@@ -2271,6 +2271,10 @@ msgid "the game's own soft reset"
 msgstr "ゲーム本来のソフトリセット"
 
 #: port/src/ui/sections.cpp
+msgid "in a battle: battle speed 1x, 2x, 4x (Gameplay > Battle speed on)"
+msgstr "戦闘中: 戦闘速度を 1 倍、2 倍、4 倍に切り替え(ゲームプレイ > 戦闘速度がオンのとき)"
+
+#: port/src/ui/sections.cpp
 msgid "The game is using this card; try again in a moment."
 msgstr "ゲームがこのカードを使っています。少ししてからもう一度どうぞ。"
 
@@ -2590,15 +2594,16 @@ msgstr ""
 
 #: port/src/ui/sections.cpp
 msgid ""
-"Select opens and closes a window in the lower right of the battle with each "
-"enemy's name, HP and active statuses, named as the game names them; while "
-"you choose a target, only the enemy under the cursor. Hidden enemies are "
-"not listed; weaknesses stay hidden. HP once beaten: an enemy's HP appears "
-"only once you have defeated that kind of enemy before, as the extras' "
-"bestiary records it (kept with your settings, across games: a boss beaten "
-"in one game shows its HP in the next)."
+"Select, pressed and released on its own, opens and closes a window in the "
+"lower right of the battle with each enemy's name, HP and active statuses, "
+"named as the game names them; while you choose a target, only the enemy "
+"under the cursor. Hidden enemies are not listed; weaknesses stay hidden. HP "
+"once beaten: an enemy's HP appears only once you have defeated that kind of "
+"enemy before, as the extras' bestiary records it (kept with your settings, "
+"across games: a boss beaten in one game shows its HP in the next). Select "
+"with L1, R1, L2 or R2 is another control (Select + R2: battle speed)."
 msgstr ""
-"SELECT で戦闘画面の右下にウィンドウを開閉し、各敵の名前、HP、効いている状態をゲームの呼び方で表示します。ターゲットを選んでいる間はカーソル下の敵だけです。隠れている敵は載せず、弱点は表示しません。「倒した敵の HP だけ」では、その種類の敵を一度倒してからでないと HP を表示しません。エクストラの図鑑の記録（設定と一緒に保存され、ゲームをまたいで残ります。あるゲームで倒したボスは次のゲームで HP が見えます）に従います。"
+"SELECT だけを押して離すと戦闘画面の右下にウィンドウを開閉し、各敵の名前、HP、効いている状態をゲームの呼び方で表示します。ターゲットを選んでいる間はカーソル下の敵だけです。隠れている敵は載せず、弱点は表示しません。「倒した敵の HP だけ」では、その種類の敵を一度倒してからでないと HP を表示しません。エクストラの図鑑の記録（設定と一緒に保存され、ゲームをまたいで残ります。あるゲームで倒したボスは次のゲームで HP が見えます）に従います。SELECT と L1、R1、L2、R2 の同時押しは別の操作です（SELECT + R2: 戦闘速度）。"
 
 #: port/src/ui/sections.cpp
 msgid "Retry lost battles"
@@ -7138,6 +7143,14 @@ msgstr "再読込"
 #: port/src/ui/sections.cpp
 msgid "Speedup"
 msgstr "高速化"
+
+#: port/src/ui/sections.cpp
+msgid "Battle speed"
+msgstr "戦闘速度"
+
+#: port/src/ui/sections.cpp
+msgid "Character and Gear battles at 2x or 4x: the game runs that many of its own frames per picture, so turns, damage and every random roll come as at 1x, only sooner. Music keeps its tempo; sound effects keep their pitch. Menus, target selection, dialogue and the first moments of each attack name run at 1x. In a battle, Tab (or Select + R2 together on a gamepad) steps 1x, 2x, 4x. Off: the original speed, and the control does nothing."
+msgstr "人間戦闘とギア戦闘を 2 倍、4 倍で進めます。1 画面ごとにゲーム自身のフレームをその数だけ進めるので、ターン、ダメージ、乱数はすべて 1 倍と同じで、早く来るだけです。音楽のテンポと効果音の音程は変わりません。メニュー、対象の選択、会話、技名が出た直後は 1 倍になります。戦闘中に Tab (ゲームパッドは SELECT と R2 の同時押し) で 1 倍、2 倍、4 倍を切り替えます。オフで原作の速度になり、切り替えも働きません。"
 
 #: port/src/ui/sections.cpp
 msgid "Reduces card/loading waits and field/battle stalls, and enables smooth field motion at 60 Hz by default. Gameplay, animation events, movies and audio stay at normal speed. Off keeps original timing and frame cadence."

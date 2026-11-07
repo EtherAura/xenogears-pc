@@ -116,6 +116,9 @@ extern void extrasRecord(void* cmd, int w, int h, int format) __attribute__((wea
 extern int extrasIsOpen(void) __attribute__((weak));
 extern int uiIsOpen(void) __attribute__((weak));
 extern void extrasVulkanShutdown(void) __attribute__((weak));
+/* port/src/system/battlespeed.c: this vblank's picture is withheld (a game
+ * frame between two shown ones at 2x/4x battle speed; weak: GPU tests). */
+extern int battleSpeedHidden(void) __attribute__((weak));
 
 static const uint32_t drawVertSpv[] =
 #include "draw.vert.spv.inc"
@@ -6684,10 +6687,16 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
     vramFlushCpuWrites((VRect){0,0,VRAM_W-1,VRAM_H-1});
     endBatch();
     hostPresent.nativeFrames++;
-    presentVBlank();
+    /* Battle speed: the game frames between two shown ones are drawn (into
+     * VRAM, as every frame) and submitted, but no swapchain image is
+     * acquired or presented for them, so the game thread never waits on the
+     * display for them; native dumps keep their vblanks (kind 2). The
+     * corner note ages with the shown pictures (it stays up as long). */
+    int hidden = battleSpeedHidden != NULL && battleSpeedHidden();
+    if (!hidden) presentVBlank();
     gtVBlank(vblank);
     int before, after; double alpha;
-    int eligible = hostPresent.realtime && presentationRate() && interpolationEnabled() &&
+    int eligible = !hidden && hostPresent.realtime && presentationRate() && interpolationEnabled() &&
         !gpuCapturing() && !shaderChainUse(d->rgb24);
     int ready = eligible && interpolationPicture(d, (double)vblank, &before, &after, &alpha) != NULL;
     /* Field drawing and idle waits can fall in different native frames.
@@ -6701,7 +6710,11 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
         !hostPresent.realtime ? "Native rate during deterministic playback" : !interpolationEnabled() ?
         "Native rate: Smooth motion is off" : starved ? "Native rate: no idle display time" : ready ? "Native rate: display work is over budget" : !eligible ? "Native rate: shader preset or capture active" :
         "Native rate: waiting for supported field frames";
-    if (active) {
+    if (hidden) {
+        gpuHostInvalidate();
+        if (dumpPresentWanted(vblank)) presentPicture(d, vblank, 0, NULL, (double)vblank, 2, 1);
+        else { endBatch(); submitFrame(NULL, NULL); }
+    } else if (active) {
         if (!hostPresent.active) {
             uint64_t now = SDL_GetTicksNS();
             /* Put the first deadline between native vblanks. At 60 Hz,

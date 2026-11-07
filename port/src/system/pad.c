@@ -15,6 +15,8 @@
  *            e.g. key_cross=X, key_select=Backspace,Right Shift; "none")
  *            F1  the settings menu (port/src/ui; the game pauses while it is open)
  *            F2  swap discs when the game asks for one (port/src/cd/swap.c)
+ *            Tab in a battle, with Battle speed on: 1x, 2x, 4x (battlespeed.c,
+ *                battle_speed_key; the pad's Select+R2 too, battle_speed_button)
  * Display:   F3  aspect: 4:3, 1:1 (square pixels), 16:9, 16:10, 21:9, 32:9
  *            F4  scale: fit, integer, stretch
  *            Shift+F4  resolution: exact 1x, or back to the upscaled
@@ -695,10 +697,17 @@ void padDeviceEvent(const SDL_Event* event) {
  * replacements' A/B comparison: settings.ini keys), ahead of these; 1 when it took
  * the key. Weak: programs without the settings menu. */
 extern int diagnosticsHotkey(int scancode, int mod) __attribute__((weak));
+/* battlespeed.c: the in-battle battle speed control, its key and its pad
+ * button (weak: pad tests link this file without it). */
+extern int battleSpeedKey(int scancode, int mod) __attribute__((weak));
+extern void battleSpeedPad(unsigned buttons) __attribute__((weak));
 
 static void keyDown(SDL_Scancode key, SDL_Keymod mod) {
     if (diagnosticsHotkey != NULL && diagnosticsHotkey((int)key, (int)mod)) {
         return;
+    }
+    if (battleSpeedKey != NULL && battleSpeedKey((int)key, (int)mod)) {
+        return; /* the battle speed control (battlespeed.c), in a battle only */
     }
     switch (key) {
     case SDL_SCANCODE_F1:
@@ -1159,6 +1168,9 @@ void padVBlank(void) {
         /* What closed the menu (Return, Start, a stick click...) is not the game's. */
         heldAfterMenu = (live1 | live2) != 0;
         live1 = live2 = 0;
+    }
+    if (battleSpeedPad != NULL) {
+        battleSpeedPad((unsigned)(port1 | live1)); /* its button, in a battle (battlespeed.c) */
     }
     if (netplayActive()) {
         /* netplay: this side's input out, both players' in (netplay.c) */

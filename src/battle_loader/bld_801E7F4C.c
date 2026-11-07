@@ -636,7 +636,7 @@ void battleLoaderUpdateMode1(void) {
             }
         }
         checkSoftReboot();
-        STACK_SWITCH(0x1F8003FC);
+        STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
         updateBattleTileEffect((TaskHeader*)e);
         renderBattleTileEffect((TaskHeader*)e);
         STACK_RESTORE();

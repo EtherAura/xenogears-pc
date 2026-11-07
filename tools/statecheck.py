@@ -129,6 +129,8 @@ def read_state(path: Path) -> tuple[dict, bytes]:
         "thumb": struct.unpack_from("<II", data, 192),
         "bodySize": struct.unpack_from("<Q", data, 200)[0],
         "bodyHash": struct.unpack_from("<Q", data, 208)[0],
+        # The image's load bias (statefile.c H_IMAGE): a PIE's or a shared library's; 0 before it.
+        "image": struct.unpack_from("<Q", data, 232)[0],
     }
     thumb_packed = struct.unpack_from("<I", data, 216)[0]
     body_packed = struct.unpack_from("<Q", data, 224)[0]
@@ -189,6 +191,16 @@ def executable(build: Path) -> tuple[list[str], Path]:
     return [str(build / "xenogears")], build / "xenogears"
 
 
+def game_library(exe: Path) -> Path | None:
+    """A shared-library build's game (port/CMakeLists.txt XG_SHARED): lib<exe>.so beside the
+    executable, when the executable is its launcher (needs it), else None."""
+    lib = exe.parent / f"lib{exe.name}.so"
+    if not lib.exists():
+        return None
+    p = subprocess.run(["objdump", "-p", str(exe)], capture_output=True, text=True)
+    return lib if re.search(rf"^\s*NEEDED\s+{re.escape(lib.name)}\s*$", p.stdout, re.M) else None
+
+
 def build_symbols(build: Path | None) -> dict:
     """Addresses the comparison needs from the build: Battling's coroutine
     stacks and the module sections' starts (ELF or PE: a PE symbol has no
@@ -196,6 +208,9 @@ def build_symbols(build: Path | None) -> dict:
     if build is None or not executable(build)[1].exists():
         return {}
     exe = executable(build)[1]
+    lib = game_library(exe)
+    if lib is not None:
+        exe = lib
     out = {}
     text = subprocess.run(["nm", "-n", "-S", str(exe)], capture_output=True, text=True).stdout
     rows = []
@@ -219,6 +234,14 @@ def build_symbols(build: Path | None) -> dict:
         if len(f) >= 4 and f[1].startswith("xgbss_"):
             out.setdefault("section." + f[1][6:] + ".bss", int(f[3], 16))
     return out
+
+
+def at_bias(syms: dict, bias: int) -> dict:
+    """The symbols' link addresses where a state's process had them: a PIE or a shared library
+    sits at its load bias (the header's image field)."""
+    if not bias:
+        return syms
+    return {k: ((v[0] + bias, v[1]) if isinstance(v, tuple) else v + bias) for k, v in syms.items()}
 
 
 def dead_ranges(chunk: dict, syms: dict) -> dict[str, list[tuple[int, int]]]:
@@ -287,8 +310,8 @@ def state_diffs(a: Path, b: Path, build: Path | None = None, live: bool = True) 
         header.append("the chunk lists differ")
     guard_a = next((ba[o:o + s] for t, o, s in ca if t == "mem.guard"), None)
     guard_b = next((bb[o:o + s] for t, o, s in cb if t == "mem.guard"), None)
-    dead_a = dead_ranges({t: ba[o:o + s] for t, o, s in ca}, syms) if live else {}
-    dead_b = dead_ranges({t: bb[o:o + s] for t, o, s in cb}, syms) if live else {}
+    dead_a = dead_ranges({t: ba[o:o + s] for t, o, s in ca}, at_bias(syms, ha["image"])) if live else {}
+    dead_b = dead_ranges({t: bb[o:o + s] for t, o, s in cb}, at_bias(syms, hb["image"])) if live else {}
     out: dict[str, set] = {}
     for (tag, oa, sa), (_, ob, sb) in zip(ca, cb):
         if sa != sb:
@@ -420,6 +443,10 @@ SCENES = {
     # stepped clock keeps the original single park per frame, so the
     # real-clock catch-up park (hwWaitVSyncSince) is not reached here.
     "speedup": dict(disc="1", n=600, m=1600, env={"XG_BOOT_MODE": "2", "XG_SPEEDUP": "1"}, pad="battle"),
+    # Battle speed at 4x (xg-mrj.2, port/src/system/battlespeed.c): N falls in
+    # the battle's 4x stretch (the audio clock a quarter of the game's), M in
+    # a later one: the state carries the factor and the audio clock's anchor.
+    "battlespeed": dict(disc="1", n=1500, m=2600, env={"XG_BOOT_MODE": "2", "XG_BATTLE_SPEED": "4"}, pad="battle"),
 }
 
 
@@ -788,7 +815,9 @@ def cmd_inventory(args) -> int:
         text = subprocess.run(["objdump", "-t", str(obj)], capture_output=True, text=True).stdout
         for line in text.splitlines():
             f = line.split()
-            if len(f) >= 6 and f[2] == "O" and (f[3].startswith(".bss") or f[3].startswith(".data")):
+            # (.data.rel.ro: constants with pointers in position-independent code, read-only once relocated)
+            if len(f) >= 6 and f[2] == "O" and (f[3].startswith(".bss") or f[3].startswith(".data")) and \
+                    not f[3].startswith(".data.rel.ro"):
                 found.append((rel, re.sub(r"\.\d+$", "", f[-1])))
     found = sorted(set(found))
     files = {o for o, _ in found}

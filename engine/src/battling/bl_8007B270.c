@@ -884,7 +884,7 @@ void spawnBattlingBeamEffect(s32 arg0, VECTOR* pos, VECTOR* pos2, s32 owner) {
 void drawBattlingEffects(MATRIX* m, OTag* ot) {
     MATRIX t;
 
-    *(VECTOR*)0x1F800000 = battlingViewOrigin;
+    *(VECTOR*)PSX_SCRATCH(0x1F800000) = battlingViewOrigin;
     TransposeMatrix(m, &t);
     drawBattlingSpriteEffects(m, &t, ot);
     drawBattlingTrailEffects(m, &t, ot);
@@ -897,7 +897,7 @@ void drawBattlingEffects(MATRIX* m, OTag* ot) {
 }
 
 void drawBattlingLineEffects(OTag* ot) {
-    *(VECTOR*)0x1F800000 = battlingViewOrigin;
+    *(VECTOR*)PSX_SCRATCH(0x1F800000) = battlingViewOrigin;
     drawBattlingLines(ot);
 }
 
@@ -1090,7 +1090,7 @@ void drawBattlingDust(OTag* ot) {
     OTag old;
     OTag tag;
 
-    s = (BattlingScratch*)0x1F800000;
+    s = (BattlingScratch*)PSX_SCRATCH(0x1F800000);
     a = &battlingDustParticles[battlingBufferIndex];
     p = battlingDustTiles[battlingBufferIndex];
     n = 0;
@@ -1249,7 +1249,7 @@ void drawBattlingSplash(OTag* ot) {
     OTag old;
     OTag tag;
 
-    s = (BattlingScratch*)0x1F800000;
+    s = (BattlingScratch*)PSX_SCRATCH(0x1F800000);
     n = 0;
     cx = s->m0_camera.vx;
     cy = s->m0_camera.vy;
@@ -1359,7 +1359,7 @@ void drawBattlingLines(OTag* ot) {
     u32* e;
     OTag old;
 
-    s = (BattlingScratch*)0x1F800000;
+    s = (BattlingScratch*)PSX_SCRATCH(0x1F800000);
     l = battlingLines;
     cx = s->m0_camera.vx;
     cy = s->m0_camera.vy;

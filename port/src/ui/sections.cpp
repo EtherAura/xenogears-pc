@@ -50,6 +50,7 @@ extern "C" {
 #include "system/gameplay.h"
 #include "system/hw.h"
 #include "system/speedup.h"
+#include "system/battlespeed.h"
 #include "system/mouse.h"
 #include "system/rumble.h"
 }
@@ -877,6 +878,7 @@ void displaySection() {
         if(artwork) {
             currentName=selectedSet();
             for(int i=1;i<portraitPackCount();i++)if(!strcmp(portraitPackSet(i)->id,selectedSet()))currentName=portraitPackSet(i)->name;
+            if(!strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK))currentName=tr("Texture pack");
         }
         ImGui::SetNextItemWidth(-1);
         if(ImGui::BeginCombo("##appearance",currentName)) {
@@ -902,6 +904,10 @@ void displaySection() {
                     if(ImGui::Selectable(set->name,selected)) {selectSet(set->id);textureSetFilter(kind,0);}
                     if(selected)ImGui::SetItemDefaultFocus();
                 }
+                /* the texture pack's pictures of the faces (a Beetle PSX HW pack's, or the user's pack) */
+                bool packSelected=artwork && !strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK);
+                if(ImGui::Selectable(tr("Texture pack"),packSelected)) {selectSet(PORTRAIT_TEXTURE_PACK);textureSetFilter(kind,0);}
+                if(packSelected)ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
@@ -1119,6 +1125,33 @@ void packsSection() {
             (unsigned long long)pack.invalid,(double)pack.bytes/(1024*1024));
         hint("Choose the folder containing %s. Packs apply with upscaling or subpixel geometry. Reload after editing PNGs. Edge keeps authored detail above 1x. Display > Textures and art chooses where each kind of picture uses it.",texturePackVersion());
         overrideNote("texture_pack");
+    }
+
+    /* A Beetle PSX HW replacement folder (the community's HD packs), beside the texture pack. */
+    if (row("Beetle PSX pack", "beetle_pack beetle_pack_order")) {
+        static char beetlePath[3072];
+        static bool beetlePathLoaded;
+        if (!beetlePathLoaded) {
+            snprintf(beetlePath,sizeof(beetlePath),"%s",texturePackBeetleRoot());
+            beetlePathLoaded=true;
+        }
+        if (folderField("beetle_pack",beetlePath,sizeof(beetlePath),908,"Use")) {textureFreezeAppearances();texturePackBeetleSetRoot(beetlePath);}
+        if (ImGui::Button(tr("Reload##beetle"))) texturePackReload();
+        ImGui::SameLine();
+        if (ImGui::Button(tr("Disable##beetle"))) { texturePackBeetleSetRoot(""); beetlePath[0]=0; }
+        static const char* const orders[]={"Our texture pack first","Beetle pack first"};
+        ImGui::SetNextItemWidth(-1);
+        int first=texturePackBeetleFirst();
+        int v=listChoice("##beetle_order",orders,2,first);
+        if (v!=first) texturePackBeetleSetFirst(v);
+        BeetlePackStats beetle;
+        texturePackBeetleStats(&beetle);
+        hint("%s",beetle.message);
+        if (beetle.enabled) hint("%llu PNG loads, %llu missing, %llu invalid files since the last reload",
+            (unsigned long long)beetle.loads,(unsigned long long)beetle.misses,(unsigned long long)beetle.invalid);
+        hint("A RetroArch Beetle PSX HW replacement folder (<game>-texture-replacements, its <upload>-<palette>.png files). It applies where Display > Textures and art uses the texture pack (portraits: their Texture pack choice). Textures already in VRAM when it is chosen show it once the game loads them again.");
+        overrideNote("beetle_pack");
+        overrideNote("beetle_pack_order");
     }
 
     if (row("HUD packs", "ui_packs")) {
@@ -1688,6 +1721,7 @@ void controlsSection() {
             {"F12", N_("replacements A/B: the original art shown in place (replacements_ab_key)")},
             {"F11, Alt+Enter", "fullscreen"},
             {"Start+Select+L1+R1", N_("the game's own soft reset")},
+            {"Tab, Select+R2", N_("in a battle: battle speed 1x, 2x, 4x (Gameplay > Battle speed on)")},
         };
         if (ImGui::BeginTable("hotkeys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
             for (const auto& h : hotkeys) {
@@ -2022,6 +2056,20 @@ void gameplaySection() {
         hint("Reduces card/loading waits and field/battle stalls, and enables smooth field motion at 60 Hz by default. Gameplay, animation events, movies and audio stay at normal speed. Off keeps original timing and frame cadence.");
         overrideNote("speedup");
     }
+    if (row("Battle speed", "battle_speed battle_speed_key")) {
+        static const char* const battleSpeedNames[] = {N_("Off"), "1x", "2x", "4x"};
+        static const int battleSpeeds[] = {0, 1, 2, 4};
+        int chosen = battleSpeedChosen(), index = 0;
+        for (int i = 1; i < 4; i++) if (chosen == battleSpeeds[i]) index = i;
+        int picked = listChoice("##battle_speed", battleSpeedNames, 4, index);
+        if (picked != index && picked >= 0) battleSpeedSetChosen(battleSpeeds[picked]);
+        hint("Character and Gear battles at 2x or 4x: the game runs that many of its own frames per picture, so "
+             "turns, damage and every random roll come as at 1x, only sooner. Music keeps its tempo; sound effects "
+             "keep their pitch. Menus, target selection, dialogue and the first moments of each attack name run at "
+             "1x. In a battle, Tab (or Select + R2 together on a gamepad) steps 1x, 2x, 4x. Off: the original "
+             "speed, and the control does nothing.");
+        overrideNote("battle_speed");
+    }
     if (row("Original-game bug fixes", "original_bug_fixes")) {
         bool originalFixes = pcGameplayOriginalBugFixes() != 0;
         if (offOnList("##original_bug_fixes", &originalFixes)) pcGameplaySetOriginalBugFixes(originalFixes);
@@ -2143,11 +2191,12 @@ void gameplaySection() {
         int enemyInfoChoice = pcGameplayEnemyInfoMode();
         int enemyInfoSelected = listChoice("##enemy_info", enemyInfoNames, 3, enemyInfoChoice);
         if (enemyInfoSelected != enemyInfoChoice && enemyInfoSelected >= 0) pcGameplaySetEnemyInfoMode(enemyInfoSelected);
-        hint("Select opens and closes a window in the lower right of the battle with each enemy's name, HP and "
-             "active statuses, named as the game names them; while you choose a target, only the enemy under the "
-             "cursor. Hidden enemies are not listed; weaknesses stay hidden. HP once beaten: an enemy's HP appears "
-             "only once you have defeated that kind of enemy before, as the extras' bestiary records it (kept with "
-             "your settings, across games: a boss beaten in one game shows its HP in the next).");
+        hint("Select, pressed and released on its own, opens and closes a window in the lower right of the battle "
+             "with each enemy's name, HP and active statuses, named as the game names them; while you choose a "
+             "target, only the enemy under the cursor. Hidden enemies are not listed; weaknesses stay hidden. HP "
+             "once beaten: an enemy's HP appears only once you have defeated that kind of enemy before, as the "
+             "extras' bestiary records it (kept with your settings, across games: a boss beaten in one game shows "
+             "its HP in the next). Select with L1, R1, L2 or R2 is another control (Select + R2: battle speed).");
         overrideNote("enemy_info");
     }
     if (row("Random encounters", "encounter_rate")) {

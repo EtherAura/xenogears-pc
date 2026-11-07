@@ -1,0 +1,8 @@
+/* The game library's exports (port/CMakeLists.txt XG_SHARED): its entry
+   only; everything else binds inside the library. */
+{
+    global:
+        xenogearsMain;
+    local:
+        *;
+};

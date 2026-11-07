@@ -2234,7 +2234,7 @@ void refreshAttachedMechaTransforms(sLoadedMechas** mechas) {
     sMechaBone* bones;
     s32 i;
 
-    m = (MATRIX*)0x1F800000;
+    m = (MATRIX*)PSX_SCRATCH(0x1F800000);
     for (i = 0; i < 2; i++) {
         if (mechaInitVar5[i].m6_isActive != 0) {
             if (mechaInitVar5[i].m10_mechaIndex >= 0 && mechas[mechaInitVar5[i].m10_mechaIndex] != NULL) {

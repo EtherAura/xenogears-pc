@@ -350,6 +350,23 @@ def ps1_c_objects(ver: str, data: dict[str, dict[str, tuple[str, str, int]]]) ->
     return out
 
 
+def array_alignment_promise(objs: list[str]) -> int:
+    """The alignment the target's ABI promises a global array of 16 bytes or more, from the first
+    object's machine: 16 on x86-64 (ELF EM_X86_64, and COFF: the Windows build), none (0) on
+    aarch64 (ELF EM_AARCH64), whose ABI makes no such promise and whose loads and stores need no
+    alignment on normal memory: its compilers may place such arrays on 8 and nothing relies on 16."""
+    for obj in objs:
+        try:
+            with open(obj, "rb") as f:
+                head = f.read(20)
+        except OSError:
+            continue
+        if head[:4] == b"\x7fELF" and len(head) == 20:
+            return 0 if int.from_bytes(head[18:20], "little") == 183 else 16
+        return 16
+    return 16
+
+
 def data_residues(where: dict[str, tuple[str, str, int]]) -> dict[str, int | None]:
     """name -> its address mod 16 once linked, from its object (section offset and the section's
     alignment; ELF or, for the Windows build, COFF objects), or None where that is not known (a
@@ -1414,14 +1431,16 @@ def main() -> int:
     # Names the link (or the port's bss.c blocks) puts inside another object need not sit on the
     # 16 bytes the x86-64 ABI promises a global array of 16 bytes or more; clang relies on that
     # promise (aligned SSE stores: xg-htn.49). Every such name declared as an array of 16 bytes
-    # or more must say so where it is declared (PORT_ALIAS, include/common.h).
+    # or more must say so where it is declared (PORT_ALIAS, include/common.h). An aarch64 build
+    # has no such promise to keep (array_alignment_promise).
     hazards: dict[str, list[str]] = {}  # name -> referencing objects
+    promise = array_alignment_promise([objs[0] for objs in by_module.values() if objs])
     for (owner, name), off in alias_offsets.items():
         s = sizes.get(name, {})
-        if off % 16 and (s.get("pc") or 0) >= 16 and s.get("pc_elem"):
+        if promise and off % promise and (s.get("pc") or 0) >= 16 and s.get("pc_elem"):
             hazards.setdefault(name, []).extend(probe_input.get(name, []))
-    residues = {m: data_residues(data_objects[m]) for m in {d for d, _, _ in c_data_refs}}
-    for definer, name, objs in c_data_refs:
+    residues = {m: data_residues(data_objects[m]) for m in {d for d, _, _ in c_data_refs}} if promise else {}
+    for definer, name, objs in c_data_refs if promise else []:
         s = sizes.get(name, {})
         if residues[definer].get(name) != 0 and (s.get("pc") or 0) >= 16 and s.get("pc_elem"):
             hazards.setdefault(name, []).extend(objs)

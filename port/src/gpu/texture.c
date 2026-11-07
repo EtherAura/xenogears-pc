@@ -58,7 +58,9 @@ static void lruFront(int32_t i) {
 
 static void snapMemoReset(void);
 
+void textureBeetleReset(void) __attribute__((weak)); /* texture_beetle.c; standalone tests have none */
 void textureCacheReset(void) {
+    if (textureBeetleReset) textureBeetleReset(); /* its memos name decode revisions, which start over */
     for (int i = 0; i < TEXTURE_CACHE_SLOTS; ++i) free(cache[i].storage);
     memset(cache, 0, sizeof(cache));
     memset(bucket, 0, sizeof(bucket));

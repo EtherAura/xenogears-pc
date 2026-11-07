@@ -164,7 +164,7 @@ s32 worldmapMode13_taskCamera_init(s32 index) {
 void pcWm60Cut(void);
 
 s32 worldmapMode13_taskCamera_update(s32 index) {
-    u8* scratch = (u8*)0x1F800000;
+    u8* scratch = (u8*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     s32 r;
     s32 d;
@@ -258,12 +258,12 @@ s32 worldmapMode13_taskExplosion_update(s32 index) {
 
     if (e->m4_request == 1) {
         e->m4_request = 0;
-        ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-        ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-        ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-        spawnWorldmapParticles(0x28, (SVECTOR*)0x1F8000A0, 0);
-        spawnWorldmapParticles(0x29, (SVECTOR*)0x1F8000A0, 0);
-        spawnWorldmapParticles(0x2A, (SVECTOR*)0x1F8000A0, 0);
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+        spawnWorldmapParticles(0x28, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
+        spawnWorldmapParticles(0x29, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
+        spawnWorldmapParticles(0x2A, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
     }
     return 1;
 }
@@ -307,11 +307,11 @@ s32 worldmapMode13_taskRings_update(s32 index) {
     models[0].m8_position.vz = models[1].m8_position.vz = e->m28_position.vz >> 12;
     models[1].m20_rotationMatrix = worldMapIdentityMatrix;
     models[0].m20_rotationMatrix = models[1].m20_rotationMatrix;
-    ((VECTOR*)0x1F800000)->vx = ((VECTOR*)0x1F800000)->vz = (s32)e->m50;
-    ((VECTOR*)0x1F800010)->vx = ((VECTOR*)0x1F800010)->vz = (s32)e->m54;
-    ((VECTOR*)0x1F800000)->vy = ((VECTOR*)0x1F800010)->vy = 0x1000;
-    ScaleMatrix(&models[0].m20_rotationMatrix, (VECTOR*)0x1F800000);
-    ScaleMatrix(&models[1].m20_rotationMatrix, (VECTOR*)0x1F800010);
+    ((VECTOR*)PSX_SCRATCH(0x1F800000))->vx = ((VECTOR*)PSX_SCRATCH(0x1F800000))->vz = (s32)e->m50;
+    ((VECTOR*)PSX_SCRATCH(0x1F800010))->vx = ((VECTOR*)PSX_SCRATCH(0x1F800010))->vz = (s32)e->m54;
+    ((VECTOR*)PSX_SCRATCH(0x1F800000))->vy = ((VECTOR*)PSX_SCRATCH(0x1F800010))->vy = 0x1000;
+    ScaleMatrix(&models[0].m20_rotationMatrix, (VECTOR*)PSX_SCRATCH(0x1F800000));
+    ScaleMatrix(&models[1].m20_rotationMatrix, (VECTOR*)PSX_SCRATCH(0x1F800010));
     e->m50 += 0x180;
     if (e->m50 > 0x7FFF) {
         e->m50 = 0x7FFF;
@@ -519,7 +519,7 @@ s32 worldmapMode16_taskCamera_init(s32 index) {
 }
 
 s32 worldmapMode16_taskCamera_update(s32 index) {
-    u8* scratch = (u8*)0x1F800000;
+    u8* scratch = (u8*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     s32 r;
     s32 d;
@@ -674,9 +674,9 @@ s32 worldmapMode16_taskLightPillars_init(s32 index) {
     e->m54 = 0;
     e->m58 = 0;
     m->m20_rotationMatrix = worldMapIdentityMatrix;
-    ((VECTOR*)0x1F800000)->vx = ((VECTOR*)0x1F800000)->vz = 0x1000;
-    ((VECTOR*)0x1F800000)->vy = 0x7000;
-    ScaleMatrix(&m->m20_rotationMatrix, (VECTOR*)0x1F800000);
+    ((VECTOR*)PSX_SCRATCH(0x1F800000))->vx = ((VECTOR*)PSX_SCRATCH(0x1F800000))->vz = 0x1000;
+    ((VECTOR*)PSX_SCRATCH(0x1F800000))->vy = 0x7000;
+    ScaleMatrix(&m->m20_rotationMatrix, (VECTOR*)PSX_SCRATCH(0x1F800000));
     m[1].m20_rotationMatrix = m[0].m20_rotationMatrix;
     setWorldmapMode16ModelSemiTrans(m, (POLY_FT4*)m->m48_primBuffers[0], m->m40_modelBlock->m4_numPrims, 3);
     m++;
@@ -1032,7 +1032,7 @@ s32 worldmapMode17_taskCamera_init(s32 index) {
 
 s32 worldmapMode17_taskCamera_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
-    u8* scratch = (u8*)0x1F800000;
+    u8* scratch = (u8*)PSX_SCRATCH(0x1F800000);
     s32 r;
 
     switch (e->m4_request) {
@@ -1326,7 +1326,7 @@ s32 worldmapMode17_taskGlow_update(s32 index) {
         pcSetGlowParams(e, &worldmapMode17GlowParams3[k * 14 + 3]);
         break;
     }
-    updateWorldmapMode17Glow(e, m, (sWorldmapScratch*)0x1F800000);
+    updateWorldmapMode17Glow(e, m, (sWorldmapScratch*)PSX_SCRATCH(0x1F800000));
     pcWm60ModelColour(m, (s32)e->m50, (s32)e->m54, (s32)e->m58, 1); /* Enhanced, 60 Hz: both buffers (w_80070CFC.c) */
     return 1;
 }

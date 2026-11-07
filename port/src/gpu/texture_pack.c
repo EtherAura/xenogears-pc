@@ -122,6 +122,8 @@ static int rectKeys = 1;
  * replacement pixels, 5 MiB as an index map, so a field needs more than the
  * default 32 MiB. */
 static size_t packBytes = PACK_BYTES;
+static size_t beetleBytes; /* with a Beetle pack: the cache's budget at least (beetle_pack_cache_mb) */
+static size_t cacheBudget(void) { return packBytes>beetleBytes?packBytes:beetleBytes; }
 static void loaderStop(void); /* the background loader and the room lists, below */
 static void posesClear(void); /* the sprite pose cache and its loaders, below */
 static void roomsRead(void);
@@ -140,6 +142,19 @@ static uint64_t roomWaitLimitNs=ROOM_WAIT_NS; /* ROOM_WAIT_NS; texture_pack_room
 static unsigned roomSerial; static int roomDrawn, roomOver; static uint32_t roomDrawVblank; static uint64_t roomWaitNs;
 static char root[PATH_BYTES], dir[PATH_BYTES + 32];
 static int rootChosen; /* root from texture_pack (the user's own pack), not the default texture-packs library */
+/* A Beetle PSX HW replacement pack (beetle_pack; texture_beetle.c names what a draw needs): its folder,
+ * read once per reload into an index of the names it holds ('<upload>-<palette>.png', hex either case
+ * as on the core's Windows builds, no leading zeros as the core asks for them, top level only), so a
+ * miss costs no file system call. Its images are entries of kind 5 (RGBA, alpha 0 clear, 255 opaque,
+ * anything between STP). */
+#define BEETLE_KIND 5
+#define BEETLE_CACHE_MB 512 /* the pack cache's budget at least, with a Beetle pack (beetle_pack_cache_mb) */
+static char beetleDir[PATH_BYTES];
+static struct { uint32_t upload, palette; char* name; }* beetleNames;
+static size_t beetleCap, beetleCount;
+static int beetleFirstSetting; /* beetle_pack_order=beetle: its images before ours */
+static BeetlePackStats bstats;
+static uint64_t beetleGeneration;
 
 const char* texturePackVersion(void) {
 #if defined(VERSION_JP)
@@ -204,9 +219,21 @@ static void metadata(void) {
         line = next;
     }
 }
+static void beetleNamesFree(void);
 void texturePackShutdown(void) {
     texturePackReport();   /* the counters go with the entries (libgpu.c's quit) */
     loaderStop();
+    if (bstats.enabled && (cpuTimingFromEnv() || settingsGet("beetle_pack_log"))) {
+        BeetleStats b; beetleStats(&b);
+        fprintf(stderr,"beetle pack: %llu images loaded, %llu missing, %llu invalid; %llu uploads named, %d owning texels; "
+                "%llu request walks (%.1f ms in all): %llu one image, %llu composites made, %llu kept (%llu evicted, %zu MB now), %llu without a palette name; %llu draws\n",
+                (unsigned long long)bstats.loads,(unsigned long long)bstats.misses,(unsigned long long)bstats.invalid,
+                (unsigned long long)b.uploads,b.slots,(unsigned long long)b.walks,b.walkNs*1e-6,(unsigned long long)b.singles,
+                (unsigned long long)b.composites,(unsigned long long)b.compositeReuses,(unsigned long long)b.compositeEvictions,b.compositeBytes>>20,
+                (unsigned long long)b.paletteMissing,(unsigned long long)b.draws);
+    }
+    beetleNamesFree(); beetleDir[0]=0; memset(&bstats,0,sizeof(bstats)); beetleBytes=0;
+    beetleTrackEnable(0); beetleNameLogOpen(NULL);
     posesClear();
     spriteIndexFree();
     cropsReset();
@@ -504,6 +531,7 @@ static void spriteMetadata(void) {
     }
     fclose(f);
 }
+static void beetleReload(void);
 void texturePackReload(void) {
     memset(cellMemo,0,sizeof(cellMemo)); memset(probeMemo,0,sizeof(probeMemo)); posesClear(); /* another library root: probe again */
     ++generation;
@@ -566,6 +594,7 @@ void texturePackReload(void) {
         const char* warm[]={spriteDir,glyphDir,ui,portraits};
         warmPacks(warm,4);
     }
+    beetleReload();
     if (!root[0] || !SDL_strcasecmp(root,"none")) {
         snprintf(stats.message,sizeof(stats.message),"Disabled"); return;
     }
@@ -668,8 +697,10 @@ typedef struct { uint8_t *rgba, *indices; int scale; } Decoded;
 /* Decode one replacement file for a w x h texture (any thread: no shared state). An index
  * map stored uncompressed as 8-bit grey (pngfast) is read straight into indices; anything
  * else goes through texturePackReadPng. 1 when usable; *found 0 when the file is absent. */
+static int decodeBeetle(const char* path, int w, int h, Decoded* out, int* found);
 static int decodeImage(const char* path, int w, int h, int indexed, int limit, Decoded* out, int* found) {
     memset(out,0,sizeof(*out)); *found=0;
+    if (indexed==BEETLE_KIND) return decodeBeetle(path,w,h,out,found);
     if (indexed) {
         size_t n=0; uint8_t* file=NULL; SDL_PathInfo info;
         if (SDL_GetPathInfo(path,&info) && info.type==SDL_PATHTYPE_FILE && info.size<=PNG_BYTES) file=SDL_LoadFile(path,&n);
@@ -706,9 +737,64 @@ static int decodeImage(const char* path, int w, int h, int indexed, int limit, D
     if (!ok) { free(out->rgba); free(out->indices); memset(out,0,sizeof(*out)); }
     return ok;
 }
+/* A Beetle pack's replacement for an upload of w x h texels (any thread). As the core takes them
+ * (measured, docs/BEETLE_PACKS.md): a PNG of 8-bit channels (RGB, RGBA, grey, grey and alpha,
+ * palette; 16-bit ones are refused), the upload's size times 1, 2, 4, 8 or 16 on both axes; alpha 0
+ * clear, 255 opaque, anything between the STP flag. Here at most 8x and 4096 x 4096, 4M pixels:
+ * bigger ones are halved until they fit (every other pixel; alpha classes stay crisp). */
+#define BEETLE_PNG_BYTES (64u * 1024u * 1024u)
+static int decodeBeetle(const char* path, int w, int h, Decoded* out, int* found) {
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(path,&info)) return 0;
+    *found=1;
+    if (info.type!=SDL_PATHTYPE_FILE || info.size>BEETLE_PNG_BYTES || w<1 || h<1) return 0;
+    SDL_IOStream* io=SDL_IOFromFile(path,"rb"); if (!io) return 0;
+    uint8_t head[26];
+    int ok=SDL_ReadIO(io,head,sizeof(head))==sizeof(head) && !memcmp(head,"\x89PNG\r\n\x1a\n",8) &&
+           be32(head+8)==13 && !memcmp(head+12,"IHDR",4);
+    uint32_t pw=ok?be32(head+16):0, ph=ok?be32(head+20):0;
+    int bits=ok?head[24]:0;
+    int scale=w>0 && pw%(unsigned)w==0 ? (int)(pw/(unsigned)w) : 0;
+    ok=ok && bits<=8 && scale>=1 && scale<=16 && !(scale&(scale-1)) && ph==(uint32_t)h*(uint32_t)scale;
+    if (!ok || SDL_SeekIO(io,0,SDL_IO_SEEK_SET)<0) {
+        SDL_CloseIO(io);
+        if (ok==0 && pw) fprintf(stderr,"beetle pack: %s: %ux%u is not the upload's %dx%d times 1, 2, 4, 8 or 16 (or not 8 bits)\n",path,pw,ph,w,h);
+        return 0;
+    }
+#if SDL_VERSION_ATLEAST(3,4,0)
+    SDL_Surface* source=SDL_LoadPNG_IO(io,true); if (!source) return 0;
+    SDL_Surface* image=SDL_ConvertSurface(source,SDL_PIXELFORMAT_RGBA32); SDL_DestroySurface(source);
+    if (!image) return 0;
+    if (image->w!=(int)pw || image->h!=(int)ph) { SDL_DestroySurface(image); return 0; }
+    int step=1;
+    while (scale/step>8 || (uint64_t)w*(scale/step)>4096 || (uint64_t)h*(scale/step)>4096 ||
+           (uint64_t)w*h*(scale/step)*(scale/step)>4096u*1024u) {
+        if (scale/step==1) { SDL_DestroySurface(image); return 0; }
+        step*=2;
+    }
+    int s2=scale/step, ow=w*s2, oh=h*s2;
+    out->rgba=malloc((size_t)ow*oh*4);
+    if (!out->rgba) { SDL_DestroySurface(image); return 0; }
+    for (int y=0;y<oh;++y) {
+        const uint8_t* row=(const uint8_t*)image->pixels+(size_t)y*step*image->pitch;
+        uint8_t* dst=out->rgba+(size_t)y*ow*4;
+        for (int x=0;x<ow;++x) {
+            memcpy(dst+x*4,row+(size_t)x*step*4,4);
+            uint8_t a=dst[x*4+3];
+            dst[x*4+3]=a==0?0:a==255?255:128;
+        }
+    }
+    SDL_DestroySurface(image);
+    out->scale=s2;
+    return 1;
+#else
+    SDL_CloseIO(io); return 0;
+#endif
+}
 static void install(Entry* e, Decoded* dec) {
-    size_t count=(size_t)e->w*e->h*dec->scale*dec->scale, bytes=count*(e->indexed?5:4);
-    while (stats.bytes+bytes>packBytes) {
+    size_t count=(size_t)e->w*e->h*dec->scale*dec->scale, bytes=count*(e->indexed && e->indexed!=BEETLE_KIND?5:4);
+    if (e->indexed==BEETLE_KIND) { ++bstats.loads; ++beetleGeneration; }
+    while (stats.bytes+bytes>cacheBudget()) {
         Entry* victim=NULL;
         for (int i=0;i<PACK_SLOTS;++i) if (&entries[i]!=e && entries[i].bytes &&
             (!victim || entries[i].touched<victim->touched)) victim=&entries[i];
@@ -788,7 +874,7 @@ static void jobInstall(Entry* e, Job* j, int gameThread) {
         if (j->page) { ++stats.pageLoads; if (gameThread) ++stats.pageSync; else ++stats.pageLoader; }
         if (gameThread) ++stats.gameThreadLoads;
     }
-    else if (j->found) invalid(j->path,j->key);
+    else if (j->found) { invalid(j->path,j->key); if (j->indexed==BEETLE_KIND) { ++bstats.invalid; ++beetleGeneration; } }
     else ++stats.misses;
 }
 static void poll(void) {
@@ -886,7 +972,14 @@ static Entry* entryNew(uint64_t texel, uint64_t palette, int indexed, int w, int
     return e;
 }
 /* The pack file of a key, 1 when it is there (*info its stat). */
+static const char* beetleName(uint32_t upload, uint32_t palette);
 static int packFile(char* path, size_t size, uint64_t texel, uint64_t palette, int indexed, SDL_PathInfo* info) {
+    if (indexed==BEETLE_KIND) {
+        const char* name=beetleName((uint32_t)texel,(uint32_t)palette);
+        if (!name) return 0;
+        snprintf(path,size,"%s/%s",beetleDir,name);
+        return SDL_GetPathInfo(path,info) && info->type==SDL_PATHTYPE_FILE;
+    }
     const char* base=indexed==4?spriteDir:indexed==3?glyphDir:dir; const char* sub=indexed==2||indexed==3?"glyphs/":"";
     if (indexed) snprintf(path,size,"%s/%s%016" PRIx64 ".indices.png",base,sub,texel);
     else snprintf(path,size,"%s/%016" PRIx64 "-%016" PRIx64 ".png",dir,texel,palette);
@@ -902,15 +995,18 @@ static Entry* lookupKey(uint64_t texel, uint64_t palette, int indexed, int w, in
     Entry* e=entryFind(texel,palette,indexed,w,h,limit);
     if (e) {
         e->touched=++clock;
-        if (e->pending && indexed<=1 && lookupDraw) pageDrawnLoading(e);
+        if (e->pending && (indexed<=1 || indexed==BEETLE_KIND) && lookupDraw) pageDrawnLoading(e);
         if (!(e->pending && indexed==4)) return e;
         /* a preloaded cel drawn before its decode finished: decoded here, now, as before the
          * preload (the picture never shows the native pose first); the loader's result is dropped */
         ++stats.celLate; e->pending=0; e->serial=++serials;
     } else e=entryNew(texel,palette,indexed,w,h,limit);
     char path[sizeof(dir)+80]; SDL_PathInfo info;
-    if (!packFile(path,sizeof(path),texel,palette,indexed,&info)) { ++stats.misses; return e; } /* Negative cache; explicit reload retries. */
-    int page=indexed<=1 && info.size>ASYNC_FROM;
+    if (!packFile(path,sizeof(path),texel,palette,indexed,&info)) { /* Negative cache; explicit reload retries. */
+        ++stats.misses; if (indexed==BEETLE_KIND) ++bstats.misses;
+        return e;
+    }
+    int page=(indexed<=1 || indexed==BEETLE_KIND) && info.size>ASYNC_FROM;
     /* a page drawn first in a room's first frames is decoded here (its draw would show the original) */
     int here=page && (pageSyncAlways || (lookupDraw && roomFirstFrames()));
     if (page && !here && enqueue(e,path,0,1)) { if (lookupDraw) pageDrawnLoading(e); return e; }
@@ -924,6 +1020,7 @@ static Entry* lookupKey(uint64_t texel, uint64_t palette, int indexed, int w, in
     else if (cpuTimingOn) loadTimed(indexed==4?0:1,ns);
     if (!decoded) {
         if (found) invalid(path,texel); else ++stats.misses;
+        if (indexed==BEETLE_KIND) { if (found) ++bstats.invalid; else ++bstats.misses; }
         return e;
     }
     install(e,&dec); ++stats.gameThreadLoads; if (indexed==4) ++stats.celSync;
@@ -1036,7 +1133,7 @@ static void preloadCel(const SpriteCel* c) {
     if (entryFind(c->texel,0,4,c->w,c->h,c->limit)) return;   /* loaded, decoding, or a known miss */
     if (stats.entries>=PACK_SLOTS-CEL_SLOTS_FREE) { ++stats.celSkipped; return; }   /* would make the room's own entries make way */
     size_t estimate=(size_t)c->w*c->h*SPRITE_CEL_SCALE*SPRITE_CEL_SCALE*5;
-    if (stats.bytes+preloadPending+estimate>packBytes) { ++stats.celSkipped; return; }
+    if (stats.bytes+preloadPending+estimate>cacheBudget()) { ++stats.celSkipped; return; }
     char path[sizeof(dir)+80]; SDL_PathInfo info;
     if (!packFile(path,sizeof(path),c->texel,0,4,&info)) return;   /* not in the pack after all: the draw keeps its own miss */
     Entry* e=entryNew(c->texel,0,4,c->w,c->h,c->limit);
@@ -1155,6 +1252,147 @@ static void roomsPreload(void) {
      * entry spot, which varies by exit): its pages are keyed 1024 (the world map) in rooms.txt. */
     roomsPreloadField(pcWideGetMode && pcWideGetMode()==3 ? 0x400 : gpuTextureField());
 }
+/* ---- the Beetle PSX HW pack (beetle_pack) ---- */
+static uint32_t beetleSlot(uint32_t upload, uint32_t palette) {
+    uint64_t k=((uint64_t)upload<<32|palette)*0x9E3779B97F4A7C15ull;
+    return (uint32_t)(k>>32)&(uint32_t)(beetleCap-1);
+}
+static void beetleAdd(uint32_t upload, uint32_t palette, const char* name) {
+    if ((beetleCount+1)*2>beetleCap) {
+        size_t cap=beetleCap?beetleCap*2:1024;
+        __typeof__(beetleNames) t=calloc(cap,sizeof(*t)); if (!t) return;
+        __typeof__(beetleNames) old=beetleNames; size_t oldCap=beetleCap;
+        beetleNames=t; beetleCap=cap; beetleCount=0;
+        for (size_t i=0;i<oldCap;++i) if (old[i].name) {
+            uint32_t j=beetleSlot(old[i].upload,old[i].palette);
+            while (beetleNames[j].name) j=(j+1)&(uint32_t)(beetleCap-1);
+            beetleNames[j]=old[i]; ++beetleCount;
+        }
+        free(old);
+    }
+    uint32_t j=beetleSlot(upload,palette);
+    while (beetleNames[j].name) {
+        if (beetleNames[j].upload==upload && beetleNames[j].palette==palette) return; /* the first spelling met */
+        j=(j+1)&(uint32_t)(beetleCap-1);
+    }
+    beetleNames[j].upload=upload; beetleNames[j].palette=palette; beetleNames[j].name=SDL_strdup(name);
+    if (beetleNames[j].name) ++beetleCount;
+}
+static const char* beetleName(uint32_t upload, uint32_t palette) {
+    if (!beetleCount) return NULL;
+    for (uint32_t j=beetleSlot(upload,palette); beetleNames[j].name; j=(j+1)&(uint32_t)(beetleCap-1))
+        if (beetleNames[j].upload==upload && beetleNames[j].palette==palette) return beetleNames[j].name;
+    return NULL;
+}
+static void beetleNamesFree(void) {
+    for (size_t i=0;i<beetleCap;++i) SDL_free(beetleNames[i].name);
+    free(beetleNames); beetleNames=NULL; beetleCap=beetleCount=0;
+}
+/* A file name the core asks for: hex digits, no leading zero (0 is "0"), either case. */
+static int beetleHex(const char* s, size_t n, uint32_t* out) {
+    if (n<1 || n>8 || (n>1 && s[0]=='0')) return 0;
+    uint32_t v=0;
+    for (size_t i=0;i<n;++i) {
+        int c=(unsigned char)s[i], d=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1;
+        if (d<0) return 0;
+        v=v<<4|(uint32_t)d;
+    }
+    *out=v; return 1;
+}
+static SDL_EnumerationResult SDLCALL beetleScan(void* user, const char* dirname, const char* name) {
+    (void)user;
+    size_t n=strlen(name);
+    const char* dash=strchr(name,'-');
+    uint32_t upload, palette;
+    if (n>4 && !SDL_strcasecmp(name+n-4,".png") && dash &&
+        beetleHex(name,(size_t)(dash-name),&upload) && beetleHex(dash+1,(size_t)(name+n-4-dash-1),&palette)) {
+        char path[PATH_BYTES+300]; SDL_PathInfo info;
+        snprintf(path,sizeof(path),"%s%s",dirname,name);
+        if (SDL_GetPathInfo(path,&info) && info.type==SDL_PATHTYPE_FILE) beetleAdd(upload,palette,name);
+    }
+    return SDL_ENUM_CONTINUE;
+}
+static void beetleReload(void) {
+    static int described;
+    if (!described) {
+        described=1;
+        settingsDescribe("beetle_pack","Beetle PSX HW replacement folder (<game>-texture-replacements: <upload>-<palette>.png files) drawn where a category uses the texture pack; none or empty: off");
+        settingsDescribe("beetle_pack_order","ours (default: our texture pack's images win where both have one) or beetle");
+        settingsDescribe("beetle_pack_cache_mb","With a Beetle pack: the pack images' memory at least (64..4096, default 512)");
+        settingsDescribe("beetle_pack_log","Debug: append each Beetle pack name the draws meet (as the core's dump names it) to this file");
+    }
+    beetleNamesFree();
+    memset(&bstats,0,sizeof(bstats)); ++beetleGeneration;
+    beetleBytes=0;
+    const char* s=settingsGet("beetle_pack");
+    beetleDir[0]=0;
+    if (s && *s && SDL_strcasecmp(s,"none") && strlen(s)<sizeof(beetleDir)) snprintf(beetleDir,sizeof(beetleDir),"%s",s);
+    const char* order=settingsGet("beetle_pack_order");
+    beetleFirstSetting=order && !SDL_strcasecmp(order,"beetle");
+    bstats.first=beetleFirstSetting;
+    beetleNameLogOpen(settingsGet("beetle_pack_log"));
+    if (!beetleDir[0]) {
+        snprintf(bstats.message,sizeof(bstats.message),"Off");
+        beetleTrackEnable(0); textureBeetleReset(); return;
+    }
+    size_t len=strlen(beetleDir);
+    while (len>1 && (beetleDir[len-1]=='/' || beetleDir[len-1]=='\\')) beetleDir[--len]=0;
+    SDL_PathInfo info;
+    if (!SDL_GetPathInfo(beetleDir,&info) || info.type!=SDL_PATHTYPE_DIRECTORY) {
+        snprintf(bstats.message,sizeof(bstats.message),"Folder unavailable; using original textures");
+        fprintf(stderr,"beetle pack: %s: %s\n",beetleDir,bstats.message);
+        beetleDir[0]=0; beetleTrackEnable(0); textureBeetleReset(); return;
+    }
+    SDL_EnumerateDirectory(beetleDir,beetleScan,NULL);
+    bstats.files=(int)beetleCount;
+    long mb=settingsInt("beetle_pack_cache_mb",BEETLE_CACHE_MB);
+    beetleBytes=(size_t)(mb<64?64:mb>4096?4096:mb)*1024u*1024u;
+#if SDL_VERSION_ATLEAST(3,4,0)
+    bstats.enabled=beetleCount>0;
+    snprintf(bstats.message,sizeof(bstats.message),beetleCount?"Ready; %d replacements, drawn as their uploads are seen":"No <upload>-<palette>.png files in the folder",bstats.files);
+#else
+    snprintf(bstats.message,sizeof(bstats.message),"PNG packs require SDL 3.4");
+#endif
+    beetleTrackEnable(bstats.enabled);
+    textureBeetleReset();
+    fprintf(stderr,"beetle pack: %s (%d replacements)\n",beetleDir,bstats.files);
+}
+int texturePackBeetleEnabled(void) { load(); return bstats.enabled; }
+int texturePackActive(void) { load(); return stats.enabled || bstats.enabled; }
+/* gpuInit: a chosen Beetle pack is read now, so its upload tracking sees the boot's first uploads. */
+void texturePackBeetleInit(void) {
+    const char* s=settingsGet("beetle_pack");
+    if (s && *s && SDL_strcasecmp(s,"none")) load();
+}
+uint64_t texturePackBeetleGeneration(void) { poll(); return beetleGeneration; }
+int texturePackGpuKeeps(void) { return gpuKeeps; }
+const char* texturePackBeetleRoot(void) { load(); return beetleDir; }
+void texturePackBeetleSetRoot(const char* s) {
+    load(); if (!s) s="";
+    if (strlen(s)>=sizeof(beetleDir)) { snprintf(bstats.message,sizeof(bstats.message),"Folder path too long; previous selection kept"); return; }
+    settingsSet("beetle_pack",s[0]?s:"none"); settingsSave(); texturePackReload();
+}
+int texturePackBeetleFirst(void) { load(); return beetleFirstSetting; }
+void texturePackBeetleSetFirst(int first) {
+    load(); beetleFirstSetting=first!=0; bstats.first=beetleFirstSetting;
+    settingsSet("beetle_pack_order",first?"beetle":"ours"); settingsSave();
+}
+void texturePackBeetleStats(BeetlePackStats* out) { load(); *out=bstats; }
+int texturePackBeetleImage(uint32_t upload, uint32_t palette, int w, int h, TexturePackImage* out) {
+    memset(out,0,sizeof(*out));
+    if (!bstats.enabled || w<1 || h<1 || !beetleName(upload,palette)) return 0;
+    Entry* e=lookupKey(upload,palette,BEETLE_KIND,w,h,0);
+    if (e->pending) return -1;
+    if (!e->rgba) return 0;
+    out->rgba=e->rgba; out->w=e->w; out->h=e->h; out->scale=e->scale; out->revision=e->loaded;
+    return 1;
+}
+static int beetleSample(const DecodedTexture* d, TextureRequest patch, TextureSample* out) {
+    if (!bstats.enabled) return 0;
+    beetleNameLogPatch(patch,hwVSyncCount?hwVSyncCount():0);
+    return textureBeetleSample(d,patch,out);
+}
+
 int texturePackGlyph(uint64_t key, int w, int h, int limit, const uint8_t** indices, int* scale) {
     if (!texturePackEnabled() || w<1 || h<1 || w>256 || h>64 || limit<1 || limit>256) return 0;
     DecodedTexture d={0}; d.texelKey=key; d.request.w=w; d.request.h=h; d.paletteSize=limit;
@@ -1174,7 +1412,7 @@ static int sampleEntry(const DecodedTexture* d, Entry* e, TextureRequest patch, 
 static int packSample(const DecodedTexture* d, TextureRequest patch, int filter, TextureSample* out);
 int texturePackSample(const DecodedTexture* d, TextureRequest patch, int filter, TextureSample* out) {
     if (d && texturePackEnabled()) roomsPreload();
-    if (!d || !texturePackEnabled() || patch.w<1 || patch.h<1 || patch.u<d->request.u || patch.v<d->request.v ||
+    if (!d || !(texturePackEnabled() || bstats.enabled) || patch.w<1 || patch.h<1 || patch.u<d->request.u || patch.v<d->request.v ||
         patch.u+patch.w>d->request.u+d->request.w || patch.v+patch.h>d->request.v+d->request.h) return 0;
     roomDrawnNow();
     lookupDraw=1;   /* a page still loading: waited for in a room's first frames (pageDrawnLoading) */
@@ -1183,6 +1421,9 @@ int texturePackSample(const DecodedTexture* d, TextureRequest patch, int filter,
     return got;
 }
 static int packSample(const DecodedTexture* d, TextureRequest patch, int filter, TextureSample* out) {
+    /* A Beetle pack's image first (beetle_pack_order=beetle) or after ours (the default) */
+    if (beetleFirstSetting && beetleSample(d,patch,out)) return !replacementsHidden;
+    if (!stats.enabled) return !beetleFirstSetting && beetleSample(d,patch,out) && !replacementsHidden;
     Entry* e=lookup(d,0); /* Exact RGBA pair wins; indexed file ignores CLUT key. */
     if (!e->rgba && d->paletteSize) e=lookup(d,1);
     if (!e->rgba && d->request.stableTo && rectKeys) {
@@ -1196,7 +1437,8 @@ static int packSample(const DecodedTexture* d, TextureRequest patch, int filter,
             if (f->rgba) { d=p; e=f; }
         }
     }
-    if (!e->rgba || replacementsHidden) return 0;
+    if (!e->rgba) return !beetleFirstSetting && beetleSample(d,patch,out) && !replacementsHidden;
+    if (replacementsHidden) return 0;
     return sampleEntry(d,e,patch,filter,out);
 }
 /* Sprites -> Cel 8x: the field sprite cel library, index maps keyed by the

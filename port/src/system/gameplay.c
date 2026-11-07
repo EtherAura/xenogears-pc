@@ -217,6 +217,23 @@ int pcGameplayEnemyInfoKnown(void) {
     return pcGameplayEnemyInfoMode() == GAMEPLAY_ENEMY_INFO_BEATEN;
 }
 
+/* The enemy info window's Select (port/src/game/battle/enemyinfo.c): a lone
+ * Select toggles it, on its release. A shoulder button (L1, R1, L2, R2) held
+ * when Select goes down, or going down while it is held, makes a chord
+ * (battle speed's Select+R2, rewind's Select+L2) that toggles nothing.
+ * previous, held: the pad's buttons at the last battle frame and now (the
+ * game's active-high bits); *chord carries the chord from call to call. */
+int pcGameplaySelectTap(int previous, int held, int* chord) {
+    int pressed = held & ~previous;
+    int released = previous & ~held;
+    if (pressed & 0x100) {
+        *chord = (held & 0x000F) != 0;
+    } else if ((held & 0x100) && (pressed & 0x000F)) {
+        *chord = 1;
+    }
+    return (released & 0x100) && !*chord;
+}
+
 static const char* const enemyKeys[GAMEPLAY_ENEMY_STAT_COUNT] = {
     "enemy_hp", "enemy_attack", "enemy_ether", "enemy_defence", "enemy_ether_defence", "enemy_agility"
 };

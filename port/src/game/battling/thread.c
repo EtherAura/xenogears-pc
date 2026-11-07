@@ -166,6 +166,76 @@ static void* newStack(u8* base, uptr size, void (*start)(void)) {
     sp[0xB0 / 8] = low;
     return sp;
 }
+#elif defined(__aarch64__)
+/* AAPCS64 (Linux, Android): x19-x28, the frame pointer x29, the link register
+ * x30, d8-d15 and FPCR (the rounding and flush modes), in a 176-byte frame
+ * (16-byte aligned); x18, the platform register, is left alone. The switch
+ * returns through x30, so a new stack starts in portBattlingEntry, which calls
+ * the start function saved in x19 and traps should it return (hint #34, BTI's
+ * landing pad: a NOP where branch protection is off). The same frame as
+ * port/src/system/gamestack.c's switch. */
+__asm__(".text\n"
+        ".globl portBattlingSwitch\n"
+        ".type portBattlingSwitch, %function\n"
+        ".p2align 2\n"
+        "portBattlingSwitch:\n"
+        "    hint #34\n"
+        "    sub sp, sp, #176\n"
+        "    stp x19, x20, [sp, #0]\n"
+        "    stp x21, x22, [sp, #16]\n"
+        "    stp x23, x24, [sp, #32]\n"
+        "    stp x25, x26, [sp, #48]\n"
+        "    stp x27, x28, [sp, #64]\n"
+        "    stp x29, x30, [sp, #80]\n"
+        "    stp d8, d9, [sp, #96]\n"
+        "    stp d10, d11, [sp, #112]\n"
+        "    stp d12, d13, [sp, #128]\n"
+        "    stp d14, d15, [sp, #144]\n"
+        "    mrs x9, fpcr\n"
+        "    str x9, [sp, #160]\n"
+        "    mov x9, sp\n"
+        "    str x9, [x0]\n"
+        "    mov sp, x1\n"
+        "    ldr x9, [sp, #160]\n"
+        "    msr fpcr, x9\n"
+        "    ldp d14, d15, [sp, #144]\n"
+        "    ldp d12, d13, [sp, #128]\n"
+        "    ldp d10, d11, [sp, #112]\n"
+        "    ldp d8, d9, [sp, #96]\n"
+        "    ldp x29, x30, [sp, #80]\n"
+        "    ldp x27, x28, [sp, #64]\n"
+        "    ldp x25, x26, [sp, #48]\n"
+        "    ldp x23, x24, [sp, #32]\n"
+        "    ldp x21, x22, [sp, #16]\n"
+        "    ldp x19, x20, [sp, #0]\n"
+        "    add sp, sp, #176\n"
+        "    ret\n"
+        ".size portBattlingSwitch, . - portBattlingSwitch\n"
+        ".type portBattlingEntry, %function\n"
+        ".p2align 2\n"
+        "portBattlingEntry:\n"
+        "    hint #34\n"
+        "    blr x19\n"
+        "    brk #0\n"
+        ".size portBattlingEntry, . - portBattlingEntry\n");
+void portBattlingEntry(void);
+
+/* A stack whose first switch "returns" into portBattlingEntry, which calls
+ * start(): the switch's frame with x19 = start, x30 = the entry, x29 = 0 (the
+ * end of the frame chain) and FPCR 0 (round to nearest, no flush: the
+ * default). */
+static void* newStack(u8* base, uptr size, void (*start)(void)) {
+    u64* sp = (u64*)(((uptr)base + size) & ~(uptr)15);
+    s32 i;
+
+    sp -= 176 / 8;
+    for (i = 0; i < 176 / 8; i++) {
+        sp[i] = 0;
+    }
+    sp[0] = (u64)(uptr)start;                 /* x19 */
+    sp[11] = (u64)(uptr)portBattlingEntry;    /* x30 */
+    return sp;
+}
 #elif defined(XG_PS1_LAYOUT)
 /* tools/pc_link.py's PS1-layout probe compiles this file for 32-bit x86 only
  * to size the data it names; no switch is built or run there. */

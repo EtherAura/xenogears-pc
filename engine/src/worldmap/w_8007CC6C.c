@@ -151,7 +151,7 @@ s32 worldmapMode12_taskShip4_init(s32 index) {
 s32 worldmapMode12_taskShip4_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = &worldmapModels[4];
-    u8* scratch = (u8*)0x1F800000;
+    u8* scratch = (u8*)PSX_SCRATCH(0x1F800000);
 
     if (e->m4_request == 1) {
         e->m4_request = 0;
@@ -220,15 +220,15 @@ s32 worldmapMode12_taskShip5_update(s32 index) {
     models[5].m8_position.vz = e->m28_position.vz >> 12;
     /* vx written as the vy of the SVECTOR 8 bytes lower: keeps the first
      * store's address out of the register that holds 0x1F8000A0 (retail). */
-    ((SVECTOR*)0x1F80009E)->vy = e->m28_position.vx >> 12;
-    ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-    ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-    spawnWorldmapParticles(0x15, (SVECTOR*)0x1F8000A0, 0);
+    ((SVECTOR*)PSX_SCRATCH(0x1F80009E))->vy = e->m28_position.vx >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+    spawnWorldmapParticles(0x15, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
     if (e->m20_subState == 1) {
-        ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-        ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-        ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-        spawnWorldmapParticles(0x1E, (SVECTOR*)0x1F8000A0, 0);
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+        spawnWorldmapParticles(0x1E, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
     }
     return 1;
 }
@@ -273,10 +273,10 @@ s32 worldmapMode12_taskShip9_update(s32 index) {
     models[9].m8_position.vx = e->m28_position.vx >> 12;
     models[9].m8_position.vy = e->m28_position.vy >> 12;
     models[9].m8_position.vz = e->m28_position.vz >> 12;
-    ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-    ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-    ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-    spawnWorldmapParticles(0x16, (SVECTOR*)0x1F8000A0, 0);
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+    spawnWorldmapParticles(0x16, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
     return 1;
 }
 
@@ -310,10 +310,10 @@ s32 worldmapMode12_taskShip10_update(s32 index) {
         models[10].m0_hidden = 1;
         models[11].m0_hidden = 1;
         clearWorldmapParticles(0x17);
-        ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-        ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-        ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-        spawnWorldmapParticles(0x1C, (SVECTOR*)0x1F8000A0, 0);
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+        spawnWorldmapParticles(0x1C, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
         return 3;
     }
     e->m28_position.vz += e->m38_step.vz;
@@ -322,10 +322,10 @@ s32 worldmapMode12_taskShip10_update(s32 index) {
     models[10].m8_position.vx = e->m28_position.vx >> 12;
     models[10].m8_position.vy = e->m28_position.vy >> 12;
     models[10].m8_position.vz = e->m28_position.vz >> 12;
-    ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-    ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-    ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-    spawnWorldmapParticles(0x17, (SVECTOR*)0x1F8000A0, 0);
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+    spawnWorldmapParticles(0x17, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
     return 1;
 }
 
@@ -359,10 +359,10 @@ s32 worldmapMode12_taskShip12_update(s32 index) {
         models[12].m0_hidden = 1;
         models[15].m0_hidden = 1;
         clearWorldmapParticles(0x18);
-        ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-        ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-        ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-        spawnWorldmapParticles(0x1D, (SVECTOR*)0x1F8000A0, 0);
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+        ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+        spawnWorldmapParticles(0x1D, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
         return 3;
     }
     e->m28_position.vz += e->m38_step.vz;
@@ -371,10 +371,10 @@ s32 worldmapMode12_taskShip12_update(s32 index) {
     models[12].m8_position.vx = e->m28_position.vx >> 12;
     models[12].m8_position.vy = e->m28_position.vy >> 12;
     models[12].m8_position.vz = e->m28_position.vz >> 12;
-    ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-    ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-    ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-    spawnWorldmapParticles(0x18, (SVECTOR*)0x1F8000A0, 0);
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+    spawnWorldmapParticles(0x18, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
     return 1;
 }
 
@@ -409,10 +409,10 @@ s32 worldmapMode12_taskShip13_update(s32 index) {
     models[13].m8_position.vx = e->m28_position.vx >> 12;
     models[13].m8_position.vy = e->m28_position.vy >> 12;
     models[13].m8_position.vz = e->m28_position.vz >> 12;
-    ((SVECTOR*)0x1F8000A0)->vx = e->m28_position.vx >> 12;
-    ((SVECTOR*)0x1F8000A0)->vy = e->m28_position.vy >> 12;
-    ((SVECTOR*)0x1F8000A0)->vz = e->m28_position.vz >> 12;
-    spawnWorldmapParticles(0x19, (SVECTOR*)0x1F8000A0, 0);
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = e->m28_position.vx >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = e->m28_position.vy >> 12;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = e->m28_position.vz >> 12;
+    spawnWorldmapParticles(0x19, (SVECTOR*)PSX_SCRATCH(0x1F8000A0), 0);
     return 1;
 }
 
@@ -747,7 +747,7 @@ void pcWm60Cut(void);
 
 s32 worldmapMode15_taskCamera_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
-    u8* scratch = (u8*)0x1F800000;
+    u8* scratch = (u8*)PSX_SCRATCH(0x1F800000);
     s32 r;
 
     switch (e->m4_request) {
@@ -1004,7 +1004,7 @@ s32 worldmapMode15_taskProjectile_update(s32 index) {
     s32 ret = 1;
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = &worldmapModels[1];
-    sWorldmapScratch* sp = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* sp = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
 
     if (e->m4_request != 0) {
         e->m38_step.vx = -0x85A;
@@ -1256,7 +1256,7 @@ s32 worldmapMode15_taskTrailRing_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapStateEntry* ship = &gWorldmapState->m0_entries[3];
     sWorldmapModel* m = &worldmapModels[index];
-    sWorldmapScratch* sp = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* sp = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     VECTOR* scale;
     s32 unused[2]; /* reserves retail's stack frame */
 

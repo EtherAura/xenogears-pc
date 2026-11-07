@@ -23,7 +23,7 @@
 #include "pc_geometry.h"
 
 /* The scratchpad where the game C has it (see include/battling/battling.h). */
-#define SCRATCH ((u8*)0x1F800000)
+#define SCRATCH ((u8*)PSX_SCRATCH(0x1F800000))
 
 extern u8 battlingBufferIndex;           /* display buffer index */
 extern POLY_FT3* battlingGroundPolys[2]; /* floor primitives per display buffer */

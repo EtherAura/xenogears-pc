@@ -314,6 +314,7 @@ int gpuInit(SDL_Window* window) {
     }
     dumpInit();
     textureDumpInit();
+    texturePackBeetleInit(); /* a chosen Beetle pack tracks uploads from the first one */
 #ifdef SIGUSR1
     signal(SIGUSR1, onUsr1);
 #else
@@ -774,6 +775,8 @@ static int loadNoWide; /* pcVramPutBack: the wide picture and the bookkeeping le
 void gpuLoad(int x, int y, int w, int h, const uint16_t* src) {
     VPiece pieces[4];
     int n = vramWrap(x, y, w, h, pieces);
+    /* A Beetle PSX HW pack's upload names (texture_beetle.c): a put back is the pixels as they were */
+    if (!moving && !loadNoWide) beetleTrackLoad(x, y, w, h, src);
     for (int i = 0; i < n; i++) interpolationTransfer(pieces[i].r);
     int setMask = gp0SetMask();
     int checkMask = gp0CheckMask();
@@ -826,6 +829,7 @@ static int moveCopy(int sx, int sy, int dx, int dy, int w, int h);
 void gpuMove(int sx, int sy, int dx, int dy, int w, int h) {
     int setMask = gp0SetMask();
     int checkMask = gp0CheckMask();
+    beetleTrackMove(sx, sy, dx, dy, w, h); /* a copy takes its source's upload names (texture_beetle.c) */
     /* So does a VRAM-to-VRAM copy (measured black-box, gp0.c). */
     gp0InvalidateTexture();
     interpolationCopy(0,sx,sy,dx,dy,w,h);
@@ -949,6 +953,7 @@ void gpuFill(int x, int y, int w, int h, uint32_t rgb) {
     VPiece pieces[4];
     int n = vramWrap(x, y, w, h, pieces);
     uint16_t c = (uint16_t)(((rgb >> 3) & 0x1F) | ((rgb >> 11) & 0x1F) << 5 | ((rgb >> 19) & 0x1F) << 10);
+    beetleTrackFill(x, y, w, h); /* a fill lets go of the upload names (texture_beetle.c) */
     for (int i = 0; i < n; i++) {
         VRect r = pieces[i].r;
         vramKeepWrite(r); /* a picture between's keep (vram.c) */
@@ -1178,5 +1183,6 @@ void gpuStateLoaded(void) {
     gvkSubmit();
     textureCacheReset();
     textureGlyphReset();
+    beetleTrackStateLoaded();
     hiresStateLoaded();
 }

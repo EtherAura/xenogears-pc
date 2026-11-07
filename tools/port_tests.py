@@ -171,7 +171,7 @@ PLAIN = [
     "gametext_spritetest",
     "cpueffecttest", "textureedgetest", "texturefiltertest", "texturetest", "ui_l10ntest", "ui_motiontest", "verticaltest",
     "state_codectest", "rewindpacktest", "seamreusetest", "spansteptest", "battlepacingtest", "spu_outputtest",
-    "hostpolltest",
+    "hostpolltest", "battlespeedtest",
 ]
 
 # Settings tests: DIR check, then DIR write and DIR read in a fresh DIR.
@@ -317,6 +317,11 @@ class Runner:
             self.run(t, b / t, d, f"{d}/settings.ini")
             self.run(f"{t}-reload", b / t, d, f"{d}/settings.ini", "read", target=t)
 
+        # Beetle PSX HW packs (xg-mrj.1): upload names and ownership, palettes, the folder's rules,
+        # one-image and composite samples, precedence against the texture pack, the A/B; no GPU.
+        d = self.scratch("beetlepacktest")
+        self.run("beetlepacktest", b / "beetlepacktest", d, d / "settings.ini")
+
         # Legacy texture options kept exactly by the menu's first appearance
         # change, then after a restart (xg-j85.9); no GPU work.
         for case in ("1", "2", "3"):
@@ -414,6 +419,14 @@ class Runner:
         else:
             self.skip("text-wordwrap", "needs the disc 1 image in bin/")
             self.skip("state-equivalence", "needs the disc 1 image in bin/")
+        # Battle speed (xg-mrj.2, tools/test_battle_speed.py): a scripted battle at 1x, 2x and 4x reaches
+        # the original's states in the same order, the music at its tempo; 4x on the real clock never
+        # runs the sound device dry.
+        if disc("Japan" if jp else "USA", 1).exists() or self.listing:
+            self.run("battle-speed", Path(sys.executable), ROOT / "tools" / "test_battle_speed.py", b,
+                     self.scratch("battle-speed"), *(["--jp"] if jp else []), target="xenogears", timeout=3 * TIMEOUT)
+        else:
+            self.skip("battle-speed", "needs the disc 1 image in bin/")
         # Rewind (xg-htn.34.10): on and unused it changes nothing; going back and playing on reaches the same
         # frames, sound and state as never going back (a field, and Battling with its coroutine).
         if disc("Japan" if jp else "USA", 1).exists() or self.listing:
@@ -483,7 +496,7 @@ def game_executable(build: Path) -> Path:
 def targets(build: Path) -> list[str]:
     """The CMake targets this runner uses (every test and the GPU fixtures)."""
     names = set(PLAIN) | set(SETTINGS) | {"highrefreshtest", "interpolationgputest", "transitiontest",
-        "pad_profiletest", "texturepacktest", "portraitpacktest", "glyphtest", "glyphgputest", "celgputest", "celpacktest",
+        "pad_profiletest", "texturepacktest", "beetlepacktest", "portraitpacktest", "glyphtest", "glyphgputest", "celgputest", "celpacktest",
         "texturepackgputest", "portraitgputest", "gputest", "card_biostest", "card_historytest", "card_speeduptest",
         "presenttest", "promptgputest", "gameplay_portraittest",
         "regional_audiotest", "slangtest", "moviepacktest", "gametexttest", "presentfiltertest",

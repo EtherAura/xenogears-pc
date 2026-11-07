@@ -213,6 +213,17 @@ static double counterRate(int n) {
     }
 }
 
+/* Counter 2 (the sound driver's tick) counts on the audio clock (hw.h, battle
+ * speed): its count's base and its next target are audio times. The audio
+ * clock is the game's time until the battle speed first changes. */
+static double counterNow(int n) {
+    return n == 2 ? hwAudioTime(hwNow()) : hwNow();
+}
+
+static double counterEventAt(int n, double at) {
+    return n == 2 ? hwAudioToGame(at) : at;
+}
+
 static u32 counterPeriod(int n) {
     const RootCounter* c = &counters[n];
     if ((c->mode & 0x8) && c->target != 0) {
@@ -230,12 +241,12 @@ static void counterInterrupt(void* arg) {
         return; /* stopped or reprogrammed since */
     }
     double period = counterPeriod(n) / counterRate(n);
-    double now = hwNow();
+    double now = counterNow(n);
     c->nextIrq += period;
     if (c->nextIrq < now - 0.25) {
         c->nextIrq = now + period; /* a long stall: skip the backlog */
     }
-    hwScheduleAt(c->nextIrq, counterInterrupt, arg);
+    hwScheduleAt(counterEventAt(n, c->nextIrq), counterInterrupt, arg);
     DeliverEvent(EV_CLASS_RCNT(n), EV_SPEC_INT);
 }
 
@@ -245,7 +256,19 @@ static void reprogram(int n) {
     c->generation++;
     if (c->irqEnabled && (c->mode & 0x10)) {
         c->nextIrq = c->base + counterPeriod(n) / counterRate(n);
-        hwScheduleAt(c->nextIrq, counterInterrupt, (void*)(((uptr)c->generation << 2) | (uptr)n));
+        hwScheduleAt(counterEventAt(n, c->nextIrq), counterInterrupt, (void*)(((uptr)c->generation << 2) | (uptr)n));
+    }
+}
+
+/* hw.c: the audio clock's rate changed (battle speed). Counter 2's next
+ * target stays at its audio time, queued again at the game's time that now
+ * reaches it (the old entry is left to find its generation stale). */
+void apiAudioClockChanged(void) {
+    RootCounter* c = &counters[2];
+
+    if (c->irqEnabled && (c->mode & 0x10)) {
+        c->generation++;
+        hwScheduleAt(counterEventAt(2, c->nextIrq), counterInterrupt, (void*)(((uptr)c->generation << 2) | (uptr)2));
     }
 }
 
@@ -272,7 +295,7 @@ s32 SetRCnt(u32 spec, u16 target, s32 mode) {
     }
     counters[n].mode = m;
     counters[n].target = target;
-    counters[n].base = hwNow(); /* writing the mode resets the count */
+    counters[n].base = counterNow(n); /* writing the mode resets the count */
     reprogram(n);
     return 1;
 }
@@ -284,7 +307,7 @@ s32 GetRCnt(u32 spec) {
     if (n >= 3) {
         return 0;
     }
-    double ticks = (hwNow() - counters[n].base) * counterRate(n);
+    double ticks = (counterNow(n) - counters[n].base) * counterRate(n);
     return (s32)((uint64_t)ticks % counterPeriod(n));
 }
 
@@ -320,7 +343,7 @@ s32 ResetRCnt(u32 spec) {
     if (n >= 3) {
         return 0;
     }
-    counters[n].base = hwNow();
+    counters[n].base = counterNow(n);
     reprogram(n);
     return 1;
 }

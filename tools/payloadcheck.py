@@ -196,6 +196,12 @@ def audit() -> int:
         print(f"payload: no version: {build} is not a configured build and --ver is missing")
         return 2
     exe = Path(a.exe) if a.exe else next((p for p in (build / "xenogears", build / "xenogears.exe") if p.exists()), None)
+    if exe is not None and not a.exe:
+        # A shared-library build (XG_SHARED): the executable is a launcher, the game is the library.
+        lib = exe.parent / "libxenogears.so"
+        needed = subprocess.run(["objdump", "-p", str(exe)], capture_output=True, text=True).stdout if lib.exists() else ""
+        if re.search(r"^\s*NEEDED\s+libxenogears\.so\s*$", needed, re.M):
+            exe = lib
     if exe is None or not exe.exists():
         print(f"payload: no executable in {build}")
         return 2

@@ -34,7 +34,8 @@ extern const int portModuleCount;
 u32 portRandSeed(void);
 void srand(u32 newSeed);
 
-#define SCRATCHPAD ((unsigned char*)(uintptr_t)0x1F800000UL)
+extern unsigned char pcScratchpad[]; /* system/memory.c: the PS1 scratchpad (include/common.h PSX_SCRATCH) */
+#define SCRATCHPAD pcScratchpad
 #define SCRATCHPAD_SIZE 0x400
 #define DEFAULT_HEAP (16u << 20)
 

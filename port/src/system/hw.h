@@ -50,6 +50,25 @@ void hwSetClockRate(double rate);
 /* ... that rate (the sound output plays at it, port/src/spu/output.c). */
 double hwClockRate(void);
 
+/* Battle speed (port/src/system/battlespeed.c): from now on the game's clock
+ * runs `factor` (1 to HW_GAME_SPEED_MAX) game seconds per second of the audio
+ * clock, which the sound driver's root counter (counter 2, libapi.c) and the
+ * SPU's samples (spu.c) follow, so the music keeps its tempo and pitch. On the
+ * real clock the audio clock keeps real time (the vblanks, the CD and every
+ * other interrupt come `factor` times as often); on the stepped clock it is
+ * the game's time divided by the factor. Until the factor first changes the
+ * audio clock is the game's time itself, to the bit. Not in a world (world.h:
+ * its own clock, at 1). */
+#define HW_GAME_SPEED_MAX 4
+void hwSetGameSpeed(int factor);
+int hwGameSpeed(void);
+/* Game code runs in a world of its own (world.h: the extras' sandbox). */
+int hwInWorld(void);
+/* The audio clock at the game's time t (hwNow() units; t at or after the last
+ * change), and the game's time at which the audio clock reads a. */
+double hwAudioTime(double t);
+double hwAudioToGame(double a);
+
 /* Seconds per vblank (per field) in the current video mode. */
 double hwVSyncPeriod(void);
 

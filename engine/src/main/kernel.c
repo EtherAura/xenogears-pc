@@ -376,7 +376,20 @@ void* loadGameModeOverlay(s32 mode) {
 /* The PS1 discards the stack before each mode (func_80019548 resets $sp) and
  * then boots again by recursion, often from deep inside the previous mode.
  * The PC unwinds back here instead, so modes do not nest on the stack. */
-static void* bootContext[5];
+#if defined(__clang__) && defined(__aarch64__)
+/* clang has __builtin_setjmp on some targets only (x86 among them, aarch64
+ * not): the platform's own pair there (port/src/system/gamestack.c). */
+int portBootSetjmp(void** context) __attribute__((returns_twice));
+void portBootLongjmp(void** context) __attribute__((noreturn));
+#define BOOT_SETJMP(context) portBootSetjmp(context)
+#define BOOT_LONGJMP(context) portBootLongjmp(context)
+#define BOOT_CONTEXT_WORDS 21
+#else
+#define BOOT_SETJMP(context) __builtin_setjmp(context)
+#define BOOT_LONGJMP(context) __builtin_longjmp(context, 1)
+#define BOOT_CONTEXT_WORDS 5
+#endif
+static void* bootContext[BOOT_CONTEXT_WORDS];
 static s32 bootContextReady;
 static s32 bootErrNo;
 
@@ -392,10 +405,10 @@ void bootGame(s32 errNo) {
         bootErrNo = 0;
     }
     if (bootContextReady) {
-        __builtin_longjmp(bootContext, 1);
+        BOOT_LONGJMP(bootContext);
     }
     bootContextReady = 1;
-    __builtin_setjmp(bootContext);
+    BOOT_SETJMP(bootContext);
     mode = &gameModes[bootMode];
     ResetGraph(1);
     DrawSyncCallback(0);

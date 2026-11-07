@@ -40,8 +40,8 @@
 #include "pc_geometry.h"
 #include "worldmap/worldmap.h"
 
-#define SCRATCH ((u8*)0x1F800000)
-#define WM_SCRATCH ((sWorldmapScratch*)0x1F800000)
+#define SCRATCH ((u8*)PSX_SCRATCH(0x1F800000))
+#define WM_SCRATCH ((sWorldmapScratch*)PSX_SCRATCH(0x1F800000))
 
 #define GTE_SXY0 12
 #define GTE_SXY1 13

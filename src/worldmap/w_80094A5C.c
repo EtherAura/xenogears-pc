@@ -74,7 +74,7 @@ extern s16 megatilesVisibility[5][5];
 extern s16 tilesVisibility[5][5][4];
 extern s16 worldmapGridCornerIndices[4];                   /* Noah: USHORT_ARRAY_worldmap__8009bbac (grid corners) */
 extern s32 mapQuadrantTilesPatch[4][25][2];            /* Noah: mapQuadrantTilesPatch (s16 [4][5][5][4]) */
-#define WM_SCRATCH ((sWorldmapScratch*)0x1F800000)
+#define WM_SCRATCH ((sWorldmapScratch*)PSX_SCRATCH(0x1F800000))
 extern MATRIX streamingMatrixIdentity;
 extern VECTOR worldmapGridInputPosition;
 extern s32 worldmapWaterWave;
@@ -86,17 +86,17 @@ extern MATRIX worldmapMainMatrix2;
 extern SVECTOR worldmapRotation;
 
 /* Scratchpad work areas (Noah names them after their addresses) */
-#define SCRATCH_VECTOR_000 ((VECTOR*)0x1F800000)
-#define SCRATCH_VECTOR_010 ((VECTOR*)0x1F800010)
-#define SCRATCH_VECTOR_020 ((VECTOR*)0x1F800020)
-#define SCRATCH_VECTOR_030 ((VECTOR*)0x1F800030)
-#define SCRATCH_SVECTOR_040 ((SVECTOR*)0x1F800040)
-#define SCRATCH_MATRIX_048 ((MATRIX*)0x1F800048)
-#define SCRATCH_SVECTOR_0A0 ((SVECTOR*)0x1F8000A0)
-#define SCRATCH_MATRIX_0F0 ((MATRIX*)0x1F8000F0)
-#define SCRATCH_MATRIX_110 ((MATRIX*)0x1F800110)
-#define SCRATCH_MATRIX_130 ((MATRIX*)0x1F800130)
-#define SCRATCH_MATRIX_150 ((MATRIX*)0x1F800150)
+#define SCRATCH_VECTOR_000 ((VECTOR*)PSX_SCRATCH(0x1F800000))
+#define SCRATCH_VECTOR_010 ((VECTOR*)PSX_SCRATCH(0x1F800010))
+#define SCRATCH_VECTOR_020 ((VECTOR*)PSX_SCRATCH(0x1F800020))
+#define SCRATCH_VECTOR_030 ((VECTOR*)PSX_SCRATCH(0x1F800030))
+#define SCRATCH_SVECTOR_040 ((SVECTOR*)PSX_SCRATCH(0x1F800040))
+#define SCRATCH_MATRIX_048 ((MATRIX*)PSX_SCRATCH(0x1F800048))
+#define SCRATCH_SVECTOR_0A0 ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))
+#define SCRATCH_MATRIX_0F0 ((MATRIX*)PSX_SCRATCH(0x1F8000F0))
+#define SCRATCH_MATRIX_110 ((MATRIX*)PSX_SCRATCH(0x1F800110))
+#define SCRATCH_MATRIX_130 ((MATRIX*)PSX_SCRATCH(0x1F800130))
+#define SCRATCH_MATRIX_150 ((MATRIX*)PSX_SCRATCH(0x1F800150))
 
 void RotMatrixX(s32 r, MATRIX* m);
 
@@ -1722,7 +1722,7 @@ void worldmapGroundPrepareRenderingTable(VECTOR* pos) {
 
 /* Noah: computeTileVisibility (worldmapWorldStreaming.cpp); splat says Handwritten, it is C + gte.h macros */
 s16 computeTileVisibility(SVECTOR* v0, SVECTOR* v1, SVECTOR* v2, SVECTOR* v3) {
-    VECTOR* p = (VECTOR*)0x1F800000;
+    VECTOR* p = (VECTOR*)PSX_SCRATCH(0x1F800000);
     s32 a;
     s32 b;
     s32 c;
@@ -2087,7 +2087,7 @@ void drawWorldmapGroundCell(u32* cell, void* ot, POLY_FT3* prims, SVECTOR* start
     u32 wave;
     u32 wave2;
 
-    out = (SVECTOR*)0x1F800000;
+    out = (SVECTOR*)PSX_SCRATCH(0x1F800000);
     src = cell;
     wave2 = worldmapWaterWave2;
     x0 = start->vx;

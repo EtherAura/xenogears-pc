@@ -70,6 +70,11 @@ static void buildText(void) {
 }
 
 /* drawBattleMode1/2, right after the dialogue windows: the choice's text. */
+/* Battle speed (speed.c): the choice is up, the battle waits for the player. */
+s32 pcBattleRetryShown(void) {
+    return retryShown;
+}
+
 void pcBattleRetryDraw(void) {
     if (retryShown) {
         updateAndRenderTextForDialogWindow(&retryWindow, D_800CCB04.m0_pCurrentBattleOT + 1,

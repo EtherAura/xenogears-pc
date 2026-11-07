@@ -49,6 +49,7 @@ static void parseStyle(int k,const char* s) {
     if(a<0)return;
     appearance[k]=a;mixPack[k]=pack;mixFilter[k]=filter;if(k==PC_TEX_TEXT)battleTextScale=battle;
 }
+static int packChosen(void);
 static int filterClass(int k) {return k==PC_TEX_BATTLE_TEXT?PC_TEX_TEXT:k==PC_TEX_MENU_THUMB_PORTRAIT?PC_TEX_MENU_PORTRAIT:k;}
 static int textUsesGlyphs(void) {return textureUseGlyphs(PC_TEX_TEXT);}
 static void load(void) {
@@ -127,7 +128,7 @@ int textureAppearance(int kind) {
     if(appearance[k]>=0)return appearance[k];
     if(k==PC_TEX_TEXT && textureGlyphsEnabled())return 6;
     int n=legacyHudScale(kind);if(n)return n==2?3:4;
-    if(!PC_TEX_IS_PORTRAIT(k) && texturePackChosen())return 5;
+    if(!PC_TEX_IS_PORTRAIT(k) && packChosen())return 5;
     return filters[k];
 }
 void textureFreezeAppearances(void) {
@@ -138,7 +139,7 @@ void textureFreezeAppearances(void) {
      * upscale, then the filter), not only the menu's one choice. */
     for(int k=0;k<PC_TEX_CLASSES;k++)if(choiceKeys[k] && appearance[k]<0) {
         int a=textureAppearance(k),scale=a==3?2:a==4?4:0;
-        int pack=a!=5 && texturePackChosen(),filter=a>=3 && a<=5?filters[k]:0;
+        int pack=a!=5 && packChosen(),filter=a>=3 && a<=5?filters[k]:0;
         int battle=k==PC_TEX_TEXT && a!=6 && hudUpscale[1]!=scale?hudUpscale[1]:-1;
         appearance[k]=a;mixPack[k]=pack;mixFilter[k]=filter;if(k==PC_TEX_TEXT)battleTextScale=battle;
         char style[96];
@@ -163,10 +164,13 @@ int textureSetAppearance(int kind,int mode) {
     if(k==PC_TEX_TEXT)textureSetGlyphs(mode==6);
     settingsSave();return 1;
 }
+/* A pack the user chose: their texture pack or a Beetle PSX HW pack (the legacy default applies either). */
+static int packChosen(void) {return texturePackChosen() || texturePackBeetleEnabled();}
 int textureUsePack(int kind) {
     load();int k=filterClass(kind);
-    if(k<0 || k>=PC_TEX_CLASSES || PC_TEX_IS_PORTRAIT(k))return 0;
-    return (appearance[k]<0 && texturePackChosen()) || appearance[k]==5 || mixPack[k] || (k==PC_TEX_3D && appearance[k]==9); /* 3D Cel 8x: the field texture library; the legacy default only a chosen pack */
+    if(k<0 || k>=PC_TEX_CLASSES)return 0;
+    if(PC_TEX_IS_PORTRAIT(k))return portraitClassUsesTexturePack(kind); /* portrait_set=texture-pack */
+    return (appearance[k]<0 && packChosen()) || appearance[k]==5 || mixPack[k] || (k==PC_TEX_3D && appearance[k]==9); /* 3D Cel 8x: the field texture library; the legacy default only a chosen pack */
 }
 int textureUseSpriteCel(int kind) {
     load();return filterClass(kind)==PC_TEX_SPRITE && appearance[PC_TEX_SPRITE]==9;

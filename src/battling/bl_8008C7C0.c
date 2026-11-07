@@ -823,11 +823,11 @@ void updateBattlingEmitterParticles(BattlingEmitter* pool, OTag* arg1, MATRIX* m
     SVECTOR sv;
     void (*draw)(BattlingParticle*, OTag*);
 
-    battlingParticleScratchVerts = (void*)0x1F800000;
-    battlingParticleScratchOrigin = (void*)0x1F800030;
-    ((SVECTOR*)0x1F800030)->vx = battlingViewOrigin.vx;
-    ((SVECTOR*)0x1F800030)->vy = battlingViewOrigin.vy;
-    ((SVECTOR*)0x1F800030)->vz = battlingViewOrigin.vz;
+    battlingParticleScratchVerts = (void*)PSX_SCRATCH(0x1F800000);
+    battlingParticleScratchOrigin = (void*)PSX_SCRATCH(0x1F800030);
+    ((SVECTOR*)PSX_SCRATCH(0x1F800030))->vx = battlingViewOrigin.vx;
+    ((SVECTOR*)PSX_SCRATCH(0x1F800030))->vy = battlingViewOrigin.vy;
+    ((SVECTOR*)PSX_SCRATCH(0x1F800030))->vz = battlingViewOrigin.vz;
     p = pool->m10_particles;
     draw = pool->m54_render;
     for (i = 0; i < pool->mA_count; i++) {

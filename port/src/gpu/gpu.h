@@ -242,6 +242,7 @@ int textureUseSpriteCel(int kind); /* Sprites -> Cel 8x: the field sprite cel li
 int textureSetAppearance(int kind, int mode);
 void textureFreezeAppearances(void);
 int textureUsePack(int kind);
+int texturePackActive(void); /* the texture pack or a Beetle PSX HW pack is in use */
 int textureUseGlyphs(int kind);
 
 /* User-owned packs, scoped to the compiled disc version. Counters describe
@@ -289,6 +290,20 @@ const char* texturePackVersion(void);
 void texturePackSetRoot(const char* root);
 void texturePackReload(void);
 void texturePackStats(TexturePackStats* out);
+/* A Beetle PSX HW replacement pack (texture_beetle.c; docs/BEETLE_PACKS.md): beetle_pack=<the
+ * folder of '<upload>-<palette>.png' files> (none or empty: off), drawn wherever a category uses
+ * the texture pack. beetle_pack_order: ours (default: our packs' images win where both have one)
+ * or beetle. Its images share the pack cache (at least beetle_pack_cache_mb, default 512). */
+typedef struct {
+    int enabled, files, first;
+    uint64_t loads, misses, invalid;
+    char message[256];
+} BeetlePackStats;
+const char* texturePackBeetleRoot(void);
+void texturePackBeetleSetRoot(const char* root);
+int texturePackBeetleFirst(void);
+void texturePackBeetleSetFirst(int first);
+void texturePackBeetleStats(BeetlePackStats* out);
 /* The A/B comparison (port/src/ui/diagnostics.cpp's hotkey): 0 withholds every
  * replacement (texture, sprite cel and pose, glyph, Cel HUD, portrait packs)
  * without unloading anything, 1 shows them again (the default). */

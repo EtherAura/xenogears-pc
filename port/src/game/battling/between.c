@@ -109,7 +109,7 @@ void cpuTimeBetween(int part, int on); /* port/src/system/cputime.c (XG_CPU_TIMI
 void cpuTimeBetweenBytes(int which, unsigned long long n); /* 0 memory, 1 VRAM */
 int workersRun(void (*fn)(void* arg, int part, int parts), void* arg); /* port/src/system/workers.c */
 
-#define SCRATCHPAD ((unsigned char*)(uptr)0x1F800000UL)
+#define SCRATCHPAD ((unsigned char*)PSX_SCRATCH(0x1F800000))
 #define SCRATCHPAD_SIZE 0x400
 #define NODES_MAX 160
 #define JUMP_POSITION 0x1000 /* a Gear or node moved further in one frame: a cut, drawn where it is */

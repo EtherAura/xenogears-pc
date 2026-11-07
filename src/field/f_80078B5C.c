@@ -1802,7 +1802,7 @@ s32 updateEntityEventCode3Sub4Sub1(VECTOR* delta, VECTOR* position, sFieldScript
 void* allocateScratchBufferLocationForMoveCheck(s32 size) {
     s32 old = positionInScratchBufferForMove;
     positionInScratchBufferForMove = old + size;
-    return (void*)(uptr)(old * 4 + 0x1F800000); /* the PC maps the scratchpad there too */
+    return (void*)(uptr)(old * 4 + PSX_SCRATCH(0x1F800000));
 }
 
 /* Noah: freeScratchBuffer (size in words) */

@@ -55,7 +55,6 @@ void SetDrawTPage(DR_TPAGE* p, s32 dfe, s32 dtd, s32 page) {
     (void)dfe; (void)dtd; p->code[0] = 0xe1000000 | page; setlen(p, 1);
 }
 void AddPrim(void* entry, void* p) { OTag* ot = entry; *(OTag*)p = (*ot & OT_LINK_MASK) | (*(OTag*)p & ~OT_LINK_MASK); *ot = OT_LINK(p); }
-int portScratchpadInit(void);
 void renderLitFlatQuads(void*, s32);
 void renderBattlingShadowTris(u8*, s32);
 void renderBattlingShadowQuads(u8*, s32);
@@ -79,7 +78,7 @@ static void setup(int on, int fail, int precision) {
     vertices[4] = (SVECTOR){-100,-100,1000,0}; vertices[5] = (SVECTOR){100,-100,1000,0};
     vertices[6] = (SVECTOR){-100,100,1000,0}; vertices[7] = (SVECTOR){100,100,1000,0};
     memset(packets, 0x55, sizeof(packets)); memset(modes, 0, sizeof(modes));
-    memset(extra, 0, sizeof(extra)); memset((void*)0x1F800000, 0, 4096);
+    memset(extra, 0, sizeof(extra)); memset(pcScratchpad, 0, 4096);
     for (int i=0;i<4096;i++) ot[i] = OT_LINK_MASK;
     currentModelBlockVertices=vertices; currentModelInstanceDrawPrims=packets;
     currentModeBlock18=modes; currentOTEntry=ot; fieldPolyCount=fieldPolyCount2=0;
@@ -100,7 +99,7 @@ static void basic(int loop) {
 }
 static void ground(int arena) {
     static u32 heights[128*128], cells[81];
-    u8* scratch=(u8*)0x1F800000;
+    u8* scratch=(u8*)PSX_SCRATCH(0x1F800000);
     if (arena) {
         memset(heights,0,sizeof(heights)); for (int i=128;i<256;i++) heights[i]=0xffff;
         battlingHeightMap=heights; battlingGroundPolys[0]=(POLY_FT3*)packets;
@@ -119,7 +118,6 @@ static void ground(int arena) {
     }
 }
 int main(void) {
-    CHECK(portScratchpadInit());
     for(int loop=0;loop<6;loop++) for(int face=0;face<(loop<3?2:1);face++) for(int control=0;control<4;control++) {
         negativeCase=face;
         GteState off,on;

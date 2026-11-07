@@ -152,6 +152,46 @@ typedef struct {
     uint64_t revision;      /* unique per loaded image */
 } TexturePackImage;
 int texturePackFind(int library, uint64_t texel, uint64_t palette, int w, int h, int limit, TexturePackImage* out);
+int texturePackGpuKeeps(void); /* texturePackSetGpu's choice: samples are kept on the GPU by revision */
+
+/* Beetle PSX HW replacement packs (texture_beetle.c; the folder, its files and their decoding in
+ * texture_pack.c: beetle_pack). A replacement is named by the CRC-32 of the upload that owns a
+ * texel and of the draw's palette, '<upload>-<palette>.png' (15-bit '<upload>-0.png'), and covers
+ * the whole upload at the draw's depth. */
+typedef struct {
+    int tracking, slots;
+    uint64_t uploads, walks, walkNs, singles, composites, compositeReuses, compositeEvictions, paletteMissing, draws;
+    size_t compositeBytes;
+} BeetleStats;
+void beetleTrackEnable(int on);
+int beetleTrackEnabled(void);
+/* libgpu.c's transfers: an upload (rectangle and its halfwords), a VRAM copy, a fill; VRAM's
+ * reset and a state load; a 60 Hz Battling picture between (nothing it does is tracked). */
+void beetleTrackLoad(int x, int y, int w, int h, const uint16_t* src);
+void beetleTrackMove(int sx, int sy, int dx, int dy, int w, int h);
+void beetleTrackFill(int x, int y, int w, int h);
+void beetleTrackReset(void);
+void beetleTrackStateLoaded(void);
+void beetleTrackHold(int on);
+uint32_t beetleCrc(const uint16_t* words, size_t count);
+/* The upload owning VRAM halfword (x, y): its slot (0 none), name, size and the place in it. */
+int beetleOwner(int x, int y, uint32_t* crc, int* w, int* h, int* ux, int* uy);
+/* A CLUT's name: 1 with the CRC-32 when one upload owns all its entries, else 0 ('missing'). */
+int beetlePaletteName(uint16_t clut, int entries, uint32_t* crc);
+/* The pack's picture of a decoded request (texture_pack.c's packSample): 1 with *out. */
+int textureBeetleSample(const DecodedTexture* d, TextureRequest patch, TextureSample* out);
+void textureBeetleReset(void);
+void beetleStats(BeetleStats* out);
+/* beetle_pack_log: each name a draw meets, once, as the core's dump would name it. */
+void beetleNameLogOpen(const char* path);
+void beetleNameLogPatch(TextureRequest patch, uint32_t vblank);
+/* texture_pack.c: the Beetle pack's image for an upload of w x h texels at the draw's depth
+ * (1 with *out, RGBA only; 0 none; -1 still loading), and a counter that moves when an image
+ * arrives or the pack is read again. */
+int texturePackBeetleImage(uint32_t upload, uint32_t palette, int w, int h, TexturePackImage* out);
+uint64_t texturePackBeetleGeneration(void);
+int texturePackBeetleEnabled(void);
+void texturePackBeetleInit(void); /* gpuInit: a chosen Beetle pack is read at once (its tracking sees every upload) */
 int textureSpriteCelKnown(uint64_t key);
 int textureSpriteCelSample(const DecodedTexture* texture, TextureRequest patch, int filter, TextureSample* out);
 /* Independent portrait lookup; shared by live drawing and motion snapshots. */

@@ -854,7 +854,7 @@ void updateAllEntities(void) {
     cameraDeltaTan = ratan2(length2d((fieldSceneState.m10_cameraAt.vx - fieldSceneState.m0_cameraEye.vx) >> 16,
                                  (fieldSceneState.m10_cameraAt.vz - fieldSceneState.m0_cameraEye.vz) >> 16),
                         (fieldSceneState.m10_cameraAt.vy - fieldSceneState.m0_cameraEye.vy) >> 16);
-    STACK_SWITCH(0x1F8003FC);
+    STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     updateCameraInterpolation(); /* Enhanced: inside, counters tick at the native cadence and the lerps are split per frame */
     STACK_RESTORE();
     eye.vx = fieldSceneState.m0_cameraEye.vx;
@@ -877,7 +877,7 @@ void updateAllEntities(void) {
         fieldSceneState.m110_cameraMatrix = g_cameraMatrix2;
         lookAtDivided(&g_cameraMatrix2, &eye, &at, &fieldSceneState.m20_cameraUp);
     }
-    STACK_SWITCH(0x1F8003FC);
+    STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     setProjectionMatrixForField();
     STACK_RESTORE();
     for (i = 0; i < g_totalActors; i++) {
@@ -2112,7 +2112,7 @@ void updateAndRenderField(void) {
         func_80281B00("MESSAGE   ");
     }
     renderCompass();
-    STACK_SWITCH(0x1F8003FC);
+    STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     pcFieldShiftBegin(0); /* Enhanced: scripted moves drawn through the tick (xg-hbc.19.3) */
     renderObjects();
     pcFieldShiftEnd(0);

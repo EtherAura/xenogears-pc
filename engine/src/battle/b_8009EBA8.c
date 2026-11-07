@@ -2523,7 +2523,7 @@ void refreshAttachedMechaTransforms_battle(sLoadedMechas** mechas) {
     sMechaBone* bones;
     s32 i;
 
-    m = (MATRIX*)0x1F800000;
+    m = (MATRIX*)PSX_SCRATCH(0x1F800000);
     for (i = 0; i < 2; i++) {
         if (mechaInitVar5_battle[i].m6_isActive != 0) {
             if (mechaInitVar5_battle[i].m10_mechaIndex >= 0 && mechas[mechaInitVar5_battle[i].m10_mechaIndex] != NULL) {
@@ -2557,7 +2557,7 @@ void battleDrawEnv(MATRIX* m, MATRIX* light, s32 arg2, OTag* ot, s32 oddOrEven, 
     for (i = 0; i < battleMechas[31]->m10E_num118; i++, tile++) {
         updateAnimatedEnvTextureTile_battle(tile, battle800ccc5c);
     }
-    STACK_SWITCH(0x1F8003FC);
+    STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     rebuildBattleEnvironmentVramBuffer();
     STACK_RESTORE();
     for (i = 0; i < 2; i++) {
@@ -2605,7 +2605,7 @@ void renderBattleScenePolys(sMechaInitVar4* blocks, sMechaBone* bones, MATRIX* m
     u32 n;
     s32 mode;
 
-    tmp = (MATRIX*)0x1F800040;
+    tmp = (MATRIX*)PSX_SCRATCH(0x1F800040);
     backup = gDepthDivider;
     n = bones->mA_numBones - 1;
     bones++;

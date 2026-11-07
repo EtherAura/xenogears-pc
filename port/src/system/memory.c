@@ -13,17 +13,10 @@
  * data is kept from startup, and portResetModule puts both back.
  */
 
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#else
-#include <sys/mman.h>
-#endif
 
 #include "savestate.h"
 #include "system.h"
@@ -45,44 +38,13 @@ unsigned char* portHeapEnd(void) {
     return heapArena + PORT_HEAP_SIZE;
 }
 
-/* The PS1's 1 KB scratchpad. The game reaches it by its raw address, so the PC
- * maps a page there; the executable is not position-independent, so nothing
- * else lives that low. (Windows: VirtualAlloc at the same address.) */
-#define SCRATCHPAD_ADDR 0x1F800000UL
-#define SCRATCHPAD_MAP 0x1000
-
-int portScratchpadInit(void) {
-    void* want = (void*)(size_t)SCRATCHPAD_ADDR;
-#ifdef _WIN32
-    /* Reserves the 64 KB allocation granule at 0x1F800000, commits one page. */
-    void* p = VirtualAlloc(want, SCRATCHPAD_MAP, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    if (p != want) {
-        fprintf(stderr, "scratchpad: VirtualAlloc at 0x1F800000 failed (error %lu)\n", GetLastError());
-        return 0;
-    }
-#else
-    void* p = mmap(want, SCRATCHPAD_MAP, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
-                   -1, 0);
-    if (p != want) {
-        int err = errno;
-        if (p != MAP_FAILED) munmap(p, SCRATCHPAD_MAP); /* a kernel that took the address as a hint */
-        fprintf(stderr, "scratchpad: mmap at 0x1F800000 gave %p (errno %d, %s)\n", p, err, strerror(err));
-        /* What is in the way: the mappings of this process that overlap the range. */
-        FILE* maps = fopen("/proc/self/maps", "r");
-        if (maps) {
-            char line[512];
-            while (fgets(line, sizeof(line), maps)) {
-                unsigned long lo = 0, hi = 0;
-                if (sscanf(line, "%lx-%lx", &lo, &hi) == 2 && lo < SCRATCHPAD_ADDR + SCRATCHPAD_MAP && hi > SCRATCHPAD_ADDR)
-                    fprintf(stderr, "scratchpad: in the way: %s", line);
-            }
-            fclose(maps);
-        }
-        return 0;
-    }
-#endif
-    return 1;
-}
+/* The PS1's 1 KB scratchpad. The game C reaches it through PSX_SCRATCH
+ * (include/common.h: 0x1F800000 + offset on the PS1, this block + offset on
+ * the PC), so it can sit anywhere: until 2026-11 it was mapped at the PS1
+ * address itself, which an Android app's Java heap holds (xg-mrj.3.4). A
+ * whole page, page-aligned: its addresses' low 12 bits are the PS1's. Saved
+ * by savestate.c (part "scratchpad"). */
+_Alignas(4096) unsigned char pcScratchpad[4096];
 
 /* build/pc/cmake/gen/modules.c */
 typedef struct {

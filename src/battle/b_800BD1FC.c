@@ -75,6 +75,7 @@ s32 mecha_battle_op3(void);
 #ifdef PLATFORM_PC
 void portBattleSweepFrame(void);
 void portBattleWideTest(void);
+void pcBattleSpeedFrame(void);
 #endif
 
 /* battleRender (battleRender) */
@@ -800,6 +801,7 @@ void battleRender(void) {
     battlePreviewBeginFrame();
     portBattleSweepFrame(); /* XG_SWEEP_LOG (port/src/game/battle/sweep.c) */
     portBattleWideTest(); /* XG_BATTLE_WIDETEST (port/src/game/battle/widetest.c) */
+    pcBattleSpeedFrame(); /* battle speed (port/src/game/battle/speed.c) */
 #endif
     battleRenderCount++;
     checkSoftReboot();
@@ -824,7 +826,7 @@ void battleRender(void) {
         printDebugTextOnScreen(battleBssBlock.m8C54_currentOT);
     }
     renderMechasBattle(&battleCameraBlock.m20_renderingMatrix, &battleBssBlock.m8CE4_matrix800CCB94, characterRenderingOT, battleBssBlock.m8C84_oddOrEven);
-    STACK_SWITCH(0x1F8003FC);
+    STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     uploadCharacterSprites();
     execSpritesCallbacksList1();
     execSpritesCallbacksList2();

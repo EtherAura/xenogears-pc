@@ -45,7 +45,6 @@
 
 void kernelMain(void);
 void portModulesInit(void);
-int portScratchpadInit(void);
 int hwInit(void);
 void hwGameStart(void);
 int cdOpenDisc(const char* cuePath);
@@ -62,6 +61,28 @@ void portStartPrepare(void); /* system/options.c: a start the extras asked for *
 #include "system/netplay.h"
 
 static jmp_buf kernelEntry;
+
+#if defined(XG_PIE) && defined(__linux__) && !defined(__ANDROID__)
+#include <sys/personality.h>
+#include <unistd.h>
+/* A PIE build (port/CMakeLists.txt XG_PIE) at the same addresses at every
+ * run, as a non-PIE executable is: save states hold addresses (statefile.c
+ * puts the load address in their id). The first start turns address
+ * randomisation off for this process and executes itself again, once;
+ * XG_ASLR=1 keeps randomisation (tests of the code at changing addresses). */
+static void fixedAddresses(char** argv) {
+    const char* aslr = getenv("XG_ASLR");
+    if (aslr != NULL && aslr[0] == '1') {
+        return;
+    }
+    int now = personality(0xffffffff);
+    if (now == -1 || (now & ADDR_NO_RANDOMIZE) || personality((unsigned long)now | ADDR_NO_RANDOMIZE) == -1) {
+        return;
+    }
+    execv("/proc/self/exe", argv);
+    personality((unsigned long)now); /* no such file: on with randomised addresses */
+}
+#endif
 
 /* The PS1 executable's entry point (0x80019524, hand-written): it clears
  * main's BSS, resets the stack and enters kernelMain. The game calls it again
@@ -135,7 +156,17 @@ static int loadGameData(SDL_Window* window, const char* image, int extras) {
     return 0;
 }
 
+#ifdef XG_SHARED_LIBRARY
+/* A shared-library build (port/CMakeLists.txt XG_SHARED): the launcher
+ * (port/src/launcher) calls this, the library's only export. */
+__attribute__((visibility("default"))) int xenogearsMain(int argc, char** argv);
+int xenogearsMain(int argc, char** argv) {
+#else
 int main(int argc, char** argv) {
+#endif
+#if defined(XG_PIE) && defined(__linux__) && !defined(__ANDROID__)
+    fixedAddresses(argv);
+#endif
     if (argc > 1 && SDL_strcmp(argv[1], "--verify-discs") == 0)
         return cdVerifyCommand(argc - 2, argv + 2, BUILD_REGION);
     if (argc > 1 && SDL_strcmp(argv[1], "--help") == 0) {
@@ -173,11 +204,6 @@ int main(int argc, char** argv) {
     }
     if (argc > 2 || (argc > 1 && argv[1][0] == '-')) {
         fprintf(stderr, "xenogears: unknown arguments; use --help\n"); return 2;
-    }
-    /* The scratchpad's fixed address before SDL and the Vulkan driver map
-     * anything, including settings/pref-path allocations. */
-    if (!portScratchpadInit()) {
-        return 1;
     }
     /* The engine the player asked for (system/engine.h): the other executable
      * takes over here, with these arguments, when it is wanted and found. */

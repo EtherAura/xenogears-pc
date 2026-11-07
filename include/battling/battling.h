@@ -936,7 +936,7 @@ typedef struct BattlingScratch {
     /* 0xB0 */ s32 mB0_sz;
 } BattlingScratch;
 
-#define BATTLING_SCRATCH ((BattlingScratch*)0x1F800000)
+#define BATTLING_SCRATCH ((BattlingScratch*)PSX_SCRATCH(0x1F800000))
 
 /* ---- 3D effects and lines (drawBattlingEffects-showBattlingAnalogWarning) ------------------- */
 

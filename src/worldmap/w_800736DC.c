@@ -255,7 +255,7 @@ typedef struct {
     /* 0x24 */ u8 m24[0xA0 - 0x24];
     /* 0xA0 */ SVECTOR mA0_controlPoints[3];
 } PathScratch;
-#define PATH_SCRATCH ((PathScratch*)0x1F800000)
+#define PATH_SCRATCH ((PathScratch*)PSX_SCRATCH(0x1F800000))
 
 #define POLY_G4_RGB(p, n) (*(u32*)&(p).r##n) /* r,g,b,pad/code written as one word */
 void initWorldmapSkyGradient(void) {
@@ -305,7 +305,7 @@ void drawWorldmapSkyGradient(void) {
     SVECTOR* v;
     POLY_G4* p;
     s32 z;
-    SkyScratch* sp = (SkyScratch*)0x1F800000;
+    SkyScratch* sp = (SkyScratch*)PSX_SCRATCH(0x1F800000);
 
     sp->m0_rot.vx = sp->m0_rot.vz = 0;
     sp->m0_rot.vy = worldmapRotation.vy;
@@ -381,7 +381,7 @@ void drawWorldmapSkyCloudBand(void) {
     OTag* ot;
     s32 u;
     s32 u1;
-    CloudScratch* sp = (CloudScratch*)0x1F800000;
+    CloudScratch* sp = (CloudScratch*)PSX_SCRATCH(0x1F800000);
     u16* rotY = (u16*)&worldmapRotation.vy;
 
     u = (*rotY >> 2) & 0x7F;
@@ -467,7 +467,7 @@ void worldmapRenderMinimap(void) {
     POLY_G3* p;
     TILE* t;
     u32 mask;
-    RadarScratch* sp = (RadarScratch*)0x1F800000;
+    RadarScratch* sp = (RadarScratch*)PSX_SCRATCH(0x1F800000);
 
     p = worldmapMinimapRadar[worldmapOddOrEven];
     for (v = worldmapMinimapRadarShape[0], i = 0; i < 4; i++, v += 3, p++) {
@@ -601,7 +601,7 @@ void drawWorldmapTrackMarks(void) {
     MarkScratch* sp;
 
     if (worldmapTrackMarkIndex != 0) {
-        sp = (MarkScratch*)0x1F800000;
+        sp = (MarkScratch*)PSX_SCRATCH(0x1F800000);
         sp->mA0_vertices[0].vx = -16;
         sp->mA0_vertices[0].vz = 16;
         sp->mA0_vertices[1].vx = 16;
@@ -1088,7 +1088,7 @@ typedef struct {
 
 /* draw a gear (field_mecha model) at a fixed world position (GTE macros) */
 void drawWorldmapMechaModel(void) {
-    GearScratch* sp = (GearScratch*)0x1F800000;
+    GearScratch* sp = (GearScratch*)PSX_SCRATCH(0x1F800000);
 
     sp->m0_position.vy = 0xA0;
     sp->m0_position.vx = 0x4E0E - (worldmapRadarPosition3.vx >> 12);
@@ -1345,15 +1345,15 @@ s32 worldmapOP_3_setPosition(sWorldmapStateEntry* e, s32 a1, s32 a2, s32 a3) {
 
 /* script op */
 s32 worldmapOP_4_setParticlePosition(sWorldmapStateEntry* e, s16 a1, s16 a2, s16 a3) {
-    *(s16*)0x1F8000A0 = a1;
-    *(s16*)0x1F8000A2 = a2;
-    *(s16*)0x1F8000A4 = a3;
+    *(s16*)PSX_SCRATCH(0x1F8000A0) = a1;
+    *(s16*)PSX_SCRATCH(0x1F8000A2) = a2;
+    *(s16*)PSX_SCRATCH(0x1F8000A4) = a3;
     return 4;
 }
 
 /* script op */
 s32 worldmapOP_5_spawnParticles(sWorldmapStateEntry* e, s32 a1) {
-    spawnWorldmapParticles(a1, (void*)0x1F8000A0, 0);
+    spawnWorldmapParticles(a1, (void*)PSX_SCRATCH(0x1F8000A0), 0);
     return 2;
 }
 
@@ -1585,15 +1585,15 @@ s32 worldmapMode8_taskPadCamera_init(s32 index) {
     worldmapRadarPosition3.vy = worldmapPosition.vy;
     worldmapRadarPosition3.vz = worldmapPosition.vz;
     computeCameraVector(&worldmapCameraVector, &worldmapRadarPosition3, worldmapCameraVar0, &worldmapRotation);
-    ((DemoScratch*)0x1F800000)->mA0_tmp = worldmapCameraVector.m0_eye;
+    ((DemoScratch*)PSX_SCRATCH(0x1F800000))->mA0_tmp = worldmapCameraVector.m0_eye;
     worldmapCameraVector.m0_eye = worldmapCameraVector.m8_target;
-    worldmapCameraVector.m8_target = ((DemoScratch*)0x1F800000)->mA0_tmp;
+    worldmapCameraVector.m8_target = ((DemoScratch*)PSX_SCRATCH(0x1F800000))->mA0_tmp;
     return 1;
 }
 
 /* task update: free-look camera driven by pad (debug/demo view) */
 s32 worldmapMode8_taskPadCamera_update(s32 index) {
-    DemoScratch* sp = (DemoScratch*)0x1F800000;
+    DemoScratch* sp = (DemoScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
 
     if (worldmapInput2_0 & 0x40) {
@@ -1888,7 +1888,7 @@ s32 worldmapMode9_taskAirship_init(s32 index) {
 /* task update: ship parts rotation (Noah sWorldmapModel matrices); needs RotMatrixYXZ declared returning MATRIX* (SDK prototype) */
 s32 worldmapMode9_taskAirship_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
-    ShipScratch* sp = (ShipScratch*)0x1F800000;
+    ShipScratch* sp = (ShipScratch*)PSX_SCRATCH(0x1F800000);
 
     e->m28_position.vz -= 0x4000;
     worldmapGridInputPosition.vz -= 0x4000;
@@ -2050,7 +2050,7 @@ s32 worldmapMode10_taskCamera_init(s32 index) {
 /* task update: scripted camera with shake (19-case switch, jump table jtbl_8006FB60) */
 s32 worldmapMode10_taskCamera_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
-    ShakeScratch* sp = (ShakeScratch*)0x1F800000;
+    ShakeScratch* sp = (ShakeScratch*)PSX_SCRATCH(0x1F800000);
 
     switch (e->m20_subState) {
     case 0:
@@ -2238,7 +2238,7 @@ s32 worldmapMode10_taskAirship_init(s32 index) {
 s32 worldmapMode10_taskAirship_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = worldmapModels;
-    ShipScratch* sp = (ShipScratch*)0x1F800000;
+    ShipScratch* sp = (ShipScratch*)PSX_SCRATCH(0x1F800000);
 
     switch (e->m20_subState) {
     case 0:

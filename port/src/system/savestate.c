@@ -68,7 +68,8 @@ int32_t portOverlayCd(void);
 void cardImageStateIo(XgState* s);
 extern u8 g_playTimeHours, g_playTimeMinutes, g_playTimeSeconds;
 
-#define SCRATCHPAD ((unsigned char*)(uintptr_t)0x1F800000UL)
+extern unsigned char pcScratchpad[]; /* system/memory.c: the PS1 scratchpad (include/common.h PSX_SCRATCH) */
+#define SCRATCHPAD pcScratchpad
 #define SCRATCHPAD_SIZE 0x400
 
 /* ---- the chunks ----------------------------------------------------------------------- */
@@ -150,9 +151,12 @@ static int tagOf(const XgState* s, const char* name, char* out) {
  * own data and BSS (modules, the heap arena, the game stack, statics). A
  * rewind capture lists such chunks in place and copies the others. */
 #if defined(__linux__)
-extern char __executable_start[], _end[];
+/* The image's own bounds from the linker (an executable, PIE or not, or a
+ * shared library): its ELF header to its end. */
+extern const char __ehdr_start[] __attribute__((visibility("hidden")));
+extern char _end[] __attribute__((visibility("hidden")));
 static int staticMemory(const void* p, size_t n) {
-    return (const char*)p >= __executable_start && (const char*)p + n <= _end;
+    return (const char*)p >= __ehdr_start && (const char*)p + n <= _end;
 }
 #elif defined(_WIN32)
 /* The executable's image (gamestack.c: its base and size from the PE header). */
@@ -401,18 +405,30 @@ static const Part parts[] = {
     {"gpu", gpuStateIo},         {"vram", vramStateIo},       {"gp0", gp0StateIo},
     {"wide", wideStateIo},       {"prim", primStateIo},       {"quitat", quitAtStateIo},
     {"gametext", gametextStateIo}, {"gametextfont", gametextFontStateIo}, {"moviepack", moviePackStateIo},
+    {"battlespeed", battleSpeedStateIo},
 };
 
 /* The stack protector's guard value: random per process (glibc keeps it in
- * the thread block at %fs:0x28). The saved frames hold the saving process's
- * value, so a load from another run puts this run's value in their place
+ * the thread block at %fs:0x28 on x86-64 and in the global __stack_chk_guard
+ * on aarch64; Android's bionic on aarch64 in the thread block's guard slot,
+ * TPIDR_EL0 + 0x28). The saved frames hold the saving process's value, so a
+ * load from another run puts this run's value in their place
  * (relocateGuard), or the first restored function to return would stop the
  * program. */
+#if defined(__aarch64__) && defined(__linux__) && !defined(__ANDROID__)
+extern uintptr_t __stack_chk_guard;
+#endif
 static uint64_t stackGuard(void) {
 #if defined(__x86_64__) && defined(__linux__)
     uint64_t v;
     __asm__ volatile("movq %%fs:0x28, %0" : "=r"(v));
     return v;
+#elif defined(__aarch64__) && defined(__ANDROID__)
+    uint64_t* tls;
+    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tls));
+    return tls[5];
+#elif defined(__aarch64__) && defined(__linux__)
+    return (uint64_t)__stack_chk_guard;
 #else
     return 0;
 #endif
@@ -909,7 +925,7 @@ int stateAvailable(const char** why) {
         if (why) *why = "Save states are off during an online session";
         return 0;
     }
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
     if (!gameStackActive() && gameStackBase() == NULL) {
         if (why) *why = "Save states need the game on its own stack (not in this build)";
         return 0;

@@ -194,6 +194,7 @@ gpu/shaderchain.c * host shader presets
 gpu/texture.c * host decoded texture cache (reset on load)
 gpu/texture_dump.c * host texture dumps
 gpu/texture_filter.c * host settings
+gpu/texture_beetle.c * host Beetle PSX HW pack upload names (kept on load where VRAM still matches), memos and composites
 gpu/texture_glyph.c * host glyph texture cache (reset on load)
 gpu/texture_pack.c * host texture packs
 gpu/portrait_pack.c * host independent portrait library, selection and derived cache
@@ -338,6 +339,23 @@ system/arena.c versusConfig state
 system/arena.c versusEnvRead host environment and settings
 system/arena.c versusPending state
 system/arena.c versusTable state
+system/battlespeed.c battleText state the latest battle frame's text and wait (battleSpeedStateIo)
+system/battlespeed.c battleWait state
+system/battlespeed.c cachedChosen host the battle_speed setting
+system/battlespeed.c cachedRevision host the battle_speed setting
+system/battlespeed.c cachedValid host the battle_speed setting
+system/battlespeed.c control host the battle_speed_key and battle_speed_button settings
+system/battlespeed.c hidden state
+system/battlespeed.c lastBattleFrame state
+system/battlespeed.c lastButtons host the pad's buttons at the last vblank (the control's edge)
+system/battlespeed.c lastCdAudio state
+system/battlespeed.c logChecked host XG_BATTLE_SPEED_LOG
+system/battlespeed.c logFile host XG_BATTLE_SPEED_LOG
+system/battlespeed.c loggedFactor host XG_BATTLE_SPEED_LOG
+system/battlespeed.c seenBattle state
+system/battlespeed.c seenCdAudio state
+system/battlespeed.c sinceShown state
+system/battlespeed.c textHold state
 system/bios.c * host host files for the extras' sandbox
 system/cputime.c * host XG_CPU_TIMING
 system/displaylock.c * host the display lock
@@ -393,7 +411,10 @@ system/gauntlet.c checked host records file path, autostart
 system/gauntlet.c path host records file path, autostart
 system/gauntlet.c picks derived scratch
 system/gauntlet.c when host records file path, autostart
+system/hw.c audioBaseA state the audio clock's anchor (battle speed)
+system/hw.c audioBaseV state the audio clock's anchor (battle speed)
 system/hw.c clockRate host real-time clock and host side
+system/hw.c gameSpeed state battle speed: game seconds per audio second
 system/hw.c earliestBits derived the heap's top event time for the spin wait, kept under the lock (noteEarliest; set again after a load)
 system/hw.c clockHold derived nesting count around Enhanced-only extra drawing, zero between frames (xg-hbc.19.2)
 system/hw.c clockDefer derived nesting count around the 60 Hz world map tick's work after its vblank, zero at every park (its VSync waits end it first: pcWm60Settle) (xg-hbc.19.1)
@@ -442,6 +463,7 @@ system/libetc.c started state
 system/libetc.c videoMode state
 system/memory.c gameModeNow state
 system/memory.c heapArena state a region of its own (savestate.c)
+system/memory.c pcScratchpad state the PS1 scratchpad (include/common.h PSX_SCRATCH): part "scratchpad" (savestate.c)
 system/memory.c pristineData host pristine module data, the copy's place
 system/memory.c savedModule state the gear shop's copy of field_mecha
 system/memory.c savedModuleOnHeap host pristine module data, the copy's place

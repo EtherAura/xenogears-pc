@@ -83,6 +83,7 @@ void pcBattle60SceneEnd(void);
 extern SVECTOR pcBattle60DrawnEye;
 extern SVECTOR pcBattle60DrawnAt;
 void portBattleWideTest(void);
+void pcBattleSpeedFrame(void);
 
 /* battleRender (battleRender) */
 #include "stack.h"
@@ -799,6 +800,7 @@ void battleRender(void) {
 
     battlePreviewBeginFrame();
     portBattleSweepFrame(); /* XG_SWEEP_LOG (port/src/game/battle/sweep.c) */
+    pcBattleSpeedFrame(); /* battle speed (port/src/game/battle/speed.c) */
     {
         /* XG_SWEEP_LOG BR: the last frame's picture camera (Enhanced, 60 Hz oracle) */
         s32 extra[6];
@@ -835,7 +837,7 @@ void battleRender(void) {
         printDebugTextOnScreen(battleBssBlock.m8C54_currentOT);
     }
     renderMechasBattle(&battleCameraBlock.m20_renderingMatrix, &battleBssBlock.m8CE4_matrix800CCB94, characterRenderingOT, battleBssBlock.m8C84_oddOrEven);
-    STACK_SWITCH(0x1F8003FC);
+    STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     uploadCharacterSprites();
     execSpritesCallbacksList1();
     execSpritesCallbacksList2();

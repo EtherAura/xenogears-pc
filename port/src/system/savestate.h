@@ -111,6 +111,7 @@ void quitAtStateIo(XgState* s);
 void gametextStateIo(XgState* s);
 void gametextFontStateIo(XgState* s);
 void moviePackStateIo(XgState* s);
+void battleSpeedStateIo(XgState* s);
 
 /* Before a save: the device's drawing read back into the CPU copy of VRAM,
  * owed texture-cache walks done (gp0.c; output-identical). */

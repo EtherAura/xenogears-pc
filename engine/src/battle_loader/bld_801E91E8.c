@@ -114,7 +114,7 @@ void battleLoaderUpdateMode2(void) {
         battleBssBlock.mB70_renderStructs[battleBssBlock.m8C84_oddOrEven].m0_drawEnv.r0 = addClamp255(battleBssBlock.mB70_renderStructs[battleBssBlock.m8C84_oddOrEven].m0_drawEnv.r0, -0xC);
         battleBssBlock.mB70_renderStructs[battleBssBlock.m8C84_oddOrEven].m0_drawEnv.g0 = addClamp255(battleBssBlock.mB70_renderStructs[battleBssBlock.m8C84_oddOrEven].m0_drawEnv.g0, -0xC);
         battleBssBlock.mB70_renderStructs[battleBssBlock.m8C84_oddOrEven].m0_drawEnv.b0 = addClamp255(battleBssBlock.mB70_renderStructs[battleBssBlock.m8C84_oddOrEven].m0_drawEnv.b0, -0xC);
-        STACK_SWITCH(0x1F8003FC);
+        STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
         updateBattleWaveEffect((TaskHeader*)e);
         renderBattleWaveEffect((TaskHeader*)e);
         STACK_RESTORE();

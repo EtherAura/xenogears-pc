@@ -32,6 +32,10 @@ const char* portraitMenuPackSelected(void);
 int portraitMenuPackSelect(const char* id);
 int portraitPackSizeEnabled(int size);
 int portraitPackClassEnabled(int kind);
+/* The reserved set id that gives a portrait category the texture pack's pictures (a Beetle PSX HW
+ * pack's faces, or the user's texture pack) instead of a named set: portrait_set=texture-pack. */
+#define PORTRAIT_TEXTURE_PACK "texture-pack"
+int portraitClassUsesTexturePack(int kind);
 int portraitPackCount(void);
 const PortraitSet* portraitPackSet(int index);
 void portraitPackSetRoot(const char* root);

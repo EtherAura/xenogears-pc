@@ -217,9 +217,156 @@ void portGameStackBounds(uintptr_t* low, uintptr_t* high) {
     *high = (uintptr_t)__ImageBase + size;
 }
 
+#elif defined(__aarch64__)
+
+/* AAPCS64 (Linux, Android): saves x19-x28, the frame pointer x29, the link
+ * register x30, d8-d15 and FPCR (the rounding and flush modes) in a 176-byte
+ * frame on the current stack (16-byte aligned), stores its stack pointer in
+ * *save and continues on `load`; x18, the platform register, is left alone.
+ * The switch returns through x30, so a new stack starts in portStackEntry,
+ * which calls the start function saved in x19 and traps should it return
+ * (hint #34 is BTI's landing pad: a NOP where branch protection is off). As
+ * port/src/game/battling/thread.c's switch. */
+void portStackSwitch(void** save, void* load);
+void portStackEntry(void);
+__asm__(".text\n"
+        ".globl portStackSwitch\n"
+        ".type portStackSwitch, %function\n"
+        ".p2align 2\n"
+        "portStackSwitch:\n"
+        "    hint #34\n"
+        "    sub sp, sp, #176\n"
+        "    stp x19, x20, [sp, #0]\n"
+        "    stp x21, x22, [sp, #16]\n"
+        "    stp x23, x24, [sp, #32]\n"
+        "    stp x25, x26, [sp, #48]\n"
+        "    stp x27, x28, [sp, #64]\n"
+        "    stp x29, x30, [sp, #80]\n"
+        "    stp d8, d9, [sp, #96]\n"
+        "    stp d10, d11, [sp, #112]\n"
+        "    stp d12, d13, [sp, #128]\n"
+        "    stp d14, d15, [sp, #144]\n"
+        "    mrs x9, fpcr\n"
+        "    str x9, [sp, #160]\n"
+        "    mov x9, sp\n"
+        "    str x9, [x0]\n"
+        "    mov sp, x1\n"
+        "    ldr x9, [sp, #160]\n"
+        "    msr fpcr, x9\n"
+        "    ldp d14, d15, [sp, #144]\n"
+        "    ldp d12, d13, [sp, #128]\n"
+        "    ldp d10, d11, [sp, #112]\n"
+        "    ldp d8, d9, [sp, #96]\n"
+        "    ldp x29, x30, [sp, #80]\n"
+        "    ldp x27, x28, [sp, #64]\n"
+        "    ldp x25, x26, [sp, #48]\n"
+        "    ldp x23, x24, [sp, #32]\n"
+        "    ldp x21, x22, [sp, #16]\n"
+        "    ldp x19, x20, [sp, #0]\n"
+        "    add sp, sp, #176\n"
+        "    ret\n"
+        ".size portStackSwitch, . - portStackSwitch\n"
+        ".globl portStackEntry\n"
+        ".type portStackEntry, %function\n"
+        ".p2align 2\n"
+        "portStackEntry:\n"
+        "    hint #34\n"
+        "    blr x19\n"
+        "    brk #0\n"
+        ".size portStackEntry, . - portStackEntry\n");
+
+/* Zeroes from `from` up to the stack pointer: the frames below the caller are
+ * dead (a leaf: its return address is in x30, nothing on the stack). Bytes up
+ * to 16-byte alignment, then 16 at a time (sp is 16-byte aligned). */
+void portStackZeroBelow(unsigned char* from);
+__asm__(".text\n"
+        ".globl portStackZeroBelow\n"
+        ".type portStackZeroBelow, %function\n"
+        ".p2align 2\n"
+        "portStackZeroBelow:\n"
+        "    hint #34\n"
+        "    mov x1, sp\n"
+        "1:  cmp x0, x1\n"
+        "    b.hs 3f\n"
+        "    tst x0, #15\n"
+        "    b.eq 2f\n"
+        "    strb wzr, [x0], #1\n"
+        "    b 1b\n"
+        "2:  stp xzr, xzr, [x0], #16\n"
+        "    cmp x0, x1\n"
+        "    b.lo 2b\n"
+        "3:  ret\n"
+        ".size portStackZeroBelow, . - portStackZeroBelow\n");
+
+/* bootGame's unwind (src/main/kernel.c, engine/src/main/kernel.c) where the
+ * compiler has no __builtin_setjmp (clang on aarch64): portBootSetjmp keeps
+ * the callee-saved registers, the frame pointer, the return address and the
+ * stack pointer in a 21-word context and returns 0; portBootLongjmp puts them
+ * back and returns 1 from that portBootSetjmp. Like the builtin pair, only
+ * for a frame that is still live, and the floating-point modes stay as they
+ * are. */
+int portBootSetjmp(void** context);
+void portBootLongjmp(void** context);
+__asm__(".text\n"
+        ".globl portBootSetjmp\n"
+        ".type portBootSetjmp, %function\n"
+        ".p2align 2\n"
+        "portBootSetjmp:\n"
+        "    hint #34\n"
+        "    stp x19, x20, [x0, #0]\n"
+        "    stp x21, x22, [x0, #16]\n"
+        "    stp x23, x24, [x0, #32]\n"
+        "    stp x25, x26, [x0, #48]\n"
+        "    stp x27, x28, [x0, #64]\n"
+        "    stp x29, x30, [x0, #80]\n"
+        "    stp d8, d9, [x0, #96]\n"
+        "    stp d10, d11, [x0, #112]\n"
+        "    stp d12, d13, [x0, #128]\n"
+        "    stp d14, d15, [x0, #144]\n"
+        "    mov x9, sp\n"
+        "    str x9, [x0, #160]\n"
+        "    mov w0, #0\n"
+        "    ret\n"
+        ".size portBootSetjmp, . - portBootSetjmp\n"
+        ".globl portBootLongjmp\n"
+        ".type portBootLongjmp, %function\n"
+        ".p2align 2\n"
+        "portBootLongjmp:\n"
+        "    hint #34\n"
+        "    ldp x19, x20, [x0, #0]\n"
+        "    ldp x21, x22, [x0, #16]\n"
+        "    ldp x23, x24, [x0, #32]\n"
+        "    ldp x25, x26, [x0, #48]\n"
+        "    ldp x27, x28, [x0, #64]\n"
+        "    ldp x29, x30, [x0, #80]\n"
+        "    ldp d8, d9, [x0, #96]\n"
+        "    ldp d10, d11, [x0, #112]\n"
+        "    ldp d12, d13, [x0, #128]\n"
+        "    ldp d14, d15, [x0, #144]\n"
+        "    ldr x9, [x0, #160]\n"
+        "    mov sp, x9\n"
+        "    mov w0, #1\n"
+        "    ret\n"
+        ".size portBootLongjmp, . - portBootLongjmp\n");
+
+/* What the first switch onto a stack pops: the AAPCS64 switch's frame, with
+ * x19 = start, x30 = portStackEntry, x29 = 0 (the end of the frame chain)
+ * and FPCR 0 (round to nearest, no flush to zero: the default). */
+static uint64_t* contextFrame(uint64_t* sp, void (*start)(void)) {
+    sp -= 176 / 8;
+    memset(sp, 0, 176);
+    sp[0] = (uint64_t)(uintptr_t)start;          /* x19 */
+    sp[11] = (uint64_t)(uintptr_t)portStackEntry; /* x30 */
+    return sp;
+}
+
+static void hostBounds(int save) {
+    (void)save;
+}
+
 #endif
 
-#if defined(__x86_64__)
+#if defined(__x86_64__) || defined(__aarch64__)
 
 static _Alignas(PAGE) unsigned char gameStack[GAME_STACK_SIZE];
 
@@ -227,6 +374,9 @@ static _Alignas(PAGE) unsigned char gameStack[GAME_STACK_SIZE];
  * default floating-point modes. */
 static void* newContext(void (*start)(void)) {
     uint64_t* sp = (uint64_t*)(gameStack + GAME_STACK_SIZE);
+#if defined(__aarch64__)
+    return contextFrame(sp, start);
+#else
     uintptr_t low = (uintptr_t)gameStack, high = (uintptr_t)(gameStack + GAME_STACK_SIZE);
 #ifdef _WIN32
     sp -= 4; /* start()'s home space (its caller's on Win64) */
@@ -235,6 +385,7 @@ static void* newContext(void (*start)(void)) {
     *--sp = 0;                       /* start()'s return address: it never returns */
     *--sp = (uint64_t)(uintptr_t)start; /* taken by the switch's ret */
     return contextFrame(sp, low, high);
+#endif
 }
 
 static void* hostSp;  /* the host side, while the game runs */

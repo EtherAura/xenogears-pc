@@ -480,9 +480,9 @@ typedef struct {
 } sMechaBoneAttachmentConfig;
 
 /* Scratchpad matrices (Noah: matrixSP_1f800000 / _1f800020 / _1f800040) */
-#define SCRATCH_MATRIX_00 ((MATRIX*)0x1F800000)
-#define SCRATCH_MATRIX_20 ((MATRIX*)0x1F800020)
-#define SCRATCH_MATRIX_40 ((MATRIX*)0x1F800040)
+#define SCRATCH_MATRIX_00 ((MATRIX*)PSX_SCRATCH(0x1F800000))
+#define SCRATCH_MATRIX_20 ((MATRIX*)PSX_SCRATCH(0x1F800020))
+#define SCRATCH_MATRIX_40 ((MATRIX*)PSX_SCRATCH(0x1F800040))
 
 /* ---- functions of this overlay (Noah names where known) ---- */
 

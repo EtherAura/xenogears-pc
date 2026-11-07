@@ -1792,7 +1792,7 @@ void drawBattlingGround(OTag* arg0, s32 arg1, s32 arg2) {
     fogNearColor.cd = 0x24;
 #endif
     gte_ldrgb(&fogNearColor);
-    copyBattlingWords((void*)0x1F800120, battlingGroundTexInfo, 0x30);
+    copyBattlingWords((void*)PSX_SCRATCH(0x1F800120), battlingGroundTexInfo, 0x30);
     renderBattlingGround(arg0, arg1, arg2);
 #ifdef PLATFORM_PC
     pcWideBattlingGround(arg0, arg1, arg2); /* the margins' floor (wide.c) */
@@ -1803,8 +1803,8 @@ void initBattlingGroundPrims(void) {
     s32 i;
     POLY_FT3* p;
 
-    battlingGroundSpanEnds = (u8*)0x1F800000;
-    battlingGroundSpanStarts = (u8*)0x1F800080;
+    battlingGroundSpanEnds = (u8*)PSX_SCRATCH(0x1F800000);
+    battlingGroundSpanStarts = (u8*)PSX_SCRATCH(0x1F800080);
     battlingGroundPolys[0] = allocateHeap(1800 * (s32)sizeof(POLY_FT3), 0);
     battlingGroundPolys[1] = allocateHeap(1800 * (s32)sizeof(POLY_FT3), 0);
     p = battlingGroundPolys[0];

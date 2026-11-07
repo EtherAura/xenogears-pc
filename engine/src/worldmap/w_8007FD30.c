@@ -100,11 +100,11 @@ s32 worldmapMode15_taskImpactRings_update(s32 index) {
     models[9].m8_position.vz = models[10].m8_position.vz = e->m28_position.vz >> 12;
     models[10].m20_rotationMatrix = worldMapIdentityMatrix;
     models[9].m20_rotationMatrix = models[10].m20_rotationMatrix;
-    ((VECTOR*)0x1F800000)->vx = ((VECTOR*)0x1F800000)->vz = (s32)e->m50;
-    ((VECTOR*)0x1F800010)->vx = ((VECTOR*)0x1F800010)->vz = (s32)e->m54;
-    ((VECTOR*)0x1F800000)->vy = ((VECTOR*)0x1F800010)->vy = 0x1000;
-    ScaleMatrix(&models[9].m20_rotationMatrix, (VECTOR*)0x1F800000);
-    ScaleMatrix(&models[10].m20_rotationMatrix, (VECTOR*)0x1F800010);
+    ((VECTOR*)PSX_SCRATCH(0x1F800000))->vx = ((VECTOR*)PSX_SCRATCH(0x1F800000))->vz = (s32)e->m50;
+    ((VECTOR*)PSX_SCRATCH(0x1F800010))->vx = ((VECTOR*)PSX_SCRATCH(0x1F800010))->vz = (s32)e->m54;
+    ((VECTOR*)PSX_SCRATCH(0x1F800000))->vy = ((VECTOR*)PSX_SCRATCH(0x1F800010))->vy = 0x1000;
+    ScaleMatrix(&models[9].m20_rotationMatrix, (VECTOR*)PSX_SCRATCH(0x1F800000));
+    ScaleMatrix(&models[10].m20_rotationMatrix, (VECTOR*)PSX_SCRATCH(0x1F800010));
     e->m50 += 0x180;
     if (e->m50 > 0x7FFF) {
         e->m50 = 0x7FFF;

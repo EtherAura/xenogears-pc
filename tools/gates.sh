@@ -24,6 +24,8 @@
 #               build/pc/release); skipped when an explicit one is missing
 #   uninit      possibly uninitialised locals in the game C (clang and gcc -O2,
 #               US+JP): each gets a PC fix or a reason in tools/uninit_allow.txt
+#   scratchpad  PS1 scratchpad addresses (0x1F800000-0x1F800FFF) in C only
+#               through PSX_SCRATCH (include/common.h; tools/scratchpadcheck.py)
 #   xmodcheck   cross-module data references the PC link would split into
 #               separate copies (names differ between modules; per version)
 #   statevars   every writable static of the platform layer in $XG_TEST_BUILD
@@ -120,6 +122,7 @@ fi
 gate check_bss "$PY" tools/check_bss.py
 gate busywait "$PY" tools/busywait.py
 gate uninit "$PY" tools/uninit.py
+gate scratchpad "$PY" tools/scratchpadcheck.py
 
 for ver in us jp; do
     gate "hostcheck-$ver" "$PY" tools/hostcheck.py --ver "$ver"

@@ -49,6 +49,9 @@ int pcGameplayEnemyInfoMode(void);
 void pcGameplaySetEnemyInfoMode(int mode);
 int pcGameplayEnemyInfo(void);      /* the window at all (mode != off) */
 int pcGameplayEnemyInfoKnown(void); /* HP only once beaten (mode beaten) */
+/* A lone Select's release toggles the window; Select with a shoulder button
+ * is a chord (*chord: its state between calls). */
+int pcGameplaySelectTap(int previous, int held, int* chord);
 
 /* Dialogue: text_speed (1 original, 2..8, 0 instant), holding confirm for
  * instant text, auto-advance after 1..10 seconds (0 off). */

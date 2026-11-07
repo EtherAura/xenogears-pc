@@ -139,6 +139,23 @@ void portYield(void);
 #define R3000_MOD(a, b) ((a) % (b))
 #endif
 
+/*
+ * PSX_SCRATCH(addr): an address in the PS1's 1 KB scratchpad (0x1F800000 to
+ * 0x1F8003FF), as the game C names it: (MATRIX*)PSX_SCRATCH(0x1F800000). On
+ * the PS1 the address itself; on the PC the same offset in the platform's
+ * scratchpad block (pcScratchpad, port/src/system/memory.c), wherever the
+ * host put it: the PS1 address is not free in every process (an Android
+ * app's Java heap holds it). tools/scratchpadcheck.py (gate scratchpad) fails
+ * on a raw scratchpad address in C.
+ */
+#define PSX_SCRATCH_BASE 0x1F800000
+#ifdef PLATFORM_PC
+extern unsigned char pcScratchpad[];
+#define PSX_SCRATCH(addr) ((uptr)pcScratchpad + ((addr) - PSX_SCRATCH_BASE))
+#else
+#define PSX_SCRATCH(addr) (addr)
+#endif
+
 #ifndef NULL
 #define NULL ((void*)0)
 #endif

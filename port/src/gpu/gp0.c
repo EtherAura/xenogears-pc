@@ -737,7 +737,7 @@ static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi
     int glyphs=textureUseGlyphs(kind);
     int portrait=PC_TEX_IS_PORTRAIT(kind);
     int spriteCel=textureUseSpriteCel(kind) && textureSpriteCelEnabled();
-    if ((!gp.filter && !hudScale && !celScale && !spriteCel && !(portrait?portraitPackClassEnabled(kind):(textureUsePack(kind) && texturePackEnabled())) && !glyphs) || (gp.wide && gp.wideTex)) return;
+    if ((!gp.filter && !hudScale && !celScale && !spriteCel && !((portrait && portraitPackClassEnabled(kind)) || (textureUsePack(kind) && texturePackActive())) && !glyphs) || (gp.wide && gp.wideTex)) return;
     if (!gp.wide) for (int i = 0; i < reads->n; ++i) {
         VRect r = reads->r[i];
         if (r.x0 <= box.x1 && r.x1 >= box.x0 && r.y0 <= box.y1 && r.y1 >= box.y0) return;
@@ -757,14 +757,15 @@ static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi
      * Keep native texels (including 1x packs), rather than enlarging the
      * cached Scale2x blocks. Authored higher-resolution images stay intact. */
     int sampleFilter = gp.filter == TEXTURE_FILTER_EDGE && gvkHiScale() > 2 ? TEXTURE_FILTER_NEAREST : gp.filter;
-    if (portrait) gp.sampled = portraitPackClassSample(d,patch,kind,&gp.sample);
+    /* a portrait category set to Texture pack (portrait_set=texture-pack) takes the texture pack's way */
+    if (portrait && !textureUsePack(kind)) gp.sampled = portraitPackClassSample(d,patch,kind,&gp.sample);
     else if(textureUsePack(kind)) gp.sampled = texturePackSample(d,patch,sampleFilter,&gp.sample);
     else if(spriteCel) {
         gp.sampled = textureSpriteCelSample(d,patch,sampleFilter,&gp.sample);
         /* A sprite the library does not cover draws exactly as Original: the
          * native path, not the enhanced copy (the compass dial lost its
          * one-texel crosshair there). */
-        if(!gp.sampled && !gp.filter && !hudScale && !celScale && !glyphs && !(textureUsePack(kind) && texturePackEnabled())) return;
+        if(!gp.sampled && !gp.filter && !hudScale && !celScale && !glyphs && !(textureUsePack(kind) && texturePackActive())) return;
     }
     if(!gp.sampled && celScale) {
         gp.sampled=textureCelSample(d,gp.glyphSource.w ? gp.glyphSource : patch,celScale,&gp.sample);

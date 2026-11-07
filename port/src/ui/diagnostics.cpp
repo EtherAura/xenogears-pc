@@ -909,9 +909,12 @@ void portraitChoice(const char* label, const char* key, const char* id, const ch
         if (!strcmp(set->id, selected)) value = i;
         names.push_back(i == 0 ? N_("Original") : set->id);
     }
+    /* the texture pack's pictures (a Beetle PSX HW pack's faces): portrait_set=texture-pack */
+    if (!strcmp(selected, PORTRAIT_TEXTURE_PACK)) value = (int)names.size();
+    names.push_back(N_("Texture pack"));
     int c = dropdown(id, names.data(), (int)names.size(), value);
     if (c != value) {
-        select(portraitPackSet(c)->id);
+        select(c == portraitPackCount() ? PORTRAIT_TEXTURE_PACK : portraitPackSet(c)->id);
         libs[LIB_PORTRAITS].scanned = false;
     }
 }

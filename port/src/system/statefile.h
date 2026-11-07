@@ -46,6 +46,10 @@ typedef struct {
 /* This executable's id: its code and its sections' places (16 bytes). */
 const uint8_t* stateBuildId(void);
 const char* stateBuildText(void); /* the same in hex, for messages */
+/* Where this build's image sits against its link addresses (its ELF load
+ * bias: 0 for a non-PIE executable and on Windows), as states record it for
+ * tools (statecheck.py turns symbol addresses into a state's addresses). */
+uintptr_t stateImageBias(void);
 
 /* Packs and writes a state atomically (a .tmp file renamed over path).
  * thumb: RGB888 thumbW x thumbH, or NULL. 0 with why on failure. */

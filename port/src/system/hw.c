@@ -24,6 +24,15 @@
  * menu's pause is. Otherwise the CD's sectors and the SPU would catch up all
  * of it at once (the SPU computing the whole gap's sound, the CD delivering
  * every sector the gap held without a vblank between them).
+ *
+ * Battle speed (hwSetGameSpeed, battlespeed.c): the game's clock can run 2 or
+ * 4 game seconds per audio second. The audio clock (hwAudioTime) is what the
+ * sound driver's root counter (libapi.c) and the SPU's samples (spu.c) follow:
+ * on the real clock it keeps real time while the game's vblanks, CD and
+ * everything else come that many times as often; on the stepped clock it is
+ * the game's time divided by the factor. It is the game's time itself until
+ * the factor first changes, so a run that never changes it is the same as
+ * before to the bit.
  */
 
 #include <SDL3/SDL.h>
@@ -70,6 +79,11 @@ extern double gpuStallSince(uint64_t ns) __attribute__((weak));
 /* port/src/spu/output.c: a stall taken out of the clock (weak: tests that
  * link this file alone have no sound output). */
 extern void spuOutputClockGap(void) __attribute__((weak));
+/* libapi.c: the audio clock's rate changed, the sound driver's root counter
+ * is queued again at its audio time (weak, like the GPU's). */
+extern void apiAudioClockChanged(void) __attribute__((weak));
+/* battlespeed.c: the factor for the frame this vblank starts (weak, like the GPU's). */
+extern void battleSpeedVBlank(void) __attribute__((weak));
 
 #define STEP_SAFE_POINT_COST 1e-6 /* XG_CLOCK=step: seconds per safe point */
 #define MAX_SLEEP 0.005           /* hwYield never sleeps longer, so events queued from other threads are seen */
@@ -113,6 +127,10 @@ static double earliestEvent(void) {
 static uint64_t startNs;    /* real time: the clock's anchor on the host's clock */
 static double startAt;      /* ... the virtual time there (0 unless the rate changed) */
 static double clockRate = 1; /* ... virtual seconds per real second (hwSetClockRate) */
+/* Battle speed (hwSetGameSpeed): game seconds per audio second, and the audio
+ * clock's anchor: at the game's time audioBaseV it read audioBaseA. */
+static int gameSpeed = 1;
+static double audioBaseV, audioBaseA;
 static uint64_t lastBeatNs; /* real time: the game thread's last safe point (gapCheck) */
 static int stepClock;
 static double stepNow;
@@ -167,7 +185,7 @@ double hwNow(void) {
     if (stepClock) {
         return stepNow;
     }
-    return startAt + (double)((pausedAt != 0 ? pausedAt : SDL_GetTicksNS()) - startNs) * 1e-9 * clockRate;
+    return startAt + (double)((pausedAt != 0 ? pausedAt : SDL_GetTicksNS()) - startNs) * 1e-9 * clockRate * gameSpeed;
 }
 
 void hwSetClockRate(double rate) {
@@ -176,13 +194,54 @@ void hwSetClockRate(double rate) {
     }
     /* From now on at the new rate: the clock goes on from where it is. */
     uint64_t t = pausedAt != 0 ? pausedAt : SDL_GetTicksNS();
-    startAt += (double)(t - startNs) * 1e-9 * clockRate;
+    startAt += (double)(t - startNs) * 1e-9 * clockRate * gameSpeed;
     startNs = t;
     clockRate = rate;
 }
 
 double hwClockRate(void) {
     return clockRate;
+}
+
+/* ---- battle speed (hw.h) ---- */
+
+double hwAudioTime(double t) {
+    return audioBaseA + (t - audioBaseV) / gameSpeed;
+}
+
+double hwAudioToGame(double a) {
+    return audioBaseV + (a - audioBaseA) * gameSpeed;
+}
+
+int hwGameSpeed(void) {
+    return gameSpeed;
+}
+
+int hwInWorld(void) {
+    return inWorld;
+}
+
+void hwSetGameSpeed(int factor) {
+    factor = factor < 1 ? 1 : factor > HW_GAME_SPEED_MAX ? HW_GAME_SPEED_MAX : factor;
+    if (factor == gameSpeed || inWorld) {
+        return;
+    }
+    double now = hwNow();
+    if (!stepClock) {
+        /* The real clock goes on from where it is, `factor` times real time. */
+        startAt = now;
+        startNs = pausedAt != 0 ? pausedAt : SDL_GetTicksNS();
+    }
+    audioBaseA = hwAudioTime(now);
+    audioBaseV = now;
+    gameSpeed = factor;
+    if (apiAudioClockChanged) apiAudioClockChanged();
+}
+
+/* Real-time waits: game seconds to real ones. A factor of 1 leaves the value
+ * as it was (the display lock's rate was never in these). */
+static double realSeconds(double gameSeconds) {
+    return gameSeconds / gameSpeed;
 }
 
 /* vsync_wait=spin: every real-time wait spins instead of sleeping. A thread
@@ -235,7 +294,7 @@ static void sleepFor(double seconds) {
     } else if (spinWaitOn()) {
         spinUntil(hwNow() + seconds, INFINITY);
     } else {
-        SDL_DelayNS((Uint64)(seconds * 1e9));
+        SDL_DelayNS((Uint64)(realSeconds(seconds) * 1e9));
     }
 }
 
@@ -262,7 +321,7 @@ static void waitReal(double until, int host) {
         uint64_t deadline = gpuHostDeadline();
         if (deadline != UINT64_MAX) {
             uint64_t ticks = SDL_GetTicksNS();
-            double at = now + (deadline > ticks ? (double)(deadline - ticks) * 1e-9 * clockRate : 0);
+            double at = now + (deadline > ticks ? (double)(deadline - ticks) * 1e-9 * clockRate * gameSpeed : 0);
             if (at < until) until = at;
         }
     }
@@ -289,7 +348,7 @@ static void waitReal(double until, int host) {
     if (wait > MAX_SLEEP) {
         wait = MAX_SLEEP;
     }
-    SDL_DelayNS((Uint64)(wait * 1e9));
+    SDL_DelayNS((Uint64)(realSeconds(wait) * 1e9));
     double over = hwNow() - now - wait;
     if (over < MAX_BACKLOG) {
         oversleep += ((over > 0 ? over : 0) - oversleep) / 16.0;
@@ -441,7 +500,7 @@ static void hostPoll(int vblankWait) {
          * deadlines in deliverDue, so a short timer interval need not
          * prevent every display sample there. */
         double until = vblankWait ? nextVBlank : nextEventTime();
-        double slack = (until - hwNow()) / clockRate;
+        double slack = (until - hwNow()) / (clockRate * gameSpeed);
         uint64_t available = !isfinite(slack) ? UINT64_MAX : slack > 0 ? (uint64_t)(slack * 1e9) : 0;
         gpuHostPoll(SDL_GetTicksNS(), hwVBlankNow(), available);
     }
@@ -648,12 +707,15 @@ static void vblankInterrupt(void* arg) {
 
     vblankCount++;
     nextVBlank += hwVSyncPeriod();
-    if (nextVBlank < now - MAX_BACKLOG) {
+    if (nextVBlank < now - MAX_BACKLOG * gameSpeed) {
         nextVBlank = now + hwVSyncPeriod(); /* a long stall (debugger, window drag): skip */
     }
     hwScheduleAt(nextVBlank, vblankInterrupt, arg);
     if (displayLockVBlank != NULL && !stepClock) {
         displayLockVBlank();
+    }
+    if (battleSpeedVBlank != NULL) {
+        battleSpeedVBlank(); /* the factor of the frame this vblank starts, and whether it is shown */
     }
     if (gpuVBlank != NULL) {
         gpuVBlank();
@@ -784,6 +846,8 @@ typedef struct {
     char* deliveringFrame;
     int maskDepth;
     int inWorld;
+    int gameSpeed;
+    double audioBaseV, audioBaseA;
 } HwPart;
 
 size_t hwWorldPartSize(void) {
@@ -795,6 +859,7 @@ void hwWorldPartInit(void* blob) {
     memset(h, 0, sizeof(*h));
     h->stepClock = 1; /* from 0, moved only by hwWorldRun and waits */
     h->inWorld = 1;
+    h->gameSpeed = 1; /* its sound on its own clock */
 }
 
 void hwWorldPartFree(void* blob) {
@@ -804,7 +869,8 @@ void hwWorldPartFree(void* blob) {
 void hwWorldPartSwap(void* blob) {
     HwPart* h = blob;
     HwPart mine = {queue,     queueCount, queueCap,   queueSeq,        stepClock, stepNow,
-                   pausedAt,  delivering, deliveringFrame, maskDepth, inWorld};
+                   pausedAt,  delivering, deliveringFrame, maskDepth, inWorld,
+                   gameSpeed, audioBaseV, audioBaseA};
     lockQueue();
     queue = h->queue;
     queueCount = h->queueCount;
@@ -819,6 +885,9 @@ void hwWorldPartSwap(void* blob) {
     deliveringFrame = h->deliveringFrame;
     maskDepth = h->maskDepth;
     inWorld = h->inWorld;
+    gameSpeed = h->gameSpeed;
+    audioBaseV = h->audioBaseV;
+    audioBaseA = h->audioBaseA;
     if (gpuHostClock) gpuHostClock(!stepClock && !inWorld);
     *h = mine;
 }
@@ -870,6 +939,9 @@ void hwStateIo(XgState* s) {
     XG_STATE_VAR(s, maskDepth);
     XG_STATE_VAR(s, delivering);
     XG_STATE_VAR(s, deliveringFrame);
+    XG_STATE_VAR(s, gameSpeed); /* (battle speed: the audio clock's anchor and rate) */
+    XG_STATE_VAR(s, audioBaseV);
+    XG_STATE_VAR(s, audioBaseA);
     lockQueue();
     XG_STATE_VAR(s, queueSeq);
     int count = (int)xgStateLen(s, "queueCount", (size_t)queueCount);

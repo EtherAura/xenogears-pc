@@ -53,7 +53,7 @@ static int metadata(const char* path, PortraitSet* set) {
 }
 static SDL_EnumerationResult scan(void* userdata, const char* dirname, const char* name) {
     (void)userdata;
-    if (count>=SETS || !validId(name) || !strcmp(name,"original")) return SDL_ENUM_CONTINUE;
+    if (count>=SETS || !validId(name) || !strcmp(name,"original") || !strcmp(name,PORTRAIT_TEXTURE_PACK)) return SDL_ENUM_CONTINUE;
     char path[sizeof(dir)+32];
     snprintf(path,sizeof(path),"%s%s/portrait.ini",dirname,name);
     PortraitSet set={0}; SDL_strlcpy(set.id,name,sizeof(set.id)); SDL_strlcpy(set.name,name,sizeof(set.name));
@@ -69,6 +69,7 @@ static void clear(void) {
 static int configureSet(const char* id,char* path,size_t pathBytes,char* message,size_t messageBytes) {
     path[0]=0;
     if (!strcmp(id,"original")) { SDL_strlcpy(message,"Original artwork",messageBytes); return 0; }
+    if (!strcmp(id,PORTRAIT_TEXTURE_PACK)) { SDL_strlcpy(message,"The texture pack's pictures",messageBytes); return 0; }
     int found=0; for(int i=1;i<count;++i) if(!strcmp(id,sets[i].id)) found=1;
     if (!found) { SDL_strlcpy(message,"Selected set unavailable; using originals",messageBytes); return 0; }
     snprintf(path,pathBytes,"%s/%s/%s",root,id,texturePackVersion());
@@ -115,6 +116,12 @@ int portraitPackClassEnabled(int kind) {
     load();return kind==PC_TEX_MENU_THUMB_PORTRAIT?stats.menuEnabled:portraitPackSizeEnabled(PC_TEX_PORTRAIT_SIZE(kind));
 }
 int portraitBattlePackEnabled(void) { load(); return stats.battleEnabled; }
+int portraitClassUsesTexturePack(int kind) {
+    load();
+    const char* id=kind==PC_TEX_MENU_PORTRAIT || kind==PC_TEX_MENU_THUMB_PORTRAIT ? menuSelected :
+                   kind==PC_TEX_BATTLE_PORTRAIT ? battleSelected : kind==PC_TEX_PORTRAIT ? selected : "";
+    return !strcmp(id,PORTRAIT_TEXTURE_PACK);
+}
 int portraitPackCount(void) { load(); return count; }
 const PortraitSet* portraitPackSet(int i) { load(); return i>=0 && i<count?&sets[i]:NULL; }
 int portraitPackEnabled(void) { load(); return stats.enabled; }

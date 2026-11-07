@@ -90,11 +90,11 @@ s32 worldmapMode14_taskTrail_update(s32);
 s32 worldmapMode14_taskFlightPath_init(s32);
 s32 worldmapMode14_taskFlightPath_update(s32);
 
-#define SCRATCH_MATRIX0 ((MATRIX*)0x1F8000F0)
-#define SCRATCH_MATRIX1 ((MATRIX*)0x1F800110)
-#define SCRATCH_VECTOR0 ((VECTOR*)0x1F800000)
-#define SCRATCH_VECTOR1 ((VECTOR*)0x1F800010)
-#define SCRATCH_SVECTOR ((SVECTOR*)0x1F8000A0)
+#define SCRATCH_MATRIX0 ((MATRIX*)PSX_SCRATCH(0x1F8000F0))
+#define SCRATCH_MATRIX1 ((MATRIX*)PSX_SCRATCH(0x1F800110))
+#define SCRATCH_VECTOR0 ((VECTOR*)PSX_SCRATCH(0x1F800000))
+#define SCRATCH_VECTOR1 ((VECTOR*)PSX_SCRATCH(0x1F800010))
+#define SCRATCH_SVECTOR ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))
 
 void spawnWorldmapParticles(s32 type, SVECTOR* position, SVECTOR* rotation);
 s32 changeWorldmapEntityState(s32 index, s32 state);
@@ -407,7 +407,7 @@ s32 worldmapMode14_taskCamera_init(s32 index) {
 
 /* task update (event camera) */
 s32 worldmapMode14_taskCamera_update(s32 index) {
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     s32 t;
 
@@ -517,7 +517,7 @@ s32 worldmapMode14_taskCamera_update(s32 index) {
 
 /* task init (models 4/5) */
 s32 worldmapMode14_taskRingsA_init(s32 index) {
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     s32 i;
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = &worldmapModels[4];
@@ -575,7 +575,7 @@ s32 worldmapMode14_taskRingsA_update(s32 index) {
 
 /* task init (models 6/7) */
 s32 worldmapMode14_taskRingsB_init(s32 index) {
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     s32 i;
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = &worldmapModels[6];
@@ -682,7 +682,7 @@ s32 worldmapMode14_taskFlightPath_init(s32 index) {
 s32 worldmapMode14_taskFlightPath_update(s32 index) {
     s32 ret = 1;
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapModel* model;
     SVECTOR* p;
     s32 t;

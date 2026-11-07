@@ -93,7 +93,7 @@ target_include_directories(jpegtest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(jpegtest PRIVATE m)
 
 add_executable(texturepacktest EXCLUDE_FROM_ALL "${XG_GPU_DIR}/texture.c" "${XG_GPU_DIR}/vram.c"
-               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/pngfast.c"
+               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_beetle.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/pngfast.c"
                "${XG_GPU_DIR}/test/texturepacktest.c"
                "${XG_GPU_DIR}/../system/settings.c" "${XG_GPU_DIR}/../system/engine.c"
                "${XG_GPU_DIR}/../system/cputime.c")
@@ -103,7 +103,7 @@ target_include_directories(texturepacktest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/
 target_link_libraries(texturepacktest PRIVATE SDL3::SDL3)
 
 add_executable(portraitpacktest EXCLUDE_FROM_ALL "${XG_GPU_DIR}/texture.c" "${XG_GPU_DIR}/vram.c"
-               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/pngfast.c"
+               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_beetle.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/pngfast.c"
                "${XG_GPU_DIR}/portrait_pack.c" "${XG_GPU_DIR}/test/portraitpacktest.c"
                "${XG_GPU_DIR}/../system/settings.c" "${XG_GPU_DIR}/../system/engine.c"
                "${XG_GPU_DIR}/../system/cputime.c")
@@ -112,9 +112,21 @@ target_compile_definitions(portraitpacktest PRIVATE PLATFORM_PC VERSION_${XG_VER
 target_include_directories(portraitpacktest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_ROOT}/include")
 target_link_libraries(portraitpacktest PRIVATE SDL3::SDL3)
 
+# Beetle PSX HW packs without a GPU: upload names, ownership, palettes, the folder's rules,
+# samples (one image, composites), precedence against the texture pack, the A/B.
+add_executable(beetlepacktest EXCLUDE_FROM_ALL "${XG_GPU_DIR}/texture.c" "${XG_GPU_DIR}/vram.c"
+               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_beetle.c" "${XG_GPU_DIR}/texture_dump.c"
+               "${XG_GPU_DIR}/pngfast.c" "${XG_GPU_DIR}/test/beetlepacktest.c"
+               "${XG_GPU_DIR}/../system/settings.c" "${XG_GPU_DIR}/../system/engine.c"
+               "${XG_GPU_DIR}/../system/cputime.c")
+target_compile_features(beetlepacktest PRIVATE c_std_11)
+target_compile_definitions(beetlepacktest PRIVATE VERSION_${XG_VERSION})
+target_include_directories(beetlepacktest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(beetlepacktest PRIVATE SDL3::SDL3)
+
 # Cel HUD libraries without a GPU: sprites.txt parsing, budget, outcome counts.
 add_executable(celpacktest EXCLUDE_FROM_ALL "${XG_GPU_DIR}/texture.c" "${XG_GPU_DIR}/vram.c"
-               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/pngfast.c"
+               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_beetle.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/pngfast.c"
                "${XG_GPU_DIR}/texture_cel.c" "${XG_GPU_DIR}/test/celpacktest.c"
                "${XG_GPU_DIR}/../system/settings.c" "${XG_GPU_DIR}/../system/engine.c"
                "${XG_GPU_DIR}/../system/cputime.c")
@@ -124,7 +136,7 @@ target_include_directories(celpacktest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 target_link_libraries(celpacktest PRIVATE SDL3::SDL3)
 
 add_executable(glyphtest EXCLUDE_FROM_ALL "${XG_GPU_DIR}/texture.c" "${XG_GPU_DIR}/vram.c"
-               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/texture_glyph.c"
+               "${XG_GPU_DIR}/texture_pack.c" "${XG_GPU_DIR}/texture_beetle.c" "${XG_GPU_DIR}/texture_dump.c" "${XG_GPU_DIR}/texture_glyph.c"
                "${XG_GPU_DIR}/pngfast.c"
                "${XG_GPU_DIR}/test/glyphtest.c" "${XG_GPU_DIR}/../system/settings.c" "${XG_GPU_DIR}/../system/engine.c"
                "${XG_GPU_DIR}/../system/cputime.c")

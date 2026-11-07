@@ -41,8 +41,8 @@ extern s32 worldmapFadePolyStep;
 extern s32 worldmapFile5;
 extern s32 worldmapFile7;
 
-#define SCRATCH_A0 (*(SVECTOR*)0x1F8000A0)
-#define SCRATCH_A8 (*(SVECTOR*)0x1F8000A8)
+#define SCRATCH_A0 (*(SVECTOR*)PSX_SCRATCH(0x1F8000A0))
+#define SCRATCH_A8 (*(SVECTOR*)PSX_SCRATCH(0x1F8000A8))
 #define ABS(x) ((x) < 0 ? -(x) : (x))
 
 s32 getAngleCos(s32 angle);
@@ -116,7 +116,7 @@ s32 checkYggdrasilLandingPosition(VECTOR* position, VECTOR* unused, s32 stepScal
 /* Noah: worldmap_taskYggdrasil_init (worldmapTaskYggdrasil.cpp). */
 s32 worldmap_taskYggdrasil_init(s32 index) {
     sWorldmapStateEntry* entry = &gWorldmapState->m0_entries[index];
-    sWorldmapScratch* scratch = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* scratch = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     s32 result;
     s16 direction;
 
@@ -216,7 +216,7 @@ s32 worldmap_taskYggdrasil_init(s32 index) {
 /* Noah: worldmapTaskYggdrasil.cpp, init of task 7 (Yggdrasil) in the alternate task set. */
 s32 worldmap_taskYggdrasil_reinit(s32 index) {
     sWorldmapStateEntry* entry = &gWorldmapState->m0_entries[index];
-    sWorldmapScratch* scratch = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* scratch = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     s32 result;
 
     worldmapModels[0].m8_position = entry->m28_position;
@@ -288,7 +288,7 @@ void pcWm60MidPosition(const VECTOR* a, const VECTOR* b, VECTOR* out);
 
 s32 worldmap_taskYggdrasil_update(s32 index) {
     s32 result = 1;
-    sWorldmapScratch* scratch = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* scratch = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* entry = &gWorldmapState->m0_entries[index];
     s32 r;
     s32 d;

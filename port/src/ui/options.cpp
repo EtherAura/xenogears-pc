@@ -39,6 +39,7 @@ extern "C" {
 #include "system/rumble.h"
 #include "system/settings.h"
 #include "system/speedup.h"
+#include "system/battlespeed.h"
 int pcFreeCameraEnabled(void); /* port/src/system/freecam.c */
 void pcFreeCameraSet(int on);
 int gvkDeviceIntegrated(void); /* port/src/gpu/vk.c: Auto's GPU budget is 8 ms by default there */
@@ -359,6 +360,10 @@ std::vector<Spec>& table() {
     // Gameplay
     add("speedup", N_("Speedup"), [](int) { return speedupEnabled() != 0 ? 1 : 0; },
         [](int, int v) { speedupSetEnabled(v); }, 0);
+    static const char* const battleSpeedNames[] = {N_("Off"), "1x", "2x", "4x"};
+    static const int battleSpeedValues[] = {0, 1, 2, 4};
+    add("battle_speed", N_("Battle speed"), [](int) { return battleSpeedChosen(); },
+        [](int, int v) { battleSpeedSetChosen(v); }, 0, battleSpeedNames, 4, battleSpeedValues);
     add("field60", N_("60 Hz fields"), [](int) { return pcGameplayField60(); },
         [](int, int v) { pcGameplaySetField60(v); }, 0)
         .def = [](int) { return engineThis() == ENGINE_ENHANCED ? 1 : 0; };

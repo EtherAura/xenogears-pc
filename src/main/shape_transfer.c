@@ -453,7 +453,7 @@ void spriteCallback_renderBillboardModel(TaskHeader* task) {
 }
 
 void scalePaletteColorsClamped(s32 count, s32 scale, u16* dst, u16* src) {
-    PaletteScratch* s = (PaletteScratch*)0x1F800000;
+    PaletteScratch* s = (PaletteScratch*)PSX_SCRATCH(0x1F800000);
 
     gte_lddp(scale << 7);
     while (--count != -1) {

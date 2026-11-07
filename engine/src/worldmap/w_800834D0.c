@@ -405,7 +405,7 @@ void pcWm60Cut(void);
 
 s32 worldmapMode18_taskCamera_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
-    WorldmapScratch* sp = (WorldmapScratch*)0x1F800000;
+    WorldmapScratch* sp = (WorldmapScratch*)PSX_SCRATCH(0x1F800000);
     s32 shake;
 
     switch (e->m4_request) {
@@ -562,7 +562,7 @@ s32 worldmapMode18_taskRisingModel_update(s32 index) {
     m = worldmapModels;
     e = &st->m0_entries[index];
     p = &m[7];
-    sp = (WorldmapScratch*)0x1F800000;
+    sp = (WorldmapScratch*)PSX_SCRATCH(0x1F800000);
 
     switch (e->m4_request) {
     case 1:
@@ -781,7 +781,7 @@ void attachWorldmapModels(s32 parent, s32 child) {
 
 /* Noah renderWorldmapModels (worldmapTaskGround.cpp) */
 void renderWorldmapModels(void) {
-    WorldmapModelScratch* sp = (WorldmapModelScratch*)0x1F800000;
+    WorldmapModelScratch* sp = (WorldmapModelScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapModel* p;
     s32 worldX;
     s32 worldZ;
@@ -853,7 +853,7 @@ s32 worldmapCheckCollisionsAgainstWorldmapModels(VECTOR* position, s16* outIndex
 /* Noah worldmapCheckCollisionsAgainstWorldmapModel (worldmapPlayer.cpp) */
 s32 worldmapCheckCollisionsAgainstWorldmapModel(VECTOR* position, s32 modelIndex) {
     sWorldmapModel* m = &worldmapModels[modelIndex];
-    WorldmapScratch* s = (WorldmapScratch*)0x1F800000;
+    WorldmapScratch* s = (WorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapCollisionMesh* mesh;
     sWorldmapCollisionTri* tri;
     SVECTOR* verts;
@@ -912,7 +912,7 @@ s32 worldmapCheckCollisionsAgainstWorldmapModel(VECTOR* position, s32 modelIndex
 
 /* model triangle contact point + normal (not in Noah) */
 void getWorldmapModelTriangleContact(VECTOR* position, VECTOR* out, VECTOR* normal, u16 modelIndex, u16 triIndex) {
-    WorldmapTriScratch* sp = (WorldmapTriScratch*)0x1F800000;
+    WorldmapTriScratch* sp = (WorldmapTriScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapModel* m = &worldmapModels[modelIndex];
     sWorldmapCollisionMesh* mesh;
     sWorldmapCollisionTri* tri;
@@ -952,7 +952,7 @@ void getWorldmapModelTriangleContact(VECTOR* position, VECTOR* out, VECTOR* norm
 
 /* model triangle plane crossing test (not in Noah) */
 s32 isWorldmapModelTrianglePlaneCrossed(VECTOR* position, s32 height, u16 modelIndex, u16 triIndex) {
-    WorldmapPlaneScratch* sp = (WorldmapPlaneScratch*)0x1F800000;
+    WorldmapPlaneScratch* sp = (WorldmapPlaneScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapModel* m = &worldmapModels[modelIndex];
     sWorldmapCollisionMesh* mesh;
     sWorldmapCollisionTri* tri;
@@ -995,7 +995,7 @@ s32 isWorldmapModelTrianglePlaneCrossed(VECTOR* position, s32 height, u16 modelI
 
 /* model triangle edge test (not in Noah) */
 s32 getWorldmapModelTriangleEdgeFlags(VECTOR* target, VECTOR* position, s32 modelIndex, s32 triIndex) {
-    WorldmapEdgeScratch* sp = (WorldmapEdgeScratch*)0x1F800000;
+    WorldmapEdgeScratch* sp = (WorldmapEdgeScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapModel* m = &worldmapModels[modelIndex];
     sWorldmapCollisionMesh* mesh;
     sWorldmapCollisionTri* tri;
@@ -1131,7 +1131,7 @@ static void pcWm60SpriteStep(SpriteActorCore* actor) {
 
 /* Noah worldmapDrawSpriteActors (worldmapTaskGround.cpp) */
 void worldmapDrawSpriteActors(void) {
-    WorldmapSpriteScratch* sp = (WorldmapSpriteScratch*)0x1F800000;
+    WorldmapSpriteScratch* sp = (WorldmapSpriteScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e;
     s32 i;
     s32 a, b, d;
@@ -1228,7 +1228,7 @@ void pcWm60SpriteFinish(void) {
  * game's own camera: the ground task has just set up its matrix) and where
  * it puts them; the frame between repeats the tick's verdict. */
 void pcWm60SpriteDecide(void) {
-    WorldmapSpriteScratch* sp = (WorldmapSpriteScratch*)0x1F800000;
+    WorldmapSpriteScratch* sp = (WorldmapSpriteScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e = gWorldmapState->m0_entries;
     s32 i;
     s32 depth;
@@ -1301,7 +1301,7 @@ void freeWorldmapPolyFT4Array3(void) {
 
 /* draw grid decorations with FT4 array 3 (not in Noah) */
 void drawWorldmapBillboards(void) {
-    WorldmapQuadScratch* sp = (WorldmapQuadScratch*)0x1F800000;
+    WorldmapQuadScratch* sp = (WorldmapQuadScratch*)PSX_SCRATCH(0x1F800000);
     s32 i, j, k;
 
     sWorldmapOffsetEntry* table;
@@ -1470,7 +1470,7 @@ void RotMatrixX(s32 r, MATRIX* m);
  * retail (ADD_PRIM_ASM, include/ot.h) and the projected SXY values live in
  * t6-t9 throughout, hence the register variables (user decision). */
 void drawWorldmapClouds(void) {
-    WorldmapCloudScratch* sp = (WorldmapCloudScratch*)0x1F800000;
+    WorldmapCloudScratch* sp = (WorldmapCloudScratch*)PSX_SCRATCH(0x1F800000);
     s32 i, j, k, l;
     WorldmapCloudPrim* prim;
     s32 uv;
@@ -1763,7 +1763,7 @@ s32 worldmap_taskSpinModels_init(s32 index) {
 s32 worldmap_taskSpinModels_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = worldmapModels;
-    SVECTOR* r = (SVECTOR*)0x1F8000A0;
+    SVECTOR* r = (SVECTOR*)PSX_SCRATCH(0x1F8000A0);
     e->m50 = (e->m50 + e->m54) & 0xFFF;
     r[1].vx = 0;
     r[0].vx = 0;
@@ -1786,7 +1786,7 @@ s32 worldmap_taskSpinModelPair_init(s32 index) {
 s32 worldmap_taskSpinModelPair_update(s32 index) {
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = worldmapModels;
-    SVECTOR* r = (SVECTOR*)0x1F8000A0;
+    SVECTOR* r = (SVECTOR*)PSX_SCRATCH(0x1F8000A0);
     SVECTOR unused; /* reserves retail's stack frame */
     sWorldmapModel* m0 = &m[worldmapSpinModelPairs[initWorldMapVar0][0]];
     sWorldmapModel* m1 = &m[worldmapSpinModelPairs[initWorldMapVar0][1]];
@@ -1833,7 +1833,7 @@ s32 worldmap_taskTranslucentSpin_reinit(s32 index) {
 s32 worldmap_taskTranslucentSpin_update(s32 index) {
     s32 pad[2]; /* reserves retail's stack frame */
     sWorldmapStateEntry* p = &gWorldmapState->m0_entries[index];
-    SVECTOR* rot = (SVECTOR*)0x1F8000A0;
+    SVECTOR* rot = (SVECTOR*)PSX_SCRATCH(0x1F8000A0);
     sWorldmapModel* a = &worldmapModels[worldmapTranslucentSpinModelPairs[initWorldMapVar0][0]];
     sWorldmapModel* b = &worldmapModels[worldmapTranslucentSpinModelPairs[initWorldMapVar0][1]];
 
@@ -1866,7 +1866,7 @@ void computeWorldmapLookMatrix(VECTOR* forward, VECTOR* tmp, MATRIX* m) {
 }
 
 s32 worldmap_taskWaypointShip_init(s32 index) {
-    VECTOR* v = (VECTOR*)0x1F800000;
+    VECTOR* v = (VECTOR*)PSX_SCRATCH(0x1F800000);
     s32 modelIdx = worldmapWaypointShipModels[initWorldMapVar0];
     sWorldmapStateEntry* p;
     sWorldmapModel* m;
@@ -1933,7 +1933,7 @@ s32 worldmap_taskWaypointShip_reinit(s32 index) {
 }
 
 s32 worldmap_taskWaypointShip_update(s32 index) {
-    VECTOR* v = (VECTOR*)0x1F800000;
+    VECTOR* v = (VECTOR*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* p = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m = &worldmapModels[worldmapWaypointShipModels[initWorldMapVar0]];
     s32 d;
@@ -1968,8 +1968,8 @@ s32 worldmap_taskWaypointShip_update(s32 index) {
         v->vx = p->m38_step.vx;
         v->vy = p->m38_step.vy;
         v->vz = -p->m38_step.vz;
-        computeWorldmapLookMatrix(v, (VECTOR*)0x1F800010, (MATRIX*)0x1F8000F0);
-        m->m20_rotationMatrix = *(MATRIX*)0x1F8000F0;
+        computeWorldmapLookMatrix(v, (VECTOR*)PSX_SCRATCH(0x1F800010), (MATRIX*)PSX_SCRATCH(0x1F8000F0));
+        m->m20_rotationMatrix = *(MATRIX*)PSX_SCRATCH(0x1F8000F0);
         p->m28_position.vx += worldmapWaypointShipSteps[p->m58].vx * (p->m4A_stepScale >> 12);
         p->m28_position.vz += worldmapWaypointShipSteps[p->m58].vz * (p->m4A_stepScale >> 12);
         p->m58 = (p->m58 + 1) & 0x1F;
@@ -2059,24 +2059,24 @@ s32 worldmap_taskFlyingShip_reinit(s32 index) {
 }
 
 s32 worldmap_taskFlyingShip_update(s32 index) {
-    VECTOR* v = (VECTOR*)0x1F800000;
+    VECTOR* v = (VECTOR*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* p = &gWorldmapState->m0_entries[index];
     s32 base = worldmapFlyingShipModelBases[initWorldMapVar0];
     sWorldmapModel* m;
 
     p->m50 = (p->m50 + p->m54) & 0xFFF;
     p->m58 = (p->m58 + p->m5C) & 0xFFF;
-    ((SVECTOR*)0x1F8000A0)->vz = 0;
-    ((SVECTOR*)0x1F8000A0)->vx = 0;
-    ((SVECTOR*)0x1F8000A0)->vy = p->m50;
-    ((SVECTOR*)0x1F8000A8)->vz = 0;
-    ((SVECTOR*)0x1F8000A8)->vx = 0;
-    ((SVECTOR*)0x1F8000A8)->vy = p->m58;
-    RotMatrixYXZ((SVECTOR*)0x1F8000A0, (MATRIX*)0x1F8000F0);
-    RotMatrixYXZ((SVECTOR*)0x1F8000A8, (MATRIX*)0x1F800110);
-    (&worldmapModels[base])[5].m20_rotationMatrix = *(MATRIX*)0x1F8000F0;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vz = 0;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vx = 0;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))->vy = p->m50;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A8))->vz = 0;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A8))->vx = 0;
+    ((SVECTOR*)PSX_SCRATCH(0x1F8000A8))->vy = p->m58;
+    RotMatrixYXZ((SVECTOR*)PSX_SCRATCH(0x1F8000A0), (MATRIX*)PSX_SCRATCH(0x1F8000F0));
+    RotMatrixYXZ((SVECTOR*)PSX_SCRATCH(0x1F8000A8), (MATRIX*)PSX_SCRATCH(0x1F800110));
+    (&worldmapModels[base])[5].m20_rotationMatrix = *(MATRIX*)PSX_SCRATCH(0x1F8000F0);
     m = (sWorldmapModel*)(base * sizeof(sWorldmapModel) + (uptr)worldmapModels); /* offset first: (plus offset D) ties m to the offset qty */
-    m[3].m20_rotationMatrix = *(MATRIX*)0x1F800110;
+    m[3].m20_rotationMatrix = *(MATRIX*)PSX_SCRATCH(0x1F800110);
     m[2].m20_rotationMatrix = m[3].m20_rotationMatrix;
     m[1].m20_rotationMatrix = m[2].m20_rotationMatrix;
     m[0].m20_rotationMatrix = m[1].m20_rotationMatrix;
@@ -2507,7 +2507,7 @@ void moveWorldmapParticles(void) {
 
 void updateWorldmapParticleEmitters(void) {
     sWorldmapParticle* e = worldmapFile1Buffer_18;
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapParticle2* part;
     s32 i;
     s32 j;
@@ -2636,7 +2636,7 @@ typedef struct sWorldmapParticleRenderScratch {
 /* Render the second-stage particles as projected textured quads. The
  * matrix/table pointer reuse and buffer-pointer advance retain retail
  * allocation and stack layout. Address temporaries use MIPS32 pointers. */
-#define RS ((sWorldmapParticleRenderScratch*)0x1F800000)
+#define RS ((sWorldmapParticleRenderScratch*)PSX_SCRATCH(0x1F800000))
 void drawWorlmapPolyFT4Array1(void) {
     s32 cx, cz;
 
@@ -2666,9 +2666,9 @@ void drawWorlmapPolyFT4Array1(void) {
     uv = &worldMapIdentityMatrix;
     s->m68_identity = *(MATRIX*)uv;
     i = 0;
-    lm = (MATRIX*)0x1F800048;
+    lm = (MATRIX*)PSX_SCRATCH(0x1F800048);
     data = worldmapParticleQuadVertices;
-    pos = (VECTOR*)0x1F800088;
+    pos = (VECTOR*)PSX_SCRATCH(0x1F800088);
     uv = worldmapParticleQuadUVs;
     buffers = worldmapFT4_1;
     lastQuad = D_8009B058;
@@ -2892,7 +2892,7 @@ s32 worldmapMode0_taskPlayer_initSaved(s32 index) {
 
 s32 worldmapMode0_taskPlayer_update(s32 index) {
     s32 ret = 1;
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* ws = gWorldmapState->m0_entries;
     sWorldmapStateEntry* p = &ws[index];
     sWorldmapFollowLeader* f;
@@ -3304,7 +3304,7 @@ s32 worldmapMode0_task_partyMember1_initSaved(s32 index) {
 
 s32 worldmapMode0_task_partyMember_update(s32 index) {
     s32 ret = 1;
-    VECTOR* tmp = (VECTOR*)0x1F800000;
+    VECTOR* tmp = (VECTOR*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* ws = gWorldmapState->m0_entries;
     sWorldmapStateEntry* p = &ws[index];
     sWorldmapStateEntry* parent;

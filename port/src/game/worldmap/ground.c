@@ -14,7 +14,7 @@
 #include "pc_geometry.h"
 #include "pc_interpolation.h"
 
-#define SCRATCH ((u8*)0x1F800000)
+#define SCRATCH ((u8*)PSX_SCRATCH(0x1F800000))
 
 extern s32 renderWorldmapGroundVar1; /* ground POLY_FT3 used this frame */
 /* Billboard POLY_FT4 used this frame. The game C has it as an s16; the PS1

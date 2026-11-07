@@ -99,7 +99,7 @@ void pcWm60Live(s32 index);
 void pcWm60LiveModel(s32 index);
 
 s32 worldmap_taskYggdrasilSubModels_update(s32 index) {
-    sWorldmapScratch* sp = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* sp = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* p = &gWorldmapState->m0_entries[index];
     sWorldmapModel* m2 = &worldmapModels[2];
     sWorldmapModel* m3 = &worldmapModels[3];
@@ -847,7 +847,7 @@ s32 worldmap_taskCamera_updateSub0(s32 current, s16* pitch, s16* heights) {
     s32 d;
     s32* dist;
 
-    sp = (sWorldmapScratch*)0x1F800000;
+    sp = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     dist = worldmapCameraStepDistances;
     i = 0;
     sp->mA8.vy = worldmapRotation.vy;
@@ -1655,7 +1655,7 @@ void interpolateWorldPosition(VECTOR* out, s32 x, s32 z) {
     sWorldmapScratch* sp;
     u8* c;
 
-    sp = (sWorldmapScratch*)0x1F800000;
+    sp = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     c = getWorldChunkForPosition(x, z);
     x = (x / 8) & 0xFFFF;
     z = (z / 8) & 0xFFFF;
@@ -1735,7 +1735,7 @@ s32 getWorldmapElevationWithWater(s32 x, s32 z) {
     s32 uz;
 
     c = getWorldChunkForPosition(x, z);
-    sp = (sWorldmapScratch*)0x1F800000;
+    sp = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     cx = ((u32)x >> 19) & 7;
     x0 = cx * 0x200;
     cz = ((u32)z >> 19) & 7;

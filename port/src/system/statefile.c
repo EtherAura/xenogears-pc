@@ -9,6 +9,9 @@
  * other refuses them, with a message.
  */
 
+#ifndef _WIN32
+#define _GNU_SOURCE 1 /* dl_iterate_phdr (link.h) */
+#endif
 #include "statefile.h"
 
 #include <SDL3/SDL.h>
@@ -24,6 +27,7 @@
 #include <windows.h>
 #else
 #include <elf.h>
+#include <link.h>
 #endif
 
 #define MAGIC "XGSTATE"
@@ -34,6 +38,7 @@
 static uint8_t buildId[16];
 static char buildText[33];
 static int buildKnown;
+static uintptr_t imageBias;
 
 static void idMix(uint64_t* a, uint64_t* b, const void* data, size_t n) {
     *a = stateHash(data, n, *a);
@@ -59,8 +64,53 @@ static int computeId(uint64_t* a, uint64_t* b) {
     return 1;
 }
 #else
+/* The ELF object this code is in (the executable, or the library an Android
+ * app loads) and where it sits: its load bias (0 for a non-PIE executable)
+ * and the file to read its sections from. */
+typedef struct {
+    uintptr_t inside, bias;
+    const char* path;
+    int found;
+} SelfObject;
+
+static int findSelf(struct dl_phdr_info* info, size_t size, void* data) {
+    (void)size;
+    SelfObject* self = data;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+        uintptr_t lo = info->dlpi_addr + ph->p_vaddr;
+        if (ph->p_type == PT_LOAD && self->inside >= lo && self->inside < lo + ph->p_memsz) {
+            self->bias = info->dlpi_addr;
+            self->path = info->dlpi_name != NULL && info->dlpi_name[0] != '\0' ? info->dlpi_name : "/proc/self/exe";
+            self->found = 1;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The bias, before main (or at the library's load): states record it while
+ * the game is parked, on the game's stacks, where a call into the C library
+ * would leave this run's host values below the game's frames. */
+__attribute__((constructor)) static void imageBiasInit(void) {
+    SelfObject self = {.inside = (uintptr_t)&imageBiasInit};
+    dl_iterate_phdr(findSelf, &self);
+    imageBias = self.found ? self.bias : 0;
+}
+
 static int computeId(uint64_t* a, uint64_t* b) {
-    FILE* f = fopen("/proc/self/exe", "rb");
+    SelfObject self = {.inside = (uintptr_t)&computeId};
+    dl_iterate_phdr(findSelf, &self);
+    if (!self.found) {
+        return 0;
+    }
+    /* Position-independent code at another address holds other addresses: a
+     * non-zero load bias is part of the id (as the image base is on Windows). */
+    if (self.bias != 0) {
+        uint64_t bias = self.bias;
+        idMix(a, b, &bias, sizeof(bias));
+    }
+    FILE* f = fopen(self.path, "rb");
     Elf64_Ehdr eh;
     if (f == NULL || fread(&eh, sizeof(eh), 1, f) != 1 || memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
         eh.e_shentsize != sizeof(Elf64_Shdr) || eh.e_shnum == 0) {
@@ -88,8 +138,8 @@ static int computeId(uint64_t* a, uint64_t* b) {
         idMix(a, b, name, strlen(name));
         idMix(a, b, where, sizeof(where));
         if ((sh[i].sh_flags & SHF_EXECINSTR) && sh[i].sh_type == SHT_PROGBITS) {
-            /* The code as loaded (the executable is not position-independent). */
-            idMix(a, b, (const void*)(uintptr_t)sh[i].sh_addr, sh[i].sh_size);
+            /* The code as loaded. */
+            idMix(a, b, (const void*)(uintptr_t)(self.bias + sh[i].sh_addr), sh[i].sh_size);
         }
     }
     free(names);
@@ -117,6 +167,10 @@ const uint8_t* stateBuildId(void) {
         buildKnown = 1;
     }
     return buildId;
+}
+
+uintptr_t stateImageBias(void) {
+    return imageBias;
 }
 
 const char* stateBuildText(void) {
@@ -147,7 +201,8 @@ static uint64_t get64(const uint8_t* p) {
 enum {
     H_BUILD = 16, H_REGION = 32, H_DISC = 36, H_SERIAL = 40, H_SECTORS = 56, H_VBLANK = 60, H_SAVED = 64,
     H_PLAY = 72, H_MODE = 76, H_PLACE = 80, H_LABEL = 84, H_FLAGS = 180, H_DUMP = 184, H_THUMBW = 192,
-    H_THUMBH = 196, H_BODY = 200, H_HASH = 208, H_THUMBPACKED = 216, H_ENGINE = 220, H_BODYPACKED = 224
+    H_THUMBH = 196, H_BODY = 200, H_HASH = 208, H_THUMBPACKED = 216, H_ENGINE = 220, H_BODYPACKED = 224,
+    H_IMAGE = 232
 };
 
 static void headerPack(const StateHeader* h, uint32_t thumbPacked, uint64_t bodyPacked, uint8_t out[HEADER_SIZE]) {
@@ -176,6 +231,10 @@ static void headerPack(const StateHeader* h, uint32_t thumbPacked, uint64_t body
     put32(out + H_THUMBPACKED, thumbPacked);
     put32(out + H_ENGINE, h->engine); /* system/engine.h; 0 in files from before it: the Original */
     put64(out + H_BODYPACKED, bodyPacked);
+    /* For tools (statecheck.py): the image's load bias, which the build id
+     * holds too (a PIE or a library at other addresses is another build to a
+     * state); 0 in files from before it. */
+    put64(out + H_IMAGE, (uint64_t)stateImageBias());
 }
 
 static int headerUnpack(const uint8_t in[HEADER_SIZE], StateHeader* h, uint32_t* thumbPacked, uint64_t* bodyPacked) {

@@ -32,10 +32,10 @@ void hwClockHold(int on); /* system/hw.c: the PS1 does none of this */
 static void keep(void) {
     hwClockHold(1);
     gteSave(&gteKept);
-    memcpy(scratchKept, (void*)0x1F800000, sizeof scratchKept);
+    memcpy(scratchKept, (void*)PSX_SCRATCH(0x1F800000), sizeof scratchKept);
 }
 static void putBack(void) {
-    memcpy((void*)0x1F800000, scratchKept, sizeof scratchKept);
+    memcpy((void*)PSX_SCRATCH(0x1F800000), scratchKept, sizeof scratchKept);
     gteLoad(&gteKept);
     hwClockHold(0);
 }

@@ -508,7 +508,7 @@ static int texture(InterpFrame* f, HiVertex* v, int count, int kind, uint64_t* m
     if (gvkHiScale()) {
         const DecodedTexture* enhanced = PC_TEX_IS_PORTRAIT(kind) ? d :
             textureCacheGet(kind == PC_TEX_3D ? textureRequestSnapStable(patch) : textureRequestSnap(patch));
-        int sampled = PC_TEX_IS_PORTRAIT(kind) ? portraitPackClassSample(enhanced,patch,kind,&sample) :
+        int sampled = PC_TEX_IS_PORTRAIT(kind) && !textureUsePack(kind) ? portraitPackClassSample(enhanced,patch,kind,&sample) :
             (textureUsePack(kind)?texturePackSample(enhanced,patch,filter,&sample):textureUseSpriteCel(kind)?textureSpriteCelSample(enhanced,patch,filter,&sample):0);
         int hudScale=textureHudScale(kind);
         int celScale=textureCelScale(kind);

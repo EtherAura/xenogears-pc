@@ -108,7 +108,9 @@ static void powerOn(void) {
 }
 
 void spuSync(double now) {
-    int64_t sample = (int64_t)floor(now * SPU_RATE);
+    /* The SPU's samples follow the audio clock (hw.h: the game's time until
+     * the battle speed first changes). */
+    int64_t sample = (int64_t)floor(hwAudioTime(now) * SPU_RATE);
     int16_t buffer[CHUNK * 2];
     int irq = 0;
 

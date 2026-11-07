@@ -212,7 +212,7 @@ void updateMechasBaseMatrixIsAttached(sLoadedMechas* arg0) {
     MATRIX* m;
     SVECTOR v;
 
-    m = (MATRIX*)0x1F800000;
+    m = (MATRIX*)PSX_SCRATCH(0x1F800000);
     if (loadedMechas[arg0->m5C_attachMecha] != NULL) {
         if (!(arg0->m4A_flags & 0x10)) {
             arg0->m34_visible = loadedMechas[arg0->m5C_attachMecha]->m34_visible;
@@ -221,7 +221,7 @@ void updateMechasBaseMatrixIsAttached(sLoadedMechas* arg0) {
             if (arg0->m5D_attachRotation != 0) {
                 if (arg0->m5E_attachBone != 0) {
                     MulMatrix0(&loadedMechas[arg0->m5C_attachMecha]->m4_bones[0].m2C_boneFinalMatrix,
-                               &loadedMechas[arg0->m5C_attachMecha]->m4_bones[arg0->m5E_attachBone].m2C_boneFinalMatrix, (MATRIX*)0x1F800000);
+                               &loadedMechas[arg0->m5C_attachMecha]->m4_bones[arg0->m5E_attachBone].m2C_boneFinalMatrix, (MATRIX*)PSX_SCRATCH(0x1F800000));
                 } else {
                     m = &loadedMechas[arg0->m5C_attachMecha]->m4_bones[0].m2C_boneFinalMatrix;
                 }
@@ -1489,7 +1489,7 @@ void updateMechaTargetPosition(sLoadedMechas* pMecha) {
     pTarget = loadedMechas[id];
     if (pTarget != NULL && id != pMecha->m20_mechaEntryId) {
         if (pMecha->m5A_targetBone != 0) {
-            m = (MATRIX*)0x1F800000;
+            m = (MATRIX*)PSX_SCRATCH(0x1F800000);
             CompMatrix(&pTarget->m4_bones->mC_localMatrix, &pTarget->m4_bones[pMecha->m5A_targetBone].m2C_boneFinalMatrix, m);
         } else {
             m = &pTarget->m4_bones->mC_localMatrix;
@@ -1769,7 +1769,7 @@ void updateMechaBoneAttachedSprite(SpriteTask* task) {
         m = &zero;
     } else
     if (pAttach->mC_boneIndex != 0) {
-        m = (MATRIX*)0x1F800000;
+        m = (MATRIX*)PSX_SCRATCH(0x1F800000);
         CompMatrix(&pAttach->m8_mecha->m4_bones->mC_localMatrix,
                    &pAttach->m8_mecha->m4_bones[pAttach->mC_boneIndex].m2C_boneFinalMatrix, m);
     } else {

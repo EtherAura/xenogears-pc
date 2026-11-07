@@ -95,11 +95,11 @@ s32 worldmapMode12_taskShip13_update(s32);
 s32 worldmapMode12_taskAirship_init(s32);
 s32 worldmapMode12_taskAirship_update(s32);
 
-#define SCRATCH_MATRIX0 ((MATRIX*)0x1F8000F0)
-#define SCRATCH_MATRIX1 ((MATRIX*)0x1F800110)
-#define SCRATCH_VECTOR0 ((VECTOR*)0x1F800000)
-#define SCRATCH_VECTOR1 ((VECTOR*)0x1F800010)
-#define SCRATCH_SVECTOR ((SVECTOR*)0x1F8000A0)
+#define SCRATCH_MATRIX0 ((MATRIX*)PSX_SCRATCH(0x1F8000F0))
+#define SCRATCH_MATRIX1 ((MATRIX*)PSX_SCRATCH(0x1F800110))
+#define SCRATCH_VECTOR0 ((VECTOR*)PSX_SCRATCH(0x1F800000))
+#define SCRATCH_VECTOR1 ((VECTOR*)PSX_SCRATCH(0x1F800010))
+#define SCRATCH_SVECTOR ((SVECTOR*)PSX_SCRATCH(0x1F8000A0))
 
 void spawnWorldmapParticles(s32 type, SVECTOR* position, SVECTOR* rotation);
 s32 changeWorldmapEntityState(s32 index, s32 state);
@@ -221,7 +221,7 @@ s32 worldmapMode12_taskDirector_init(s32 index) {
 
 /* task update (event sequencer; scratch pointer local) */
 s32 worldmapMode12_taskDirector_update(s32 index) {
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
 
     switch (e->m20_subState) {
@@ -321,7 +321,7 @@ s32 worldmapMode12_taskCamera_init(s32 index) {
 
 /* task update (event camera; path tail written in both branches, cross-jumped) */
 s32 worldmapMode12_taskCamera_update(s32 index) {
-    sWorldmapScratch* s = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* s = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
     SVECTOR* p;
 

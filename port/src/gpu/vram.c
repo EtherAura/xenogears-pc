@@ -931,7 +931,9 @@ static struct {
     uint64_t captureAge;
 } kept;
 
+void beetleTrackHold(int on) __attribute__((weak)); /* texture_beetle.c; standalone tests have none */
 void vramBookkeepingKeep(void) {
+    if (beetleTrackHold) beetleTrackHold(1); /* nothing the picture between does is a Beetle pack upload */
     kept.drawn = drawnTiles;
     kept.rendered = renderedTiles;
     kept.cpuWritten = cpuWritten;
@@ -948,6 +950,7 @@ void vramBookkeepingKeep(void) {
 void vramBookkeepingPutBack(void) {
     if (!kept.on) return;
     kept.on = 0;
+    if (beetleTrackHold) beetleTrackHold(0);
     drawnTiles = kept.drawn;
     renderedTiles = kept.rendered;
     cpuWritten = kept.cpuWritten;

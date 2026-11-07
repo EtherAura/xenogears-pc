@@ -615,6 +615,8 @@ void pcLoader60Record(void) {
     loader60Frames++;
 }
 
+void renderBattleWaveEffect(TaskHeader* task); /* below; called before its definition (clang rejects the implicit int) */
+
 /* Inside the frame's VSync(2), at its first vblank. */
 static void loader60Between(void) {
     s32 f = loader60Frames - 1, cur = battleBssBlock.m8C84_oddOrEven, prev = 1 - cur, n;
@@ -781,7 +783,7 @@ void battleLoaderUpdateMode1(void) {
             }
         }
         checkSoftReboot();
-        STACK_SWITCH(0x1F8003FC);
+        STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
         updateBattleTileEffect((TaskHeader*)e);
         renderBattleTileEffect((TaskHeader*)e);
         STACK_RESTORE();

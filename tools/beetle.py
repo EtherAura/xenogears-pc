@@ -16,7 +16,7 @@ are never copied.
         [--every 30] [--from 0] [--audio] [--states 6000,9000] [--load-state F]
         [--ram 9000,...] [--vram 9000,...] [--log 0x800CCC5C,...] [--vsync-log]
         [--hashes] [--start XG_FIELD=4 --start XG_PARTY=0,1,255 ...] [--no-hooks]
-        [--card1 F] [--card2 F] [--cards-out DIR]
+        [--card1 F] [--card2 F] [--cards-out DIR] [--hw] [--texture-dump] [--texture-replace DIR]
     python tools/beetle.py compare OUT PCFRAMES [--offset N] [--from V --to V]
         [--offset-search W] [--pictures DIR] [--json FILE] [--race-cases FILE]
     python tools/beetle.py logdiff OUT/vsyncs.txt PC_SLOWDOWN_LOG
@@ -34,6 +34,19 @@ copies the reference's after the run). Core options:
 1x, native dither, no PGXP or line hack, no overclock, no frame duping, 2x
 CD speed, real BIOS, no overscan crop); each capture's options.log has every
 key the core declared and asked for.
+
+--hw runs the Beetle PSX HW core (--core, $XG_BEETLE_HW_CORE, else RetroArch's
+mednafen_psx_hw_libretro.so) with its Vulkan renderer, in a headless context
+beetle_front.c makes (the GPU by $XG_BEETLE_VK_DEVICE, a part of its name,
+default Intel); pictures are read back as with the software core.
+--texture-dump turns the core's texture tracking and dumping on (the dump in
+OUT/textures: '<upload>-<palette>.png', see tools/beetle_pack.py and
+docs/BEETLE_PACKS.md), --texture-replace DIR its replacement from DIR (a
+Beetle pack folder); the disc image is staged in OUT/content (links, a copy of
+the cue sheet), as the core keeps those folders beside the content. The core
+loads replacements in the background: the first pictures of a texture can be
+native. At beetle_psx_hw_internal_resolution 1x(native) it samples a 2x
+replacement at its top-left pixels: compare at 2x.
 
 Outputs in OUT (vsync = vblanks from power-on; retro_run N starts with vblank
 interrupt N: the game's work after it, and the field scanned after it, are N's):
@@ -160,6 +173,8 @@ import start_state  # noqa: E402
 CACHE = Path(os.environ.get("XG_BEETLE_CACHE", Path.home() / ".cache" / "xg-beetle"))
 FRONT_SRC = HERE / "beetle_front.c"
 DEFAULT_CORE = ROOT / "work/clean-room/bin/mednafen_psx_libretro.so"
+# --hw: the Beetle PSX HW core (its Vulkan renderer: texture dumping and replacement)
+DEFAULT_HW_CORE = Path.home() / ".config/retroarch/cores/mednafen_psx_hw_libretro.so"
 DEFAULT_SYSDIR = "/mnt/Games/Arcade/Frontends/RetroArch/system"
 DISC_NAMES = {"us": "USA", "jp": "Japan"}
 
@@ -336,12 +351,21 @@ class Beetle:
 
     def __init__(self, content: Path, core: Path | None = None, sysdir: str | None = None,
                  savedir: Path | None = None, options: dict[str, str] | None = None, verbose: bool = False,
-                 option_log: Path | None = None, index: int = 0):
+                 option_log: Path | None = None, index: int = 0, hw: bool = False, hw_frames: bool = True):
         L = self.lib = _Selected(_frontend(), index)
         opts = {k: v for k, (v, _) in CORE_OPTIONS.items()}
         opts.update(options or {})
         for k, v in opts.items():
             L.bf_option(k.encode(), v.encode())
+            if k.startswith("beetle_psx_") and not k.startswith("beetle_psx_hw_"):
+                # the Beetle PSX HW core's keys: the same options under beetle_psx_hw_
+                hk = "beetle_psx_hw_" + k[len("beetle_psx_"):]
+                if hk not in opts:
+                    L.bf_option(hk.encode(), v.encode())
+        # hw: a Vulkan context for a core that asks for one (the HW core's Vulkan
+        # renderer: its texture dumping and replacement); hw_frames reads each frame back
+        if hw and not L.bf_hw_enable(1, 1 if hw_frames else 0):
+            raise SystemExit("beetle: beetle_front.so was built without <vulkan/vulkan.h>")
         self.core = Path(core or os.environ.get("XG_BEETLE_CORE") or DEFAULT_CORE)
         sysdir = sysdir or os.environ.get("XG_BEETLE_SYSDIR") or DEFAULT_SYSDIR
         savedir = Path(savedir or CACHE / "save")
@@ -1423,6 +1447,40 @@ class Capture:
                 if a.exists() != b.exists() or (a.exists() and a.read_bytes() != b.read_bytes()):
                     self.note(f"warning: card {n}: the hooked copies' card ended different from the reference's")
 
+    def hw_content(self, content: Path) -> tuple[Path, dict[str, str]]:
+        """--hw: the HW core's Vulkan renderer. Its texture dump and replacement folders sit beside the
+        disc image (<stem>-texture-dump, <stem>-texture-replacements), so the image is staged in
+        OUT/content (a copy of the cue sheet, links to its files): the dump lands in OUT/textures and
+        --texture-replace's folder is linked in as the replacements."""
+        args = self.args
+        options = {"beetle_psx_hw_renderer": "hardware_vk"}
+        if not (args.texture_dump or args.texture_replace):
+            return content, options
+        stage = self.out / "content"
+        shutil.rmtree(stage, ignore_errors=True)
+        stage.mkdir(parents=True)
+        content = Path(content).resolve()
+        if content.suffix.lower() == ".cue":
+            for line in content.read_text(errors="replace").splitlines():
+                m = re.match(r'\s*FILE\s+"([^"]+)"', line)
+                if m:
+                    (stage / m.group(1)).symlink_to(content.parent / m.group(1))
+            shutil.copy(content, stage / content.name)
+        else:
+            (stage / content.name).symlink_to(content)
+        staged = stage / content.name
+        options["beetle_psx_hw_track_textures"] = "enabled"
+        if args.texture_dump:
+            dump = self.out / "textures"
+            shutil.rmtree(dump, ignore_errors=True)
+            dump.mkdir()
+            (stage / f"{content.stem}-texture-dump").symlink_to(dump.resolve())
+            options["beetle_psx_hw_dump_textures"] = "enabled"
+        if args.texture_replace:
+            (stage / f"{content.stem}-texture-replacements").symlink_to(Path(args.texture_replace).resolve())
+            options["beetle_psx_hw_replace_textures"] = "enabled"
+        return staged, options
+
     def note(self, text: str) -> None:
         self.notes.append(text)
         print("beetle:", text, flush=True)
@@ -1435,11 +1493,19 @@ class Capture:
         shutil.rmtree(rundir, ignore_errors=True)
         (rundir / "save").mkdir(parents=True)
         content = args.content or disc_image(self.ver, args.disc)
+        options = dict(kv.split("=", 1) for kv in args.option)
+        core = args.core
+        if args.hw or args.texture_dump or args.texture_replace:
+            content, hw_options = self.hw_content(content)
+            options = {**hw_options, **options}
+            core = core or Path(os.environ.get("XG_BEETLE_HW_CORE") or DEFAULT_HW_CORE)
         self.put_cards(rundir / "save", content)
-        self.b = Beetle(content, core=args.core, sysdir=args.sysdir, savedir=rundir / "save",
-                        options=dict(kv.split("=", 1) for kv in args.option), verbose=args.verbose,
-                        option_log=self.out / "options.log")
+        self.b = Beetle(content, core=core, sysdir=args.sysdir, savedir=rundir / "save",
+                        options=options, verbose=args.verbose,
+                        option_log=self.out / "options.log", hw=args.hw or args.texture_dump or bool(args.texture_replace))
         b = self.b
+        if (args.hw or args.texture_dump or args.texture_replace) and not b.lib.bf_hw_active():
+            raise SystemExit("beetle: the core did not take the Vulkan context (is --core the Beetle PSX HW core?)")
         hooks = args.vsync_log and not args.no_hooks
         vrams = {int(x) for x in args.vram.split(",") if x}
         self.h = None
@@ -2055,6 +2121,13 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--start", action="append", default=[], metavar="XG_OPTION=VALUE",
                    help="a start option (XG_BOOT_MODE, XG_FIELD, XG_PRESET, XG_PARTY, XG_GAMESTATE)")
     c.add_argument("--option", action="append", default=[], metavar="KEY=VALUE", help="override a core option")
+    c.add_argument("--hw", action="store_true",
+                   help="the Beetle PSX HW core (--core, $XG_BEETLE_HW_CORE or RetroArch's) with its Vulkan renderer "
+                        "(a headless context; $XG_BEETLE_VK_DEVICE picks the GPU by name, default Intel)")
+    c.add_argument("--texture-dump", action="store_true",
+                   help="--hw with the core's texture tracking and dumping: the dump in OUT/textures")
+    c.add_argument("--texture-replace", type=Path, metavar="DIR",
+                   help="--hw with the core's texture replacement from DIR (a Beetle PSX HW replacements folder)")
     c.add_argument("--card1", type=Path, help="a memory card image (128 KB) in slot 1 (default: a fresh card)")
     c.add_argument("--card2", type=Path, help="a memory card image in slot 2")
     c.add_argument("--cards-out", type=Path, help="copy the reference's cards here after the run")

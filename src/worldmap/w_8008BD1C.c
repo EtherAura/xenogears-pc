@@ -336,7 +336,7 @@ s32 worldmapMode0_taskPlayerGear_initSaved(s32 index) {
 /* Noah: worldmapMode0_taskPlayerGear_update (worldmapPlayerGear.cpp). */
 s32 worldmapMode0_taskPlayerGear_update(s32 index) {
     s32 result = 1;
-    sWorldmapScratch* scratch = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* scratch = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* entry = &gWorldmapState->m0_entries[index];
     s32 i;
     sWorldmapFollowLeader* p;
@@ -688,7 +688,7 @@ s32 worldmapMode0_task_partyGear1_initSaved(s32 index) {
 /* Noah: worldmapMode0_task_partyGear_update (worldmapPartyGear.cpp). */
 s32 worldmapMode0_task_partyGear_update(s32 index) {
     sWorldmapStateEntry* entry = &gWorldmapState->m0_entries[index];
-    sWorldmapScratch* scratch = (sWorldmapScratch*)0x1F800000;
+    sWorldmapScratch* scratch = (sWorldmapScratch*)PSX_SCRATCH(0x1F800000);
     sWorldmapStateEntry* target;
     sWorldmapFollowLeader* p;
 

@@ -4,9 +4,12 @@
  * calls this first each frame, under PLATFORM_PC; with the option off it
  * returns at once and the battle is the PS1's.
  *
- * Select toggles the window (a press, as an edge of what the pad holds:
- * pcPadHeldRemapped, src/main/pad.c, as the retry prompt reads it; the
- * battle's own reader answers Select with a button code nothing consumes).
+ * Select toggles the window when it is released on its own (edges of what
+ * the pad holds: pcPadHeldRemapped, src/main/pad.c, as the retry prompt
+ * reads it; the battle's own reader answers Select with a button code
+ * nothing consumes). Select with a shoulder button is a chord of the port's
+ * (battle speed's Select+R2, rewind's Select+L2) and toggles nothing
+ * (pcGameplaySelectTap, port/src/system/gameplay.c).
  * It stands in the lower right, above the bottom message window, and in a
  * wide picture at the wide right edge (pcWidePrim, pc_wide.h). The frame is
  * the battle's own dialogue window, built by the battle's own window
@@ -64,6 +67,7 @@
 
 int pcGameplayEnemyInfo(void); /* port/src/system/gameplay.c */
 int pcGameplayEnemyInfoKnown(void);
+int pcGameplaySelectTap(int previous, int held, int* chord);
 extern u8 currentBattleConfig[0x20]; /* [0]: the enemy set */
 s32 pcPadHeldRemapped(void);   /* src/main/pad.c */
 extern BattleBss_800CCCE8* pBattleEntities;
@@ -131,6 +135,7 @@ static sBattleDialogWindow frame;
 static DR_MODE restoreMode[2];
 static s32 shown;
 static s32 previousHeld;
+static int selectChord; /* Select is part of a chord until it is released (pcGameplaySelectTap) */
 static s32 lastDrawn = -1000; /* g_playTimeInVsync at the last frame drawn */
 
 /* The message for one status bit of one word, by the game's own mapping. */
@@ -356,7 +361,6 @@ void pcBattleEnemyInfo(void) {
     OTag* ot;
     s32 odd;
     s32 held;
-    s32 pressed;
     s32 count = 0;
     s32 nameWidth = 0;
     s32 hpWidth = 0;
@@ -377,11 +381,10 @@ void pcBattleEnemyInfo(void) {
         return;
     }
     held = pcPadHeldRemapped();
-    pressed = held & ~previousHeld;
-    previousHeld = held;
-    if (pressed & 0x100) {
+    if (pcGameplaySelectTap(previousHeld, held, &selectChord)) {
         shown ^= 1;
     }
+    previousHeld = held;
     if (!shown) {
         return;
     }

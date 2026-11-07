@@ -19,6 +19,13 @@ project(xenogears_pc C)
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-ffp-contract=off>")
 endif()
+# Plain char is signed in the port's own C and C++ on every target, as on
+# x86-64, where it was written; aarch64 (Linux, Android) makes it unsigned.
+# The game C keeps the PS1's unsigned char (XG_GAME_OPTIONS' -funsigned-char
+# comes after this). xg-mrj.3.2.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64|ARM64|arm)")
+    add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-fsigned-char>")
+endif()
 
 set(XG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
@@ -48,6 +55,32 @@ else()
 endif()
 set(XG_VERSION "US" CACHE STRING "Game version: US or JP")
 set_property(CACHE XG_VERSION PROPERTY STRINGS US JP)
+
+# XG_PIE (xg-mrj.3.3): every object position-independent (-fPIC, without
+# semantic interposition: nothing replaces the program's own functions) and
+# the executable linked as a PIE, the layout an Android app's shared library
+# has; off (the default) keeps the fixed non-PIE executable. A PIE start
+# re-executes itself once without address randomisation (main.c; XG_ASLR=1
+# keeps it), so its addresses, like a non-PIE build's, are the same at every
+# run and save states load across runs.
+option(XG_PIE "position-independent code, a PIE executable (the Android layout)" OFF)
+# XG_SHARED: the game as a shared library (libxenogears.so, -Bsymbolic, only
+# its entry exported) and a small launcher executable that calls it
+# (port/src/launcher), the shape of an Android app's native code; implies
+# XG_PIE. Linux only.
+option(XG_SHARED "the game as libxenogears.so plus a launcher (the Android app's shape)" OFF)
+if(XG_SHARED AND WIN32)
+    message(FATAL_ERROR "XG_SHARED: Linux (ELF) only")
+endif()
+if(XG_SHARED)
+    set(XG_PIE ON)
+endif()
+if(XG_PIE)
+    set(XG_PIC_OPTIONS -fPIC -fno-semantic-interposition)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+else()
+    set(XG_PIC_OPTIONS -fno-pie)
+endif()
 
 set(XG_SOURCES_CMAKE "${XG_ROOT}/build/pc/sources.cmake")
 if(NOT EXISTS "${XG_SOURCES_CMAKE}")
@@ -139,7 +172,12 @@ add_executable(battlepacingtest EXCLUDE_FROM_ALL src/system/test/battlepacingtes
 add_executable(hostpolltest EXCLUDE_FROM_ALL src/system/test/hostpolltest.c)
 # The game's identity in a save's free tail (gameid.c).
 add_executable(gameidtest EXCLUDE_FROM_ALL src/system/test/gameidtest.c src/system/gameid.c)
-foreach(tool rewindpacktest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest)
+# Battle speed (xg-mrj.2): hw.c's audio clock, libapi.c's root counter 2 and
+# battlespeed.c's decisions (includes the three whole); gameplay.c's enemy-info
+# Select rule beside its chord.
+add_executable(battlespeedtest EXCLUDE_FROM_ALL src/system/test/battlespeedtest.c src/system/settings.c
+    src/system/gameplay.c)
+foreach(tool rewindpacktest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest)
     target_include_directories(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
     target_compile_definitions(${tool} PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
     target_compile_options(${tool} PRIVATE -fno-strict-aliasing)
@@ -198,7 +236,7 @@ target_link_libraries(gallery_scenetest PRIVATE SDL3::SDL3)
 # and explicit zero initialisers in .data, not .bss, as GCC 2.x places them
 # (the soft reset clears main's BSS and keeps its data, as the PS1's does).
 set(XG_GAME_OPTIONS -std=gnu89 -nostdinc -fno-builtin -funsigned-char -fwrapv -fno-strict-aliasing -fcommon
-    -fno-zero-initialized-in-bss -fno-pie)
+    -fno-zero-initialized-in-bss ${XG_PIC_OPTIONS})
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     list(APPEND XG_GAME_OPTIONS -fpermissive -w)
 else()
@@ -338,7 +376,7 @@ target_compile_definitions(platform PRIVATE PLATFORM_PC VERSION_${XG_VERSION} XG
     XG_ENGINE_ENHANCED=${XG_ENGINE_ENHANCED})
 # -fno-strict-aliasing: platform code reads the game's packets and buffers
 # through the same punned views the game uses.
-target_compile_options(platform PRIVATE -fno-pie -fno-strict-aliasing ${XG_WIN32_LAYOUT_OPTIONS})
+target_compile_options(platform PRIVATE ${XG_PIC_OPTIONS} -fno-strict-aliasing ${XG_WIN32_LAYOUT_OPTIONS})
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(platform PRIVATE -Wall -Wextra -Wno-unused-parameter)
 endif()
@@ -512,11 +550,16 @@ set(XG_MODULE_OBJECTS)
 set(XG_SRCDATA_SOURCES)
 foreach(module IN LISTS XG_MODULES)
     add_library(gen_${module} OBJECT "${XG_GEN_DIR}/${module}.c")
-    target_compile_options(gen_${module} PRIVATE -w -fno-pie)
+    target_compile_options(gen_${module} PRIVATE -w ${XG_PIC_OPTIONS})
     set(out "${CMAKE_BINARY_DIR}/modules/${module}.o")
     # Each module's data and BSS in sections of their own: the overlays are
     # reset at each load, main's BSS at the soft reset (port/src/system/memory.c).
+    # Position-independent code (XG_PIE) puts initialised data that holds
+    # pointers in .data.rel* instead of .data: the module's data all the same.
     set(rename --rename-section .data=xgdata_${module} --rename-section .bss=xgbss_${module})
+    foreach(rel .data.rel .data.rel.local .data.rel.ro .data.rel.ro.local)
+        list(APPEND rename --rename-section ${rel}=xgdata_${module})
+    endforeach()
     # The partial link (ld -r) leaves the game C's own retail bytes (tables and
     # strings as C initialisers) out: zeroed, and filled from the player's disc
     # like the module data (tools/pc_srcdata.py: <module>.src.c has the copies).
@@ -541,20 +584,46 @@ foreach(module IN LISTS XG_MODULES)
 endforeach()
 set_source_files_properties(${XG_MODULE_OBJECTS} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
 add_library(game_generated OBJECT "${XG_GEN_DIR}/stubs.c" "${XG_GEN_DIR}/modules.c" ${XG_SRCDATA_SOURCES})
-target_compile_options(game_generated PRIVATE -w -fno-pie)
+target_compile_options(game_generated PRIVATE -w ${XG_PIC_OPTIONS})
 
-# Platform layer and entry point.
-add_executable(xenogears
-    $<TARGET_OBJECTS:platform>
-    $<TARGET_OBJECTS:ui>
-    ${XG_MODULE_OBJECTS}
-    $<TARGET_OBJECTS:game_generated>
-)
-set_target_properties(xenogears PROPERTIES LINKER_LANGUAGE CXX)
+# Platform layer and entry point: the executable, or (XG_SHARED) the game
+# library xenogears_game (libxenogears.so) and the launcher executable.
+if(XG_SHARED)
+    set(XG_GAME_TARGET xenogears_game)
+    add_library(xenogears_game SHARED
+        $<TARGET_OBJECTS:platform>
+        $<TARGET_OBJECTS:ui>
+        ${XG_MODULE_OBJECTS}
+        $<TARGET_OBJECTS:game_generated>
+    )
+    target_compile_definitions(platform PRIVATE XG_SHARED_LIBRARY=1)
+    # Its own definitions bind inside it (as an executable's do), and only the
+    # entry is exported (port/cmake/libxenogears.map); nothing left undefined.
+    target_link_options(xenogears_game PRIVATE -Wl,-Bsymbolic -Wl,--no-undefined
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/cmake/libxenogears.map")
+    set_property(TARGET xenogears_game APPEND PROPERTY LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/libxenogears.map")
+    add_executable(xenogears src/launcher/launcher.c)
+    target_link_libraries(xenogears PRIVATE xenogears_game)
+    set_target_properties(xenogears PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+else()
+    set(XG_GAME_TARGET xenogears)
+    add_executable(xenogears
+        $<TARGET_OBJECTS:platform>
+        $<TARGET_OBJECTS:ui>
+        ${XG_MODULE_OBJECTS}
+        $<TARGET_OBJECTS:game_generated>
+    )
+endif()
+set_target_properties(${XG_GAME_TARGET} PROPERTIES LINKER_LANGUAGE CXX)
 if(XG_ENGINE STREQUAL "enhanced")
     set_target_properties(xenogears PROPERTIES OUTPUT_NAME xenogears-enhanced)
+    if(XG_SHARED)
+        set_target_properties(xenogears_game PROPERTIES OUTPUT_NAME xenogears-enhanced)
+    endif()
+elseif(XG_SHARED)
+    set_target_properties(xenogears_game PROPERTIES OUTPUT_NAME xenogears)
 endif()
-target_link_libraries(xenogears PRIVATE SDL3::SDL3 m ${XG_GLSLANG_LIBS} ${XG_DAV1D_LIBS})
+target_link_libraries(${XG_GAME_TARGET} PRIVATE SDL3::SDL3 m ${XG_GLSLANG_LIBS} ${XG_DAV1D_LIBS})
 if(WIN32)
     # Low addresses as on Linux: a fixed image base far below the scratchpad
     # (0x1F800000), never relocated. Linux's 8 MB main stack. The C and GCC
@@ -595,8 +664,15 @@ if(WIN32)
     add_custom_command(TARGET xenogears POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_RUNTIME_DLLS:xenogears> $<TARGET_FILE_DIR:xenogears>
         COMMAND_EXPAND_LISTS)
+elseif(XG_PIE)
+    target_link_options(xenogears PRIVATE -pie)
+    target_compile_definitions(platform PRIVATE XG_PIE=1)
+    if(XG_SHARED)
+        target_compile_definitions(xenogears PRIVATE XG_PIE=1)
+    endif()
 else()
-    # Non-PIE, so initialised pointers stay in .data (one section per overlay to reset).
+    # Non-PIE: fixed addresses (save states hold them), and initialised pointers
+    # stay in .data (one section per overlay to reset).
     target_link_options(xenogears PRIVATE -no-pie)
 endif()
 
@@ -612,7 +688,7 @@ if(XG_LTO)
     include(CheckIPOSupported)
     check_ipo_supported(RESULT XG_IPO OUTPUT XG_IPO_WHY LANGUAGES C CXX)
     if(XG_IPO)
-        set_property(TARGET platform xenogears PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+        set_property(TARGET platform ${XG_GAME_TARGET} PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
         target_compile_options(platform PRIVATE -ffat-lto-objects)
     else()
         message(STATUS "XG_LTO: no link-time optimisation here (${XG_IPO_WHY})")
