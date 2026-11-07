@@ -30,7 +30,7 @@ extern void (*startBattleAttackAnimationVar8[8])(void);
 
 /* Plain-symbol views of members of the 0x800CCCE8 block */
 extern sBattle800D2204 D_800D2204[];
-extern s32 damageDonePerAttack[11];
+extern s32 damageDonePerAttack[11] PORT_ALIAS;
 extern u8 initBattleAttackStatusArray0[11];
 extern u16 entitiesHitInCurrentAttackBF;
 extern u16 performAttack_type;

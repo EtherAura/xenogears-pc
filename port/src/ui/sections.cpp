@@ -981,7 +981,7 @@ void displaySection() {
         bool ordered = gpuOrderedFallback();
         if (checkbox("Exact ordered fallback", &ordered)) gpuSetOrderedFallback(ordered);
         hint("May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. Off by default.");
-        hint(gpuOrderedStatus());
+        hint("%s", gpuOrderedStatus());
         overrideNote("gpu_ordered_batches");
     }
 
@@ -2132,7 +2132,7 @@ void gameplaySection() {
         ImGui::EndDisabled();
         hint("Speedup defaults to 60 Hz in supported fields. Higher rates add display samples. Shader presets and unsupported scenes use native presentation. Speedup off keeps authentic frame cadence.");
         hint("Rates above your monitor's refresh can be discarded. VRR availability depends on your display and desktop; submission rate does not measure visible refreshes.");
-        char rateStatus[384]; presentationRateDescribe(rateStatus, sizeof(rateStatus)); hint(rateStatus);
+        char rateStatus[384]; presentationRateDescribe(rateStatus, sizeof(rateStatus)); hint("%s", rateStatus);
         overrideNote("interpolation_hz");
     }
 

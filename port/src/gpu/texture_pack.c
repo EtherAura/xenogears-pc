@@ -62,7 +62,7 @@ static void cropsReset(void) {
     memset(crops,0,sizeof(crops)); cropBytes=0;
 }
 static TexturePackStats stats;
-static uint64_t clock, revision, generation; /* Never reset: pending GPU snapshots may survive a reload. */
+static uint64_t useClock, revision, generation; /* Never reset: pending GPU snapshots may survive a reload. */
 static int loaded;
 /* The A/B comparison (textureReplacementsShow): every replacement lookup still runs (the same
  * loads, the same caches) and its answer is withheld, so showing them again gives exactly the
@@ -966,7 +966,7 @@ static Entry* entryNew(uint64_t texel, uint64_t palette, int indexed, int w, int
     Entry* e=oldest(NULL);
     if (e->touched) { ++stats.evictions; drop(e); }
     e->texel=texel; e->palette=palette; e->indexed=indexed;
-    e->w=w; e->h=h; e->touched=++clock; e->serial=++serials; ++stats.entries;
+    e->w=w; e->h=h; e->touched=++useClock; e->serial=++serials; ++stats.entries;
     chain[e-entries]=bucket[hash]; bucket[hash]=(int32_t)(e-entries)+1;
     e->limit=limit;
     return e;
@@ -994,7 +994,7 @@ static Entry* lookupKey(uint64_t texel, uint64_t palette, int indexed, int w, in
     poll();
     Entry* e=entryFind(texel,palette,indexed,w,h,limit);
     if (e) {
-        e->touched=++clock;
+        e->touched=++useClock;
         if (e->pending && (indexed<=1 || indexed==BEETLE_KIND) && lookupDraw) pageDrawnLoading(e);
         if (!(e->pending && indexed==4)) return e;
         /* a preloaded cel drawn before its decode finished: decoded here, now, as before the

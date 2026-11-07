@@ -1,0 +1,72 @@
+plugins {
+    id 'com.android.application'
+}
+
+// tools/build_android.sh passes these: SDL3's source (its Java glue), the native
+// libraries per ABI (jniLibs/<abi>/libSDL3.so, libxgloader.so, libxenogears-<region>.so)
+// and the ABIs built.
+def home = System.getProperty('user.home')
+def sdlSource = providers.gradleProperty('xg.sdlSource').getOrElse("${home}/Android/src/SDL3-3.4.16")
+def jniLibsDir = providers.gradleProperty('xg.jniLibs').getOrElse("${rootDir}/../../build/android/jniLibs")
+def abis = providers.gradleProperty('xg.abis').getOrElse('x86_64,arm64-v8a').split(',')
+
+// A release is signed with the user's own key, from the environment (never in a file here).
+def keystore = System.getenv('XG_ANDROID_KEYSTORE')
+
+android {
+    namespace = 'io.github.etheraura.xgport'
+    compileSdk = 36
+    buildToolsVersion = '36.1.0'
+    ndkVersion = '29.0.14206865' // strips the libraries' debug information when packing
+
+    defaultConfig {
+        applicationId = 'io.github.etheraura.xgport'
+        minSdk = 33
+        targetSdk = 36
+        versionCode = 1
+        versionName = '0.1'
+        ndk {
+            abiFilters.addAll(abis)
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += ["${sdlSource}/android-project/app/src/main/java"]
+            jniLibs.srcDirs = [jniLibsDir]
+        }
+    }
+
+    // Native libraries as files in the app's library folder, not left in the
+    // APK: the loader opens the game library by name at a reserved address,
+    // and save states read the library's own file (port/src/system/statefile.c).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    signingConfigs {
+        if (keystore) {
+            release {
+                storeFile = file(keystore)
+                storePassword = System.getenv('XG_ANDROID_KEYSTORE_PASSWORD')
+                keyAlias = System.getenv('XG_ANDROID_KEY_ALIAS')
+                keyPassword = System.getenv('XG_ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled = false
+            if (keystore) {
+                signingConfig = signingConfigs.release
+            }
+        }
+    }
+
+    lint {
+        abortOnError = false
+    }
+}

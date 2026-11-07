@@ -1,0 +1,17 @@
+// The Android app of the Xenogears PC port (xg-mrj.3.6). Built by tools/build_android.sh,
+// which builds the native libraries first and passes their folder (xg.jniLibs).
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+rootProject.name = 'xenogears'
+include ':app'

@@ -1,77 +1,98 @@
 # Display
 
-![Lahan at 16:9 and 6x the PS1 resolution, original art](img/display.png)
+![Lahan at 16:9 and 6x the PS1 resolution](img/display.png)
 
-F1 opens the settings menu (on a gamepad: Guide, or both stick clicks). The
-settings below are under F1 > Display unless another section is named. A
-change applies at once and is saved to `settings.ini`.
+Lahan at 16:9 and six times the PS1 resolution, with Expanded vertical framing.
 
-## Picture
+F1 opens the settings menu (on a gamepad: Guide, or both stick clicks).
+Changes apply at once and are saved to `settings.ini`.
 
-| Setting | Choices | Default |
-|---|---|---|
-| Aspect | 4:3 TV, 4:3 fill, 1:1 square pixels, 16:9 wide, 16:10 wide, 21:9 wide, 32:9 wide, Custom w:h | 4:3 TV |
-| Vertical framing | Original, Expanded | Original |
-| Scale | Fit, Integer, Stretch | Fit |
-| Wide fill | Bars, Zoom, Blur | Bars |
-| Fullscreen | Off, On (also F11 or Alt+Enter) | Off |
+![F1 > Display](img/display-menu.png)
 
-The wide aspects draw more of the scene at the sides in fields, battles and
-the world map. Movies stay 4:3; Wide fill decides what goes beside them.
+## Widescreen
 
-Expanded vertical framing draws the lines the game leaves black above and
-below its 216-line picture, in fields, battles and the world map. Where a
-room's art ends, black still shows: no art is invented. The title screen is
-zoomed to fill instead.
+![4:3 TV and 16:9](img/display-aspect.webp)
+
+4:3 TV and 16:9: the wide aspects draw more of the scene at the sides.
+F1 > Display > Aspect (also F3).
+
+![21:9](img/display-ultrawide.webp)
+
+21:9. Aspect also has 4:3 fill, 1:1 square pixels, 16:10, 32:9 and a custom w:h.
+
+![Original and Expanded vertical framing](img/display-vertical.webp)
+
+Expanded draws the lines the game leaves black above and below its picture,
+in fields, battles and the world map.
+F1 > Display > Vertical framing.
+
+![Bars, Zoom and Blur beside a movie](img/display-widefill.webp)
+
+Movies stay 4:3. Wide fill puts bars, a zoomed picture or a blurred one beside
+them. F1 > Display > Wide fill (also F6).
+
+![Fit, Integer and Stretch](img/display-scale.webp)
+
+Fit, Integer and Stretch, here a 4:3 picture in a 16:9 window.
+F1 > Display > Scale (also F4).
 
 ## Resolution and filters
 
-| Setting | Choices | Default |
-|---|---|---|
-| Resolution | 1x (PS1 resolution), Auto (from the window), 2x to 12x | 1x |
-| Colour | True colour, 15-bit, 15-bit fine, Raw 8-bit | True colour |
-| Filter | Nearest, Linear, Sharp, Bicubic, xBR (edges) | Nearest |
-| Movies | Same as the filter, or one of the filters | Same as the filter |
-| Shader | Off, or a RetroArch `.slangp` / `.slang` preset | Off |
+![1x, 2x, 4x and 6x](img/display-resolution.png)
 
-Above 1x the picture is drawn again at the higher resolution for the screen.
-The game itself still works with its 1x picture, so higher resolutions do not
-change how it plays. Auto picks the largest multiple the window's height
-holds. Movies keep their own resolution.
+The game drawn at 1x to 12x its resolution, or Auto (from the window's
+height). The game itself still works with its 1x picture.
+F1 > Display > Resolution (Shift+F4 toggles 1x).
 
-Colour only matters above 1x: True colour drops the PS1's dither, 15-bit keeps
-it. Shader presets need a build with Khronos glslang.
+![True colour, 15-bit, 15-bit fine and Raw 8-bit](img/display-colour.png)
 
-F1 > Display > Advanced > Geometry has Subpixel geometry (on by default above
-1x), Perspective textures, Restore thin surfaces and Close surface gaps.
+Above 1x: True colour drops the PS1's dither, 15-bit keeps it at PS1 size,
+15-bit fine at the higher resolution.
+F1 > Display > Colour.
+
+![Nearest, Linear, Sharp, Bicubic and xBR](img/display-filter.png)
+
+How the picture is scaled to the window: Nearest, Linear, Sharp, Bicubic or
+xBR (edges). F1 > Display > Filter (also F5).
+
+![Movie shader None and Smooth](img/display-movie-shader.png)
+
+Movies can have a filter and a shader of their own. Smooth (built in)
+softens the movies' block edges. F1 > Display > Movies, Movie shader.
+Shader takes a RetroArch `.slangp` or `.slang` preset for the whole picture.
 
 ## Smoothed motion
 
-The game runs at 30 frames per second in most scenes. Under F1 > Gameplay:
+![Motion smoothing off and on](img/clip-smooth.webp)
 
-| Setting | Choices | Default |
-|---|---|---|
-| Speedup | Off, On | Off |
-| Motion smoothing | Smooth motion (needs Speedup) | On |
-| Motion display rate | Native (59.8 Hz), 60 Hz, 120 Hz, 144 Hz, 240 Hz | 60 Hz |
+The game draws 30 pictures a second in most scenes. Motion smoothing draws the
+in-between pictures of fields and the world map, at 60, 120, 144 or 240 Hz.
+Game logic and sound keep their timing; it adds one game frame of delay.
+F1 > Gameplay > Speedup, Motion smoothing, Motion display rate.
 
-Motion smoothing draws in-between pictures of fields and the world map:
-models, the camera, terrain, particles and clouds. Game logic, animation
-events and sound keep their original timing. It adds one game frame of
-display delay. Rates above the monitor's refresh rate gain nothing.
+The Enhanced engine (F1 > System > Engine) runs fields, the world map and
+battles at 60 frames per second instead.
 
-The Enhanced engine (F1 > System > Engine) also has 60 Hz fields, 60 Hz world
-map and 60 Hz battles, on by default there, which draw those modes at 60
-frames per second.
+## Performance overlay
 
-## Keys
+![The performance overlay](img/display-perf.png)
 
-| Key | Does |
+Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
+
+## Defaults and keys
+
+| Setting | Default |
 |---|---|
-| F3 | next aspect |
-| F4 | next scale |
-| Shift+F4 | 1x, or back to the upscaled resolution |
-| F5 | next filter |
-| F6 | next wide fill |
-| F11, Alt+Enter | fullscreen |
-| F10 | performance overlay |
+| Aspect | 4:3 TV |
+| Vertical framing | Original |
+| Scale | Fit |
+| Wide fill | Bars |
+| Resolution | 1x |
+| Colour | True colour |
+| Filter | Nearest |
+| Speedup | Off |
+| Motion display rate | 60 Hz |
+
+F11 or Alt+Enter: fullscreen. F1 > Display > Advanced has Geometry (Subpixel
+geometry, Perspective textures, Restore thin surfaces, Close surface gaps),
+Display lock and VSync wait.

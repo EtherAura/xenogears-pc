@@ -1,0 +1,9 @@
+plugins {
+    id 'com.android.application' version '9.5.1' apply false
+}
+
+// Gradle's outputs outside the source tree (tools/build_android.sh: build/android/gradle).
+def buildRoot = providers.gradleProperty('xg.buildRoot').getOrElse("${rootDir}/../../build/android/gradle")
+allprojects {
+    layout.buildDirectory = file("${buildRoot}/${project.name}")
+}

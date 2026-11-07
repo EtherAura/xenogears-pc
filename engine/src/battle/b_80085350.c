@@ -94,7 +94,7 @@ extern u8 gearHudFrameGlyphs[4];
 extern u8 autoPartyMemberTurnActive;
 extern u8 battleTickMainSub0Var1[11];   /* accumulated damage type per entity */
 extern s16 battleTickMainSub0Var0[11];  /* accumulated damage value per entity */
-extern s32 damageDonePerAttack[11];  /* damage value per entity (current hit) */
+extern s32 damageDonePerAttack[11] PORT_ALIAS; /* damage value per entity (current hit) */
 extern u8 initBattleAttackStatusArray0[11];   /* damage type per entity (current hit) */
 extern u16 entitiesHitInCurrentAttackBF[1];
 extern u16 performAttack_type;

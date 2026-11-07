@@ -1,61 +1,107 @@
 # Extras
 
-![The map viewer with a free camera, original art](img/extras.png)
+The extras read your disc images and use the game's own code to load,
+animate and draw what they show. Open them from F1 > Extras > Open the extras
+(the game stays paused), or start `xenogears --extras`. Builds made with
+`-DXG_EXTRAS=ON` have them.
 
-The extras read everything from your own disc images and use the game's own
-code to set up, animate and draw it. They are in builds made with
-`-DXG_EXTRAS=ON`.
+![The extras](img/extras-home.png)
 
-Open them from F1 > Extras > Open the extras; the game stays paused and
-leaving them returns to the menu. `xenogears --extras` opens them on their
-own, without starting the game. They work with the keyboard, the mouse or a
-gamepad.
+## Assets
 
-## On the extras screen
+![A portrait as a TIM picture](img/extras-browser.png)
 
-| Extra | What it does |
-|---|---|
-| Assets | Both discs' files: their kinds, hex, LZSS, bundles, TIM pictures, models and sound banks, with export |
-| Visuals | The visual library: sprites, models, battle scenes and effects, the map viewer and the gallery |
-| Jukebox | Music, sound effects and movie music, played by the game's own sound driver |
-| Bestiary | Every enemy: its picture, numbers, weaknesses, drops, attacks and where it appears |
-| Tables | Names, music, sounds and rates read from the disc and the game's code |
-| Scripts | Actor routines, variables, execution traces and dialogue history |
+Both discs' files, with their kinds, bundles, LZSS, TIM pictures, models and
+sound banks, and export.
 
-In Visuals:
+![The same file in hex](img/extras-browser-hex.png)
 
-- Sprites: party, NPC, Gear, enemy and battle sprites, animated by the
-  game's sprite code, with every frame, facing and palette. PNG export of a
-  frame, a sheet or an animation.
-- Models: Gears, enemies, arenas, field and world map models, with their
-  animations and texture pages. glTF (GLB) export with the skeleton and
-  animations.
-- Battle scene and effects: battle arenas, actors and moves, ability
-  effects and Gear trails.
-- Map viewer: fields and the world map as the game draws them, from the
-  game's camera or a free one, with the walkmesh, triggers, exits and actors
-  marked.
-- Gallery: the movies, played by the game's own movie player; portraits
-  and event pictures; and Scenes, which starts the game at a chosen cutscene.
+## Visuals
 
-The bestiary can show everything, or only what you have met and defeated
-(My progress). Battles are recorded as you play, for each game separately.
-Exports go to an `exports` folder beside `settings.ini`; the extras screen
-can change it.
+![The visual library](img/extras-visuals.png)
 
-## In the settings menu
+![Fei's field sprite](img/extras-sprites.png)
 
-- Battle arena (F1 > Extras): Battling's two-player bouts (BONUS BATTLING,
-  PLAYER1 VS PLAYER2) from any field, then back to where you were. Every Gear
-  lets both players pick from all 49 Gears.
-- Versus battle (F1 > Extras): player 2 commands an enemy formation from
-  the disc against your party. Nothing is won or lost.
-- Online (F1 > Extras): Battling or a versus battle with a player
-  elsewhere. One player hosts, the other joins, and both type the same session
-  word. The host's UDP port (7461 by default) must be reachable. Both need the
-  same game version and disc.
-- Gauntlet (F1 > Gameplay): the story's bosses one after another: all of
-  them in story order, the character bosses, the Gear bosses, or a list you
-  make. You pick the party for each fight from the members with you, and a
-  recovery rule between fights. When the run ends, the game is put back as it
-  was; nothing is won and no memory card is touched.
+Sprites: every frame, facing and palette, animated by the game's sprite code.
+PNG export of a frame, a sheet or an animation.
+
+![A field NPC](img/extras-sprites-npc.png)
+
+![Fei's battle sprite](img/extras-sprites-battle.png)
+
+Field NPCs by room, and battle sprites.
+
+![Weltall](img/extras-models.webp)
+
+Models: Gears, enemies, arenas, field and world map models, with glTF export.
+
+![A battle arena](img/extras-models-arena.webp)
+
+![A Gear's animation programs](img/extras-animations.png)
+
+Animations: Gear programs, Battling clips and field MIMe targets.
+
+![Battle effects](img/extras-battlefx.webp)
+
+Battle effects: ability sprites, effects and Gear trails.
+
+![A field with its walkmesh, triggers and exits](img/extras-maps-walkmesh.png)
+
+Map viewer: fields with the walkmesh, triggers, exits and actors marked,
+from the game's camera or a free one.
+
+![A field from a free camera](img/extras.png)
+
+![The world map](img/extras-maps-world.png)
+
+The world map from a free camera, and a top-down overview with PNG export.
+
+![A movie](img/extras-gallery-movie.png)
+
+Gallery: the movies, played by the game's own movie player.
+
+![Portraits](img/extras-gallery-pictures.png)
+
+Portraits and event pictures.
+
+![Scenes](img/extras-gallery-scenes.png)
+
+Scenes starts the game at a chosen cutscene.
+
+## Jukebox
+
+![The jukebox](img/extras-jukebox.png)
+
+Music, sound effects and movie music, played by the game's own sound driver,
+with WAV export.
+
+## Bestiary
+
+![An enemy in the bestiary](img/extras-bestiary.png)
+
+Every enemy: its numbers, weaknesses, drops, attacks and where it appears.
+Everything, or only what you have met (My progress).
+
+![An enemy's attack in the battle scene](img/extras-bestiary-battle.webp)
+
+An attack played in the battle scene.
+
+## Tables and scripts
+
+![Playback rates](img/extras-tables.png)
+
+Tables: names, music, sounds and rates read from the disc and the game's
+code, with TSV export.
+
+![A room's actor routines](img/extras-scripts.png)
+
+Scripts: a room's actor routines, variables, a trace and the dialogue history.
+
+## Battle arena
+
+![F1 > Extras](img/extras-f1.png)
+
+Battling's two-player bouts from any field, and versus battles where player 2
+commands an enemy formation. Online plays either with someone elsewhere: one
+hosts, the other joins with the same session word (UDP port 7461 by default).
+F1 > Extras.

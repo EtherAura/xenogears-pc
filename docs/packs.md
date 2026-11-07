@@ -1,92 +1,104 @@
 # Packs
 
-![F1 > Packs over the game, original art](img/packs.png)
+Packs replace the game's pictures on screen. The game's data is not touched,
+and the port ships no artwork: you install packs yourself. They are drawn
+above 1x (F1 > Display > Resolution). The pictures on this page use packs
+made for the port; they are not part of this repository.
 
-Packs replace the game's pictures on screen without touching the game's data.
-The port ships no artwork: a pack is something you make or install. Packs
-are drawn only above 1x (F1 > Display > Resolution), or with Subpixel
-geometry on.
+![F1 > Packs](img/packs.png)
 
-## Installing a texture pack
+F1 > Packs: one folder for each library, with Browse, Use and Reload.
 
-1. Put the pack's folder anywhere. It holds a version folder: `SLUS-00664`
-   for the US release, `SLPS-01160` for the Japanese one.
-2. F1 > Packs > Texture pack: Browse to the folder that holds the version
-   folder, then Use. A `texture-packs` folder beside the executable is used
-   when none is chosen.
-3. F1 > Display > Textures and art: set each kind of picture that should use
-   the pack to Texture pack.
+![Original art and packs](img/packs-scene.webp)
 
-Reload pack reads the folder again after you edit it. F12 hides and shows
-every replacement in place, to compare with the original art.
+The same moment with the original art and with packs.
 
-## Textures and art
+## Choosing what uses a pack
 
-F1 > Display > Textures and art has one choice per kind of picture: 3D
-textures, Sprites, HUD, Battle HUD, Text, Battle icons, Dialogue portraits,
-Menu portraits and Battle portraits. Every kind starts at Original.
+![F1 > Display > Textures and art](img/packs-textures-menu.png)
 
-| Choice | What it draws |
-|---|---|
-| Original | the game's pixels, sharp |
-| Linear | the game's pixels, smoothed |
-| Edge | the game's pixels with smoothed edges, for pixel art |
-| Upscaled 2x, 4x | the game's own pixel art, enlarged 2x or 4x by a pixel-art scaler (HUD, Battle HUD, Text, Battle icons) |
-| Texture pack | the texture pack's image where it has one |
-| Cel, Enhanced text | art from the HUD, sprite, texture or glyph pack libraries in F1 > Packs |
-| A portrait set | a set from the portrait packs folder (portraits only) |
+Each kind of picture has its own choice: 3D textures, Sprites, HUD, Battle
+HUD, Text, Battle icons, Dialogue portraits, Menu portraits, Battle portraits.
+All start at Original. F1 > Display > Textures and art.
 
-## The pack format
+![3D textures Original and Cel 8x](img/packs-3d.png)
 
-A version folder holds PNGs named after the texture they replace:
+3D textures: Original and Cel 8x (the field texture library).
 
-- `<texel-key>-<palette-key>.png`: an RGBA image for the texture drawn with
-  one palette.
+![Sprites Original, Linear, Edge and Cel 8x](img/packs-sprites.png)
+
+Sprites: Original, Linear, Edge and Cel 8x (the field sprite library).
+
+![Battle HUD Original, Edge, Upscaled 4x and Cel 4x](img/packs-hud.png)
+
+Battle HUD: Original, Edge, Upscaled 4x (the game's own art, enlarged) and
+Cel 4x (the HUD library).
+
+![Text Original, Upscaled 4x and Enhanced text](img/packs-text.png)
+
+Text: Original, Upscaled 4x and Enhanced text (the glyph library), here with a
+menu portrait from a portrait set.
+
+![The game's menu with original art and packs](img/packs-menu.webp)
+
+![A battle with original art and packs](img/packs-battle.png)
+
+The game's menu and a battle, original art and packs.
+
+![A portrait set compared with the original](img/packs-portraits.png)
+
+Portrait sets are chosen per kind (dialogue, menu, battle). The gallery
+compares a set with the original. Extras > Visuals > Gallery > Pictures.
+
+F12 hides every replacement in place, to compare with the original art.
+
+## Installing a pack
+
+| Library | Default folder beside the executable | F1 > Packs |
+|---|---|---|
+| Texture pack | `texture-packs` | Texture pack |
+| Beetle PSX HW pack | none | Beetle PSX pack |
+| HUD artwork | `ui-packs` | HUD packs |
+| Portrait sets | `portrait-packs` | Portrait packs |
+| Field sprites | `sprite-packs` | Sprite packs |
+| Glyphs | `glyph-packs` | Glyph packs |
+
+A pack folder holds a version folder: `SLUS-00664` (US) or `SLPS-01160`
+(Japanese). Put it in the default folder, or choose it in F1 > Packs, then set
+the kinds of picture that should use it in Textures and art.
+
+## Making a texture pack
+
+F1 > Packs > Advanced > Discovery: choose an empty folder and play. Each
+texture the game draws is written there once:
+
+- `<texel-key>-<palette-key>.png`: an RGBA picture for one palette;
 - `<texel-key>.indices.png`: a greyscale index map (R = G = B = the palette
-  index, alpha 255). It follows the game's live palette, so fades and palette
-  swaps still work.
+  index), which follows the game's live palette.
 
-A replacement is the original size times a whole number from 1 to 8, at most
-2048 pixels a side. In RGBA images, alpha below 64 is clear, 64 to 191 sets
-the PS1's semi-transparency flag, and 192 and up is opaque. An optional
-`pack.ini` in the version folder gives `name=` and `author=`.
-
-To make one, start F1 > Packs > Advanced > Discovery with an empty folder and
-play: each texture the game draws is written there once, under the names
-above. Copy the ones you edit into your pack. Movie frames go in the version
-folder's `movies` folder, as `d<disc>s<stream>/<frame>.png` or an AV1
-`d<disc>s<stream>.webm` (F1 > Packs > Pack movies).
+Copy the ones you edit into your pack's version folder. A replacement is the
+original size times a whole number from 1 to 8, at most 2048 pixels a side.
+Alpha below 64 is clear, 64 to 191 sets the PS1's semi-transparency flag,
+192 and up is opaque. `pack.ini` can give `name=` and `author=`. Movie frames
+go in `movies/d<disc>s<stream>/<frame>.png`, or an AV1 `d<disc>s<stream>.webm`.
 
 ## Beetle PSX HW packs
 
-Packs made for RetroArch's Beetle PSX HW core work too. F1 > Packs > Beetle
-PSX pack: choose the core's replacement folder itself, for example
-`Xenogears (USA) (Disc 1)-texture-replacements`, then Use.
+Packs made for RetroArch's Beetle PSX HW core work as well. Choose the core's
+`<game>-texture-replacements` folder in F1 > Packs > Beetle PSX pack. It is
+drawn wherever Textures and art is set to Texture pack (portraits: their
+Texture pack choice). Where both packs have a picture, ours is drawn first;
+Beetle pack first swaps them. Text pictures from Beetle packs (menu names,
+dialogue) don't match the port's and are not drawn.
 
-- It is drawn wherever F1 > Display > Textures and art is set to Texture pack.
-  For its portraits, set the portrait rows to Texture pack.
-- When the texture pack and the Beetle pack both have an image for a
-  texture, the texture pack's is drawn (Our texture pack first, the default).
-  Beetle pack first swaps them.
-- Text images in Beetle packs (menu names, dialogue text) never match, so
-  they are not drawn.
-- Textures already loaded when the pack is chosen change when the game loads
-  them again, for example in the next room.
-
-## Portraits
-
-Portrait sets live in the portrait packs folder (`portrait-packs` beside the
-executable, or F1 > Packs > Portrait packs):
+## Portrait sets
 
 ```
 portrait-packs/
   my-set/
-    portrait.ini          name=My set, optional author=
+    portrait.ini          name=My set
     SLUS-00664/<texel-key>-<palette-key>.png
-    SLPS-01160/<texel-key>-<palette-key>.png
 ```
 
-Portraits are square RGBA PNGs, 1 to 8 times the original 64x64. Alpha 0 is
-clear, 128 the semi-transparency flag, 255 opaque. Dialogue, menu and battle
-portraits each pick their set in F1 > Display > Textures and art. In the
-extras, Visuals > Gallery > Pictures compares a set with the originals.
+Square RGBA PNGs, 1 to 8 times the original 64x64. Alpha 0 is clear, 128 the
+semi-transparency flag, 255 opaque.
