@@ -1,0 +1,520 @@
+# Every writable static of the platform layer (port/src, objects of the
+# `platform` library), for save states (port/src/system/savestate.h):
+#   state    saved and loaded by its file's xxxStateIo
+#   derived  rebuilt, reset or scratch: nothing to keep across a load
+#   host     the host's side: never in a state
+# `<file> * <class>` covers a whole file. tools/statecheck.py inventory
+# <build> (gates.sh: statevars) fails on a static missing here, so a new
+# one is classified (and saved, if the game can see it) when it is added.
+
+system/engine.c * host the engine choice's arguments, note and executable path (settings.ini carries the choice)
+
+system/invariants.c * host the XG_INVARIANT_LOG file (tools/engine_diff.py): never in a state
+
+system/gamedata.c retailHeapStarts host original boot-header boundaries from the current disc image
+
+gpu/interpolation.c * host immutable presentation snapshots and lifetime identities, reset on timeline changes
+
+card/bu.c accesses state
+card/bu.c blank derived a formatted image, rebuilt
+card/bu.c dir derived scratch inside one BIOS call (states wait for idle cards)
+card/bu.c fast host settings, logging
+card/bu.c files state
+card/bu.c instant state
+card/bu.c logLevel host settings, logging
+card/bu.c powerOnScanDone state
+card/bu.c search state
+card/bu.c started state
+card/bu.c timeoutSlot state
+card/bu.c turn state
+card/image.c * host the cards' images (disk-backed: never rolled back); flagNew handled by cardImageStateIo
+card/mcs.c * host the --card command
+cd/boot.c dirs derived scratch
+cd/boot.c reload state
+cd/boot.c table derived scratch
+cd/boot.c tablesDone state
+cd/disc.c * host the image reader
+cd/drive.c activity state
+cd/drive.c afterSeek state
+cd/drive.c cdLogLevel host the image, settings, logging
+cd/drive.c disc host the image, settings, logging
+cd/drive.c eventCount state
+cd/drive.c eventSeq state
+cd/drive.c events state
+cd/drive.c fifoPos state
+cd/drive.c fifoSize state
+cd/drive.c fifoStart state
+cd/drive.c filterChannel state
+cd/drive.c filterFile state
+cd/drive.c haveLastHeader state
+cd/drive.c headLba state
+cd/drive.c inWorld host the image, settings, logging
+cd/drive.c japaneseImage derived of the disc in the drive
+cd/drive.c lastAckAt state
+cd/drive.c lastHeader state
+cd/drive.c lastReadLba state
+cd/drive.c mode state
+cd/drive.c motorOn state
+cd/drive.c muted state
+cd/drive.c paused state
+cd/drive.c replayDone state
+cd/drive.c replayFirst state
+cd/drive.c sector state
+cd/drive.c sectorCount derived of the disc in the drive
+cd/drive.c seekTarget state
+cd/drive.c setlocPending state
+cd/drive.c setlocTarget state
+cd/drive.c shellLatch state
+cd/drive.c shellOpen state
+cd/drive.c sizeBits state
+cd/drive.c speedFactor host the image, settings, logging
+cd/drive.c streaming state
+cd/libcd.c cbData state
+cd/libcd.c cbRead state
+cd/libcd.c cbReady state
+cd/libcd.c cbSync state
+cd/libcd.c dataEndIntr state
+cd/libcd.c dataEndResult state
+cd/libcd.c debugLevel state
+cd/libcd.c dmaPending state
+cd/libcd.c inWorld host the extras' worlds
+cd/libcd.c irqDepth state
+cd/libcd.c lastCom state
+cd/libcd.c lastMode state
+cd/libcd.c lastPos state
+cd/libcd.c mix state
+cd/libcd.c readyIntr state
+cd/libcd.c readyResult state
+cd/libcd.c status state
+cd/libcd.c status1 state
+cd/libcd.c syncIntr state
+cd/libcd.c syncResult state
+cd/regional.c battle host voice bundles' files and settings
+cd/regional.c cache derived merged voice files, rebuilt as needed
+cd/regional.c cacheCount derived with cache
+cd/regional.c initialized host voice bundles' files and settings
+cd/regional.c movie state its head (fadeOut lives inside one sector's mixing)
+cd/regional.c sources host voice bundles' files and settings
+cd/stream.c endCallback state
+cd/stream.c endFrame state
+cd/stream.c expectSector state
+cd/stream.c frameCallback state
+cd/stream.c frameNumber state
+cd/stream.c frameStart state
+cd/stream.c headerless state
+cd/stream.c lastFrame state
+cd/stream.c lastLoc state
+cd/stream.c masked state
+cd/stream.c readSlot state
+cd/stream.c ring state
+cd/stream.c ringSize state
+cd/stream.c startFrame state
+cd/stream.c typeBits state
+cd/stream.c writeSlot state
+cd/swap.c afterStop state
+cd/swap.c manualOnly host image paths, settings
+cd/swap.c paths host image paths, settings
+cd/swap.c pending state
+cd/swap.c polls state
+cd/swap.c warned host image paths, settings
+cd/xa.c history state
+cd/xa.c logLevel host logging
+cd/xa.c lr derived scratch (one sector)
+cd/xa.c xaSectors host logging
+extras/bestiary_data.c * host the extras (their own worlds; states wait until they are left)
+extras/bestiary_record.c * host the extras (their own worlds; states wait until they are left)
+extras/disc.c * host the extras (their own worlds; states wait until they are left)
+extras/files.c * host the extras (their own worlds; states wait until they are left)
+extras/gallery_movie.c * host the extras (their own worlds; states wait until they are left)
+extras/models.c * host the extras (their own worlds; states wait until they are left)
+extras/observe.c * host the extras (their own worlds; states wait until they are left)
+extras/preview.c * host the extras (their own worlds; states wait until they are left)
+extras/replace.c * host the extras (their own worlds; states wait until they are left)
+extras/sandbox.c * host the extras (their own worlds; states wait until they are left)
+extras/tables.c * host the extras (their own worlds; states wait until they are left)
+extras/tables_battle.c * host the extras (their own worlds; states wait until they are left)
+extras/tables_sound.c * host the extras (their own worlds; states wait until they are left)
+extras/vgpu.c * host the extras (their own worlds; states wait until they are left)
+extras/writers.c * host the extras (their own worlds; states wait until they are left)
+gpu/dump.c * host test dumps (reset on load: dumpStateLoaded)
+gpu/gp0.c cacheDirty state
+gpu/gp0.c cachePend derived malloc'd list of owed texture-cache walks: its live part is saved by gp0StateIo
+gpu/gp0.c cachePendUsed state with cachePend's live part
+gpu/gp0.c cacheTiles state
+gpu/gp0.c cacheMaybeStale state entries that may no longer equal VRAM while the cache is dirty
+gpu/gp0.c cacheMaybeStaleCount state
+gpu/gp0.c clutLoads derived counts CLUT cache loads for clutCleanMemo (the memo is invalidated by vramLayoutSerial on a load)
+gpu/gp0.c clutCleanMemo derived memo of cacheRaster's CLUT-cache-equals-VRAM check, revalidated by tile generations
+gpu/gp0.c gp state the drawing state, a command or load in progress, the texture and CLUT caches
+gpu/gp0.c l derived per-line scratch
+gpu/gp0.c probe host debug switches
+gpu/gp0.c probeSolid host debug switches
+gpu/gp0.c probeX host debug switches
+gpu/gp0.c probeY host debug switches
+gpu/gp0.c report host debug switches (XG_TEXTURE_LOG)
+gpu/gp0.c reported host a log line count
+gpu/gp0.c savedClipX0 derived only inside a wide draw
+gpu/gp0.c savedClipX1 derived only inside a wide draw
+gpu/gp0.c savedClipY0 derived only inside a wide draw
+gpu/gp0.c savedClipY1 derived only inside a wide draw
+gpu/gp0.c savedShift derived only inside a wide draw
+gpu/gp0.c savedShiftY derived only inside a wide draw
+gpu/gp0.c spanBuf derived per-primitive scratch
+gpu/gp0.c stepBuf derived per-primitive scratch
+gpu/gp0.c stepMap derived per-primitive scratch
+gpu/gp0.c exactBreaks host batch statistics (XG_BATCH_LOG)
+gpu/gp0.c exactCleared host batch statistics (XG_BATCH_LOG)
+gpu/gp0.c exactOn host the XG_BATCH_EXACT switch
+gpu/gp0.c log host debug switches
+gpu/gp0.c scratch derived per-primitive scratch
+gpu/gp0.c poseActors derived sprite pose timing for in-betweens, rebuilt as frames draw
+gpu/hires.c detailKept derived the copy's detail marks under the displayed buffer kept across one Battling picture between (hiresDetailKeep/PutBack)
+gpu/hires.c hr derived settings, display-only Auto GPU policy and hi-res bookkeeping: timing, detail, stash and CPU-effect sources reset on load (hiresStateLoaded)
+gpu/jpeg.c * host JPEG decoder (shader preset pictures): constant tables
+gpu/libgpu.c capture host capture, traces, logging
+gpu/libgpu.c loadNoWide derived set and cleared inside one pcVramPutBack call (the wide picture left alone)
+gpu/libgpu.c drawQuiet derived set around the Battling between's DrawOTagEnv and VRAM put back (pcGpuQuiet)
+gpu/libgpu.c g state environments, display, DrawSync callback and flags, vblanks (ready, externalVBlank, nextVBlank kept)
+gpu/libgpu.c moving derived only inside gpuMove
+gpu/libgpu.c rects derived gpuMove scratch
+gpu/libgpu.c seen host capture, traces, logging
+gpu/libgpu.c seenCount host capture, traces, logging
+gpu/libgpu.c step derived gpuMove scratch
+gpu/libgpu.c terminator derived constant end packet
+gpu/libgpu.c traceChecked host capture, traces, logging
+gpu/libgpu.c traceFile host capture, traces, logging
+gpu/libgpu.c traceVBlanks host capture, traces, logging
+gpu/libgpu.c videoMode host capture, traces, logging
+gpu/libgpu.c vramDumpRequested host capture, traces, logging
+gpu/moviepack.c * host replacement movies (ended on load)
+gpu/pngfast.c * host PNG writer
+gpu/present.c * host presentation settings
+gpu/prim.c timCursor state
+gpu/shaderchain.c * host shader presets
+gpu/texture.c * host decoded texture cache (reset on load)
+gpu/texture_dump.c * host texture dumps
+gpu/texture_filter.c * host settings
+gpu/texture_glyph.c * host glyph texture cache (reset on load)
+gpu/texture_pack.c * host texture packs
+gpu/portrait_pack.c * host independent portrait library, selection and derived cache
+gpu/texture_cel.c * host optional cel HUD artwork cache
+gpu/vk.c * host Vulkan (wideExtent serialized by wideStateIo)
+gpu/vram.c bins derived scratch of a stability scan
+gpu/vram.c captureAge state
+gpu/vram.c capturePixels state live prefixes of two native StoreImage captures
+gpu/vram.c captureSize state lengths saved by xgStateLen
+gpu/vram.c captures state native capture rectangles and ages
+gpu/vram.c cpuWritten derived CPU-authoritative tiles awaiting physical upload; cleared on load after the device receives restored VRAM
+gpu/vram.c drawnTiles derived cleared on load (the device gets the CPU copy)
+gpu/vram.c generation state
+gpu/vram.c generations state
+gpu/vram.c pageCache derived texture page cache: freed on load
+gpu/vram.c pageClock derived texture page cache's clock
+gpu/vram.c queue derived scratch of a stability scan
+gpu/vram.c renderedTiles state
+gpu/vram.c saving derived a save's VRAM, made aside
+gpu/vram.c slot derived scratch of a stability scan
+gpu/vram.c stampClock derived the vblank clock for stamps (set each vblank)
+gpu/vram.c stampedTiles derived cleared on load
+gpu/vram.c stamps derived upload stamps (texture stability): cleared on load
+gpu/vram.c uploadNext state
+gpu/vram.c uploads state
+gpu/vram.c vramLayoutSerial derived counts VRAM resets and state loads (memos in texture.c and gp0.c invalidate on it)
+gpu/vram.c vramShadow state taken as after a full readback (the device's drawn tiles read aside)
+gpu/vram.c blocks derived the newest generation per block of tiles, rebuilt from generations on load
+gpu/vram.c owned state the CPU-owned tile hints (draw where the CPU reads): they choose the drawing path, which the texture cache's walks follow (xg-hbc.21); on is a setting
+gpu/vram.c savings derived the snapshot a save or rewind capture takes of the CPU copy
+gpu/vram.c stampTiles derived per-tile stamp summaries, dropped on load with the stamps
+gpu/wide.c kindWhy derived text a view's reason points at
+gpu/wide.c last host environment switches
+gpu/wide.c optOut host environment switches
+gpu/wide.c pcVerticalCull state
+gpu/wide.c pcWideCull state
+gpu/wide.c pcWideOnlyScope state
+gpu/wide.c pcWideView state
+gpu/wide.c wd state the game's choices, bookkeeping, the packet table's live entries, the arenas' used parts
+gpu/wide.c wideKept derived a frame buffer's wide picture kept across one VSync wait (the ripple's picture between), put back before the native frame draws
+gpu/vram.c kept derived VRAM's bookkeeping kept across one Battling picture between and put back with its pixels (vramBookkeepingKeep/PutBack)
+gpu/vram.c keep derived the tiles a Battling picture between may write, kept before the write and put back after it (vramKeepBegin/Write/Changed/End): open only inside one wait
+gpu/vram.c keepSyncing derived set around a keep's readback (no owned-hint marks)
+gpu/wide.c wideSlotsLive state
+gpu/wide.c wideStashed derived the game's registrations put aside while a picture between two vblanks draws (pcWideStash), empty between frames
+gpu/wide.c wideStashedCap derived pcWideStash's buffer size
+gpu/wide.c wideStashedCount derived pcWideStash: empty between frames
+gpu/wide.c wideStashedGroups derived pcWideStash: empty between frames
+gpu/wide.c wideStashedPoses derived pcWideStash: empty between frames
+gpu/wide.c poseGroupCount derived sprite pose groups of the frame being drawn
+gpu/wide.c poseGroups derived sprite pose groups of the frame being drawn
+gpu/wide.c poseSerial derived counts drawn ordering tables for pose timing
+gte/gte.c cmdIrMin derived only inside a command
+gte/gte.c cmdShift derived only inside a command
+gte/gte.c ctrlRegs state
+gte/gte.c dataRegs state
+gte/gte.c flag derived only inside a command
+gte/gte.c precise state
+gte/gte.c reported host logging
+gte/gte.c unrReady derived with unrTable
+gte/gte.c unrTable derived a table built on first use
+gte/libgte.c cosTable derived a table built on first use
+gte/libgte.c libgteAtanTable derived constant
+gte/libgte.c matrixStack state
+gte/libgte.c matrixStackTop state
+gte/libgte.c reported host logging
+gte/libgte.c sinTable derived a table built on first use
+gte/libgte.c sqrtTables derived a table built on first use
+gte/libgte.c tablesReady derived with the tables
+gte/precision.c enabled host enhanced geometry or field interpolation setting
+gte/precision.c entries derived projection metadata: cleared on load (precisionStateLoaded)
+gte/precision.c epoch derived reset on load
+gte/precision.c pendingDraws derived reset on load
+main.c * host entry (kernelEntry: the host stack's jmp_buf)
+mdec/libpress.c cmdActive state
+mdec/libpress.c cmdEndAt state
+mdec/libpress.c dctCommand state
+mdec/libpress.c decodeAt state
+mdec/libpress.c generation state
+mdec/libpress.c inAddr state
+mdec/libpress.c inCallback state
+mdec/libpress.c inWorld host the extras' worlds
+mdec/libpress.c iqCommand state
+mdec/libpress.c outAddr state
+mdec/libpress.c outBusy state
+mdec/libpress.c outBytes state
+mdec/libpress.c outCallback state
+mdec/libpress.c outDst state
+mdec/libpress.c outEndAt state
+mdec/libpress.c spill state
+mdec/libpress.c spillLen state
+mdec/libpress.c spillPos state
+mdec/libpress.c stage derived realloc'd: its live part saved with stageFill
+mdec/libpress.c stageCap derived the buffer's size
+mdec/libpress.c stageFill state with stage's first stageFill bytes (the buffer is realloc'd)
+mdec/libpress.c tablesReady state
+mdec/mdec.c blockNo state
+mdec/mdec.c coef state
+mdec/mdec.c coefIndex state
+mdec/mdec.c colour state
+mdec/mdec.c command state
+mdec/mdec.c control state
+mdec/mdec.c counter state
+mdec/mdec.c depth state
+mdec/mdec.c feed state
+mdec/mdec.c feedLeft state
+mdec/mdec.c highNext state
+mdec/mdec.c iq state
+mdec/mdec.c kind state
+mdec/mdec.c paramsLeft state
+mdec/mdec.c planes state
+mdec/mdec.c qscale state
+mdec/mdec.c scaleTable state
+mdec/mdec.c tableIndex state
+mdec/mdec.c word state
+mdec/mdec.c zagzig derived a table built on first use (built on load if needed)
+mdec/mdec.c zagzigReady derived with zagzig
+mdec/vlc.c builtin derived a table built on first use
+mdec/vlc.c builtinReady derived with builtin
+mdec/vlc.c limit1 state
+mdec/vlc.c limit2 state
+mdec/vlc.c state1 state
+mdec/vlc.c state2 state
+spu/cdin.c frac state
+spu/cdin.c lead state
+spu/cdin.c queue state
+spu/cdin.c queueCount state
+spu/cdin.c queueHead state
+spu/cdin.c queueStep state
+spu/cdin.c ring state
+spu/cdin.c taken state
+spu/core.c spu state
+spu/menusfx.c * host the menu's sound effects
+spu/output.c * host audio output and dump (flushed on load: spuOutputStateLoaded)
+system/arena.c directAsked host environment (XG_ARENA=2,...: the oracle's direct match), taken once
+system/arena.c directParams host environment (XG_ARENA=2,...)
+system/arena.c envRead host environment and settings
+system/arena.c keyboardOn derived set from the restored session on load
+system/arena.c on host environment and settings
+system/arena.c pending state
+system/arena.c versusConfig state
+system/arena.c versusEnvRead host environment and settings
+system/arena.c versusPending state
+system/arena.c versusTable state
+system/bios.c * host host files for the extras' sandbox
+system/cputime.c * host XG_CPU_TIMING
+system/displaylock.c * host the display lock
+system/gameplay.c dialogStepSkip derived set and cleared within one field frame (xg-hbc.11)
+system/gameplay.c dialogHideLines derived set and cleared around one window's text draw (xg-hbc.19.5)
+system/gameplay.c spritePrecise derived set and cleared within one field frame (xg-hbc.19.3)
+system/gameplay.c field60Checked host the field60 experiment setting, read once (xg-hbc.6)
+system/gameplay.c field60On host the field60 experiment setting, read once (xg-hbc.6)
+system/gameplay.c field60SlowChecked host the field60slow setting, read once (xg-hbc.19.3)
+system/gameplay.c field60SlowOn host the field60slow setting, read once (xg-hbc.19.3)
+system/gameplay.c worldmap60Checked host the worldmap60 setting, read once (xg-hbc.19.1)
+system/gameplay.c worldmap60On host the worldmap60 setting, read once (xg-hbc.19.1)
+system/gameplay.c battle60Checked host the battle60 setting, read once (xg-hbc.19.2)
+system/gameplay.c battle60On host the battle60 setting, read once (xg-hbc.19.2)
+system/gameplay.c autoSince state
+
+system/gameid.c gameId state the running game's identity (its records follow it)
+system/gameid.c gameFresh state
+system/gameid.c serial host a nonce for new ids (newId's)
+system/gameplay.c autoWaiting state
+system/gameplay.c battleClass state
+system/gameplay.c dialogueNext state
+system/gameplay.c dialogueWindows state
+system/gameplay.c enemyScriptStats state
+system/gameplay.c pendingRandomConfig state
+system/gameplay.c practiceCarry state
+system/gameplay.c retryKeepsClass state
+system/gamestack.c * host the game stack (saved by savestate.c as a region)
+system/gametext.c * host text sources (settings, images, packs, caches of the discs' text)
+system/gametext.c arenaBytes state the texts the game was given (it keeps pointers to them)
+system/gametext.c arenaCount state the texts the game was given
+system/gametext.c arenaFull derived reset on load
+system/gametext.c arenaHash derived rebuilt from arenaTexts on load
+system/gametext.c arenaTexts state the texts the game was given
+system/gametext.c arenaUsed state the texts the game was given
+system/gametext.c last derived the window measure's cache
+system/gametext.c lastLayout derived the window measure's cache
+system/gametext.c m derived the window measure's cache
+system/gametext.c oa derived scratch
+system/gametext.c ob derived scratch
+system/gametext.c pcGameTextProportionalOn derived set from the restored texts on load
+system/gametext.c pcGameTextWrapOn derived set from the restored texts on load
+system/gametext.c printing state the proportional print's pens (mid-text)
+system/gametext.c printingAge state the proportional print's pens (mid-text)
+system/gametext_font.c * host text sources' fonts
+system/gametext_font.c glyphSnapshots state immutable glyph pixels referenced by encoded strings
+system/gametext_font.c glyphSnapshotCount state number of glyph snapshots
+system/gametext_font.c glyphSnapshotHash derived rebuilt from glyphSnapshots on load
+system/gametext_pack.c * host text packs
+system/gametext_picture.c * host the discs' pictures with text (what the game gets is copied into its heap)
+system/gauntlet.c R state the run (autostarted stays the process's)
+system/gauntlet.c checked host records file path, autostart
+system/gauntlet.c path host records file path, autostart
+system/gauntlet.c picks derived scratch
+system/gauntlet.c when host records file path, autostart
+system/hw.c clockRate host real-time clock and host side
+system/hw.c earliestBits derived the heap's top event time for the spin wait, kept under the lock (noteEarliest; set again after a load)
+system/hw.c clockHold derived nesting count around Enhanced-only extra drawing, zero between frames (xg-hbc.19.2)
+system/hw.c clockDefer derived nesting count around the 60 Hz world map tick's work after its vblank, zero at every park (its VSync waits end it first: pcWm60Settle) (xg-hbc.19.1)
+system/hw.c clockDeferred state stepped-clock time the tick's work still owes, spent at the next tick's start: the frame between's park holds it (always 0 on the real clock)
+system/hw.c delivering state
+system/hw.c deliveringFrame state
+system/hw.c dotClocks state
+system/hw.c heartbeat host real-time clock and host side
+system/hw.c inWorld host real-time clock and host side
+system/hw.c interlacedVideo state
+system/hw.c lastBeatNs host real-time clock and host side
+system/hw.c maskDepth state
+system/hw.c nextVBlank state
+system/hw.c oversleep host real-time clock and host side
+system/hw.c palVideo state
+system/hw.c pausedAt host real-time clock and host side
+system/hw.c queue state its entries (the array is realloc'd: loaded into the live one)
+system/hw.c queueCap host real-time clock and host side
+system/hw.c queueCount state with the entries
+system/hw.c queueLock host real-time clock and host side
+system/hw.c queueSeq state
+system/hw.c startAt host real-time clock and host side
+system/hw.c startNs host real-time clock and host side
+system/hw.c stepClock host real-time clock and host side
+system/hw.c stepNow state the virtual time is saved; the real clock is re-anchored on it
+system/hw.c vblankCount state
+system/hw.c spinWait host the vsync_wait setting
+system/krom.c * host the BIOS font image
+system/libapi.c counters state
+system/libapi.c critical state
+system/libapi.c events state
+system/libapi.c testMisses state
+system/libc.c seed state
+system/libetc.c betweenDraw derived the Enhanced engine's picture between a VSync(2) frame's vblanks, registered by the loop around its wait (xg-hbc.19.4)
+system/libetc.c betweenChecked host XG_VSYNC_BETWEEN, read once
+system/libetc.c betweenOff host XG_VSYNC_BETWEEN, read once
+system/libetc.c callbacks state
+system/libetc.c countBase state
+system/libetc.c idleChecked host the vsync_idle setting, read once
+system/libetc.c idleOn host the vsync_idle setting, read once
+system/libetc.c lastVSync state
+system/libetc.c lastVSyncTime state
+system/libetc.c pollCount host the host's presentation in VSync(-1) busy waits only
+system/libetc.c pollRun host the host's presentation in VSync(-1) busy waits only
+system/libetc.c started state
+system/libetc.c videoMode state
+system/memory.c gameModeNow state
+system/memory.c heapArena state a region of its own (savestate.c)
+system/memory.c pristineData host pristine module data, the copy's place
+system/memory.c savedModule state the gear shop's copy of field_mecha
+system/memory.c savedModuleOnHeap host pristine module data, the copy's place
+system/mouse.c * host live mouse input (cleared on load)
+system/mouse_battle.c seen derived actors seen: cleared on load
+system/net.c * host networking (netplay)
+system/netplay.c * host netplay: an input source, like the pads' devices
+system/netplay_launch.c * host netplay: the session the menu started, a process of its own
+system/options.c start state
+system/overlay_cd.c * host XG_OVERLAY_CD (states refused in that mode)
+system/pad.c actuator state
+system/pad.c bind host devices, bindings, scripts (re-positioned on load)
+system/pad.c gamepads host devices, bindings, scripts (re-positioned on load)
+system/pad.c heldAfterMenu host devices, bindings, scripts (re-positioned on load)
+system/pad.c keyboardPort derived set from the restored arena session on load
+system/pad.c padBuffer state
+system/pad.c padLength state
+system/pad.c padStarted state
+system/pad.c profiles host devices, bindings, scripts (re-positioned on load)
+system/pad.c promptPad host devices, bindings, scripts (re-positioned on load)
+system/pad.c replayScript host devices, bindings, scripts (re-positioned on load)
+system/pad.c returnTaken host devices, bindings, scripts (re-positioned on load)
+system/pad.c script host devices, bindings, scripts (re-positioned on load)
+system/pad.c script2 host devices, bindings, scripts (re-positioned on load)
+system/pad.c scriptKeyCount host devices, bindings, scripts (re-positioned on load)
+system/pad.c scriptKeyPos host devices, bindings, scripts (re-positioned on load)
+system/pad.c scriptKeys host devices, bindings, scripts (re-positioned on load)
+system/pad.c selectedProfile host devices, bindings, scripts (re-positioned on load)
+system/pad.c strings host devices, bindings, scripts (re-positioned on load)
+system/pad.c camIn host the free camera's stick and keys this frame
+system/pad.c padLog host the pad log file
+system/pad.c padLogChecked host the pad log file
+system/pad.c padLogLast host the pad log file
+system/quit.c * host quitting
+system/quit_at.c * host XG_QUIT_AT (its event handled by quitAtStateIo)
+system/rewind.c * host rewind's history: captures of the game kept by the host, never in a state
+system/workers.c * host helper threads for work the game thread splits into parts (the Battling between's page compares), never in a state
+system/rumble.c * host vibration devices
+system/rumble_game.c * host the port's feedback
+system/savestate.c * host save states
+system/settings.c * host settings
+system/slowdown.c * host the slowdown replay (states refused while it runs)
+system/speedup.c * host the Speedup setting's cached value (settings)
+system/spu.c irqCallback state
+system/spu.c keptRegs derived scratch inside one picture between of the 60 Hz Battling (between.c), never across a load
+system/spu.c lastReport host the samples' destination, logging
+system/spu.c lastSample state
+system/spu.c logLevel host the samples' destination, logging
+system/spu.c mallocTable state
+system/spu.c portSpuRegisters state
+system/spu.c powered state
+system/spu.c reverb state
+system/spu.c runSpu host the samples' destination, logging
+system/spu.c sink host the samples' destination, logging
+system/spu.c sinkUser host the samples' destination, logging
+system/spu.c spuEvent state
+system/spu.c started state
+system/spu.c toDevice host the samples' destination, logging
+system/spu.c transferAddr state
+system/spu.c transferCallback state
+system/spu.c transferMode state
+system/stall.c * host the stall watchdog
+system/statefile.c * host save state files
+system/sweeplog.c * host sweep logs
+system/todo.c * host PORT_TODO reports
+system/world.c * host the extras' worlds (states wait until none is entered)
+system/freecam.c fade host the XG_FREECAM_FADE switch
+system/freecam.c fc host the free camera's view (the player's, not the game's)
+system/freecam.c fixedRooms host the XG_FREECAM_FIXED switch
+system/freecam.c limits host the XG_FREECAM_LIMITS switch
+system/freecam.c field host log state
+system/freecam.c row host log state
+system/freecam.c sw host the XG_FREECAM_SWEEP tool's state
+system/freecam.c walls host the XG_FREECAM_WALLS switch
+system/freecam.c wc host the world map free camera's tilt and zoom (the player's view)
+system/freecam.c start host the XG_WORLDCAM test start

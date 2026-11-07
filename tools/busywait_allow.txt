@@ -1,0 +1,75 @@
+# Reviewed loops for tools/busywait.py: they can go round without a safe point,
+# and that is harmless. One per line:
+#     <file> | <function> | <loop> | <reason>
+# <loop> is the key busywait.py prints. A loop that waits for something an
+# interrupt changes is not listed here: it gets PORT_YIELD() (include/common.h).
+
+# The vsync input queue (pad.c): each loadInputFromVSyncBuffer() call pops one
+# entry and returns 0 once it is empty (16 at most): a drain, not a wait.
+src/battle/b_80089B50.c | battleHandleInput | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/battle/b_8008A274.c | battleUpdateInputs_mode2 | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/battle/b_8008A274.c | battleUpdateInputs_mode0 | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/battling/bl_80075060.c | updateBattlingFight | goto loop if (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/field/f_80072140.c | updateFieldInputs | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/main/game_init.c | drawMenuDebugUpdateInputs | while (loadInputFromVSyncBuffer() != 0) | drains the vsync input queue (one entry per call)
+src/main/pad.c | mergeQueuedInputs | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/main/pad.c | printPadDebugInfo | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/menu/m_801C65F4.c | updateMenuInput | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/menu_gear_shop/gs_801C511C.c | updateMenuInput | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/menu_name_entry/ne_801C5040.c | updateMenuInput | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/menu_party/pt_801C5018.c | updateMenuInput | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/menu_shop/sh_801C5040.c | updateMenuInput | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/worldmap/w_80070CFC.c | worldmapMainLoop | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/worldmap/w_800736DC.c | runWorldmapPause | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+src/worldmap/w_800736DC.c | waitWorldmapControllerReconnect | while (loadInputFromVSyncBuffer()) | drains the vsync input queue (one entry per call)
+
+# Walks and interpreters over data that a callee steps (the tool sees only
+# the stepping it does itself).
+src/battle/b_80079674.c | skipScriptIfFalse | while (*ctx->m0_scriptPtr >= 0x80) | walks the monster script: advanceBattleScript(ctx) steps it 4 bytes
+src/battle/b_80079674.c | skipScriptIfFalse | while ((u8)(*ctx->m0_scriptPtr - 0x80) >= 0x70) | walks the monster script: advanceBattleScript(ctx) steps it 4 bytes
+src/battle/b_80079674.c | executeMonsterScript | while (*ctx.m0_scriptPtr != 0xFD && *ctx.m0_scriptPtr != 0xFF) | monster script interpreter: every opcode steps ctx to the end marker
+src/battle/b_80079674.c | executeMonsterScriptWhenAttacked | while (*ctx.m0_scriptPtr != 0xFD && *ctx.m0_scriptPtr != 0xFF) | monster script interpreter: every opcode steps ctx to the end marker
+port/src/game/battle/versus.c | playRun | while (*ctx.m0_scriptPtr != 0xFD && *ctx.m0_scriptPtr != 0xFF) | a versus battle's enemy turn: executeMonsterScript's loop, every opcode steps ctx to the end marker
+src/battle/b_80079674.c | execMonsterScriptEndOfPlayerTurn | while (*ctx.m0_scriptPtr != 0xFD && *ctx.m0_scriptPtr != 0xFF) | monster script interpreter: every opcode steps ctx to the end marker
+src/main/sprite_actor.c | spriteActorRestoreState | while (actor->mA8_x16_bytecodeStep != st->m18_bytecodeStep) | replays the sprite bytecode (each call steps it) up to the saved step
+src/field/f_80072140.c | uploadFieldImages | while (ReadTIM(&tim)) | ReadTIM walks the TIM list OpenTIM set up and returns 0 at its end
+src/main/heap.c | flushDelayedFrees | while (e != NULL) | unlinks one delayed free per pass (head->m0_next = e->m0_next) until the list is empty
+src/main/task.c | deleteAllTasks | while ((t = spriteCallback2Var2) != NULL) | each task's delete callback unlinks it: the list empties
+src/main/task.c | deleteAllTasks | while ((t = spriteCallbackHead) != NULL) | each task's delete callback unlinks it: the list empties
+src/battle/b_800B3E04.c | battleSpriteEffect | while ((task = findTaskByCallback((void (*)(TaskHeader*))battleSpriteEffect_3_update)) != 0) | each delete callback unlinks the task found: the search ends
+src/main/task.c | execSpritesCallbacksList2 | while (spriteCallbacksCurrentEntry != NULL) | walks the task list (cursor = the current task's m18_pNext)
+src/main/task.c | execSpritesCallbacksList1 | while (spriteCallbacksCurrentEntry != NULL) | walks the task list (cursor = the current task's m18_pNext)
+
+# Retries on the game's random numbers (no interrupt involved).
+src/battle/b_80079674.c | monsterBattleOpcode_selectRandomPC | while (!(tested[0] & tested[1] & tested[2])) | random pick among 3 party slots until one fits or all 3 are tested
+src/battle/b_80079674.c | monsterBattleOpcode_selectRandomPCSameRow | while (!(tested[0] & tested[1] & tested[2])) | random pick among 3 party slots until one fits or all 3 are tested
+src/battle/b_80079674.c | monsterBattleOpcode_selectRandomPCDiffRow | while (!(tested[0] & tested[1] & tested[2])) | random pick among 3 party slots until one fits or all 3 are tested
+src/battle/b_80079674.c | monsterBattleOpcode_selectRandGearPCSameRow | while (!(tested[0] & tested[1] & tested[2])) | random pick among 3 party slots until one fits or all 3 are tested
+src/battle/b_80079674.c | monsterBattleOpcode_selectRandomGearPC | while (!(tested[0] & tested[1] & tested[2])) | random pick among 3 party slots until one fits or all 3 are tested
+src/battle/b_80079674.c | monsterBattleOpcode_selectRandomKOPC | while (!(tested[0] & tested[1] & tested[2])) | random pick among 3 party slots until one fits or all 3 are tested
+src/battle/b_80080AE4.c | performAutoPartyMemberTurn | while ((abilitySelectedTarget = targets[randomInRange(0, 10)]) == 0xFF || abilitySelectedTarget == arg0) | random target until a valid one comes up (rand is the game's own generator)
+
+# Pure arithmetic.
+src/menu_gear_shop/gs_801C511C.c | initGearShopCameraTween | do (cont) | counts the tween's frames: the offset grows by a step each pass until it passes the target
+src/menu_gear_shop/gs_801C511C.c | initGearShopCameraTween | do (cont) #2 | counts the tween's frames: the offset grows by a step each pass until it passes the target
+
+# Frame loops whose every round does reach a safe point, by facts the tool
+# cannot see.
+port/src/game/battling/thread.c | battlingThreadStart | for () | the battling thread's entry yields (yieldBattlingThread) every frame; restarted if it returns, like the PS1's $ra
+src/battle/b_80083FF4.c | battleSelectTargetLoop | do (state == 2) | every pass ends with battleInputButton = 8, so the next one renders a frame (battleRenderDebugAndMain)
+src/battle/b_800BFC80.c | processBattleAnimationSub0 | while (1) | busy implies count > 0, so each waiting pass runs battleRender (the one-shot loops)
+src/battle_event/be_801E5160.c | battleEvent_update | do (cont) | renders a frame per script entity (an event has some); cont is local, ended by the pause countdown
+src/field/f_800A55B8.c | startFieldTransition | do (fieldMovieParams.m1A_loop != 0 || fieldMovieCurrentFrame < fieldMovieParams.mE_lastFrame) | onlyUpdateDirector is only ever 0, 1 or 2, and each case renders (VSync, ClearOTagR)
+src/field/f_800775C0.c | loadInitialField | while (loadNewField((fieldMapNumber & 0xFFF) * 2, 0) != 0) | after waitReadCompletion(0) the CD is idle: the first call starts the load, the second returns 0
+
+# Not reachable on the PC.
+src/main/filesystem.c | loadImageFileToVram | do (readInProgress > 0) | SN dev kit host-file path (cdromFnd != 0); retail boots with cdromFnd 0, and PCread is synchronous
+src/movie/mv_800737EC.c | loadDebugSoundEffectBanks | while ((s16)waitForMusic(0) != 0) | dead debug code: nothing calls it (loads from the SN dev kit's host)
+src/movie/mv_800737EC.c | loadDebugSoundEffectBanks | while ((s16)waitForMusic(0) != 0) #2 | dead debug code: nothing calls it (loads from the SN dev kit's host)
+src/movie/mv_800737EC.c | loadDebugSoundEffectBanks | while ((s16)waitForMusic(0) != 0) #3 | dead debug code: nothing calls it (loads from the SN dev kit's host)
+src/movie/mv_800737EC.c | loadDebugBattleMusic | while ((s16)waitForMusic(0) != 0) | dead debug code: nothing calls it (loads from the SN dev kit's host)
+
+# The 60 Hz Battling's VRAM put back (port/src/game/battling/between.c):
+# vramKeepChanged hands out the next run of changed kept tiles from an
+# index it advances, 0 once the 2048 tiles are passed: a drain, not a wait.
+port/src/game/battling/between.c | pcBattling60WaitDone | while (vramKeepChanged(&index, &x, &y, &w, &h, sb->run)) | drains the changed kept tiles (the index advances; 0 after the last tile)

@@ -1,0 +1,76 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#define ORDERED_SET 1
+#include "ordered.glsl"
+layout(local_size_x=8,local_size_y=8) in;
+layout(set=0,binding=0,r16ui) uniform uimage2D vram;
+layout(set=0,binding=2,r16ui) uniform uimage2D wideImg;
+layout(set=0,binding=3,r32ui) uniform uimage2D hiVram;
+layout(set=0,binding=4,r32ui) uniform uimage2D hiWide;
+ivec3 ordRgb5(uint v){return ivec3(v&31u,v>>5&31u,v>>10&31u);}
+ivec3 ordRgb8(uint v){return ivec3(v&255u,v>>8&255u,v>>16&255u);}
+ivec3 ordExpand5(ivec3 v){return (v<<3)|(v>>2);}
+uint ordPack5(ivec3 v){return uint(v.r)|uint(v.g)<<5|uint(v.b)<<10;}
+uint ordPack8(ivec3 v){return uint(v.r)|uint(v.g)<<8|uint(v.b)<<16;}
+uint ordApply(uint dst,uvec4 op,bool native) {
+    uint flags=op.w,mask=native?32768u:0x1000000u,covered=0x2000000u;
+    if(((flags&ORD_CHECK)!=0u&&(dst&mask)!=0u)||
+       (!native&&(flags&ORD_FRINGE)!=0u&&(dst&covered)!=0u))return dst;
+    bool quant=(flags&ORD_QUANT5)!=0u;
+    ivec3 f=quant?ordRgb5(op.z):ordRgb8(op.z);
+    ivec3 b=native?ordRgb5(dst):quant?ordRgb8(dst)>>3:ordRgb8(dst);
+    uint blend=flags&7u;
+    ivec3 c=f;
+    if(blend==1u)c=(b+f)>>1;
+    else if(blend==2u)c=b+f;
+    else if(blend==3u)c=b-f;
+    else if(blend==4u)c=b+((flags&ORD_QUARTER5)!=0u?ordExpand5((f>>3)>>2):f>>2);
+    c=clamp(c,0,quant?31:255);
+    uint cover=(flags>>ORD_COVER_SHIFT)&255u;
+    if(cover!=0u)c=ivec3(floor(mix(vec3(b),vec3(c),float(cover)/255.0)+0.5));
+    uint color=native?ordPack5(c):ordPack8(quant?ordExpand5(c):c);
+    uint coverage=native?0u:dst&covered;
+    if(!native) {
+        if((flags&(ORD_SURFACE|ORD_FRINGE))!=0u)coverage=covered;
+        else if((flags&ORD_CLEAR)!=0u)coverage=0u;
+    }
+    return color|((flags&ORD_MASK)!=0u?mask:0u)|coverage;
+}
+void main() {
+    ivec2 q=ivec2(gl_GlobalInvocationID.xy);
+    if(any(greaterThanEqual(q,ordered.grid)))return;
+    uint next=head[uint(q.y*ordered.grid.x+q.x)];
+    if(next==0xffffffffu)return;
+    ivec2 p=q+ordered.origin;uint dst;
+    uint kind=ordered.targetKind;
+    if(kind==0u)dst=imageLoad(vram,p).r;
+    else if(kind==1u)dst=imageLoad(wideImg,p).r;
+    else if(kind==2u)dst=imageLoad(hiVram,p).r;
+    else dst=imageLoad(hiWide,p).r;
+    // Keep only eight indices live per lane. Long overdraw is resolved in
+    // sorted chunks; short lists avoid a 64-entry array's register pressure.
+    uint ids[8],last=0u;bool haveLast=false;
+    for(int chunk=0;chunk<8;chunk++) {
+        int n=0,visited=0;uint at=next;
+        while(at!=0xffffffffu&&visited<64) {
+            uvec4 op=ordered.operation[at];uint order=op.y;
+            if(!haveLast||order>last) {
+                int j=n;
+                while(j>0&&ordered.operation[ids[j-1]].y>order) {
+                    if(j<8)ids[j]=ids[j-1];j--;
+                }
+                if(j<8)ids[j]=at;
+                n=min(n+1,8);
+            }
+            visited++;at=op.x;
+        }
+        if(at!=0xffffffffu){atomicAdd(ordered.overflow,1u);return;}
+        for(int k=0;k<n;k++)dst=ordApply(dst,ordered.operation[ids[k]],kind<2u);
+        if(n<8)break;
+        last=ordered.operation[ids[7]].y;haveLast=true;
+    }
+    if(kind==0u)imageStore(vram,p,uvec4(dst));
+    else if(kind==1u)imageStore(wideImg,p,uvec4(dst));
+    else if(kind==2u)imageStore(hiVram,p,uvec4(dst));
+    else imageStore(hiWide,p,uvec4(dst));
+}

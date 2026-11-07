@@ -1,0 +1,11 @@
+# tools/xmodcheck.py: cross-module references that are NOT split on the PC,
+# although the PS1 symbol names differ.
+#
+#   <ver> <module> <name>  # reason
+#
+# JP battle_event's sprite-actor helpers name battle data by JP address;
+# PLATFORM_PC #defines map them to the US names the battle defines
+# (src/battle_event/be_801E9420.c), so the PC links the battle's copy.
+jp battle_event D_800C2D44  # PLATFORM_PC: allocateJumpAnimationStructVar0
+jp battle_event D_800C2D50  # PLATFORM_PC: battleAnimationLoadingDest
+jp battle_event D_800C2F00  # PLATFORM_PC: battleCameraVar0

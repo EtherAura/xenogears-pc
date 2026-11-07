@@ -1,0 +1,25 @@
+diff --git a/src/core/web-server.cc b/src/core/web-server.cc
+index 5a8a4639..11a6b21c 100644
+--- a/src/core/web-server.cc
++++ b/src/core/web-server.cc
+@@ -24,6 +24,7 @@
+ #include <uv.h>
+ 
+ #include <charconv>
++#include <cstdlib>
+ #include <magic_enum/magic_enum_all.hpp>
+ #include <map>
+ #include <memory>
+@@ -832,7 +833,11 @@ void PCSX::WebServer::startServer(uv_loop_t* loop, int port) {
+     m_server.data = this;
+ 
+     struct sockaddr_in bindAddr;
+-    int result = uv_ip4_addr("0.0.0.0", port, &bindAddr);
++    // Xenogears decomp: listen on loopback only. Upstream binds every
++    // interface, which hands RAM writes, disc-image patching and the Lua
++    // handlers to anyone on the LAN. Override with PCSX_REDUX_WEB_BIND.
++    const char* bindHost = getenv("PCSX_REDUX_WEB_BIND");
++    int result = uv_ip4_addr(bindHost && *bindHost ? bindHost : "127.0.0.1", port, &bindAddr);
+     if (result != 0) {
+         uv_close(reinterpret_cast<uv_handle_t*>(&m_server), closeCB);
+         return;

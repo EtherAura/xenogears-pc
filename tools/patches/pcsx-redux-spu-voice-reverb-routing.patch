@@ -1,0 +1,25 @@
+diff --git a/src/spu/spu.cc b/src/spu/spu.cc
+index 389a3ec..51fa427 100644
+--- a/src/spu/spu.cc
++++ b/src/spu/spu.cc
+@@ -275,7 +275,6 @@ void PCSX::SPU::impl::synthesizeVoice(int ch, SPUCHAN *voice, int32_t &capVoice1
+     auto &sval = voice->data.get<Chan::sval>().value;
+     auto &mute = voice->data.get<Chan::Mute>().value;
+     auto &solo = voice->data.get<Chan::Solo>().value;
+-    auto &rvbActive = voice->data.get<Chan::RVBActive>().value;
+     auto &actFreq = voice->data.get<Chan::ActFreq>().value;
+     auto &usedFreq = voice->data.get<Chan::UsedFreq>().value;
+ 
+@@ -374,8 +373,10 @@ void PCSX::SPU::impl::synthesizeVoice(int ch, SPUCHAN *voice, int32_t &capVoice1
+                 SSumR[ns] += (sval * voice->volume.right()) / kVoiceVolumeUnity;
+             }
+ 
+-            // Store for reverb.
+-            if (rvbActive) m_reverb.store(voice, ns);
++            // Store for reverb. EON is a live mixer switch on hardware: a voice already
++            // playing starts or stops feeding the reverb the moment its bit changes, not at
++            // its next KEY ON (which is all RVBActive, latched by ReverbUnit::start, sees).
++            if (voice->data.get<Chan::Reverb>().value) m_reverb.store(voice, ns);
+         }
+ 
+         voice->interp.advance();

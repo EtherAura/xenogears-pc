@@ -1,0 +1,56 @@
+diff --git a/src/spu/adpcm.cc b/src/spu/adpcm.cc
+index dc097f5b..1e7e43e7 100644
+--- a/src/spu/adpcm.cc
++++ b/src/spu/adpcm.cc
+@@ -24,7 +24,11 @@ void PCSX::SPU::AdpcmDecoder::saveTo(Protobuf::Int32 &history1, Protobuf::Int32
+                                      Protobuf::Int32 *sb, Protobuf::Int32 &sbPos) const {
+     history1.value = m_s1;
+     history2.value = m_s2;
+-    auto storeOffset = [ramBase](uint8_t *ptr, Protobuf::Int32 &offset) { offset.value = ptr ? ptr - ramBase : -1; };
++    // kStopped is not inside sound RAM, and its distance from ramBase does not fit the 32-bit
++    // field, so it gets its own value.
++    auto storeOffset = [ramBase](uint8_t *ptr, Protobuf::Int32 &offset) {
++        offset.value = ptr == kStopped ? kStoppedOffset : ptr ? ptr - ramBase : -1;
++    };
+     storeOffset(m_start, startOffset);
+     storeOffset(m_curr, currOffset);
+     storeOffset(m_loop, loopOffset);
+@@ -38,8 +42,12 @@ void PCSX::SPU::AdpcmDecoder::loadFrom(const Protobuf::Int32 &history1, const Pr
+                                        const Protobuf::Int32 &sbPos) {
+     m_s1 = history1.value;
+     m_s2 = history2.value;
++    // Anything outside the 512KiB sound RAM is a parked cursor: kStoppedOffset, or the truncated
++    // pointer difference that states saved before kStoppedOffset existed hold instead.
+     auto restore = [ramBase](const Protobuf::Int32 &offset) -> uint8_t * {
+-        return offset.value == -1 ? nullptr : offset.value + ramBase;
++        if (offset.value == -1) return nullptr;
++        if (offset.value < 0 || offset.value >= kSoundRamSize) return kStopped;
++        return offset.value + ramBase;
+     };
+     m_start = restore(startOffset);
+     m_curr = restore(currOffset);
+diff --git a/src/spu/adpcm.h b/src/spu/adpcm.h
+index 4c782502..479cf40a 100644
+--- a/src/spu/adpcm.h
++++ b/src/spu/adpcm.h
+@@ -84,8 +84,9 @@ class AdpcmDecoder {
+     // the per-channel savestate fields. The fields are passed in rather than the
+     // whole channel message because adpcm.h cannot include types.h (it is
+     // included by it). `ramBase` is spuRamBase; each cursor is stored as a byte
+-    // offset, with -1 standing in for a null pointer. The kStopped sentinel is
+-    // an all-ones (non-null) pointer, so it round-trips as raw offset arithmetic.
++    // offset, with -1 standing in for a null pointer and kStoppedOffset for the
++    // kStopped sentinel (an all-ones pointer, whose distance from ramBase does not
++    // fit 32 bits on a 64-bit host).
+     void saveTo(Protobuf::Int32 &history1, Protobuf::Int32 &history2, Protobuf::Int32 &startOffset,
+                 Protobuf::Int32 &currOffset, Protobuf::Int32 &loopOffset, uint8_t *ramBase, Protobuf::Int32 *sb,
+                 Protobuf::Int32 &sbPos) const;
+@@ -107,6 +108,8 @@ class AdpcmDecoder {
+     DecodeResult decodeBlock(uint8_t *block);
+ 
+     static constexpr int kSamplesPerBlock = 28;
++    static constexpr int kSoundRamSize = 512 * 1024;
++    static constexpr int kStoppedOffset = -2;
+     bool bufferExhausted() const { return m_pos >= kSamplesPerBlock; }
+     int32_t takeSample() { return m_samples[m_pos++]; }
+     // Key-on leaves the buffer empty so the first sample forces a decode.

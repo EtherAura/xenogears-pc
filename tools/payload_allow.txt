@@ -1,0 +1,86 @@
+# tools/payloadcheck.py: port code (or, with a reason, game C) whose bytes match
+# retail module data.
+#
+#   source[:symbol]  byte budget  # reason
+#
+# Patterns are fnmatch on "source:symbol" or on the source alone (bytes whose
+# symbol is unknown, as merged strings or a PE file's local data, match an
+# entry by its source). A source's bytes must stay within the sum of its
+# entries' budgets. Anything else from port/ fails the check. None of this
+# is game data: it is SDK data the port's own libraries reimplement, or
+# coincidence (format strings, hex digits, runs of small consecutive numbers
+# that a game table also holds).
+#
+# Optional "pe" prefix: Windows-only, exact source:symbol pattern and its
+# own budget (no unknown-symbol fallback or pooling across symbols). Library
+# member/symbol origins are checked against the linked map and object bytes.
+
+port/src/gte/libgte.c:libgteAtanTable  2100  # LIBGTE's arctangent table (ratan2): src/main/psyq/libgte/ratan.c's own initialiser, #included there; decompiled game C's data like the rest of src/ (reported with it by --measure)
+port/src/system/spu.c:reverbPresets     640  # LIBSPU's ten reverb presets (SpuSetReverbModeType): SDK register values the port's LIBSPU writes, documented in psx-spx
+port/src/mdec/libpress.c                400  # LIBPRESS's debug messages, the MPEG-1 default intra quantisation matrix and the IDCT cosine table: SDK strings and standard values
+port/src/cd/libcd.c                     160  # LIBCD's debug messages and command names, printed as the SDK prints them
+port/src/gte/libgte.c                   120  # LIBGTE's matrix stack messages
+port/src/spu/tables.c                    64  # the SPU's Gaussian interpolation table (hardware values): a slowly rising run that a game table repeats
+port/src/gpu/*                           96  # deflate's length and distance tables (dump.c), "%d %d %d %d" formats: coincidence
+port/src/system/pad.c                    32  # a button index table (11, 12, 13, 14, 9, 10): coincidence
+port/src/system/gametext_pack.c          21  # gametext_fonts.h's measured glyph-to-Unicode map: consecutive UTF-16 A..K code points, coincidence; no retail font pixels or text
+port/src/game/worldmap/start.c           32  # clang builds: the vectoriser's lane-index constants (8, 9, 10, 11, 4, 5, 6, 7 as u32) that a menu table also holds: coincidence
+port/src/extras/*                       256  # "%d %d %d %d" and "(%d,%d)-(%d,%d)" formats, hex digits, consecutive numbers: coincidence
+port/src/ui/*                            96  # hex digits, button glyph ids, -1 fills: coincidence
+port/third_party/imgui/*                320  # Dear ImGui (unmodified): glyph ranges and its embedded fonts' tables hold runs of small consecutive numbers: coincidence
+
+
+# Windows static libraries: exact input/member bytes, not port-source votes.
+# Audited with glslang16.4.0 (SDK archive1.4.357.0), dav1d1.5.4 and MinGW GCC16.
+# Budgets below are measured maxima against both US and JP retail images.
+# Evidence: work/bd-payload-pe/{mapped-symbols.log,audit.map}.
+pe library/libdav1d.a/cdef_avx512.obj:pd_01234567 25 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain16_avx2.obj:hmul_bits 7 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain16_avx2.obj:mul_bits 11 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain16_avx2.obj:round 6 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain16_sse.obj:hmul_bits 7 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain16_sse.obj:mul_bits 9 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain16_sse.obj:round 6 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain_avx2.obj:hmul_bits 7 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain_avx2.obj:mul_bits 9 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain_avx2.obj:round 6 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain_sse.obj:hmul_bits 7 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain_sse.obj:mul_bits 9 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/filmgrain_sse.obj:round 6 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred16_avx2.obj:pw_1to16 31 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred16_avx512.obj:pw_1to32 37 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred_avx2.obj:cfl_ac_w8_pad1_shuffle 16 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred_avx2.obj:dav1d_z_filter_s 18 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred_avx2.obj:z2_ymul 31 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred_avx512.obj:z_xpos_off1a 16 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred_avx512.obj:z_xpos_off1b 9 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/ipred_avx512.obj:z_xpos_off2b 16 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/itx_avx512.obj:pd_0to15 53 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/lf_mask.c.obj:.rdata+0xa4 53 # dav1d compiler vector lane constants: consecutive u32 indices
+pe library/libdav1d.a/lf_mask.c.obj:.rdata+0xf0 57 # dav1d compiler vector lane constants: consecutive u32 indices
+pe library/libdav1d.a/loopfilter16_avx512.obj:filter_mask 29 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/loopfilter_avx2.obj:pb_mask 29 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/loopfilter_avx512.obj:hmulA 29 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/loopfilter_avx512.obj:hmulB 53 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/loopfilter_avx512.obj:pb_mask 64 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc16_avx2.obj:rescale_mul 29 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc16_avx2.obj:subpel_s_shuf8 1 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc16_avx512.obj:pd_0to7 25 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc16_avx512.obj:rescale_mul 57 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc16_avx512.obj:resize_shufB 1 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc_avx2.obj:rescale_mul 25 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc_avx512.obj:bilin_h_perm16 19 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc_avx512.obj:bilin_h_perm32 20 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc_avx512.obj:pd_0to7 29 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc_avx512.obj:rescale_mul 53 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libdav1d.a/mc_avx512.obj:warp_8x8_permD 1 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
+pe library/libglslang.a/GlslangToSpv.cpp.obj:CSWTCH.2655 21 # glslang compiler-generated switch result table: small integer enums
+pe library/libglslang.a/GlslangToSpv.cpp.obj:CSWTCH.7285 84 # glslang compiler-generated switch result table: small integer enums
+pe library/libglslang.a/ParseHelper.cpp.obj:string_273812c02dcca4db 32 # glslang standard unsupported-type diagnostic, two copies
+pe library/libglslang.a/glslang_tab.cpp.obj:_ZL11yytranslate 114 # glslang GLSL grammar table: consecutive parser indices/states
+pe library/libglslang.a/glslang_tab.cpp.obj:_ZL6yystos 110 # glslang GLSL grammar table: consecutive parser indices/states
+pe library/libglslang.a/glslang_tab.cpp.obj:_ZL7yycheck 3070 # glslang GLSL grammar table: consecutive parser indices/states
+pe library/libglslang.a/glslang_tab.cpp.obj:_ZL7yytable 3226 # glslang GLSL grammar table: consecutive parser indices/states
+pe library/libmingwex.a/lib64_libmingwex_a-g__fmt.o:string_9f9f5111f7b27a78 16 # MinGW/C++ standard-library hexadecimal digit string
+pe library/libstdc++.a/locale_facets.o:string_9f9f5111f7b27a78 16 # MinGW/C++ standard-library hexadecimal digit string
+pe library/libstdc++.a/locale_facets.o:string_f02ae380606c48d6 32 # MinGW/C++ standard-library hexadecimal digit string

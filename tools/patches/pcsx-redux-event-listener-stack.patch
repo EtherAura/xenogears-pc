@@ -1,0 +1,23 @@
+diff --git a/src/core/eventslua.cc b/src/core/eventslua.cc
+index a6a631d2..91b3d87f 100644
+--- a/src/core/eventslua.cc
++++ b/src/core/eventslua.cc
+@@ -107,6 +107,10 @@ void createListener(PCSX::Lua L) {
+ 
+     auto listener = new PCSX::EventBus::Listener(PCSX::g_system->m_eventBus);
+     listener->listen<Event>([L = t, ref](auto e) mutable {
++        // The listeners table, the info table and the callback's results stay
++        // on the thread's stack after the call; without dropping them every
++        // event leaks slots until the stack overflows (~32k events).
++        const int top = L.gettop();
+         L.getfieldtable("EVENT_LISTENERS", LUA_REGISTRYINDEX);
+         L.getfield(ref, true);
+         L.getfield("callback");
+@@ -118,6 +122,7 @@ void createListener(PCSX::Lua L) {
+         } catch (...) {
+             PCSX::g_system->log(PCSX::LogClass::LUA, "Unknown error in event listener");
+         }
++        if (L.gettop() > top) L.pop(L.gettop() - top);
+     });
+ 
+     int a = L.gettop();

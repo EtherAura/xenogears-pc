@@ -1,0 +1,12 @@
+# Scenes that stay 4:3 in a wide window (include/pc_wide.h: pcWideOptOut; built
+# into port/src/gpu/wide.c, XG_WIDE_OPTOUT=<file> reads another list).
+# A 4:3 picture gets the widefill= sides (bars, zoom or blur).
+#
+# <kind> <id> <reason>
+# kind: field (id: the field number, gameState.m231A_fieldID & 0xFFF)
+#
+# Empty by the user's choice: the ten rooms the wide sweep listed
+# (fields 14, 27, 39, 81, 305, 306, 307, 514, 609, 677: painted pictures,
+# cockpit and cabin views, map screens that end at the 4:3 edges) are drawn
+# wide anyway, with whatever lies beyond their edges (mostly black void, as in
+# the gear cockpits). The sweep's notes: work/agents/PORT_DISPLAY/wide-field/.

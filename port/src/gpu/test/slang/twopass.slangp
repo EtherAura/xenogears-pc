@@ -1,0 +1,13 @@
+# Two passes: a 2x copy (a named pass), then a tint from a LUT at the window's size.
+shaders = 2
+shader0 = double.slang
+filter_linear0 = "false"  # quoted, with a comment after (as libretro's presets write them)
+scale_type0 = source
+scale0 = "2.0" # doubled
+shader1 = tint.slang
+filter_linear1 = false
+textures = "Tint"
+Tint = tint.png
+Tint_linear = false
+parameters = "ROW_DARK"
+ROW_DARK = 0.0

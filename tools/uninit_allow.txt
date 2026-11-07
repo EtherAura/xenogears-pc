@@ -1,0 +1,215 @@
+# Reviewed possibly-uninitialised locals for tools/uninit.py (clang and gcc -O2
+# over the game C, US and JP, PLATFORM_PC). One per line:
+#     <file> | <function> | <variable> | <reason>
+# FP: always set before the read on every path that can happen.
+# harmless: read unset, but nothing depends on the value.
+# real, not reached: a path reads it unset, no test path (MSan runs, PCSX-Redux
+#     probes) reaches it; the reason says what the PS1 has there.
+# A reached one gets a PC-only fix with the PS1's value (IMPLICIT_RETURN, an
+# initialiser under PLATFORM_PC, a static) and leaves this list.
+
+src/main/filesystem.c | loadPcHostFile | fd | FP: the 4-try open loop always runs, PCopen sets fd (PC-devkit path only)
+src/main/filesystem.c | getNextStreamedSector | index | FP: streamSectorSlotCount >= 1 while streaming, the slot loop sets it (PC-devkit path only)
+src/main/filesystem.c | getNextStreamedPacket | slot | FP: the loop body sets slot before its step reads it (PC-devkit path only)
+src/main/filesystem.c | startFileRead | fd | FP: the 4-try open loop always runs, PCopen sets fd (PC-devkit path only)
+src/main/filesystem.c | batchStartLoadingFiles | fd | FP: the 4-try open loop always runs, PCopen sets fd (PC-devkit path only)
+src/main/filesystem.c | streamReadyCallback | slot | FP: streamSectorSlotCount >= 1 while a stream is running, the slot loop sets it
+src/main/filesystem.c | streamReadyCallback | idx | FP: set with slot (streamSectorSlotCount >= 1 while streaming)
+src/main/filesystem.c | imageFileReadyCallback | slot | FP: streamSectorSlotCount >= 1 while a read runs, the slot loop sets it
+src/main/filesystem.c | imageFileReadyCallback | idx | FP: set with slot (streamSectorSlotCount >= 1)
+src/main/filesystem.c | readImageFileSectorFromPc | s | FP: streamSectorSlotCount >= 1, the slot loop sets it (PC-devkit path only)
+src/main/filesystem.c | readImageFileSectorFromPc | slot | FP: set with s (PC-devkit path only)
+src/main/heap.c | findSymbolNameForAddress | name | debug only (the devkit symbol file is never loaded on retail); an address below the first symbol would read it unset
+src/main/model.c | submitModelForRendering | fn | FP: every renderMode passed is 0-5 (render-mode fields and tables); retail would call a stale register otherwise
+src/main/model.c | initModel2 | initParam | real, not reached: mode 3 with a model that has no instance data (m30 = 0); PS1: $s5, the caller's; no test path reaches it
+src/main/sequencer.c | findFreeSoundEffectSlot | best | real, not reached: every stealable channel has priority >= 0x21; PS1: $s6, the caller's caller's (varies by call site); no test path reaches it
+src/main/sequencer.c | saveMusicInstanceSnapshot | copy | dead code: only processMusicInstanceSnapshot calls it, and nothing calls or references that
+src/main/shape_transfer.c | spriteCallback_render15 | ofx | FP: set and read under the same m3C_x1F test
+src/main/shape_transfer.c | spriteCallback_render15 | ofy | FP: set and read under the same m3C_x1F test
+src/main/shape_transfer.c | blendPaletteColors | r | FP: the only caller passes mode 0-3, which the switch covers
+src/main/shape_transfer.c | blendPaletteColors | g | FP: the only caller passes mode 0-3, which the switch covers
+src/main/shape_transfer.c | blendPaletteColors | b | FP: the only caller passes mode 0-3, which the switch covers
+src/main/sound.c | setupReverb | addr | FP: set together with realloc = 1, read only under realloc
+src/main/sound.c | setupReverb | size | FP: set together with realloc = 1, read only under realloc
+src/main/sound.c | allocateSpuRamFromTop | addr | FP: set together with found, read only when found != NULL
+src/main/sprite.c | submitSpriteActorToRendering | visible | FP: matrixId starts at -1 and transform ids are unsigned, so the first sub-sprite sets it
+src/main/sprite.c | renderSpriteSquishedShadow | visible | FP: lastTile starts at -1 (as u32 never a tile 0-7), so the first sub-sprite sets it
+src/main/sprite.c | executeSpriteBytecode2Extended | unk | not reached: op 0xF7 reads the caller's $s2 (the op byte, 0xF7 or the 0xC8 prefix): retail would take an address error or write to BIOS RAM, so no data uses it
+src/main/sprite_actor.c | getModeForSavePointMesh | r | not reached: mode 3 (or >= 16) returns $v1 = the mode itself, and createSavePointMeshData then has no task (retail would crash), so data never has it
+src/main/sprite_actor.c | createSavePointMeshData | task | not reached: mode2 is 0-2 unless getModeForSavePointMesh's mode 3 case (see there)
+src/main/sprite_actor.c | createSavePointMeshData | size | not reached: mode2 is 0-2 unless getModeForSavePointMesh's mode 3 case (see there)
+src/battling/bl_800707A8.c | settleBattlingGearOnGround | bestDir | FP: best starts at pos->vy and only drops when bestDir is set; otherwise the loop breaks before reading it
+src/battling/bl_800732CC.c | fireBattlingProjectile | shot | not reached: all 9 slots active, but nothing ever activates slot 8 (and the PC's BSS starts zeroed)
+src/battling/bl_80075060.c | checkBattlingGearHits | best | FP: hits > 0 means a hit set best (a shape hit with bestDmg >= t only follows a projectile hit that set it)
+src/battling/bl_8007B270.c | drawBattlingTrailEffects | pt | FP: set and read under the same mC_prev != NULL test
+src/battling/bl_8007B270.c | spawnBattlingSplash | dirX | FP: read only when spread != 0, which needs d.vx or d.vz != 0, which sets it
+src/battling/bl_8007B270.c | spawnBattlingSplash | dirZ | FP: read only when spread != 0, which needs d.vx or d.vz != 0, which sets it
+src/battling/bl_8007E528.c | updateBattlingMenuInput | dx | FP: read only for type 3/4, which needs pad 0 or 1, both of which set it
+src/battling/bl_8007E528.c | updateBattlingMenuInput | dy | FP: read only for type 3/4, which needs pad 0 or 1, both of which set it
+src/battling/bl_80083DCC.c | setupBattlingTimQuad | scale | FP: both callers pass mode 0, which the switch covers
+src/battling/bl_80083DCC.c | setupBattlingTimQuadMirrored | scale | FP: both callers pass mode 0, which the switch covers
+src/field/f_80078B5C.c | updateEntityEventCode3Sub3Sub1 | collisionFlag | FP: the walk loop runs at least once (0 < 0x20) and sets it first
+src/field/f_80078B5C.c | updateEntityEventCode3Sub3Sub1 | tempTriangleId | FP: the walk loop runs at least once and sets it first
+src/field/f_80078B5C.c | updateEntityEventCode3Sub4Sub1 | collisionFlag | FP: the walk loop runs at least once (0 < 0x20) and sets it first
+src/field/f_80078B5C.c | updateEntityEventCode3Sub4Sub1 | tempTriangleId | FP: the walk loop runs at least once and sets it first
+src/field/f_80078B5C.c | checkCameraCollision | collisionFlag | FP: the walk loop runs at least once (0 < 0xF0) and sets it first
+src/field/f_80078B5C.c | checkCameraCollision | lastTriangle | FP: the walk loop runs at least once and sets it first
+src/field/f_8008FA38.c | OP_EE | v | real, not reached: a script source slot > 3 with a destination 0-3; PS1: the leaf frame's stack (the previous opcode's leftovers); no script seen using it
+src/field/f_8009BB0C.c | showDialogWindowForActor | projX | real, not reached: dialog window style 3 has no case (retail too); PS1: stack sp+0x34 leftovers; clamped on screen; no script seen using it
+src/field_mecha/field_mecha.c | updateMechAnimSub3 | t2 | FP: read only when (type & 0xF) == 5, and that case sets it in the same pass
+src/field_mecha/field_mecha.c | initAnimatedEnvTextureTile | v | FP: (y + i) % 3 is 0-2 (y is a VRAM row, >= 0)
+src/field_mecha/fm_801E34BC.c | updateMechAnim | updateFlag | harmless: returned unset when m0_model is NULL, and the only caller ignores the result
+src/field_mecha/fm_801E34BC.c | processMechaAnimData | pNew | real, not reached: op 0x15 with clone slots 8 and 9 both in use (retail writes through stale stack and past loadedMechas[9])
+src/field_mecha/fm_801E34BC.c | updateMechAnimSub4 | useOther | real, not reached: never set (sic), read by type-8 mecha events (none in New Game to Fei's room, PCSX-Redux breakpoint at 0x801E6014); PS1: stack sp+0x50 leftovers
+src/movie/mv_800737EC.c | findMovieFrameSector | name | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | findMovieFrameSector | readSize | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | findMovieFrameSector | offset | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | findMovieFrameSector | sectorSize | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | findMovieFrameSector | fileIndex | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | getMovieLastFrameNumber | name | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | getMovieLastFrameNumber | sectorSize | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | getMovieLastFrameNumber | readSize | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | getMovieLastFrameNumber | offset | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/movie/mv_800737EC.c | getMovieLastFrameNumber | fileIndex | FP: D_80077448 is 0-2 (debug movie menu); 2 returns first
+src/worldmap/w_800736DC.c | drawWorldmapSkyCloudBand | z | FP: the loop runs at least once (0 < 2)
+src/worldmap/w_800834D0.c | worldmapMode0_task_partyMember_update | parent | FP: only request 1 sets subState 8, and it sets parent in the same call
+src/worldmap/w_8008BD1C.c | worldmapMode0_task_partyGear_update | target | FP: only request 1 sets subState 8, and it sets target in the same call
+src/worldmap/w_800907F4.c | worldmap_taskCamera_updateSub0 | minH | FP: the loop runs at least once (0 < 3) and sets it
+src/worldmap/w_80094A5C.c | checkWorldmapPositionSub1 | result | FP: the switch covers every value checkWorldmapPositionSub1_0 returns (0-3)
+src/worldmap/w_80094A5C.c | checkWorldmapPosition | result | FP: collisionMode is 1 or 3, and every exit (loop = 0) sets result
+src/worldmap/w_80094A5C.c | loadWorldmapChunkFromPC | fd | FP: the 8-try open loop always runs (PC-devkit path only)
+src/battle/b_80070E2C.c | battleTickRestoreFlaggedMonsters | p | real, not reached: battle-script op 5 flags a monster, then 256 bytes are zeroed through p, retail's $s2 from battleMain's caller (0xFFFFFFFF from the field: it would wipe low BIOS RAM), so no shipped script uses it
+src/battle/b_800728B8.c | timerBarUpdateStartOfTurnAnimation | bar | real, not reached: time bar state 2 with no move steps (battle-event camera mode 2); PS1: stack sp+0x28/0x30 leftovers
+src/battle/b_800769E8.c | executeBattleCode_copyMonsterToSlot | src | real, not reached: a script mask with no bit 0-10; PS1: $s3 = the caller's n (= idx)
+src/battle/b_80079674.c | accessBattleEntityByteStat | result | harmless: returned unset only for writes (read == 0), whose callers discard it
+src/battle/b_80079674.c | accessBattleEntityByteStat | p | real, not reached: a script field id >= 24; PS1: $v1, the caller's (the op number for script ops)
+src/battle/b_80079674.c | accessBattleEntityWordStat | result | harmless: returned unset only for writes (read == 0), whose callers discard it
+src/battle/b_80079674.c | accessBattleEntityWordStat | p | real, not reached: a script field id >= 24; PS1: $v1, the caller's (the op number for script ops)
+src/battle/b_80080AE4.c | computeFacingForJump | result | FP: filled slots have ticks <= 0xA9 and empty ones 0xFF, and a battle always has another filled slot
+src/battle/b_80080AE4.c | performAutoPartyMemberTurn | result | FP: computeFacingForJump inlined by gcc (same reason)
+src/battle/b_80083FF4.c | abilityTargetSelectionInitSub0 | start1 | FP: the only caller passes targetMode 0-2, and every case sets it
+src/battle/b_80083FF4.c | abilityTargetSelectionInitSub0 | count1 | FP: the only caller passes targetMode 0-2, and every case sets it
+src/battle/b_80083FF4.c | abilityTargetSelectionInitSub0 | start2 | FP: read only when count2 > 0, which is set together with it
+src/battle/b_80085350.c | handleMenuSelectEnemySub | found | FP: the inner loop (0 < 7) always runs and sets it
+src/battle/b_80085350.c | updateDeathblowComboInput | found | FP: the inner loop always runs and sets it
+src/battle/b_80085350.c | updateDeathblowComboInput | icon | FP: combo buttons 4/6/7 store only 0, 2 or 3 in m2CC, and every case sets it
+src/battle/b_80085350.c | updateGearDeathblowComboInput | icon | FP: m2CC holds 0-2 or 0xFF, and 0xFF entries are skipped
+src/battle/b_80085350.c | callGearRelocateSlot | newSlot | FP: at most 3 gears use the 8 gear slots, so a free one exists
+src/battle/b_80089B50.c | battleHandleInput | playTime | FP: resumed only while paused or D_800C3444 != 0, both set together with it in the same call
+src/battle/b_8008A274.c | battleUpdateInputs_mode2 | playTime | FP: resumed only while paused or D_800C3444 != 0, both set together with it in the same call
+src/battle/b_8008A274.c | battleUpdateInputs_mode0 | playTime | FP: resumed only while paused or D_800C3444 != 0, both set together with it in the same call
+src/battle/b_8008B478.c | setItemMenuTargetIcons | icon | real, not reached: item target flags & 0xF outside 0-2; PS1: $s2 = the caller's item id
+src/battle/b_800941A4.c | startBattleAttackAnimationVar8_3 | base | harmless: unset only for formulas 4 and >= 6, where amount is overwritten (5) or unused
+src/battle/b_800941A4.c | computeBattleDamageSub1 | weapons | real, not reached: weapon mask bit 0x08 (gear: 0x10), never set in the data seen; PS1: stack leftovers below the frame
+src/battle/b_800941A4.c | computeBattleDamageSub1 | damage | real, not reached: an attack formula outside 0-2; PS1: stack sp+0x18 leftovers
+src/battle/b_800941A4.c | computeBattleDamageSub2 | defence | FP: the gear path always reaches noDefence (defence = 0); the other sets it from m59
+src/battle/b_800941A4.c | computeBattleDamageSub2 | result | real, not reached: a defence formula outside 0-2; PS1: $a3 left by computeBattleDamageSub1 (its attack value)
+src/battle/b_800941A4.c | chooseAutoBattleCommand | mask | FP: the command loadout is a character id 0-10, and every value has a case
+src/battle/b_800941A4.c | chooseAutoBattleCommand | count | FP: the command loadout is a character id 0-10, and every value has a case
+src/battle/b_800941A4.c | applyGearElementResistance | element | FP: the only caller checks m8_elements != 0, and the loop tests all 16 bits
+src/battle/b_8009EBA8.c | updateMechAnimSub3_battle | t2 | FP: read only when (type & 0xF) == 5, and that case sets it in the same pass
+src/battle/b_8009EBA8.c | initAnimatedEnvTextureTile_battle | v | FP: (y + i) % 3 is 0-2 (y is a VRAM row, >= 0)
+src/battle/b_800A8B0C.c | updateMechAnim_battle | updateFlag | harmless: returned unset when m0_model is NULL, and the only caller ignores the result
+src/battle/b_800A8B0C.c | processMechaAnimData_battle | pNew | real, not reached: op 0x15 (clone) with mecha slots 19-30 all in use; PS1: stack sp+0x168 (an earlier clone's pNew or leftovers)
+src/battle/b_800A8B0C.c | processMechaAnimData_battle | value | real, not reached: op 0x67 with opHi >= 7 and op3 & 0x20; PS1: stack sp+0x1B0 (the last op 0x67's value or leftovers)
+src/battle/b_800A8B0C.c | updateMechaEventAnim | outX | FP: switch (type & 1) covers both values
+src/battle/b_800A8B0C.c | updateMechaEventAnim | outY | FP: switch (type & 1) covers both values
+src/battle/b_800A8B0C.c | updateMechaEventAnim | outZ | FP: switch (type & 1) covers both values
+src/battle/b_800A8B0C.c | pushOutOfMechaColliders | bestR | FP: read only when best >= 0, which is set together with it
+src/battle/b_800A8B0C.c | pushOutOfMechaColliders | outX | FP: read only when best >= 0, which is set together with it
+src/battle/b_800A8B0C.c | pushOutOfMechaColliders | outZ | FP: read only when best >= 0, which is set together with it
+src/battle/b_800B15D8.c | copyCustomPolySubBuffer | abr | FP: set and read under the same semiTrans != 0 test
+src/battle/b_800B15D8.c | renderCustomPolyBuffer | v0 | FP: the 16 type values are all cases, and every case sets it
+src/battle/b_800B15D8.c | renderCustomPolyBuffer | v1 | FP: the 16 type values are all cases, and every case sets it
+src/battle/b_800B15D8.c | renderCustomPolyBuffer | v2 | FP: the 16 type values are all cases, and every case sets it
+src/battle/b_800BD1FC.c | createDamageDisplay | offset | FP: set when damageType != 4 and read only under the same test
+src/battle/b_800BD1FC.c | loadFragmentIsNotLoadedYet | r | FP: every caller checks fxFragmentLoaded == 0 first
+src/battle/b_800C11CC.c | executeSpriteBytecode2_battle | n | real, not reached: wait ops 0x40-0x7F; PS1: $s6, the caller's
+src/battle_event/be_801E5160.c | battleEventGetBytecodeOffset | found | FP: slot 0 is always active (set at init, endScript restores it)
+src/battle_event/be_801E5160.c | battleEvent_update | size | real, not reached: event script ops >= 0x4C; PS1: $s0 = the previous op's size (the caller's on the first op)
+src/battle_fx_model_shatter/fx_801FC074.c | createFxModelShatter | v0 | FP: all 16 code values set it
+src/battle_fx_model_shatter/fx_801FC074.c | createFxModelShatter | v1 | FP: all 16 code values set it
+src/battle_fx_model_shatter/fx_801FC074.c | createFxModelShatter | v2 | FP: all 16 code values set it
+src/battle_fx_model_shatter/fx_801FC074.c | createFxModelShatter | v3 | FP: only quad codes (code & 8) read it, and they set it
+src/battle_fx_sprite_wobble/fx_801FC000.c | fxSpriteWobble_draw | sub | real, not reached: a 2D actor with m3C_x1D (sprite op 0x3B); retail bug noted in the code (US reads through battleRender's $s1, JP takes an address error)
+src/battle_fx_tiled_sprite/fx_801FC000.c | fxTiledSprite_draw | parent | real, not reached: the same retail bug (US: $s2 = -1, an address error)
+src/battle_result/br_801DE5C4.c | setupStatsPolyG4 | color | FP: callers pass 0, or D_801E44E0, which computeStatBarWidths sets to 2 or 3 first
+src/battle_result/br_801DE5C4.c | setupRewardsItemList | width | real, not reached: a drop category outside 0-4; PS1: $s4 = the previous item's width (the caller's for the first)
+src/menu/m_801C65F4.c | loadSharedMenuData2 | bundle | FP: set and read under the same arg0 < 16 test
+src/menu/m_801C65F4.c | loadSharedMenuData2 | raw | FP: set and freed under the same arg0 < 16 test
+src/menu/m_801C65F4.c | updateMenuInput | time | FP: read only while paused, which is set together with it
+src/menu/m_801C8D78.c | scanMemoryCardDirectory | count | FP: --retries from 5 is non-zero, so the loop body runs and sets it
+src/menu/m_801C8D78.c | processLoadSaveMenuSub6 | status | harmless: no card in either slot skips the port loop; the status == 0 block it guards then changes nothing (PS1: $s3, the caller's)
+src/menu/m_801C8D78.c | saveGameToMemoryCard | handle | harmless: all three opens fail, then a close of a stale fd that fails (PS1: stack sp+0xB8)
+src/menu/m_801C8D78.c | drawMenu_4D8_text | count | FP: read only when hasData[i] != 0, which is set together with it
+src/menu/m_801D3674.c | setupStatusScreenWeight | rem | FP: set and read under the same isGear == 0 test
+src/menu/m_801D3674.c | setupStatsPolyG4 | rgb | FP: callers pass 0, or scaledStatsVar5 (2/3); the switch covers 0-3
+src/menu/m_801D3674.c | setStatDigitsColor | rgb | FP: callers pass 2 or scaledStatsVar5 - 2 (0/1); the switch covers 0-2
+src/menu/m_801D3674.c | setupStatusScreenEquipNames | load | harmless, reached (gear status): i == 0 may upload the half-drawn name image, which i == 1 then overwrites in the same rect (PS1: stack byte sp+0x48)
+src/menu/m_801D9808.c | processSoundMenu | mode | FP: processSoundMenuSub0 returns only 0-2, all cases
+src/menu/m_801D9F98.c | updateMenuPointerGlyph | x | FP: every caller passes mode 0-3; in mode 1 it is set whenever show stays 1
+src/menu/m_801D9F98.c | updateMenuPointerGlyph | y | FP: every caller passes mode 0-3; in mode 1 it is set whenever show stays 1
+src/menu/m_801DBE54.c | initEtherListMenu | bg | FP: mode comes from runEtherListMenu, only 0-2
+src/menu/m_801DBE54.c | freeEtherListMenu | bg | FP: every caller passes a constant 0-2
+src/menu/m_801DBE54.c | setupEtherListPage | value | FP: mode 0-2, and every branch sets it
+src/menu/m_801DBE54.c | setupEtherListSelection | idx | FP: mode 0-2, all cases
+src/menu/m_801DBE54.c | setupEtherListSelection | flags | FP: mode 0-2, all cases
+src/menu/m_801DBE54.c | useEtherOnParty | ether | FP: mode 0-2, all cases
+src/menu/m_801DE29C.c | buildEquipCandidateList | wpn | FP: set each pass under isGear == 0, read under the same test
+src/menu/m_801DE29C.c | buildEquipCandidateList | curWpn | FP: types 1-4 come only with isSlot, which sets it when isGear == 0
+src/menu/m_801DE29C.c | buildEquipCandidateList | acc | FP: set each pass under isGear == 0, read under the same test
+src/menu/m_801DE29C.c | buildEquipCandidateList | mask2 | FP: type 5 comes only with !isSlot && kind != 0, and both branches set it
+src/menu/m_801DE29C.c | buildEquipCandidateList | mask1 | FP: type 5 comes only with !isSlot && kind != 0, and both branches set it
+src/menu/m_801DE29C.c | buildEquipCandidateList | gw | FP: set each pass under isGear != 0, read under the same test
+src/menu/m_801DE29C.c | buildEquipCandidateList | curGw | FP: types 1-4 come only with isSlot, which sets it when isGear != 0
+src/menu/m_801DE29C.c | buildEquipCandidateList | ga | FP: set each pass under isGear != 0, read under the same test
+src/menu/m_801DE29C.c | setupEquipItemDescription | bundle | FP: the category is 0-3 (isGear is 0/1 at every caller), all cases
+src/menu/m_801DE29C.c | runEquipMenu | count | FP: on the first pass page 0 != prevPage 0xFF, so buildEquipCandidateList sets it
+src/menu/m_801E0F78.c | setupSkillMenuPage | pct | harmless: learned skills pass it unset, and the callee reads it only in state 2 (PS1: $s8, the previous entry's)
+src/menu/m_801E23CC.c | openGearMenu | set | FP: on the first pass slot != prev (0xF3), so it is set before both reads
+src/menu/m_801E3088.c | loadMemoryCardIconToVram | y | FP: the loop (0 < 3) always runs and sets it
+src/menu/m_801E3088.c | loadMemoryCardIconToVram | base | FP: the loop (0 < 3) always runs and sets it
+src/menu_gear_shop/gs_801C511C.c | loadGearShopData | bundle | FP: case 0 implies arg0 < 16, the test that sets it
+src/menu_gear_shop/gs_801C511C.c | loadGearShopData | raw | FP: set and freed under the same arg0 < 16 test
+src/menu_gear_shop/gs_801C511C.c | updateMenuPointerGlyph | x | FP: every caller passes mode 0
+src/menu_gear_shop/gs_801C511C.c | updateMenuPointerGlyph | y | FP: every caller passes mode 0
+src/menu_gear_shop/gs_801C511C.c | updateMenuInput | time | FP: read only while paused, which is set together with it
+src/menu_gear_shop/gs_801CDC68.c | updateGearShopSpark | x | FP: set whenever set = 1, read only under it
+src/menu_gear_shop/gs_801CDC68.c | updateGearShopSpark | y | FP: set whenever set = 1, read only under it
+src/menu_gear_shop/gs_801D1304.c | showGearShopSellItemInfo | value | FP: the only caller passes the category, 3 or 4
+src/menu_gear_shop/gs_801D1304.c | showGearShopSellItemInfo | price | FP: the only caller passes the category, 3 or 4
+src/menu_gear_shop/gs_801D1304.c | runGearShopSellMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showGearShopSellItemInfo sets it
+src/menu_gear_shop/gs_801D1304.c | setupGearShopBuyListRows | value | FP: kinds are 0-4 (group 0: 0-2, group 1: 3-4, unused entries zeroed)
+src/menu_gear_shop/gs_801D1304.c | setupGearShopBuyListRows | price | FP: kinds are 0-4 (group 0: 0-2, group 1: 3-4, unused entries zeroed)
+src/menu_gear_shop/gs_801D1304.c | setupGearShopBuyListRows | mask | FP: kinds are 0-4 (group 0: 0-2, group 1: 3-4, unused entries zeroed)
+src/menu_gear_shop/gs_801D1304.c | setupGearShopBuyListRows | tradeIn | harmless: returned unset for item pages and empty part pages; runGearShopBuyMenu uses it only for a flagged part row, which sets it (PS1: stack sp+0x70)
+src/menu_gear_shop/gs_801D1304.c | computeGearShopStatChange | minIdx | FP: min starts at 0xFF and defence is u8, so i = 0 sets it
+src/menu_gear_shop/gs_801D1304.c | setupGearShopOwnedCount | ids | FP: read only under found, which is set together with it
+src/menu_gear_shop/gs_801D1304.c | setupGearShopOwnedCount | counts | FP: read only under found, which is set together with it
+src/menu_gear_shop/gs_801D1304.c | setupGearShopOwnedCount | n | FP: read only under found, which is set together with it
+src/menu_gear_shop/gs_801D1304.c | showGearShopBuyItemInfo | price | FP: kinds are 0-4, all cases
+src/menu_gear_shop/gs_801D1304.c | runGearShopBuyMenu | tradeInNew | FP: set on the first pass (scroll 0 != 0xFF) before the row block, used only for flagged rows
+src/menu_gear_shop/gs_801D1304.c | runGearShopBuyMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showGearShopBuyItemInfo sets it
+src/menu_name_entry/ne_801C5040.c | updateMenuInput | time | FP: read only while paused, which is set together with it
+src/menu_party/pt_801C5018.c | updateMenuInput | time | FP: read only while paused, which is set together with it
+src/menu_party/pt_801C5018.c | runPartyChangeMenu | prevSide | FP: swapPartyMember runs only when selected, which is set together with it
+src/menu_party/pt_801C5018.c | runPartyChangeMenu | prevRow | FP: swapPartyMember runs only when selected, which is set together with it
+src/menu_party/pt_801C5018.c | runPartyChangeMenu | prevScroll | FP: swapPartyMember runs only when selected, which is set together with it
+src/menu_shop/sh_801C5040.c | loadShopData | bundle | FP: case 0 implies arg0 < 16, the test that sets it
+src/menu_shop/sh_801C5040.c | loadShopData | raw | FP: set and freed under the same arg0 < 16 test
+src/menu_shop/sh_801C5040.c | updateMenuPointerGlyph | x | FP: every caller passes mode 0
+src/menu_shop/sh_801C5040.c | updateMenuPointerGlyph | y | FP: every caller passes mode 0
+src/menu_shop/sh_801C5040.c | updateMenuInput | time | FP: read only while paused, which is set together with it
+src/menu_shop/sh_801CC720.c | setupShopBuyListRows | price | FP: setupShopStock writes only kinds 0-2, all cases
+src/menu_shop/sh_801CC720.c | setupShopBuyListRows | cost | FP: setupShopStock writes only kinds 0-2, all cases
+src/menu_shop/sh_801CC720.c | computeShopEquipStatChange | minIndex | FP: min starts at 0xFF and defence is u8, so i = 0 sets it
+src/menu_shop/sh_801CC720.c | findInventoryCount | ids | FP: inlined by gcc into setupShopOwnedCount, whose category is 0-2
+src/menu_shop/sh_801CC720.c | findInventoryCount | counts | FP: inlined by gcc into setupShopOwnedCount, whose category is 0-2
+src/menu_shop/sh_801CC720.c | setupShopOwnedCount | n | FP: the only caller passes kind 0-2
+src/menu_shop/sh_801CC720.c | setupShopOwnedCount | ids | FP: the only caller passes kind 0-2
+src/menu_shop/sh_801CC720.c | setupShopOwnedCount | counts | FP: the only caller passes kind 0-2
+src/menu_shop/sh_801CC720.c | showShopBuyItemInfo | price | FP: setupShopStock writes only kinds 0-2, all cases
+src/menu_shop/sh_801CC720.c | runShopBuyMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showShopBuyItemInfo sets it
+src/menu_shop/sh_801CC720.c | showShopSellItemInfo | value | harmless: an empty row of the equipped-accessory list passes a stale kind with id 0, and id 0 hides both labels
+src/menu_shop/sh_801CC720.c | showShopSellItemInfo | price | harmless: an empty row passes a stale kind; the price is used only for flagged rows, which recompute it
+src/menu_shop/sh_801CC720.c | runShopSellMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showShopSellItemInfo sets it

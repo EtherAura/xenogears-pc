@@ -1,0 +1,7163 @@
+# Xenogears PC port: the settings menu's and the extras' text in Japanese.
+# Our own translation of our own English (port/src/ui/l10n.h); tools/l10n.py checks it.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: ja\n"
+"X-Language-Name: 日本語\n"
+
+#: port/src/extras/battle.cpp
+msgid "This arena or actor combination could not load"
+msgstr "この闘技場と出演者の組み合わせは読み込めませんでした"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Move %d could not start with these actors"
+msgstr "この出演者では技 %d を始められません"
+
+#: port/src/extras/battle.cpp
+msgid "Move exceeded the preview limits"
+msgstr "技がプレビューの上限を超えました"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Saved battle preview: %s"
+msgstr "バトルのプレビューを保存しました: %s"
+
+#: port/src/extras/battle.cpp
+msgid "Scene + moves"
+msgstr "場面と技"
+
+#: port/src/extras/battle.cpp
+msgid "Battle preview"
+msgstr "バトルプレビュー"
+
+#: port/src/extras/battle.cpp
+msgid "Native battle arena, actors and moves"
+msgstr "ゲーム本来のバトル闘技場、出演者と技"
+
+#: port/src/extras/battlefx.cpp
+#, c-format
+msgid "Animation %d is unavailable"
+msgstr "アニメーション %d は使えません"
+
+#: port/src/extras/battlefx.cpp
+#, c-format
+msgid "Extra animation 2A/%03X is unavailable"
+msgstr "追加アニメーション 2A/%03X は使えません"
+
+#: port/src/extras/battlefx.cpp port/src/extras/models.cpp
+msgid "Out of memory"
+msgstr "メモリーが足りません"
+
+#: port/src/extras/battlefx.cpp
+msgid "The ability's sprite data or matching party bank is unavailable"
+msgstr "この技のスプライトデータか、対応するパーティのバンクが使えません"
+
+#: port/src/extras/battlefx.cpp
+msgid "No safe animation in this effect bank"
+msgstr "このエフェクトバンクには安全に再生できるアニメーションがありません"
+
+#: port/src/extras/battlefx.cpp
+msgid "No effect picture to export"
+msgstr "書き出すエフェクトの絵がありません"
+
+#: port/src/extras/battlefx.cpp
+#, c-format
+msgid "Saved effect preview: %s"
+msgstr "エフェクトのプレビューを保存しました: %s"
+
+#: port/src/extras/battlefx.cpp
+msgid "Source"
+msgstr "素材"
+
+#: port/src/extras/battlefx.cpp
+msgid "Battle effects"
+msgstr "バトルエフェクト"
+
+#: port/src/extras/battlefx.cpp
+msgid "Unknown effect source"
+msgstr "不明なエフェクトの素材です"
+
+#: port/src/extras/battlefx.cpp
+#, c-format
+msgid "Effect %s unavailable"
+msgstr "エフェクト %s は使えません"
+
+#: port/src/extras/battlefx.cpp
+msgid "Disc unavailable"
+msgstr "ディスクが使えません"
+
+#: port/src/extras/battlefx.cpp
+msgid "Cannot write diagnostic"
+msgstr "調査の記録を書き込めません"
+
+#: port/src/extras/battlefx.cpp
+msgid "Ability sprites, native effects and Gear trails"
+msgstr "技のスプライト、ゲーム本来のエフェクト、ギアの軌跡"
+
+#: port/src/extras/bestiary.cpp
+msgid "The Battle scene could not be opened"
+msgstr "バトルの場面を開けませんでした"
+
+#: port/src/extras/bestiary.cpp
+msgid "No enemies were found on these discs."
+msgstr "このディスクには敵が見つかりませんでした。"
+
+#: port/src/extras/bestiary.cpp
+msgid "A Gear: HP, attack and defences are its Gear numbers."
+msgstr "ギア: HP、攻撃力、防御力はギアの数値です。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Your gameplay options leave enemies as the disc has them."
+msgstr "ゲームプレイの設定は敵をディスクのままにしています。"
+
+#: port/src/extras/bestiary.cpp
+msgid "* Light and Dark are named only by Billy's ammunition."
+msgstr "* 光と闇の属性はビリーの弾だけが持っています。"
+
+#: port/src/extras/bestiary.cpp
+msgid "A thief's accessory in the party makes the first drop certain."
+msgstr "パーティに盗賊のアクセサリがあると、最初のドロップが必ず手に入ります。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Its own script can change these during a battle."
+msgstr "これらはバトル中に敵自身のスクリプトで変わることがあります。"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"Its scripts use no fixed attack (they choose from variables, or it does not "
+"act)."
+msgstr "スクリプトに決まった攻撃がありません(変数から選ぶか、行動しません)。"
+
+#: port/src/extras/bestiary.cpp
+msgid "The game has no description of its enemies."
+msgstr "ゲームには敵の説明文がありません。"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Random battles from story %d on: %d in %d%s"
+msgstr "ストーリー %d からのランダムバトル: %d / %d%s"
+
+#: port/src/extras/bestiary.cpp
+msgid "The Map viewer could not be opened"
+msgstr "マップビューアーを開けませんでした"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid ""
+"First met around \"%s\" (story %d), estimated from the story values the "
+"scripts of its places set."
+msgstr "初めて出会うのは「%s」の頃(ストーリー %d)。その場所のスクリプトが設定するストーリー値からの推定です。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Bestiary"
+msgstr "モンスター一覧"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"My progress: an enemy you met shows its name, picture and places; one you "
+"defeated its numbers, weaknesses, drops and attacks. Battles are recorded "
+"in either mode."
+msgstr ""
+"マイ進行: 出会った敵は名前、絵、出現場所を、倒した敵は数値、弱点、ドロップ、攻撃を表示します。バトルはどちらのモードでも記録されます。"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"Marks as met every enemy whose estimated first appearance is no later than "
+"the save's story."
+msgstr "推定の初登場がセーブのストーリー以前の敵を、すべて出会ったことにします。"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Caught up to story %d: %d enemies marked as met"
+msgstr "ストーリー %d まで追いつきました: %d 体の敵を出会ったことにしました"
+
+#: port/src/extras/bestiary.cpp
+msgid "No Xenogears saves on the memory cards"
+msgstr "メモリーカードにゼノギアスのセーブがありません"
+
+#: port/src/extras/bestiary.cpp
+msgid "Bestiary progress forgotten"
+msgstr "モンスター一覧の進行を消去しました"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"Progress is kept in bestiary.txt beside settings.ini, never on a memory "
+"card."
+msgstr "進行は settings.ini と同じフォルダの bestiary.txt に保存され、メモリーカードには書きません。"
+
+#: port/src/extras/bestiary.cpp
+msgid "No picture: its battle could not be set up here."
+msgstr "絵がありません: このバトルはここでは準備できませんでした。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Not met yet."
+msgstr "まだ出会っていません。"
+
+#: port/src/extras/bestiary.cpp
+msgid "You have not met this enemy yet."
+msgstr "この敵にはまだ出会っていません。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Its name is not a text of the JP font (a code that is no letter)."
+msgstr "その名前は JP フォントの文字ではありません(文字でないコード)。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Its name has no spelling in the game font's narrow letters."
+msgstr "名前をゲームフォントの半角文字で書き表せません。"
+
+#: port/src/extras/bestiary.cpp
+msgid "The Sprite viewer could not be opened"
+msgstr "スプライトビューアーを開けませんでした"
+
+#: port/src/extras/bestiary.cpp
+msgid "Defeat it to see its numbers, weaknesses, drops and attacks."
+msgstr "倒すと数値、弱点、ドロップ、攻撃が見られます。"
+
+#: port/src/extras/bestiary.cpp port/src/extras/gallery.cpp port/src/extras/jukebox.cpp port/src/extras/models.cpp port/src/extras/sprites.cpp
+msgid "No Xenogears disc image found"
+msgstr "ゼノギアスのディスクイメージが見つかりません"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"Every enemy: its picture, numbers, weaknesses, drops, where it appears and "
+"its attacks"
+msgstr "すべての敵: 絵、数値、弱点、ドロップ、出現場所と攻撃"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%s: %d bytes, too large to show whole (a movie stream?)"
+msgstr "%s: %d バイト。大きすぎて全体を表示できません(ムービーのストリーム?)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%s: cannot read it from the image"
+msgstr "%s: イメージから読み込めません"
+
+#: port/src/extras/browser.cpp
+msgid "Not an LZSS stream the game's decoder would take"
+msgstr "ゲームのデコーダーが受け付ける LZSS データではありません"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Decompressed by the game's decoder: %d bytes"
+msgstr "ゲームのデコーダーで展開しました: %d バイト"
+
+#: port/src/extras/browser.cpp port/src/extras/jukebox.cpp port/src/extras/tablesview.cpp
+#, c-format
+msgid "Cannot write %s"
+msgstr "%s に書き込めません"
+
+#: port/src/extras/browser.cpp port/src/extras/gallery.cpp port/src/extras/maps.cpp port/src/extras/models.cpp port/src/extras/tablesview.cpp
+#, c-format
+msgid "Exported %s"
+msgstr "%s を書き出しました"
+
+#: port/src/extras/browser.cpp port/src/extras/gallery.cpp port/src/extras/jukebox.cpp port/src/extras/models.cpp port/src/extras/sprites.cpp
+#, c-format
+msgid "Cannot write %s: %s"
+msgstr "%s に書き込めません: %s"
+
+#: port/src/extras/browser.cpp
+msgid "Play a sound first"
+msgstr "先に音を再生してください"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid ""
+"The game's own lookup (setCurrentDirectory 0x%02X, getFileStartSector, "
+"getFileSize): sector %d, size %d%s"
+msgstr ""
+"ゲーム自身の検索(setCurrentDirectory 0x%02X、getFileStartSector、getFileSize): セクター "
+"%d、サイズ %d%s"
+
+#: port/src/extras/browser.cpp
+msgid "The jukebox (coming) plays scores with the game's own sound driver."
+msgstr "ジュークボックス(準備中)はゲーム自身のサウンドドライバーで曲を再生します。"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Cannot decode field section %d"
+msgstr "フィールドのセクション %d を展開できません"
+
+#: port/src/extras/browser.cpp
+msgid ""
+"Packed VRAM uploads (uploadTextureToVram): a model bundle's textures. The "
+"Model tab of a model beside them uploads them."
+msgstr ""
+"まとめられた VRAM 転送(uploadTextureToVram): モデルバンドルのテクスチャです。隣にあるモデルの「モデル」タブが転送します。"
+
+#: port/src/extras/browser.cpp
+msgid "No members."
+msgstr "メンバーがありません。"
+
+#: port/src/extras/browser.cpp
+msgid "TIM pictures back to back."
+msgstr "TIM の絵が連続しています。"
+
+#: port/src/extras/browser.cpp
+msgid "Not a TIM picture."
+msgstr "TIM の絵ではありません。"
+
+#: port/src/extras/browser.cpp
+msgid "Not a model archive."
+msgstr "モデルのアーカイブではありません。"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid ""
+"Model: %d parts, %d polygons, %d texture files (the game's model code in a "
+"sandbox)"
+msgstr "モデル: パーツ %d 個、ポリゴン %d 枚、テクスチャファイル %d 個(サンドボックスで動くゲームのモデルコード)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "No sample bank %d on this disc"
+msgstr "このディスクにはサンプルバンク %d がありません"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Sound %d: %.2f s (on an SPU of its own)"
+msgstr "サウンド %d: %.2f 秒(専用の SPU で再生)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid ""
+"Sound %d: nothing to play (or a driver opcode the preview does not follow)"
+msgstr "サウンド %d: 再生するものがありません(またはプレビューが追えないドライバー命令)"
+
+#: port/src/extras/browser.cpp
+msgid "Each preset played as a note at its own pitch, held one second."
+msgstr "各プリセットを本来の音程の音符として 1 秒ずつ鳴らします。"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid ""
+"Each effect as the game's sound driver plays it, with sample bank %d."
+msgstr "各効果音をゲームのサウンドドライバーと同じように、サンプルバンク %d で鳴らします。"
+
+#: port/src/extras/browser.cpp
+msgid "Not a sample bank or a sound effect bank."
+msgstr "サンプルバンクでも効果音バンクでもありません。"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Opened %s"
+msgstr "%s を開きました"
+
+#: port/src/extras/browser.cpp
+msgid "No file"
+msgstr "ファイルなし"
+
+#: port/src/extras/browser.cpp
+msgid "No Xenogears disc image was found. Open one with Image..."
+msgstr "ゼノギアスのディスクイメージが見つかりませんでした。「イメージ...」で開いてください"
+
+#: port/src/extras/browser.cpp
+msgid ""
+"Open a directory and choose a file. Files are read from the image as the "
+"game's file table places them."
+msgstr "ディレクトリを開いてファイルを選んでください。ファイルはゲームのファイルテーブルの配置どおりにイメージから読みます。"
+
+#: port/src/extras/browser.cpp
+msgid "No Xenogears disc image found: open one with Image..."
+msgstr "ゼノギアスのディスクイメージが見つかりません: 「イメージ...」で開いてください"
+
+#: port/src/extras/browser.cpp port/src/extras/shell.cpp
+msgid "Asset browser"
+msgstr "アセットブラウザー"
+
+#: port/src/extras/browser.cpp
+msgid ""
+"Both discs' files: kinds, hex, LZSS, offset bundles, TIM pictures, models, "
+"sound banks; export"
+msgstr "両ディスクのファイル: 種類、16 進、LZSS、オフセットバンドル、TIM の絵、モデル、サウンドバンク、書き出し"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Gallery: %d movies, %d places the game plays them, %d scenes"
+msgstr "ギャラリー: ムービー %d 本、ゲームで再生される場所 %d か所、場面 %d"
+
+#: port/src/extras/gallery.cpp port/src/extras/jukebox.cpp port/src/extras/sprites.cpp
+msgid "No Xenogears disc image was found."
+msgstr "ゼノギアスのディスクイメージが見つかりませんでした。"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Movies: %s"
+msgstr "ムービー: %s"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Movie %s: the player did not start"
+msgstr "ムービー %s: プレイヤーが始まりませんでした"
+
+#: port/src/extras/gallery.cpp
+msgid "No frame to export"
+msgstr "書き出すフレームがありません"
+
+#: port/src/extras/gallery.cpp
+msgid "Play a movie first"
+msgstr "先にムービーを再生してください"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Exported %s (%.1f s)"
+msgstr "%s を書き出しました(%.1f 秒)"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"Choose a movie. It plays through the game's own movie player (its "
+"video_player overlay), with its XA sound, from the disc it is on."
+msgstr ""
+"ムービーを選んでください。ゲーム自身のムービープレイヤー(video_player オーバーレイ)で、XA "
+"音声とともに、そのムービーのあるディスクから再生します。"
+
+#: port/src/extras/gallery.cpp
+msgid "No verified script reference was found on the supplied discs."
+msgstr "指定されたディスクには確認済みのスクリプトの位置が見つかりませんでした。"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Picture %d: cannot read file 04/%03X"
+msgstr "絵 %d: ファイル 04/%03X を読めません"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "File 04/%03X is not a TIM picture"
+msgstr "ファイル 04/%03X は TIM の絵ではありません"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Exported %d pictures to %s"
+msgstr "%d 枚の絵を %s に書き出しました"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"Choose a picture: the dialogue portraits, the event pictures the field "
+"scripts show (and the town maps), the logo. Exported to PNG as the game's "
+"GPU would draw them."
+msgstr ""
+"絵を選んでください: 会話の顔グラフィック、フィールドのスクリプトが表示するイベント画(と町の地図)、ロゴ。ゲームの GPU が描くとおりに PNG "
+"で書き出します。"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Scene %d selected"
+msgstr "場面 %d を選びました"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "No disc %d image"
+msgstr "ディスク %d のイメージがありません"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Disc %d does not hold field %d"
+msgstr "ディスク %d にはフィールド %d がありません"
+
+#: port/src/extras/gallery.cpp
+msgid "Invalid start: check party IDs and field variables"
+msgstr "開始状態が正しくありません: パーティの ID とフィールド変数を確認してください"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Starting %s at entrance %d, story %d"
+msgstr "%s を入口 %d、ストーリー %d で始めます"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"Choose a scene to start the game there. Verified presets reached their "
+"story transition in US and JP replays. Other starts are inferred from "
+"scripts and may need party, flags or player interaction."
+msgstr ""
+"場面を選ぶとゲームをそこから始めます。確認済みのプリセットは US "
+"版と日本語版の再現でストーリーの切り替わりまで届きました。ほかの開始点はスクリプトから推定したもので、パーティ、フラグ、プレイヤーの操作が必要なことがあります。"
+
+#: port/src/extras/gallery.cpp
+msgid "Verified scene preset restored"
+msgstr "確認済みの場面プリセットに戻しました"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"This scene is in an actor's interaction routine. Talking to the actor may "
+"be required."
+msgstr "この場面は登場人物の話しかけ処理の中にあります。その人物に話しかける必要があるかもしれません。"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"The indexed script may need player interaction or story flags that this "
+"start does not supply."
+msgstr "このスクリプトには、この開始状態が用意しないプレイヤーの操作やストーリーのフラグが必要かもしれません。"
+
+#: port/src/extras/gallery.cpp
+msgid "Custom party and flags may change how this scene plays."
+msgstr "パーティやフラグを変えると、この場面の進み方が変わることがあります。"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"Verified presets protect the scene's party and starting state. Enable the "
+"override to edit."
+msgstr "確認済みのプリセットは場面のパーティと開始状態を守ります。編集するには上書きを有効にしてください。"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"Character IDs 0-10; 255 is an empty slot. Custom parties require the "
+"override."
+msgstr "キャラクター ID は 0~10、255 は空きです。パーティを変えるには上書きが必要です。"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"Advanced: variable slot 2-511 and a 16-bit value. Slot 82 is reserved for "
+"the disc."
+msgstr "上級者向け: 変数スロット 2~511 と 16 ビットの値。スロット 82 はディスク用に予約されています。"
+
+#: port/src/extras/gallery.cpp
+msgid "F1, then Extras, comes back to the gallery from the game."
+msgstr "ゲームから F1、「おまけ」でギャラリーに戻れます。"
+
+#: port/src/extras/gallery.cpp
+msgid ""
+"The lists are recovered from the disc when the gallery opens; the pictures "
+"are ready now."
+msgstr "一覧はギャラリーを開いたときにディスクから復元します。絵はもう使えます。"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Gallery: %s disc %d field %d script PC %04X"
+msgstr "ギャラリー: %s ディスク %d フィールド %d スクリプト PC %04X"
+
+#: port/src/extras/gallery.cpp
+msgid "Enable the scene override before changing its party."
+msgstr "パーティを変える前に場面の上書きを有効にしてください。"
+
+#: port/src/extras/gallery.cpp
+msgid "Enable the scene override before changing its flags."
+msgstr "フラグを変える前に場面の上書きを有効にしてください。"
+
+#: port/src/extras/gallery.cpp
+msgid "Gallery"
+msgstr "ギャラリー"
+
+#: port/src/extras/gallery.cpp
+msgid "Movies, portraits, event pictures and cutscenes"
+msgstr "ムービー、顔グラフィック、イベント画、カットシーン"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s: cannot read %s"
+msgstr "%s: %s を読めません"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s: a sample bank it uses is not on the discs"
+msgstr "%s: 使うサンプルバンクがディスクにありません"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s: the driver did not start it"
+msgstr "%s: ドライバーが始めませんでした"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Playing %s (%s, #%02d, %s)"
+msgstr "%s を再生中(%s、#%02d、%s)"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Cannot read %s"
+msgstr "%s を読めません"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Effect bank %s: a sample bank it uses is not on the discs"
+msgstr "効果音バンク %s: 使うサンプルバンクがディスクにありません"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Effect %d of %s: the driver did not play it"
+msgstr "効果音 %d(%s): ドライバーが鳴らしませんでした"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Playing movie %d's audio (disc %d, %02X/%03X)"
+msgstr "ムービー %d の音声を再生中(ディスク %d、%02X/%03X)"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s: nothing was played"
+msgstr "%s: 何も再生されませんでした"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Exported %s (%s)"
+msgstr "%s を書き出しました(%s)"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Movie %d: cannot export its audio"
+msgstr "ムービー %d: 音声を書き出せません"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s: cannot export it"
+msgstr "%s: 書き出せません"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Effect %d: cannot export it"
+msgstr "効果音 %d: 書き出せません"
+
+#: port/src/extras/jukebox.cpp
+msgid ""
+"Franz on the Yggdrasil plays the field sound bank. Choose a bank, then an "
+"effect."
+msgstr "ユグドラシルのフランツはフィールドのサウンドバンクを鳴らします。バンクを選んでから効果音を選んでください。"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Internal name: %s  /  OST %d-%02d"
+msgstr "内部名: %s  /  OST %d-%02d"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid ""
+"Internal name: %s  /  No verified OST title (ambience or unmapped variant)"
+msgstr "内部名: %s  /  確認済みの OST 曲名なし(環境音または未対応の変形)"
+
+#: port/src/extras/jukebox.cpp
+msgid "Export cancelled"
+msgstr "書き出しを取り消しました"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid ""
+"WAV, 44.1 kHz stereo, as the driver plays it: up to the loop count, then "
+"the fade (a score that does not loop plays through). To %s"
+msgstr ""
+"WAV、44.1 kHz ステレオ、ドライバーの再生どおり: ループ回数まで再生してからフェードアウトします(ループしない曲は最後まで)。書き出し先: "
+"%s"
+
+#: port/src/extras/jukebox.cpp
+msgid ""
+"Choose an effect to play it. Effects play with the reverb the last score "
+"set, as in the game."
+msgstr "効果音を選ぶと鳴らします。効果音はゲームと同じく、最後に再生した曲のリバーブ付きで鳴ります。"
+
+#: port/src/extras/jukebox.cpp
+msgid "Movie music"
+msgstr "ムービーの音楽"
+
+#: port/src/extras/jukebox.cpp port/src/extras/shell.cpp
+msgid "Jukebox"
+msgstr "ジュークボックス"
+
+#: port/src/extras/jukebox.cpp
+msgid "Continues in Extras and F1; stops when the game resumes."
+msgstr "おまけと F1 の間も続き、ゲームに戻ると止まります。"
+
+#: port/src/extras/jukebox.cpp
+msgid ""
+"Each score and effect is played by the game's own sound driver, as the game "
+"plays it, on an SPU of its own. Choose one to play it."
+msgstr "曲も効果音も、ゲーム自身のサウンドドライバーがゲームと同じように専用の SPU で再生します。選ぶと再生します。"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid ""
+"%d scores named \"Movie dammy music\" by the game are left out: the movies' "
+"music is XA audio in the movie streams."
+msgstr ""
+"ゲームで「Movie dammy music」という名前の曲 %d 曲は除いています: ムービーの音楽はムービーのストリームの中の XA 音声です。"
+
+#: port/src/extras/jukebox.cpp
+msgid "The sound driver could not be set up"
+msgstr "サウンドドライバーを準備できませんでした"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "No score %s"
+msgstr "曲 %s がありません"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Rendered %s"
+msgstr "%s を書き出しました"
+
+#: port/src/extras/jukebox.cpp
+msgid ""
+"Music, sound effects and movie music, played by the game's own sound driver"
+msgstr "音楽、効果音、ムービーの音楽。ゲーム自身のサウンドドライバーで再生します"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%s: %s (%.0f ms)"
+msgstr "%s: %s(%.0f ミリ秒)"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Field %d: %s"
+msgstr "フィールド %d: %s"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Export failed: %s"
+msgstr "書き出しに失敗しました: %s"
+
+#: port/src/extras/maps.cpp port/src/extras/sprites.cpp
+#, c-format
+msgid "Exported %s (%d x %d)"
+msgstr "%s を書き出しました(%d x %d)"
+
+#: port/src/extras/maps.cpp port/src/extras/shell.cpp
+#, c-format
+msgid "Cannot open %s"
+msgstr "%s を開けません"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "World map: %s"
+msgstr "ワールドマップ: %s"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "World map, stage %d: %s (%.0f ms)"
+msgstr "ワールドマップ、段階 %d: %s(%.0f ミリ秒)"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "World map: no overview (%d x %d)"
+msgstr "ワールドマップ: 全体図がありません(%d x %d)"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "World map overview: %d x %d (%.0f ms)"
+msgstr "ワールドマップ全体図: %d x %d(%.0f ミリ秒)"
+
+#: port/src/extras/maps.cpp
+msgid "Export failed: the map is too large"
+msgstr "書き出しに失敗しました: マップが大きすぎます"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Exported %s (%d x %d, %.1f s)"
+msgstr "%s を書き出しました(%d x %d、%.1f 秒)"
+
+#: port/src/extras/maps.cpp
+msgid "No disc 1 image found: the fields are on disc 1"
+msgstr "ディスク 1 のイメージが見つかりません: フィールドはディスク 1 にあります"
+
+#: port/src/extras/maps.cpp
+msgid "Maps need disc 1"
+msgstr "マップにはディスク 1 が必要です"
+
+#: port/src/extras/maps.cpp
+msgid "Map viewer"
+msgstr "マップビューアー"
+
+#: port/src/extras/maps.cpp
+msgid ""
+"Fields and the world map, set up and drawn by the game's own code: "
+"walkmesh, triggers, exits, actors, free camera"
+msgstr "フィールドとワールドマップ。ゲーム自身のコードで準備して描きます: 歩行メッシュ、トリガー、出口、登場人物、自由カメラ"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Animation %d: %s"
+msgstr "アニメーション %d: %s"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "%s: %d parts, %d polygons%s (the game's own model code)"
+msgstr "%s: パーツ %d 個、ポリゴン %d 枚%s(ゲーム自身のモデルコード)"
+
+#: port/src/extras/models.cpp
+msgid "Choose a model first"
+msgstr "先にモデルを選んでください"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Exported %s (%d programs, %d MIMe clips)"
+msgstr "%s を書き出しました(プログラム %d 個、MIMe クリップ %d 個)"
+
+#: port/src/extras/models.cpp
+msgid "No texture page"
+msgstr "テクスチャページがありません"
+
+#: port/src/extras/models.cpp
+msgid "No disc image."
+msgstr "ディスクイメージがありません。"
+
+#: port/src/extras/models.cpp port/src/extras/sprites.cpp
+msgid "None available."
+msgstr "使えるものがありません。"
+
+#: port/src/extras/models.cpp
+msgid ""
+"GLB keeps these weights and adds a target clip. All exports a clip per "
+"target."
+msgstr "GLB はこれらのウェイトを保ち、ターゲットのクリップを追加します。「すべて」はターゲットごとにクリップを書き出します。"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid ""
+"Normal fight speed, stationary, %.2f ticks/s. Fight events are not played."
+msgstr "通常の戦闘速度、静止、毎秒 %.2f ティック。戦闘のイベントは再生しません。"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid ""
+"Raw clip, %.2f frames/s. This clip has no verified fight speed settings."
+msgstr "生のクリップ、毎秒 %.2f フレーム。このクリップには確認済みの戦闘速度の設定がありません。"
+
+#: port/src/extras/models.cpp
+msgid ""
+"Choose an animated model on the left. Its animations are the game's own "
+"programs, run by the Gear overlay's animation VM, a game tick at a time."
+msgstr ""
+"左でアニメーションするモデルを選んでください。アニメーションはゲーム自身のプログラムで、ギアのオーバーレイのアニメーション VM が 1 "
+"ティックずつ動かします。"
+
+#: port/src/extras/models.cpp
+msgid ""
+"Choose a model on the left: it is set up and drawn by the game's own model "
+"code."
+msgstr "左でモデルを選んでください: ゲーム自身のモデルコードで準備して描きます。"
+
+#: port/src/extras/models.cpp
+msgid ""
+"Battling clips contain bone channels and delta tracks. They have no Gear "
+"bytecode program."
+msgstr "バトリングのクリップはボーンのチャンネルと差分トラックでできています。ギアのバイトコードプログラムはありません。"
+
+#: port/src/extras/models.cpp
+msgid "Choose a model first."
+msgstr "先にモデルを選んでください。"
+
+#: port/src/extras/models.cpp
+msgid "No textured polygons."
+msgstr "テクスチャ付きのポリゴンがありません。"
+
+#: port/src/extras/models.cpp
+msgid ""
+"The page through its CLUT, from the sandbox's VRAM; the frame marks the "
+"texels the polygons use."
+msgstr "サンドボックスの VRAM から、CLUT を通したページです。四角はポリゴンが使うテクセルを示します。"
+
+#: port/src/extras/models.cpp
+msgid "Model viewer"
+msgstr "モデルビューアー"
+
+#: port/src/extras/models.cpp
+msgid ""
+"Gears, enemies, arenas and field models, by the game's own code; glTF export"
+msgstr "ギア、敵、闘技場、フィールドのモデル。ゲーム自身のコードで表示; glTF 書き出し"
+
+#: port/src/extras/models.cpp
+msgid "Animation viewer"
+msgstr "アニメーションビューアー"
+
+#: port/src/extras/models.cpp
+msgid ""
+"Gear programs, Battling clips and field MIMe targets through the game's "
+"decoders"
+msgstr "ギアのプログラム、バトリングのクリップ、フィールドの MIMe ターゲット。ゲームのデコーダーで再生"
+
+#: port/src/extras/picker.cpp
+#, c-format
+msgid "No such file or folder: %s"
+msgstr "そのファイルやフォルダはありません: %s"
+
+#: port/src/extras/scripts.cpp
+msgid "Scripts and dialogue"
+msgstr "スクリプトと会話"
+
+#: port/src/extras/scripts.cpp
+msgid "The paused game is not in field mode."
+msgstr "一時停止中のゲームはフィールドモードではありません。"
+
+#: port/src/extras/scripts.cpp
+msgid "Actor routines, variables, execution traces and dialogue history"
+msgstr "登場人物の処理、変数、実行の記録、会話の記録"
+
+#: port/src/extras/shell.cpp
+msgid ""
+"Both discs' files: kinds, hex, LZSS, offset bundles, TIM pictures; export"
+msgstr "両ディスクのファイル: 種類、16 進、LZSS、オフセットバンドル、TIM の絵、書き出し"
+
+#: port/src/extras/shell.cpp port/src/extras/visuals.cpp
+msgid "Visual library"
+msgstr "ビジュアルライブラリー"
+
+#: port/src/extras/shell.cpp
+msgid "Sprites, models, animations and battle previews"
+msgstr "スプライト、モデル、アニメーション、バトルプレビュー"
+
+#: port/src/extras/shell.cpp
+msgid "Music and sound effects"
+msgstr "音楽と効果音"
+
+#: port/src/extras/shell.cpp port/src/extras/tablesview.cpp
+msgid "Game tables"
+msgstr "ゲームのデータ表"
+
+#: port/src/extras/shell.cpp
+msgid "The game's data tables: items, enemies, shops"
+msgstr "ゲームのデータ表: アイテム、敵、ショップ"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "%s: coming in a later phase"
+msgstr "%s: 今後の段階で追加予定です"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "No viewer '%s'"
+msgstr "ビューアー「%s」はありません"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Bookmark source unavailable. Use Home > Locate image: %s (%s)"
+msgstr "ブックマークの元のイメージが使えません。ホーム >「イメージの場所...」を使ってください: %s(%s)"
+
+#: port/src/extras/shell.cpp
+msgid "Bookmark source identity differs: choose the original disc image."
+msgstr "ブックマークの元のイメージが違います: 元のディスクイメージを選んでください。"
+
+#: port/src/extras/shell.cpp
+msgid "No such bookmark"
+msgstr "そのブックマークはありません"
+
+#: port/src/extras/shell.cpp
+msgid "Invalid bookmark target"
+msgstr "ブックマークの対象が正しくありません"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Cannot restore %s: %s %s"
+msgstr "%s を復元できません: %s %s"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Opened bookmark: %s"
+msgstr "ブックマークを開きました: %s"
+
+#: port/src/extras/shell.cpp
+msgid "Select an asset to bookmark"
+msgstr "ブックマークする素材を選んでください"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Bookmark saved; preview unavailable: %s"
+msgstr "ブックマークを保存しました。プレビューは使えません: %s"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Saved bookmark %zu: %s"
+msgstr "ブックマーク %zu を保存しました: %s"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Unknown bookmark command: %s"
+msgstr "不明なブックマークのコマンドです: %s"
+
+#: port/src/extras/shell.cpp
+msgid "Assets"
+msgstr "素材"
+
+#: port/src/extras/shell.cpp
+msgid "Visuals"
+msgstr "ビジュアル"
+
+#: port/src/extras/shell.cpp port/src/extras/tablesview.cpp
+msgid "Tables"
+msgstr "データ表"
+
+#: port/src/extras/shell.cpp
+msgid "Scripts"
+msgstr "スクリプト"
+
+#: port/src/extras/shell.cpp
+msgid "Bookmarks"
+msgstr "ブックマーク"
+
+#: port/src/extras/shell.cpp port/src/ui/menu.cpp
+msgid "Back"
+msgstr "もどる"
+
+#: port/src/extras/shell.cpp port/src/ui/menu.cpp
+msgid "Quit"
+msgstr "終了"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "%s  %s disc %d"
+msgstr "%s  %s ディスク %d"
+
+#: port/src/extras/shell.cpp
+msgid "No cached picture. The saved asset location is ready to open."
+msgstr "保存された絵はありません。保存した素材の場所はすぐに開けます。"
+
+#: port/src/extras/shell.cpp
+msgid "Open bookmark"
+msgstr "ブックマークを開く"
+
+#: port/src/extras/shell.cpp
+msgid "Rename"
+msgstr "名前を変える"
+
+#: port/src/extras/shell.cpp
+msgid "Bookmark renamed"
+msgstr "ブックマークの名前を変えました"
+
+#: port/src/extras/shell.cpp
+msgid "Delete"
+msgstr "削除"
+
+#: port/src/extras/shell.cpp
+msgid "Bookmark deleted"
+msgstr "ブックマークを削除しました"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Source: %s"
+msgstr "元のイメージ: %s"
+
+#: port/src/extras/shell.cpp
+msgid "Locate image..."
+msgstr "イメージの場所..."
+
+#: port/src/extras/shell.cpp
+msgid "Locate the original disc image"
+msgstr "元のディスクイメージの場所"
+
+#: port/src/extras/shell.cpp
+msgid "Bookmark source updated"
+msgstr "ブックマークの元のイメージを更新しました"
+
+#: port/src/extras/shell.cpp
+msgid "Browse and export the disc's files."
+msgstr "ディスクのファイルを見て書き出します。"
+
+#: port/src/extras/shell.cpp
+msgid "Sprites, Gears and animations."
+msgstr "スプライト、ギア、アニメーション。"
+
+#: port/src/extras/shell.cpp
+msgid "Music and sound effects."
+msgstr "音楽と効果音。"
+
+#: port/src/extras/shell.cpp
+msgid "Names and data from the game."
+msgstr "ゲームの名前とデータ。"
+
+#: port/src/extras/shell.cpp
+msgid "Dialogue and actor routines."
+msgstr "会話と登場人物の処理。"
+
+#: port/src/extras/shell.cpp
+msgid "Coming in a later phase."
+msgstr "今後の段階で追加予定です。"
+
+#: port/src/extras/shell.cpp
+msgid "Exports"
+msgstr "書き出し"
+
+#: port/src/extras/shell.cpp
+msgid "Change..."
+msgstr "変更..."
+
+#: port/src/extras/shell.cpp
+msgid "The export folder"
+msgstr "書き出し先のフォルダ"
+
+#: port/src/extras/shell.cpp port/src/ui/sections.cpp
+msgid "Default"
+msgstr "標準"
+
+#: port/src/extras/shell.cpp
+#, c-format
+msgid "Exports go to %s"
+msgstr "書き出し先: %s"
+
+#: port/src/extras/shell.cpp
+msgid "Open folder"
+msgstr "フォルダを開く"
+
+#: port/src/extras/shell.cpp
+msgid "Save an asset with Bookmark in its Options menu."
+msgstr "素材は「オプション」メニューの「ブックマーク」で保存できます。"
+
+#: port/src/extras/shell.cpp
+msgid "Options"
+msgstr "オプション"
+
+#: port/src/extras/shell.cpp
+msgid "Choose"
+msgstr "決定"
+
+#: port/src/extras/shell.cpp
+msgid "RS camera"
+msgstr "RS カメラ"
+
+#: port/src/extras/shell.cpp
+msgid "Play"
+msgstr "再生"
+
+#: port/src/extras/shell.cpp
+msgid "Tab"
+msgstr "タブ"
+
+#: port/src/extras/shell.cpp
+msgid "H help"
+msgstr "H ヘルプ"
+
+#: port/src/extras/shell.cpp port/src/ui/menu.cpp
+msgid "Extras"
+msgstr "おまけ"
+
+#: port/src/extras/shell.cpp
+msgid "Library"
+msgstr "ライブラリー"
+
+#: port/src/extras/shell.cpp
+msgid "Return"
+msgstr "もどる"
+
+#: port/src/extras/shell.cpp
+msgid "Extras controls"
+msgstr "おまけの操作"
+
+#: port/src/extras/shell.cpp
+msgid ""
+"Enter / confirm: choose or open Options. Esc / cancel: back. F1: return to "
+"the game menu."
+msgstr "Enter / 決定: 選ぶ、または「オプション」を開く。Esc / キャンセル: もどる。F1: ゲームのメニューにもどる。"
+
+#: port/src/extras/shell.cpp
+msgid ""
+"Up/Down or L1/R1: character. Left/Right: animation. Square or Space: "
+"play/pause. Triangle: one frame. Start: Options."
+msgstr ""
+"上下または L1/R1: キャラクター。左右: アニメーション。□ またはスペース: 再生/一時停止。△: 1 コマ送り。START: オプション。"
+
+#: port/src/extras/shell.cpp
+msgid "Gallery, Map viewer, effects: L1/R1 change the tabs above the list."
+msgstr "ギャラリー、マップビューアー、エフェクト: L1/R1 で一覧の上のタブを切り替えます。"
+
+#: port/src/extras/shell.cpp
+msgid ""
+"Right stick: camera. L2/R2: zoom (arena in Battle scene). R3: fit the "
+"picture."
+msgstr "右スティック: カメラ。L2/R2: ズーム(バトルの場面では闘技場)。R3: 絵を合わせる。"
+
+#: port/src/extras/shell.cpp
+msgid ""
+"Mouse: choose a row, drag to move the picture, wheel to zoom. Drag the red "
+"track to scroll a list."
+msgstr "マウス: 行を選ぶ、ドラッグで絵を動かす、ホイールでズーム。赤いバーをドラッグすると一覧をスクロールします。"
+
+#: port/src/extras/shell.cpp
+msgid "Close"
+msgstr "閉じる"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid ""
+"%s: %d animations, %d frames, %d palettes (the game's sprite code in a "
+"sandbox)"
+msgstr "%s: アニメーション %d 個、フレーム %d 枚、パレット %d 個(サンドボックスで動くゲームのスプライトコード)"
+
+#: port/src/extras/sprites.cpp
+msgid "No frames"
+msgstr "フレームがありません"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "Exported %s: %d frames in %d x %d cells of %d x %d"
+msgstr "%s を書き出しました: %d フレーム、%d x %d マス、1 マス %d x %d"
+
+#: port/src/extras/sprites.cpp
+msgid "Choose an animation that plays"
+msgstr "再生されるアニメーションを選んでください"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "Exported %d pictures (%.2f frames/s, %d x %d) to %s"
+msgstr "%d 枚の絵を書き出しました(毎秒 %.2f フレーム、%d x %d): %s"
+
+#: port/src/extras/sprites.cpp port/src/ui/sections.cpp
+msgid "Sprites"
+msgstr "スプライト"
+
+#: port/src/extras/sprites.cpp
+msgid ""
+"Up/Down or L1/R1 changes the character; Left/Right changes the animation. "
+"Confirm or Start opens Options. Animations use the game's sprite code and "
+"bytecode, at the game's rate; each frame can be held on its own, and all "
+"can be exported as PNG."
+msgstr ""
+"上下または L1/R1 でキャラクター、左右でアニメーションを切り替えます。決定または START "
+"でオプションを開きます。アニメーションはゲームのスプライトコードとバイトコードでゲームと同じ速さで動き、1 コマずつ止めることも、すべてを PNG "
+"で書き出すこともできます。"
+
+#: port/src/extras/sprites.cpp
+msgid ""
+"Field sprites are made as the field makes them: an NPC's sheet and palette "
+"where the field puts them in VRAM, the party's pieces sent to VRAM each "
+"frame."
+msgstr ""
+"フィールドのスプライトはフィールドと同じように作ります: NPC のシートとパレットはフィールドが VRAM "
+"に置く場所に、パーティのパーツは毎フレーム VRAM に送ります。"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "Ability %d is unavailable"
+msgstr "技 %d は使えません"
+
+#: port/src/extras/sprites.cpp
+msgid "Sprite viewer"
+msgstr "スプライトビューアー"
+
+#: port/src/extras/sprites.cpp
+msgid ""
+"Field and battle sprites: animations by the game's own code, frames, "
+"palettes; PNG export"
+msgstr "フィールドとバトルのスプライト: ゲーム自身のコードによるアニメーション、フレーム、パレット; PNG 書き出し"
+
+#: port/src/extras/tablesview.cpp
+#, c-format
+msgid "Compared with %s"
+msgstr "%s と比べました"
+
+#: port/src/extras/tablesview.cpp
+#, c-format
+msgid "Exported every table to %s"
+msgstr "すべての表を %s に書き出しました"
+
+#: port/src/extras/tablesview.cpp
+msgid "No Xenogears disc image found: the tables need one"
+msgstr "ゼノギアスのディスクイメージが見つかりません: 表にはイメージが必要です"
+
+#: port/src/extras/tablesview.cpp
+#, c-format
+msgid "%s: not a Xenogears disc image"
+msgstr "%s: ゼノギアスのディスクイメージではありません"
+
+#: port/src/extras/tablesview.cpp
+msgid ""
+"Names, music, sounds and rates recovered from the disc and the game's code"
+msgstr "ディスクとゲームのコードから復元した名前、音楽、効果音、確率"
+
+#: port/src/extras/visuals.cpp
+#, c-format
+msgid "Cannot open linked asset: %s"
+msgstr "リンク先の素材を開けません: %s"
+
+#: port/src/extras/visuals.cpp
+msgid "Sprites, models, battle previews, maps and gallery"
+msgstr "スプライト、モデル、バトルプレビュー、マップ、ギャラリー"
+
+#: port/src/ui/menu.cpp
+msgid "Display"
+msgstr "画面"
+
+#: port/src/ui/menu.cpp
+msgid "Audio"
+msgstr "サウンド"
+
+#: port/src/ui/menu.cpp
+msgid "Controls"
+msgstr "操作"
+
+#: port/src/ui/menu.cpp
+msgid "Gameplay"
+msgstr "ゲームプレイ"
+
+#: port/src/ui/menu.cpp
+msgid "Memory cards"
+msgstr "メモリーカード"
+
+#: port/src/ui/menu.cpp
+msgid "System"
+msgstr "システム"
+
+#: port/src/ui/menu.cpp
+msgid "About"
+msgstr "情報"
+
+#: port/src/ui/menu.cpp
+msgid "Cards"
+msgstr "カード"
+
+#: port/src/ui/menu.cpp
+msgid "Discs"
+msgstr "ディスク"
+
+#: port/src/ui/menu.cpp
+msgid "Arrows"
+msgstr "矢印キー"
+
+#: port/src/ui/menu.cpp port/src/ui/sections.cpp
+msgid "choose"
+msgstr "決定"
+
+#: port/src/ui/menu.cpp
+msgid "back"
+msgstr "もどる"
+
+#: port/src/ui/menu.cpp
+msgid "move"
+msgstr "移動"
+
+#: port/src/ui/menu.cpp
+msgid "section"
+msgstr "切り替え"
+
+#: port/src/ui/menu.cpp port/src/ui/sections.cpp
+msgid "Start"
+msgstr "スタート"
+
+#: port/src/ui/menu.cpp
+msgid ""
+"Choose your disc images and BIOS, then Start. Quit leaves without changing "
+"anything."
+msgstr "ディスクイメージと BIOS を選んで「スタート」を選んでください。「終了」は何も変えずに終わります。"
+
+#: port/src/ui/menu.cpp
+msgid ""
+"Choose an extra to open it. The game stays paused. Back returns to Settings."
+msgstr "おまけを選ぶと開きます。ゲームは一時停止したままです。「もどる」で設定にもどります。"
+
+#: port/src/ui/menu.cpp
+#, c-format
+msgid ""
+"Choose a setting, then use Left and Right to change it. %s returns to the "
+"commands."
+msgstr "設定を選び、左右で変えてください。%s でコマンドにもどります。"
+
+#: port/src/ui/menu.cpp
+msgid "Choose an option for its description."
+msgstr "オプションを選ぶと説明が出ます。"
+
+#: port/src/ui/menu.cpp
+msgid "Choose a section to open it."
+msgstr "セクションを選ぶと開きます。"
+
+#: port/src/ui/menu.cpp
+msgid ": help"
+msgstr ": ヘルプ"
+
+#: port/src/ui/menu.cpp
+#, c-format
+msgid ""
+"Set by the environment: %s=%s (a change here replaces it for this run)"
+msgstr "環境変数で設定されています: %s=%s(ここで変えると、この起動中はそちらが優先されます)"
+
+#: port/src/ui/sections.cpp
+msgid "Off"
+msgstr "オフ"
+
+#: port/src/ui/sections.cpp
+msgid "Reduced"
+msgstr "少なめ"
+
+#: port/src/ui/sections.cpp
+msgid "Normal"
+msgstr "ノーマル"
+
+#: port/src/ui/sections.cpp
+msgid "Increased"
+msgstr "多め"
+
+#: port/src/ui/sections.cpp
+msgid "Custom"
+msgstr "カスタム"
+
+#: port/src/ui/sections.cpp
+msgid "Drives"
+msgstr "ドライブ"
+
+#: port/src/ui/sections.cpp
+msgid "No folders or files of this kind here."
+msgstr "ここにはこの種類のフォルダやファイルがありません。"
+
+#: port/src/ui/sections.cpp
+msgid "No folders here."
+msgstr "ここにはフォルダがありません。"
+
+#: port/src/ui/sections.cpp
+msgid "Use this folder"
+msgstr "このフォルダを使う"
+
+#: port/src/ui/sections.cpp
+msgid "System dialog..."
+msgstr "システムのダイアログ..."
+
+#: port/src/ui/arena.cpp port/src/ui/sections.cpp
+msgid "Cancel"
+msgstr "キャンセル"
+
+#: port/src/ui/sections.cpp
+msgid "Browse..."
+msgstr "選ぶ..."
+
+#: port/src/ui/sections.cpp
+msgid "4:3 TV"
+msgstr "4:3 テレビ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The picture as a TV showed it: the 4:3 frame, Xenogears' 216 lines at their "
+"size and place."
+msgstr "テレビで映っていたままの絵: 4:3 の画面に、ゼノギアスの 216 ラインを本来の大きさと位置で。"
+
+#: port/src/ui/sections.cpp
+msgid "4:3 fill"
+msgstr "4:3 全体"
+
+#: port/src/ui/sections.cpp
+msgid "The picture stretched to fill 4:3 (its 216 lines drawn 11% taller)."
+msgstr "4:3 いっぱいに引き伸ばした絵(216 ラインを 11% 高く描きます)。"
+
+#: port/src/ui/sections.cpp
+msgid "1:1 square pixels"
+msgstr "1:1 正方形ピクセル"
+
+#: port/src/ui/sections.cpp
+msgid "Each PS1 pixel square: 320x216 is 1.48:1."
+msgstr "PS1 の 1 ピクセルを正方形に: 320x216 は 1.48:1 です。"
+
+#: port/src/ui/sections.cpp
+msgid "16:9 wide"
+msgstr "16:9 ワイド"
+
+#: port/src/ui/sections.cpp
+msgid "Widescreen: more of the scene at the sides. Movies stay 4:3."
+msgstr "ワイド画面: 場面の左右がより広く見えます。ムービーは 4:3 のままです。"
+
+#: port/src/ui/sections.cpp
+msgid "16:10 wide"
+msgstr "16:10 ワイド"
+
+#: port/src/ui/sections.cpp
+msgid "21:9 wide"
+msgstr "21:9 ワイド"
+
+#: port/src/ui/sections.cpp
+msgid "32:9 wide"
+msgstr "32:9 ワイド"
+
+#: port/src/ui/sections.cpp
+msgid "Aspect"
+msgstr "アスペクト比"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Custom %s"
+msgstr "カスタム %s"
+
+#: port/src/ui/sections.cpp
+msgid "Custom w:h"
+msgstr "カスタム 横:縦"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Widescreen at %s: more of the scene at the sides. Movies stay 4:3."
+msgstr "%s のワイド画面: 場面の左右がより広く見えます。ムービーは 4:3 のままです。"
+
+#: port/src/ui/gametext.cpp port/src/ui/sections.cpp
+msgid "Use"
+msgstr "使う"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s is narrower than 4:3: wide shapes only (or 1:1)"
+msgstr "%s は 4:3 より縦長です: 横長の比率(または 1:1)だけが使えます"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The paused picture stays as it was drawn; the game draws the wide picture "
+"when it goes on."
+msgstr "一時停止中の絵は描かれたままです。ゲームが続くとワイドの絵を描きます。"
+
+#: port/src/ui/sections.cpp
+msgid "Vertical framing"
+msgstr "縦の表示範囲"
+
+#: port/src/ui/sections.cpp
+msgid "Original"
+msgstr "オリジナル"
+
+#: port/src/ui/sections.cpp
+msgid "Expanded"
+msgstr "拡張"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Expanded draws more above and below fields, battles and the world map, "
+"including menu backdrops. The title zooms to fill."
+msgstr "「拡張」はフィールド、バトル、ワールドマップ(メニューの背景も含む)の上下をより広く描きます。タイトルは拡大して画面を埋めます。"
+
+#: port/src/ui/sections.cpp
+msgid "Scale"
+msgstr "拡大方法"
+
+#: port/src/ui/sections.cpp
+msgid "Fit"
+msgstr "フィット"
+
+#: port/src/ui/sections.cpp
+msgid "Integer"
+msgstr "整数倍"
+
+#: port/src/ui/sections.cpp
+msgid "Stretch"
+msgstr "引き伸ばし"
+
+#: port/src/ui/sections.cpp
+msgid "As large as the window allows, in the aspect's shape."
+msgstr "ウィンドウに収まる最大の大きさで、アスペクト比の形のまま。"
+
+#: port/src/ui/sections.cpp
+msgid "Each PS1 pixel a whole number of window pixels: sharp and even."
+msgstr "PS1 の 1 ピクセルをウィンドウの整数個のピクセルで: くっきり均一です。"
+
+#: port/src/ui/sections.cpp
+msgid "The whole window, whatever its shape."
+msgstr "形にかかわらずウィンドウ全体に。"
+
+#: port/src/ui/sections.cpp
+msgid "Resolution"
+msgstr "解像度"
+
+#: port/src/ui/sections.cpp
+msgid "PS1 resolution, with subpixel geometry in the displayed picture."
+msgstr "PS1 の解像度。表示する絵ではサブピクセル精度のジオメトリ。"
+
+#: port/src/ui/sections.cpp
+msgid "The PS1's picture pixel for pixel, as it always was."
+msgstr "PS1 の絵をピクセルそのままに、昔のとおり。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"Drawn at %dx the PS1's resolution in a copy of the picture the game never "
+"reads. Movies stay as they are."
+msgstr "ゲームが読むことのない絵のコピーに PS1 の %d 倍の解像度で描きます。ムービーはそのままです。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Auto: as many times as the window's height holds PS1 lines (4x in a "
+"1868x965 window, 9x at 4K)."
+msgstr "自動: ウィンドウの高さに PS1 のラインが収まる倍率(1868x965 のウィンドウで 4 倍、4K で 9 倍)。"
+
+#: port/src/ui/sections.cpp
+msgid "Auto GPU limit"
+msgstr "自動 GPU 上限"
+
+#: port/src/ui/sections.cpp
+msgid "Limit GPU time"
+msgstr "GPU 時間に上限を設定"
+
+#: port/src/ui/sections.cpp
+msgid "Auto lowers resolution after sustained GPU load and restores it when there is headroom. Off by default."
+msgstr "GPU の処理が重い状態が続くと自動で解像度を下げ、処理にゆとりがある状態が続くと戻します。標準では無効です。"
+
+#: port/src/ui/sections.cpp
+msgid "The budget covers GPU work per video frame. CPU or display waits can still limit speed."
+msgstr "上限はゲームの 1 フレームあたりの GPU 処理時間です。CPU や表示の待ち時間でも速度が下がることがあります。"
+
+#: port/src/ui/sections.cpp
+msgid "Geometry"
+msgstr "ジオメトリ"
+
+#: port/src/ui/sections.cpp
+msgid "Subpixel geometry"
+msgstr "サブピクセル精度"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Smooths projected vertices as the camera moves. Enabled by default with "
+"upscaling."
+msgstr "カメラが動くときの頂点の位置をなめらかにします。高解像度では最初から有効です。"
+
+#: port/src/ui/sections.cpp
+msgid "Perspective textures"
+msgstr "パースペクティブ補正"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Corrects texture swim on 3D surfaces. Screen-space sprites and menus keep "
+"their original mapping."
+msgstr "3D の面のテクスチャのゆがみを補正します。画面上のスプライトとメニューは本来のマッピングのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Close surface gaps"
+msgstr "面のすき間を閉じる"
+
+#: port/src/ui/sections.cpp
+msgid "Slightly overlaps opaque edges that met through PS1 pixel rounding."
+msgstr "PS1 のピクセルのまるめで接していた、ぬりつぶしの縁をわずかに重ねます。"
+
+#: port/src/ui/sections.cpp
+msgid "3D textures"
+msgstr "3D テクスチャ"
+
+#: port/src/ui/sections.cpp
+msgid "HUD"
+msgstr "HUD"
+
+#: port/src/ui/sections.cpp
+msgid "Text"
+msgstr "文字"
+
+#: port/src/ui/sections.cpp
+msgid "Nearest"
+msgstr "ニアレスト"
+
+#: port/src/ui/sections.cpp
+msgid "Linear"
+msgstr "リニア"
+
+#: port/src/ui/sections.cpp
+msgid "Edge"
+msgstr "エッジ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Texture filters apply with upscaling or subpixel geometry. Linear softens "
+"edges; Edge smooths pixel art. Captures keep their existing detail."
+msgstr ""
+"テクスチャフィルターは高解像度かサブピクセル精度のときに働きます。リニアは縁をやわらげ、エッジはドット絵をなめらかにします。キャプチャは元の細部を保ちます。"
+
+#: port/src/ui/sections.cpp
+msgid "Glyphs"
+msgstr "文字グリフ"
+
+#: port/src/ui/sections.cpp
+msgid "Enhanced text"
+msgstr "くっきり文字"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Builds crisp 2x glyph edges with the game's live palette. Uses glyph images "
+"from the selected pack when available. Text size and spacing stay the same."
+msgstr ""
+"ゲームの現在のパレットで 2 倍のくっきりした文字の縁を作ります。選んだパックに文字の絵があればそれを使います。文字の大きさと間隔は変わりません。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Applies with upscaling or subpixel geometry; Text above controls its "
+"sampling."
+msgstr "高解像度かサブピクセル精度のときに働きます。上の「文字」でサンプリングを選びます。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%llu overlay draws; %llu pack glyph uses; %.1f MiB cached"
+msgstr "重ね描き %llu 回、パックの文字 %llu 回使用、キャッシュ %.1f MiB"
+
+#: port/src/ui/sections.cpp
+msgid "Texture pack"
+msgstr "テクスチャパック"
+
+#: port/src/ui/sections.cpp
+msgid "Reload pack"
+msgstr "パックを再読み込み"
+
+#: port/src/ui/sections.cpp
+msgid "Disable pack"
+msgstr "パックを無効にする"
+
+#: port/src/ui/sections.cpp
+msgid " by "
+msgstr " 作者: "
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"%llu PNG loads, %llu replacement draws, %llu missing keys, %llu invalid "
+"files; %.1f MiB cached"
+msgstr ""
+"PNG 読み込み %llu 回、置き換え描画 %llu 回、見つからないキー %llu 個、無効なファイル %llu 個; キャッシュ %.1f MiB"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"Choose the folder containing %s. Packs apply with upscaling or subpixel "
+"geometry. Reload after editing PNGs. Edge keeps authored detail above 1x."
+msgstr ""
+"%s のあるフォルダを選んでください。パックは高解像度かサブピクセル精度のときに働きます。PNG を編集したら再読み込みしてください。エッジは 1 "
+"倍より大きいとき作者の細部を保ちます。"
+
+#: port/src/ui/sections.cpp
+msgid "Discovery"
+msgstr "テクスチャ収集"
+
+#: port/src/ui/sections.cpp
+msgid "Stop discovery"
+msgstr "収集を止める"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Writes original textures and stable filenames into a version folder for "
+"pack editing. RGBA images match one palette; index maps follow the game's "
+"live palette."
+msgstr ""
+"パック作成用に、元のテクスチャを決まったファイル名でバージョン別のフォルダに書き出します。RGBA "
+"の絵は一つのパレットに合い、インデックスマップはゲームの現在のパレットに従います。"
+
+#: port/src/ui/sections.cpp
+msgid "Colour"
+msgstr "色"
+
+#: port/src/ui/sections.cpp
+msgid "True colour"
+msgstr "トゥルーカラー"
+
+#: port/src/ui/sections.cpp
+msgid "15-bit"
+msgstr "15 ビット"
+
+#: port/src/ui/sections.cpp
+msgid "15-bit fine"
+msgstr "15 ビット(細かい)"
+
+#: port/src/ui/sections.cpp
+msgid "Raw 8-bit"
+msgstr "8 ビットそのまま"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"No dither: smooth shading, as bright as the PS1's dither pattern; blending "
+"in 8 bits a colour."
+msgstr "ディザなし: PS1 のディザ模様と同じ明るさのなめらかな陰影。合成は 1 色 8 ビット。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The PS1's 15-bit colour and its dither, each dot as large as a PS1 pixel."
+msgstr "PS1 の 15 ビットカラーとディザ。点の大きさは PS1 の 1 ピクセル。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The PS1's 15-bit colour, dithered at the sharper resolution: finer, harder "
+"to see."
+msgstr "PS1 の 15 ビットカラーを高い解像度でディザ: より細かく、目立ちません。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"No dither, all colours in 8 bits: dim glow layers add up, making dark areas "
+"brighter than the PS1."
+msgstr "ディザなし、すべての色を 8 ビットで: 薄い光の層が重なり、暗い所が PS1 より明るくなります。"
+
+#: port/src/ui/sections.cpp
+msgid " (when the resolution is above 1x)"
+msgstr "(解像度が 1 倍より大きいとき)"
+
+#: port/src/ui/sections.cpp
+msgid "Filter"
+msgstr "フィルター"
+
+#: port/src/ui/sections.cpp
+msgid "Sharp"
+msgstr "シャープ"
+
+#: port/src/ui/sections.cpp
+msgid "Bicubic"
+msgstr "バイキュービック"
+
+#: port/src/ui/sections.cpp
+msgid "xBR (edges)"
+msgstr "xBR(縁)"
+
+#: port/src/ui/sections.cpp
+msgid "Sharp pixels, as the PS1 drew them."
+msgstr "PS1 が描いたとおりのくっきりしたピクセル。"
+
+#: port/src/ui/sections.cpp
+msgid "Smoothed pixels (bilinear)."
+msgstr "なめらかなピクセル(バイリニア)。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Crisp pixels, all the same size at any scale: only where two meet is a "
+"window pixel blended."
+msgstr "どの倍率でも大きさのそろったくっきりしたピクセル: 二つが接する所だけウィンドウのピクセルを混ぜます。"
+
+#: port/src/ui/sections.cpp
+msgid "Smooth (bicubic); made for movies."
+msgstr "なめらか(バイキュービック)。ムービー向けです。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The pixel art's edges smoothed (xBR): diagonals and curves without steps."
+msgstr "ドット絵の縁をなめらかに(xBR): ななめや曲線の段差をなくします。"
+
+#: port/src/ui/sections.cpp
+msgid "Integer scale keeps it sharp (nearest)."
+msgstr "整数倍の拡大ではくっきりしたままです(ニアレスト)。"
+
+#: port/src/ui/sections.cpp
+msgid "Movies"
+msgstr "ムービー"
+
+#: port/src/ui/sections.cpp
+msgid "Same as the filter"
+msgstr "フィルターと同じ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"For the movies: the filter above, or one of their own (bicubic suits them)."
+msgstr "ムービー用: 上のフィルターか、ムービー専用のもの(バイキュービックが合います)。"
+
+#: port/src/ui/sections.cpp
+msgid "Wide fill"
+msgstr "ワイドの余白"
+
+#: port/src/ui/sections.cpp
+msgid "Bars"
+msgstr "黒帯"
+
+#: port/src/ui/sections.cpp
+msgid "Zoom"
+msgstr "ズーム"
+
+#: port/src/ui/sections.cpp
+msgid "Blur"
+msgstr "ぼかし"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Beside a 4:3 picture in a wide frame (movies): black bars, the picture "
+"zoomed to the frame's width (top and bottom cut), or the picture blurred."
+msgstr "ワイド画面の中の 4:3 の絵(ムービー)の左右: 黒帯、横いっぱいまでズーム(上下が切れます)、またはぼかした絵。"
+
+#: port/src/ui/sections.cpp
+msgid "Fullscreen"
+msgstr "フルスクリーン"
+
+#: port/src/ui/sections.cpp
+msgid "On"
+msgstr "オン"
+
+#: port/src/ui/sections.cpp
+msgid "F11 or Alt+Enter too."
+msgstr "F11 か Alt+Enter でも切り替えます。"
+
+#: port/src/ui/sections.cpp
+msgid "Window size"
+msgstr "ウィンドウサイズ"
+
+#: port/src/ui/sections.cpp
+msgid "x"
+msgstr "x"
+
+#: port/src/ui/sections.cpp
+msgid "Set"
+msgstr "設定"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"Now %dx%d (%dx%d pixels). A tiling desktop may size the window itself."
+msgstr "現在 %dx%d(%dx%d ピクセル)。タイル型のデスクトップではウィンドウの大きさを決められることがあります。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Now %dx%d. A tiling desktop may size the window itself."
+msgstr "現在 %dx%d。タイル型のデスクトップではウィンドウの大きさを決められることがあります。"
+
+#: port/src/ui/sections.cpp
+msgid "Menu text"
+msgstr "メニューの文字"
+
+#: port/src/ui/sections.cpp
+msgid "Game size"
+msgstr "ゲームと同じ"
+
+#: port/src/ui/sections.cpp
+msgid "Compact"
+msgstr "コンパクト"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"This menu's letters as large as the game's own menus: less at once, more to "
+"scroll."
+msgstr "このメニューの文字をゲームのメニューと同じ大きさに: 一度に見える量が減り、スクロールが増えます。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"This menu's letters smaller than the game's menus, to show more at once."
+msgstr "このメニューの文字をゲームのメニューより小さく、一度に多く見せます。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"In whole pixels from the window's size, so they stay sharp (Menu size can "
+"make it larger or smaller)."
+msgstr "ウィンドウの大きさから整数ピクセルで決めるので、くっきりしたままです(「メニューの大きさ」で大きくも小さくもできます)。"
+
+#: port/src/ui/sections.cpp
+msgid "Menu size"
+msgstr "メニューの大きさ"
+
+#: port/src/ui/sections.cpp
+msgid "Reset"
+msgstr "リセット"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"The whole menu, its letters, windows and gaps, at %d%% of the size its text "
+"size gives (100%%: whole pixels, the sharpest). Reset goes back to 100%%."
+msgstr ""
+"メニュー全体(文字、ウィンドウ、すき間)を、文字の大きさで決まる大きさの %d%% で表示します(100%%: "
+"整数ピクセルで最もくっきり)。「リセット」で 100%% にもどります。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"In this window it goes no smaller than %d%% (a window pixel for each of the "
+"game's)."
+msgstr "このウィンドウでは %d%% より小さくなりません(ゲームの 1 ピクセルにウィンドウの 1 ピクセル)。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"In this window it goes no larger than %d%% (the game's 320 x 216 screen "
+"filling it)."
+msgstr "このウィンドウでは %d%% より大きくなりません(ゲームの 320 x 216 の画面がいっぱいになる大きさ)。"
+
+#: port/src/ui/sections.cpp
+msgid "Dark mode"
+msgstr "ダークモード"
+
+#: port/src/ui/sections.cpp
+msgid "This menu's windows darker than the game's grey."
+msgstr "このメニューのウィンドウをゲームのグレーより暗く。"
+
+#: port/src/ui/sections.cpp
+msgid "This menu's windows in the game's own half-clear grey."
+msgstr "このメニューのウィンドウをゲーム本来の、背景がすけるグレーに。"
+
+#: port/src/ui/sections.cpp
+msgid "Battle voices"
+msgstr "バトルのボイス"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese battle voices"
+msgstr "日本語版のバトルボイス"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Uses your Japanese discs. Restart the game after changing this option."
+msgstr "日本語版のディスクを使います。変えたらゲームを再起動してください。"
+
+#: port/src/ui/sections.cpp
+msgid "Saved for the next launch."
+msgstr "次の起動のために保存しました。"
+
+#: port/src/ui/sections.cpp
+msgid "Cutscene audio"
+msgstr "カットシーン音声"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese cutscene audio"
+msgstr "日本語版のカットシーン音声"
+
+#: port/src/ui/sections.cpp
+msgid "Applies to the next cutscene. Keeps this version's video and text."
+msgstr "次のカットシーンから適用されます。この版の映像と文字はそのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Subtitles"
+msgstr "字幕"
+
+#: port/src/ui/sections.cpp
+msgid "US dialogue"
+msgstr "US 版のせりふ"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese translation"
+msgstr "日本語の訳"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Independent of audio language. Uses the in-game dialogue font. Text tracks "
+"are drafts under review."
+msgstr "音声の言語とは別に選べます。ゲーム内の会話フォントを使います。字幕はまだ見直し中の下書きです。"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese Disc 1"
+msgstr "日本語版 1"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese Disc 2"
+msgstr "日本語版 2"
+
+#: port/src/ui/sections.cpp
+msgid "Volume"
+msgstr "音量"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The game's sound is paused while this menu is open: a change is heard when "
+"it goes on."
+msgstr "このメニューを開いている間はゲームの音が止まっています。変更はゲームが続くと聞こえます。"
+
+#: port/src/ui/sections.cpp
+msgid "Latency"
+msgstr "遅延"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"How far ahead the sound is queued for the device: lower answers sooner, "
+"higher is safer if the sound crackles. 40 ms by default."
+msgstr "音をデバイスに先に送っておく時間: 短いほど反応が速く、音が途切れるなら長いほど安全です。標準は 40 ミリ秒。"
+
+#: port/src/ui/sections.cpp
+msgid "Output"
+msgstr "出力"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "SDL audio driver: %s"
+msgstr "SDL のオーディオドライバー: %s"
+
+#: port/src/ui/sections.cpp
+msgid "none"
+msgstr "なし"
+
+#: port/src/ui/sections.cpp
+msgid "Sliders: choose one, then ← and →; choose or back again when done."
+msgstr "スライダー: 選んでから ← と → で変え、終わったらもう一度決定かもどるを押します。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Press a gamepad button or pull a trigger for %s."
+msgstr "%s にするゲームパッドのボタンを押すか、トリガーを引いてください。"
+
+#: port/src/ui/sections.cpp
+msgid "No gamepad is connected."
+msgstr "ゲームパッドがつながっていません。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"Esc cancels (or wait %d s). Guide opens the menu: it cannot be bound."
+msgstr "Esc で取り消し(または %d 秒待つ)。ガイドボタンはメニューを開くので割り当てられません。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Press a key for %s (%s)."
+msgstr "%s(%s)にするキーを押してください。"
+
+#: port/src/ui/sections.cpp
+msgid "first key"
+msgstr "1 つ目のキー"
+
+#: port/src/ui/sections.cpp
+msgid "second key"
+msgstr "2 つ目のキー"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"Esc or any gamepad button cancels (or wait %d s), Delete clears. F1 to F12 "
+"are the hotkeys: they cannot be bound."
+msgstr ""
+"Esc かゲームパッドのボタンで取り消し(または %d 秒待つ)、Delete で消去。F1~F12 はホットキーなので割り当てられません。"
+
+#: port/src/ui/sections.cpp
+msgid "Clear"
+msgstr "消去"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese controls in the US version"
+msgstr "US 版で日本式の操作"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Circle confirms, Cross cancels; Triangle and Square follow the Japanese "
+"convention too."
+msgstr "○で決定、×でキャンセル。△と□も日本式になります。"
+
+#: port/src/ui/sections.cpp
+msgid "US controls in the Japanese version"
+msgstr "日本語版で US 式の操作"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Cross confirms, Circle cancels. Your keyboard and controller bindings stay "
+"independent."
+msgstr "×で決定、○でキャンセル。キーボードとコントローラーの割り当ては別のままです。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s Choose   %s Back"
+msgstr "%s 決定   %s もどる"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Button symbols follow your control convention and the controller you use, "
+"including remaps and reconnects."
+msgstr "ボタンの記号は操作の方式と使っているコントローラーに従います(割り当ての変更や再接続も含む)。"
+
+#: port/src/ui/sections.cpp
+msgid "Controller profile"
+msgstr "コントローラーのプロファイル"
+
+#: port/src/ui/sections.cpp
+msgid "Default mapping"
+msgstr "標準の割り当て"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Pad %d: %s"
+msgstr "パッド %d: %s"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Profiles follow your controller. Some identical controllers share a "
+"profile. Keyboard settings apply to all profiles."
+msgstr ""
+"プロファイルはコントローラーごとです。同じ種類のコントローラーはプロファイルを共有することがあります。キーボードの設定はすべてのプロファイルに共通です。"
+
+#: port/src/ui/sections.cpp
+msgid "Keyboard"
+msgstr "キーボード"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Choose a key to change it, then press the new one. A key drives one button: "
+"binding it elsewhere moves it."
+msgstr "キーを選んでから新しいキーを押すと変わります。1 つのキーは 1 つのボタンだけ: ほかに割り当てると移ります。"
+
+#: port/src/ui/sections.cpp
+msgid "Gamepad"
+msgstr "ゲームパッド"
+
+#: port/src/ui/sections.cpp
+msgid "Default keys"
+msgstr "標準のキー"
+
+#: port/src/ui/sections.cpp
+msgid "Default gamepad"
+msgstr "標準のゲームパッド"
+
+#: port/src/ui/sections.cpp
+msgid "Reset controller profile"
+msgstr "コントローラーのプロファイルをリセット"
+
+#: port/src/ui/sections.cpp
+msgid "Left stick drives the D-pad"
+msgstr "左スティックで方向キー"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Stick dead zone: %d%%"
+msgstr "スティックの遊び: %d%%"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The stick must move past this threshold to press a direction. Default: 50%%."
+msgstr "方向を押したことになるには、スティックをこの位置より倒す必要があります。標準: 50%%。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"No gamepad connected. The first one is pad 1 (with the keyboard), the "
+"second pad 2."
+msgstr "ゲームパッドがつながっていません。1 台目がパッド 1(キーボードと一緒)、2 台目がパッド 2 です。"
+
+#: port/src/ui/sections.cpp
+msgid "gamepad"
+msgstr "ゲームパッド"
+
+#: port/src/ui/sections.cpp
+msgid "Mouse"
+msgstr "マウス"
+
+#: port/src/ui/sections.cpp
+msgid "Mouse in the game"
+msgstr "ゲーム中のマウス"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Left click confirms, right click cancels, the wheel moves the cursor, the "
+"side buttons are L1 and R1."
+msgstr "左クリックで決定、右クリックでキャンセル、ホイールでカーソル移動、サイドボタンは L1 と R1。"
+
+#: port/src/ui/sections.cpp
+msgid "Click menu entries"
+msgstr "メニューをクリック"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"A click on a main menu command or an item moves the game's cursor there and "
+"chooses it (an item: click it again to use it)."
+msgstr ""
+"メインメニューのコマンドやアイテムをクリックすると、ゲームのカーソルがそこに移って選びます(アイテムはもう一度クリックすると使います)。"
+
+#: port/src/ui/sections.cpp
+msgid "Click battle targets"
+msgstr "バトルの対象をクリック"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"While the game asks for a target, a click on one chooses it. In an attack "
+"it aims; a click on the aimed target is the confirm button."
+msgstr "ゲームが対象を尋ねている間、クリックした対象を選びます。攻撃では狙いを定め、狙った対象をクリックすると決定ボタンになります。"
+
+#: port/src/ui/sections.cpp
+msgid "Drag to turn the camera"
+msgstr "ドラッグでカメラを回す"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Drag sideways with the right button in fields and on the world map, as L1 "
+"and R1 turn it."
+msgstr "フィールドとワールドマップで右ボタンを押したまま横にドラッグすると、L1 と R1 と同じように回ります。"
+
+#: port/src/ui/sections.cpp
+msgid "Hotkeys"
+msgstr "ホットキー"
+
+#: port/src/ui/sections.cpp
+msgid "this menu (the game pauses)"
+msgstr "このメニュー(ゲームは一時停止)"
+
+#: port/src/ui/sections.cpp
+msgid "Guide / both stick clicks"
+msgstr "ガイド / 両スティック押し込み"
+
+#: port/src/ui/sections.cpp
+msgid "this menu"
+msgstr "このメニュー"
+
+#: port/src/ui/sections.cpp
+msgid "back; from the list, leave this menu"
+msgstr "もどる。一覧からはこのメニューを閉じる"
+
+#: port/src/ui/sections.cpp
+msgid "← at an option's start"
+msgstr "オプションの先頭で ←"
+
+#: port/src/ui/sections.cpp
+msgid "back to the section list"
+msgstr "一覧にもどる"
+
+#: port/src/ui/sections.cpp
+msgid "swap discs (when the game asks for one)"
+msgstr "ディスクの入れ替え(ゲームが求めたとき)"
+
+#: port/src/ui/sections.cpp
+msgid "aspect: 4:3 TV, 4:3 fill, 1:1, 16:9, 16:10, 21:9, 32:9"
+msgstr "アスペクト比: 4:3 テレビ、4:3 全体、1:1、16:9、16:10、21:9、32:9"
+
+#: port/src/ui/sections.cpp
+msgid "scale: fit, integer, stretch"
+msgstr "拡大方法: フィット、整数倍、引き伸ばし"
+
+#: port/src/ui/sections.cpp
+msgid "filter: nearest, linear, sharp, bicubic, xbr"
+msgstr "フィルター: ニアレスト、リニア、シャープ、バイキュービック、xBR"
+
+#: port/src/ui/sections.cpp
+msgid "wide fill: bars, zoom, blur"
+msgstr "ワイドの余白: 黒帯、ズーム、ぼかし"
+
+#: port/src/ui/sections.cpp
+msgid "the game's own soft reset"
+msgstr "ゲーム本来のソフトリセット"
+
+#: port/src/ui/sections.cpp
+msgid "The game is using this card; try again in a moment."
+msgstr "ゲームがこのカードを使っています。少ししてからもう一度どうぞ。"
+
+#: port/src/ui/sections.cpp
+msgid "Cannot write this card or its backup; nothing imported."
+msgstr "このカードかそのバックアップに書き込めません。何も取り込んでいません。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Slot %d: %s"
+msgstr "スロット %d: %s"
+
+#: port/src/ui/sections.cpp
+msgid "Card in"
+msgstr "差し込むカード"
+
+#: port/src/ui/sections.cpp
+msgid "Slot 1"
+msgstr "スロット 1"
+
+#: port/src/ui/sections.cpp
+msgid "Slot 2"
+msgstr "スロット 2"
+
+#: port/src/ui/sections.cpp
+msgid "Image"
+msgstr "イメージ"
+
+#: port/src/ui/sections.cpp
+msgid "No card in this slot"
+msgstr "このスロットにカードはありません"
+
+#: port/src/ui/sections.cpp
+msgid "Insert"
+msgstr "差し込む"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Inserted: %s"
+msgstr "差し込みました: %s"
+
+#: port/src/ui/sections.cpp
+msgid "Default image"
+msgstr "標準のイメージ"
+
+#: port/src/ui/sections.cpp
+msgid "No card"
+msgstr "カードなし"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Slot %d is empty"
+msgstr "スロット %d は空です"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"A missing file becomes a new formatted card, written when something is "
+"saved on it. The game sees the change as a card taken out and put in."
+msgstr ""
+"ファイルがなければ、フォーマット済みの新しいカードになり、何かをセーブしたときに書き込まれます。ゲームからは、カードを抜いて差し込んだように見えます。"
+
+#: port/src/ui/sections.cpp
+msgid "Backups"
+msgstr "バックアップ"
+
+#: port/src/ui/sections.cpp
+msgid "Cannot read this card's backup history."
+msgstr "このカードのバックアップの記録を読めません。"
+
+#: port/src/ui/sections.cpp
+msgid "No previous versions yet"
+msgstr "まだ以前の版はありません"
+
+#: port/src/ui/sections.cpp
+msgid "Latest"
+msgstr "最新"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%d earlier"
+msgstr "%d つ前"
+
+#: port/src/ui/sections.cpp
+msgid "Restore selected backup"
+msgstr "選んだバックアップに戻す"
+
+#: port/src/ui/sections.cpp
+msgid "Refresh backups"
+msgstr "バックアップを更新"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Keeps the last ten previous card versions beside its image. Restore "
+"replaces the whole card and keeps the current contents as another backup."
+msgstr ""
+"カードの以前の版を、イメージの隣に最近の 10 個まで保存します。「戻す」はカード全体を置き換え、今の内容も別のバックアップとして残します。"
+
+#: port/src/ui/sections.cpp
+msgid "Saves"
+msgstr "セーブ"
+
+#: port/src/ui/sections.cpp
+msgid "Not formatted (the game formats it when it saves)"
+msgstr "未フォーマット(ゲームがセーブするときにフォーマットします)"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%d save%s, %d free block%s"
+msgstr "%d 件%.0s、空き %d ブロック%.0s"
+
+#: port/src/ui/sections.cpp
+msgid "Blocks"
+msgstr "ブロック"
+
+#: port/src/ui/sections.cpp
+msgid "Single save"
+msgstr "単体のセーブ"
+
+#: port/src/ui/sections.cpp
+msgid "Import"
+msgstr "取り込む"
+
+#: port/src/ui/sections.cpp
+msgid "Export to this file"
+msgstr "このファイルに書き出す"
+
+#: port/src/ui/sections.cpp
+msgid "Export to..."
+msgstr "書き出し先..."
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Choose a save above to export it as an .mcs file; Import puts an .mcs save "
+"from the file on this card."
+msgstr "上のセーブを選ぶと .mcs ファイルに書き出せます。「取り込む」はファイルの .mcs セーブをこのカードに入れます。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The game is using this card right now: go back to the game and try again in "
+"a moment."
+msgstr "ゲームが今このカードを使っています: ゲームにもどって、少ししてからもう一度どうぞ。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"Replace all saves in slot %d with this backup? The current card will be "
+"kept in its backup history."
+msgstr "スロット %d のセーブをすべてこのバックアップで置き換えますか? 今のカードはバックアップの記録に残ります。"
+
+#: port/src/ui/sections.cpp
+msgid "The card changed or is in use. Cancel and select its backup again."
+msgstr "カードが変わったか使用中です。キャンセルして、もう一度バックアップを選んでください。"
+
+#: port/src/ui/sections.cpp
+msgid "Restore whole card"
+msgstr "カード全体を戻す"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"A save of that name is on the card in slot %d already. Replace it with the "
+"one in the file?"
+msgstr "その名前のセーブはスロット %d のカードにもうあります。ファイルのもので置き換えますか?"
+
+#: port/src/ui/sections.cpp
+msgid "Replace"
+msgstr "置き換える"
+
+#: port/src/ui/sections.cpp
+msgid "Keep the one on the card"
+msgstr "カードのものを残す"
+
+#: port/src/ui/sections.cpp
+msgid "Nothing imported"
+msgstr "何も取り込んでいません"
+
+#: port/src/ui/sections.cpp
+msgid "Original-game bug fixes"
+msgstr "原作の不具合修正"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Fixes Gear-shop Ether amp, Billy's ammo elements on equipment/status "
+"refresh, the first Deus camera freeze, missing/stray portrait pixels on the "
+"next portrait load, Def UP, a name's final 's' (US), the shop's "
+"Buy/Sell/Exit arrow (US), MP for EP in the party menu, and field sound "
+"loops a menu cut off."
+msgstr ""
+"ギアショップのエーテルアンプ、装備やステータス更新時のビリーの弾の属性、最初のデウス戦のカメラの停止、次の顔グラフィック読み込み時の欠けたり余分なピクセル、防御UP、名前の最後の「s」(US 版)、ショップの買う/売る/出るの矢印(US 版)、パーティメニューの EP が MP になる表示、メニューで途切れるフィールドのループ音を修正します。"
+
+#: port/src/ui/sections.cpp
+msgid "Difficulty"
+msgstr "難易度"
+
+#: port/src/ui/sections.cpp
+msgid "Hard"
+msgstr "ハード"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Hard starts with 2x enemy HP and 1.5x attack and ether. Character starts "
+"and Gear equipment stay original. Battle changes apply when the next fight "
+"loads."
+msgstr ""
+"ハードは敵の HP 2 倍、攻撃力とエーテル 1.5 "
+"倍で始まります。キャラクターの初期状態とギアの装備は原作のままです。バトルの変更は次の戦闘を読み込むときに適用されます。"
+
+#: port/src/ui/sections.cpp
+msgid "Enemy HP"
+msgstr "敵の HP"
+
+#: port/src/ui/sections.cpp
+msgid "Enemy attack"
+msgstr "敵の攻撃力"
+
+#: port/src/ui/sections.cpp
+msgid "Enemy ether"
+msgstr "敵のエーテル"
+
+#: port/src/ui/sections.cpp
+msgid "Enemy defence"
+msgstr "敵の防御力"
+
+#: port/src/ui/sections.cpp
+msgid "Enemy ether defence"
+msgstr "敵のエーテル防御"
+
+#: port/src/ui/sections.cpp
+msgid "Enemy agility"
+msgstr "敵の素早さ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Multipliers apply on top of Normal or Hard, in character and Gear battles. "
+"Stats stop at their native limits; agility stops at 16. Normal with every "
+"multiplier at 100%% keeps the original balance."
+msgstr ""
+"倍率はノーマルかハードの上に、生身とギアのバトルでかかります。能力値は本来の上限で止まり、素早さは 16 で止まります。ノーマルですべて 100%% "
+"なら原作のバランスのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Reset difficulty"
+msgstr "難易度をリセット"
+
+#: port/src/ui/sections.cpp
+msgid "Random encounters"
+msgstr "エンカウント"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Applies while walking in fields and on the world map. 0%% turns random "
+"encounters off; 100%% is the original rate. Story battles still occur."
+msgstr ""
+"フィールドとワールドマップを歩いているときに働きます。0%% でランダムエンカウントなし、100%% "
+"は原作の確率です。ストーリーのバトルはそのまま起こります。"
+
+#: port/src/ui/sections.cpp
+msgid "Random EXP"
+msgstr "ランダム経験値"
+
+#: port/src/ui/sections.cpp
+msgid "Random gold"
+msgstr "ランダムゴールド"
+
+#: port/src/ui/sections.cpp
+msgid "Scripted EXP"
+msgstr "イベント経験値"
+
+#: port/src/ui/sections.cpp
+msgid "Scripted gold"
+msgstr "イベントゴールド"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Random battles are the ones the encounter rate controls, while walking in "
+"fields and on the world map. Scripted battles are every other fight: "
+"bosses, story battles and enemies you walk into. 100%% is original, 0%% "
+"gives none. EXP includes ether EXP and reserve characters. To make up for "
+"fewer encounters, raise the random-battle rewards: try 200%% with 50%% "
+"encounters, or 400%% with 25%%."
+msgstr ""
+"ランダムバトルは、フィールドとワールドマップを歩いているときにエンカウント率で決まるバトルです。イベントバトルはそれ以外のすべての戦闘: "
+"ボス、ストーリーのバトル、ぶつかった敵です。100%% は原作どおり、0%% "
+"はなし。経験値にはエーテルの経験値と待機中のキャラクターも含みます。エンカウントを減らした分は、ランダムバトルでもらえる量を上げて補えます: "
+"エンカウント 50%% なら 200%%、25%% なら 400%% を試してください。"
+
+#: port/src/ui/sections.cpp
+msgid "Reset rewards"
+msgstr "経験値とゴールドをリセット"
+
+#: port/src/ui/sections.cpp
+msgid "Deathblow learning"
+msgstr "必殺技の習得"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Practice each normal attack gives toward new deathblows. 100%% is original; "
+"0%% adds none. Deathblows are still learned after a battle, at their "
+"original levels and in their original order."
+msgstr ""
+"通常攻撃 1 回で新しい必殺技に向けて得られる練習量。100%% は原作どおり、0%% "
+"は増えません。必殺技はこれまでどおりバトルの後に、原作のレベルと順番で覚えます。"
+
+#: port/src/ui/sections.cpp
+msgid "Enemy info"
+msgstr "敵の情報"
+
+#: port/src/ui/sections.cpp
+msgid "HP once beaten"
+msgstr ""
+"倒した敵の HP だけ"
+
+#: port/src/ui/sections.cpp
+msgid "Always"
+msgstr ""
+"常に"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Select opens and closes a window in the lower right of the battle with each "
+"enemy's name, HP and active statuses, named as the game names them; while "
+"you choose a target, only the enemy under the cursor. Hidden enemies are "
+"not listed; weaknesses stay hidden. HP once beaten: an enemy's HP appears "
+"only once you have defeated that kind of enemy before, as the extras' "
+"bestiary records it (kept with your settings, across games: a boss beaten "
+"in one game shows its HP in the next)."
+msgstr ""
+"SELECT で戦闘画面の右下にウィンドウを開閉し、各敵の名前、HP、効いている状態をゲームの呼び方で表示します。ターゲットを選んでいる間はカーソル下の敵だけです。隠れている敵は載せず、弱点は表示しません。「倒した敵の HP だけ」では、その種類の敵を一度倒してからでないと HP を表示しません。エクストラの図鑑の記録（設定と一緒に保存され、ゲームをまたいで残ります。あるゲームで倒したボスは次のゲームで HP が見えます）に従います。"
+
+#: port/src/ui/sections.cpp
+msgid "Retry lost battles"
+msgstr "負けたらやり直し"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"When the party falls in a battle that would end the game, choose Retry to "
+"fight it again from its start, with the items, HP and Gears you had. Story "
+"battles you are meant to lose stay as they are. Difficulty changed here "
+"before you choose applies to the retry."
+msgstr ""
+"ゲームオーバーになるバトルでパーティが倒れたとき、「リトライ」を選ぶと、そのときのアイテム、HP、ギアでバトルの最初からやり直せます。負けることになっているストーリーのバトルはそのままです。選ぶ前にここで変えた難易度はやり直しに適用されます。"
+
+#: port/src/ui/sections.cpp
+msgid "Text speed"
+msgstr "文字の速さ"
+
+#: port/src/ui/sections.cpp
+msgid "2x"
+msgstr "2 倍"
+
+#: port/src/ui/sections.cpp
+msgid "3x"
+msgstr "3 倍"
+
+#: port/src/ui/sections.cpp
+msgid "4x"
+msgstr "4 倍"
+
+#: port/src/ui/sections.cpp
+msgid "8x"
+msgstr "8 倍"
+
+#: port/src/ui/sections.cpp
+msgid "Instant"
+msgstr "瞬時"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"How fast dialogue appears. Pauses stay. Timed and slow text, such as lines "
+"that close by themselves or are cut off, keeps its original pace."
+msgstr ""
+"会話の文字が出る速さ。間はそのままです。ひとりでに閉じたり途中で切れたりする行のような、時間で進む文字やゆっくりの文字は、原作の速さのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Hold to show text"
+msgstr "押して全部表示"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Holding the confirm button shows the rest of a page at once. Pages still "
+"wait for a fresh press."
+msgstr "決定ボタンを押し続けると、そのページの残りを一度に表示します。ページ送りには押し直しが必要です。"
+
+#: port/src/ui/sections.cpp
+msgid "Auto-advance text"
+msgstr "文字の自動送り"
+
+#: port/src/ui/sections.cpp
+msgid "1 s"
+msgstr "1 秒"
+
+#: port/src/ui/sections.cpp
+msgid "2 s"
+msgstr "2 秒"
+
+#: port/src/ui/sections.cpp
+msgid "3 s"
+msgstr "3 秒"
+
+#: port/src/ui/sections.cpp
+msgid "5 s"
+msgstr "5 秒"
+
+#: port/src/ui/sections.cpp
+msgid "8 s"
+msgstr "8 秒"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"A finished page continues by itself after this long, in fields and battle. "
+"Choices always wait for you."
+msgstr "フィールドとバトルで、表示し終わったページがこの時間の後にひとりでに進みます。選ぶ場面では必ず待ちます。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Cannot resolve the image path. Use a complete path within 4095 bytes."
+msgstr "イメージのパスを解決できません。4095 バイト以内の完全なパスを使ってください。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Image identity and file-table checks passed%s"
+msgstr "イメージとファイルテーブルの確認に合格しました%s"
+
+#: port/src/ui/sections.cpp
+msgid " for both discs"
+msgstr "(両方のディスク)"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"No %s Xenogears image in %s or the folders in it (only another release's)."
+msgstr "%s のゼノギアスのイメージが %s とその中のフォルダにありません(別の版のものだけです)。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "No%s Xenogears image in %s or the folders in it."
+msgstr "%sゼノギアスのイメージが %s とその中のフォルダにありません。"
+
+#: port/src/ui/sections.cpp
+msgid "that folder"
+msgstr "そのフォルダ"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "BIOS image: %s"
+msgstr "BIOS イメージ: %s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "No PS1 BIOS image (scph5501.bin, scph1001.bin... 512 KB) in %s."
+msgstr "%s に PS1 の BIOS イメージ(scph5501.bin、scph1001.bin など 512 KB)がありません。"
+
+#: port/src/ui/sections.cpp
+msgid "Cannot reopen the starting image. Check its files and try again."
+msgstr "開始イメージを開き直せません。ファイルを確認してもう一度どうぞ。"
+
+#: port/src/ui/sections.cpp
+msgid "Cannot use the other image. Check its files and try again."
+msgstr "もう一方のイメージを使えません。ファイルを確認してもう一度どうぞ。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s is not a 512 KB PS1 BIOS image."
+msgstr "%s は 512 KB の PS1 BIOS イメージではありません。"
+
+#: port/src/ui/sections.cpp
+msgid "Starting with these images; settings could not be saved."
+msgstr "このイメージで始めます。設定は保存できませんでした。"
+
+#: port/src/ui/sections.cpp
+msgid "Language"
+msgstr "言語"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"This menu and the extras. The game's own text stays as the disc has it. "
+"Text not yet translated shows in English."
+msgstr "このメニューとおまけの言語です。ゲーム本来の文字はディスクのままです。まだ訳されていない文字は英語で表示します。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s: %d texts translated."
+msgstr "%s: %d 件を訳しました。"
+
+#: port/src/ui/sections.cpp
+msgid "BIOS (kanji)"
+msgstr "BIOS(文字)"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"None read: the save titles on the memory card screens and the text that "
+"scrolls over some scenes are blank"
+msgstr "読み込んでいません: メモリーカード画面のセーブのタイトルと、一部の場面で流れる文字が空白になります"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Kanji glyphs from %s"
+msgstr "%s の文字を使います"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s is not a 512 KB PS1 BIOS image"
+msgstr "%s は 512 KB の PS1 BIOS イメージではありません"
+
+#: port/src/ui/sections.cpp
+msgid "Look beside the disc"
+msgstr "ディスクの隣を探す"
+
+#: port/src/ui/sections.cpp
+msgid "No BIOS image beside the disc or in the save folder"
+msgstr "ディスクの隣にもセーブフォルダにも BIOS イメージがありません"
+
+#: port/src/ui/sections.cpp
+msgid "None"
+msgstr "なし"
+
+#: port/src/ui/sections.cpp
+msgid "No BIOS: the kanji glyphs are blank"
+msgstr "BIOS なし: その文字は空白になります"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Only the font in the BIOS image is used (save titles, some text over "
+"movies). The image is read where it is and never copied."
+msgstr ""
+"BIOS イメージのフォントだけを使います(セーブのタイトル、ムービーに重なる一部の文字)。イメージはその場所で読み、コピーはしません。"
+
+#: port/src/ui/sections.cpp
+msgid "Current disc"
+msgstr "現在のディスク"
+
+#: port/src/ui/sections.cpp
+msgid "Other disc"
+msgstr "別のディスク"
+
+#: port/src/ui/sections.cpp
+msgid "None found: set the other disc's image"
+msgstr "見つかりません: もう一方のディスクのイメージを設定してください"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Other disc: %s"
+msgstr "もう一方のディスク: %s"
+
+#: port/src/ui/sections.cpp
+msgid "Other disc: the image beside the first one"
+msgstr "もう一方のディスク: 1 枚目の隣のイメージ"
+
+#: port/src/ui/sections.cpp
+msgid "No image beside the first one"
+msgstr "1 枚目の隣にイメージがありません"
+
+#: port/src/ui/sections.cpp
+msgid "Swap discs now"
+msgstr "今すぐディスクを入れ替える"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Swapped: the drive has %s"
+msgstr "入れ替えました: ドライブには %s が入っています"
+
+#: port/src/ui/sections.cpp
+msgid "Could not swap discs"
+msgstr "ディスクを入れ替えられませんでした"
+
+#: port/src/ui/sections.cpp
+msgid "Swap when the game asks for the other disc"
+msgstr "ゲームがもう一方のディスクを求めたら入れ替える"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Swapping works while the game asks for a disc (\"insert disc\"); F2 does "
+"the same. The game asks for disc 2 at the end of disc 1, and for the other "
+"disc when a save from it is loaded. A swap at any other time would break "
+"the game, as opening the lid mid-game does on a PS1."
+msgstr ""
+"入れ替えはゲームがディスクを求めているとき(「ディスクを入れてください」)に働きます。F2 でも同じです。ゲームはディスク 1 の最後でディスク 2 "
+"を、もう一方のディスクのセーブを読み込んだときにそのディスクを求めます。それ以外のときに入れ替えると、PS1 "
+"でゲーム中にふたを開けたのと同じようにゲームが壊れます。"
+
+#: port/src/ui/sections.cpp
+msgid "Settings file"
+msgstr "設定ファイル"
+
+#: port/src/ui/sections.cpp
+msgid "None (XG_SETTINGS=none): nothing is kept"
+msgstr "なし(XG_SETTINGS=none): 何も保存されません"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese version (SLPS-01160)"
+msgstr "日本語版(SLPS-01160)"
+
+#: port/src/ui/sections.cpp
+msgid "US version (SLUS-00664)"
+msgstr "US 版(SLUS-00664)"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Xenogears PC port, %s"
+msgstr "ゼノギアス PC 移植版、%s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Build %s, %s, %s"
+msgstr "ビルド %s、%s、%s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Compiler: clang %s"
+msgstr "コンパイラー: clang %s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Compiler: GCC %s"
+msgstr "コンパイラー: GCC %s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "SDL %d.%d.%d (built with %d.%d.%d), video %s, audio %s"
+msgstr "SDL %d.%d.%d(ビルド時 %d.%d.%d)、映像 %s、音声 %s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Vulkan: %s"
+msgstr "Vulkan: %s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Dear ImGui %s"
+msgstr "Dear ImGui %s"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The game's code is rebuilt from the original as C (a matching "
+"decompilation); its data is read from your own disc. Keep this build for "
+"your own use."
+msgstr ""
+"ゲームのコードは原作から C "
+"として作り直したもの(一致する逆コンパイル)で、データはあなた自身のディスクから読みます。このビルドは自分で使うためだけにしてください。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Xenogears PC port. Copyright (C) 2026 carl. This program is free software "
+"under the GNU General Public License, version 3 or any later version, and "
+"comes with ABSOLUTELY NO WARRANTY; see the licence below. The licence does "
+"not cover Xenogears itself: the game's data comes from your own discs."
+msgstr ""
+"ゼノギアス PC 移植版。Copyright (C) 2026 carl. このプログラムは GNU General Public "
+"License(GPL)バージョン 3 "
+"またはそれ以降の下のフリーソフトウェアで、一切の保証はありません。下のライセンスをご覧ください。ライセンスはゼノギアスそのものには及びません: "
+"ゲームのデータはあなた自身のディスクから読みます。"
+
+#: port/src/ui/sections.cpp
+msgid "Xenogears PC port (GNU GPL v3 or later)"
+msgstr "ゼノギアス PC 移植版(GNU GPL v3 以降)"
+
+#: port/src/ui/sections.cpp
+msgid "Licences of the libraries in this program"
+msgstr "このプログラムのライブラリーのライセンス"
+
+#: port/src/ui/sections.cpp
+msgid "SDL 3 (zlib licence)"
+msgstr "SDL 3(zlib ライセンス)"
+
+#: port/src/ui/sections.cpp
+msgid "Dear ImGui (MIT licence)"
+msgstr "Dear ImGui(MIT ライセンス)"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Japanese font of the OST titles and this menu (SIL Open Font Licence)"
+msgstr "日本語の OST 曲名・メニュー用フォント(SIL Open Font License)"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Vulkan is reached through the system's own loader. The right stick or the "
+"mouse wheel scrolls."
+msgstr "Vulkan にはシステムのローダーを通してつなぎます。右スティックかマウスのホイールでスクロールします。"
+
+#: port/src/ui/sections.cpp
+msgid "Disc images"
+msgstr "ディスクイメージ"
+
+#: port/src/ui/sections.cpp
+msgid "Save titles on the memory card screens"
+msgstr "メモリーカード画面のセーブのタイトル"
+
+#: port/src/ui/sections.cpp
+msgid "Text that scrolls over some scenes"
+msgstr "一部の場面で流れる文字"
+
+#: port/src/ui/sections.cpp
+msgid "Image folder"
+msgstr "イメージフォルダ"
+
+#: port/src/ui/sections.cpp
+msgid "Search"
+msgstr "検索"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The folder your Xenogears images are in: it and the folders directly in it "
+"are searched (a folder for each disc is fine). Browse lists folders here; "
+"Search finds the images."
+msgstr ""
+"ゼノギアスのイメージがあるフォルダ: "
+"そのフォルダと、すぐ下のフォルダを探します(ディスクごとのフォルダでも大丈夫)。「選ぶ」でここのフォルダを一覧し、「検索」でイメージを探します。"
+
+#: port/src/ui/sections.cpp
+msgid "Found"
+msgstr "見つかったもの"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"Choose the disc to start on; the other disc of the same release goes with "
+"it.%s"
+msgstr "始めるディスクを選んでください。同じ版のもう一方のディスクも一緒に使います。%s"
+
+#: port/src/ui/sections.cpp
+msgid " This build plays its own release's images only."
+msgstr " このビルドは自分の版のイメージだけを遊べます。"
+
+#: port/src/ui/sections.cpp
+msgid "Starting image"
+msgstr "開始イメージ"
+
+#: port/src/ui/sections.cpp
+msgid "Verify"
+msgstr "確認"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Your Disc 1 or Disc 2 .cue sheet (its BINARY files beside it), or a raw "
+".bin image."
+msgstr "ディスク 1 かディスク 2 の .cue ファイル(BINARY ファイルを隣に置いたもの)、または生の .bin イメージ。"
+
+#: port/src/ui/sections.cpp
+msgid "Other image"
+msgstr "別のイメージ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Optional: the other disc of the same release. Empty: found beside the "
+"starting image when it is there."
+msgstr "省略可: 同じ版のもう一方のディスク。空なら、開始イメージの隣にあれば見つけます。"
+
+#: port/src/ui/sections.cpp
+msgid "Status"
+msgstr "状態"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s Disc %d: %s"
+msgstr "%s ディスク %d: %s"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Start saves these and plays. XG_DISC and XG_DISC2 override them for one run."
+msgstr "「スタート」でこれらを保存して遊びます。XG_DISC と XG_DISC2 は 1 回の起動だけそれらより優先されます。"
+
+#: port/src/ui/sections.cpp
+msgid "BIOS folder"
+msgstr "BIOS フォルダ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"A folder with your PS1 BIOS image (scph5501.bin, scph1001.bin and the like: "
+"512 KB). It is read where it is and never copied."
+msgstr ""
+"PS1 の BIOS イメージ(scph5501.bin、scph1001.bin など 512 "
+"KB)のあるフォルダ。その場所で読み、コピーはしません。"
+
+#: port/src/ui/sections.cpp
+msgid "BIOS image"
+msgstr "BIOS イメージ"
+
+#: port/src/ui/sections.cpp
+msgid "Or the image itself."
+msgstr "またはイメージそのもの。"
+
+#: port/src/ui/sections.cpp
+msgid "Everything is available."
+msgstr "すべて使えます。"
+
+#: port/src/ui/sections.cpp
+msgid "Playing without a BIOS. Not available:"
+msgstr "BIOS なしで遊んでいます。使えないもの:"
+
+#: port/src/ui/sections.cpp
+msgid "No BIOS image. Without one, not available:"
+msgstr "BIOS イメージがありません。BIOS がないと使えないもの:"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "- %s (blank)"
+msgstr "- %s(空白)"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The game uses its BIOS only for its own font in those two places; "
+"everything else is complete without one. It can be set later in the "
+"settings menu (F1, System)."
+msgstr ""
+"ゲームが BIOS を使うのは、この 2 か所の自分のフォントだけです。ほかはすべて BIOS "
+"なしでそろっています。あとで設定メニュー(F1、システム)で設定できます。"
+
+#: port/src/ui/sections.cpp
+msgid "Without a BIOS"
+msgstr "BIOS なしで"
+
+#: port/src/ui/sections.cpp
+msgid "No"
+msgstr "いいえ"
+
+#: port/src/ui/sections.cpp
+msgid "Yes"
+msgstr "はい"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Yes: play without one, and do not ask again (later launches start right "
+"away)."
+msgstr "はい: BIOS なしで遊び、もう尋ねません(次からはすぐに始まります)。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"No BIOS image is set. Everything works without one but the save titles on "
+"the memory card screens and the text that scrolls over some scenes, which "
+"stay blank. A BIOS can be set later in the settings menu (F1, System)."
+msgstr ""
+"BIOS イメージが設定されていません。メモリーカード画面のセーブのタイトルと一部の場面で流れる文字が空白になるほかは、すべて BIOS "
+"なしで動きます。BIOS はあとで設定メニュー(F1、システム)で設定できます。"
+
+#: port/src/ui/sections.cpp
+msgid "Play without a BIOS"
+msgstr "BIOS なしで遊ぶ"
+
+#: port/src/ui/sections.cpp
+msgid "Choose a BIOS"
+msgstr "BIOS を選ぶ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The asset browser and the viewers: the game's files, pictures, models and "
+"sounds, from your own disc."
+msgstr "アセットブラウザーとビューアー: ゲームのファイル、絵、モデル、音を、あなた自身のディスクから。"
+
+#: port/src/ui/sections.cpp
+msgid "Not in this build."
+msgstr "このビルドにはありません。"
+
+#: port/src/ui/sections.cpp
+msgid "Open the extras"
+msgstr "おまけを開く"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The game stays paused while they are open. Leaving them comes back here."
+msgstr "開いている間ゲームは一時停止したままです。閉じるとここにもどります。"
+
+#: port/src/ui/sections.cpp
+msgid "1x (PS1 resolution)"
+msgstr "1 倍(PS1 の解像度)"
+
+#: port/src/ui/sections.cpp
+msgid "Auto (from the window)"
+msgstr "自動(ウィンドウから)"
+
+#: port/src/ui/sections.cpp
+msgid "5x"
+msgstr "5 倍"
+
+#: port/src/ui/sections.cpp
+msgid "6x"
+msgstr "6 倍"
+
+#: port/src/ui/sections.cpp
+msgid "7x"
+msgstr "7 倍"
+
+#: port/src/ui/sections.cpp
+msgid "9x"
+msgstr "9 倍"
+
+#: port/src/ui/sections.cpp
+msgid "10x"
+msgstr "10 倍"
+
+#: port/src/ui/sections.cpp
+msgid "11x"
+msgstr "11 倍"
+
+#: port/src/ui/sections.cpp
+msgid "12x"
+msgstr "12 倍"
+
+#: port/src/ui/sections.cpp
+msgid "Key"
+msgstr "キー"
+
+#: port/src/ui/sections.cpp
+msgid "Second"
+msgstr "2 つ目"
+
+#: port/src/ui/sections.cpp
+msgid "PS1 button"
+msgstr "PS1 のボタン"
+
+#: port/src/ui/sections.cpp
+msgid "File"
+msgstr "ファイル"
+
+#: port/src/ui/sections.cpp
+msgid "Title"
+msgstr "タイトル"
+
+#: port/src/ui/sections.cpp
+msgid "Reload translations"
+msgstr "訳を読み直す"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Your own translations: a gettext .po file in the save folder's lang folder "
+"(tools/l10n.py makes one). Reload reads them again after an edit."
+msgstr ""
+"自分の訳: セーブフォルダの lang フォルダに gettext の .po ファイルを置きます(tools/l10n.py "
+"で作れます)。編集したら「読み直す」で読み込みます。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 1 then plays on the gamepad."
+msgstr "プレイヤー 1 はゲームパッドで遊びます。"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"Battling's two-player bouts from where you walk: BONUS BATTLING, PLAYER1 VS "
+"PLAYER2. EXIT in its menu brings you back; the save stays as it was."
+msgstr ""
+"バトリングの 2 人対戦を、歩いている場所から: BONUS BATTLING、PLAYER1 VS PLAYER2。メニューの EXIT "
+"でもどり、セーブはそのままです。"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"From a field (a town, a dungeon...), not the world map, a battle or a menu."
+msgstr "フィールド(町やダンジョンなど)から。ワールドマップ、バトル、メニューからは行けません。"
+
+#: port/src/ui/arena.cpp
+msgid "It opens as soon as you are free to walk around."
+msgstr "自由に歩けるようになったらすぐに開きます。"
+
+#: port/src/ui/sections.cpp
+msgid "The game's"
+msgstr "ゲーム本来"
+
+#: port/src/ui/sections.cpp
+msgid "Enhanced"
+msgstr "強化"
+
+#: port/src/ui/sections.cpp
+msgid "No controller on pad 1. Vibration needs a controller with motors."
+msgstr "パッド 1 にコントローラーがありません。振動にはモーター付きのコントローラーが必要です。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid ""
+"%s has no vibration motors (or the system does not give access to them)."
+msgstr "%s には振動モーターがありません(またはシステムが使わせてくれません)。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Both modes. Test plays a short pulse at this strength. Vibration stops "
+"while the game is paused."
+msgstr "どちらのモードでも。「テスト」でこの強さの短い振動を出します。ゲームが一時停止している間は振動しません。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid ""
+"Player 1, the left Gear: %s. Player 2, the right Gear: the keyboard%s%s."
+msgstr "プレイヤー 1 は左のギア: %s。プレイヤー 2 は右のギア: キーボード%s%s。"
+
+#: port/src/ui/arena.cpp
+msgid "no gamepad (connect one)"
+msgstr "ゲームパッドなし(つないでください)"
+
+#: port/src/ui/arena.cpp
+msgid " and "
+msgstr " と "
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid ""
+"Player 1, the left Gear: the keyboard%s%s. Player 2, the right Gear: %s."
+msgstr "プレイヤー 1 は左のギア: キーボード%s%s。プレイヤー 2 は右のギア: %s。"
+
+#: port/src/ui/arena.cpp
+msgid "a second gamepad (none connected)"
+msgstr "2 台目のゲームパッド(つながっていません)"
+
+#: port/src/ui/arena.cpp
+msgid "Player 2 on the keyboard"
+msgstr "プレイヤー 2 はキーボード"
+
+#: port/src/ui/arena.cpp
+msgid "Battle arena"
+msgstr "バトル闘技場"
+
+#: port/src/ui/arena.cpp
+msgid "Go to the arena"
+msgstr "闘技場へ行く"
+
+#: port/src/ui/arena.cpp
+msgid "Asked: it opens as soon as you are free to walk around in a field."
+msgstr "受け付けました: フィールドで自由に歩けるようになったらすぐに開きます。"
+
+#: port/src/ui/arena.cpp
+msgid "On the way to the arena."
+msgstr "闘技場へ向かっています。"
+
+#: port/src/ui/arena.cpp
+msgid "In the arena: EXIT in its main menu brings you back."
+msgstr "闘技場の中: メインメニューの EXIT でもどります。"
+
+#: port/src/ui/sections.cpp
+msgid "Vibration"
+msgstr "振動"
+
+#: port/src/ui/sections.cpp
+msgid "No controller vibration."
+msgstr "コントローラーを振動させません。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"As on a DualShock. Xenogears itself vibrates only in the gear battling "
+"arena, with the arena's Vibration option on."
+msgstr "デュアルショックと同じ。ゼノギアス自体は、バトリング闘技場で闘技場の振動の設定がオンのときだけ振動します。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"The game's own, and the port's: hits taken and dealt, knock-outs, gear "
+"impacts, deathblows, and the camera shakes of battles and fields."
+msgstr "ゲーム本来の振動と移植版の振動: 受けた攻撃と与えた攻撃、戦闘不能、ギアの衝撃、必殺技、バトルとフィールドのカメラの揺れ。"
+
+#: port/src/ui/sections.cpp
+msgid "Test"
+msgstr "テスト"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Strength: %d%%"
+msgstr "強さ: %d%%"
+
+#: port/src/ui/gauntlet.cpp
+msgid "No boss yet: add them below."
+msgstr "まだボスがいません: 下で追加してください。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "No boss of this kind on the discs."
+msgstr "この種類のボスはディスクにいません。"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "Records: %s"
+msgstr "記録: %s"
+
+#: port/src/ui/gauntlet.cpp
+msgid ""
+"The story's bosses one after another, each with the party you pick. "
+"Afterwards the game is as it was before: no EXP, items or gold are kept, "
+"and no save is touched."
+msgstr ""
+"ストーリーのボスと次々に戦います。戦いごとにパーティを選べます。終わるとゲームは元どおりです: "
+"経験値、アイテム、ゴールドは残らず、セーブにも触れません。"
+
+#: port/src/ui/gauntlet.cpp
+msgid ""
+"It starts when you are free to move in a field, or on foot or in Gears on "
+"the world map."
+msgstr "フィールドで自由に動けるとき、またはワールドマップで生身かギアで動けるときに始まります。"
+
+#: port/src/ui/gauntlet.cpp
+msgid ""
+"The run ends after this fight; the game is then put back as it was before "
+"it."
+msgstr "この戦いで挑戦は終わり、ゲームは始める前の状態にもどります。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Not in this build (it reads the bosses with the extras)."
+msgstr "このビルドにはありません(ボスはおまけで読みます)。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "No disc image to read the bosses from."
+msgstr "ボスを読むディスクイメージがありません。"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid ""
+"Only disc %d's image was found: the other disc's bosses are missing (System "
+"> disc2)."
+msgstr "ディスク %d のイメージだけが見つかりました: もう一方のディスクのボスがいません(システム > disc2)。"
+
+#: port/src/ui/gauntlet.cpp
+msgid ""
+"Between fights: Full restores HP, EP, Gear HP and fuel; None keeps them as "
+"the fight left them; 25%% or 50%% of each maximum; Revive only brings a "
+"knocked-out member back at 10%% HP. Items used stay used for the run."
+msgstr ""
+"戦いの間: 「全快」は HP、EP、ギアの HP と燃料を回復、「なし」は戦いの後のまま、25%% か 50%% "
+"はそれぞれの最大値の割合、「復活」は戦闘不能のメンバーだけを HP 10%% で起こします。使ったアイテムは挑戦の間は使ったままです。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Start a game first: the fights use the party you have."
+msgstr "先にゲームを始めてください: 戦いには今のパーティを使います。"
+
+#: port/src/ui/gauntlet.cpp
+msgid ""
+"It starts when you are free to move in a field, or on foot or in Gears on "
+"the world map. A lost fight offers Retry or Game over; Game over ends the "
+"run. The story order is the scripts' estimate."
+msgstr ""
+"フィールドで自由に動けるとき、またはワールドマップで生身かギアで動けるときに始まります。負けたら「リトライ」か「ゲームオーバー」を選び、「ゲームオーバー」で挑戦は終わります。ストーリーの順番はスクリプトからの推定です。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "The last run was cleared."
+msgstr "前回の挑戦はクリアしました。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "The last run ended before its last fight."
+msgstr "前回の挑戦は最後の戦いの前に終わりました。"
+
+#: port/src/ui/movies.cpp
+msgid "Pack movies"
+msgstr "パックのムービー"
+
+#: port/src/ui/movies.cpp
+#, c-format
+msgid "Last movie: %s%s"
+msgstr "最後のムービー: %s%s"
+
+#: port/src/ui/movies.cpp
+#, c-format
+msgid "%llu movie frames written by discovery."
+msgstr "収集で書き出したムービーのフレーム %llu 枚。"
+
+#: port/src/ui/shaders.cpp
+#, c-format
+msgid ""
+"%d pass%s. RetroArch .slangp presets and .slang shaders (not .glslp or "
+".cgp)."
+msgstr ""
+"絵に %d 段%.0s。RetroArch の .slangp プリセットと .slang シェーダー(.glslp や .cgp は不可)。"
+
+#: port/src/ui/shaders.cpp
+msgid "Movie parameters"
+msgstr "ムービーのパラメーター"
+
+#: port/src/ui/shaders.cpp
+msgid "Parameters"
+msgstr "パラメーター"
+
+#: port/src/ui/shaders.cpp
+msgid "Shader"
+msgstr "シェーダー"
+
+#: port/src/ui/shaders.cpp
+msgid ""
+"This build has no shader compiler (Khronos glslang): presets cannot be used."
+msgstr "このビルドにはシェーダーのコンパイラー(Khronos glslang)がありません: プリセットは使えません。"
+
+#: port/src/ui/shaders.cpp
+msgid ""
+"A RetroArch .slangp preset or .slang shader over the picture (CRT, scalers, "
+"sharpening). Off: the picture as it is."
+msgstr ""
+"絵にかける RetroArch の .slangp プリセットか .slang シェーダー(CRT、拡大、シャープ化)。オフ: 絵はそのまま。"
+
+#: port/src/ui/shaders.cpp
+msgid "Movie shader"
+msgstr "ムービーのシェーダー"
+
+#: port/src/ui/shaders.cpp
+msgid ""
+"The movies (24-bit pictures; a pack's movie pictures too): the picture's "
+"shader, none, a preset of their own, or the built-in smoothing (the MDEC's "
+"block edges softened, a sharp Catmull-Rom upscale)."
+msgstr ""
+"ムービー(24 ビットの絵。パックのムービーの絵も): 絵のシェーダー、なし、専用のプリセット、または内蔵のなめらか処理(MDEC "
+"のブロックの縁をやわらげ、くっきりした Catmull-Rom 拡大)。"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"All 49 Gears to choose from, Argento too, not only those the story has "
+"reached."
+msgstr "ストーリーで出会ったギアだけでなく、アルジェントも含めて 49 体すべてから選べます。"
+
+#: port/src/ui/gametext.cpp
+msgid "Dialogue"
+msgstr "会話"
+
+#: port/src/ui/gametext.cpp
+msgid "Battle text"
+msgstr "バトルの文字"
+
+#: port/src/ui/gametext.cpp
+msgid "Names, items"
+msgstr "名前・アイテム"
+
+#: port/src/ui/gametext.cpp
+msgid "Japanese"
+msgstr "日本語"
+
+#: port/src/ui/gametext.cpp
+msgid "English"
+msgstr "英語"
+
+#: port/src/ui/gametext.cpp
+msgid "Disc"
+msgstr "ディスク"
+
+#: port/src/ui/gametext.cpp
+#, c-format
+msgid "Since chosen: %d texts from it, %d kept the disc's."
+msgstr "選んでから: %d 件をそこから、%d 件はディスクのまま。"
+
+#: port/src/ui/gametext.cpp
+msgid ""
+"The game's own text from the other release's disc or a text pack, per kind: "
+"field and world map dialogue, battle names, the menu's words, item and "
+"ability names. A text that does not fit (a few fields' scripts differ "
+"between the releases) keeps the disc's. Applies to texts shown from now on."
+msgstr ""
+"ゲーム本来の文字を、もう一方の版のディスクかテキストパックから種類ごとに: "
+"フィールドとワールドマップの会話、バトルの名前、メニューの言葉、アイテムと技の名前。合わない文字(両方の版でスクリプトが違う一部のフィールド)はディスクのままです。これから表示する文字に適用されます。"
+
+#: port/src/ui/gametext.cpp
+msgid ""
+"The other release's discs: text_other_disc1 and 2 in settings.ini, the "
+"Japanese discs of Audio (US build), or images beside the game's."
+msgstr ""
+"もう一方の版のディスク: settings.ini の text_other_disc1 と 2、サウンドの日本語版ディスク(US "
+"版)、またはゲームのイメージの隣のイメージ。"
+
+#: port/src/ui/gametext.cpp
+msgid "Text packs"
+msgstr "テキストパック"
+
+#: port/src/ui/gametext.cpp
+msgid "Make a pack of this release's text"
+msgstr "この版の文字からパックを作る"
+
+#: port/src/ui/gametext.cpp
+msgid "Make a pack of the other release's text"
+msgstr "もう一方の版の文字からパックを作る"
+
+#: port/src/ui/gametext.cpp
+#, c-format
+msgid ""
+"A pack is the game's text as UTF-8 files (field.txt, kernel.txt, menu.txt, "
+"battle.txt, world.txt) in %s, made from your own discs for your own use: "
+"edit it and choose it above. Tags such as <wait> and <name 0> stand for the "
+"game's codes; <g:N> for a glyph with no known character."
+msgstr ""
+"パックはゲームの文字を UTF-8 "
+"のファイル(field.txt、kernel.txt、menu.txt、battle.txt、world.txt)にしたもので、%s "
+"に、あなた自身のディスクから自分で使うために作ります: 編集して上で選んでください。<wait> や <name 0> "
+"のようなタグはゲームのコードを、<g:N> は対応する文字のない字形を表します。"
+
+#: port/src/ui/gametext.cpp
+msgid "the save folder's packs folder"
+msgstr "セーブフォルダの packs フォルダ"
+
+#: port/src/ui/gametext.cpp
+msgid "Game menus"
+msgstr "ゲームのメニュー"
+
+#: port/src/ui/arena.cpp
+msgid "Versus battle"
+msgstr "対戦バトル"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"Player 2 commands an enemy formation in a normal battle: on each enemy's "
+"turn, pad 2 picks what that enemy can do now, then its target. Your party "
+"fights as it is. Afterwards everything is as it was: nothing won, nothing "
+"lost."
+msgstr ""
+"プレイヤー 2 が通常のバトルで敵の編成を操ります: 敵の番ごとに、パッド 2 "
+"でその敵が今できる行動と対象を選びます。あなたのパーティはそのまま戦います。終わるとすべて元どおりです: 得るものも失うものもありません。"
+
+#: port/src/ui/arena.cpp
+msgid "Not in this build (it reads the battles with the extras)."
+msgstr "このビルドにはありません(バトルはおまけで読みます)。"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"Asked: the battle starts as soon as you are free to walk around in a field."
+msgstr "受け付けました: フィールドで自由に歩けるようになったらすぐにバトルが始まります。"
+
+#: port/src/ui/arena.cpp
+msgid "In a versus battle."
+msgstr "対戦バトル中です。"
+
+#: port/src/ui/arena.cpp
+msgid "Reading the battles"
+msgstr "バトルを読んでいます"
+
+#: port/src/ui/arena.cpp
+msgid "No battles found on the disc in the drive."
+msgstr "ドライブのディスクにバトルが見つかりません。"
+
+#: port/src/ui/arena.cpp
+msgid "Filter by enemy"
+msgstr "敵で探す"
+
+#: port/src/ui/arena.cpp
+msgid "Fight"
+msgstr "戦う"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Battle table %d, config %d."
+msgstr "バトル表 %d、設定 %d。"
+
+#: port/src/ui/arena.cpp
+msgid "Every Gear"
+msgstr "すべてのギア"
+
+#: port/src/ui/movies.cpp
+#, c-format
+msgid ""
+"%s, %dx%d: %llu shown, %llu frames without one, %llu read late (the "
+"original or the last picture showed); %.1f ms a picture to read, worst %.1f"
+msgstr ""
+"%s、%dx%d: 表示 %llu、絵のないフレーム %llu、遅れて読んだもの %llu(元の絵か前の絵を表示); 絵 1 枚の読み込み %.1f "
+"ミリ秒、最長 %.1f"
+
+#: port/src/ui/movies.cpp
+#, c-format
+msgid "%llu unusable pictures."
+msgstr "使えない絵 %llu 枚。"
+
+#: port/src/ui/movies.cpp
+#, c-format
+msgid ""
+"In the pack's %s/movies: d<disc>s<stream>/<frame>.png (PNG frames; "
+"uncompressed ones read fastest) or d<disc>s<stream>.webm (AV1%s). They show "
+"in place of the movie frames, frame for frame: the game plays its own movie "
+"(timing, music, voices). The field's movie backgrounds need upscaling. "
+"Discovery writes the original frames there."
+msgstr ""
+"パックの %s/movies に: d<disc>s<stream>/<frame>.png(PNG のフレーム。無圧縮が最も速く読めます)または "
+"d<disc>s<stream>.webm(AV1%s)。ムービーのフレームの代わりに 1 フレームずつ表示されます: "
+"ゲームは自分のムービーを再生します(タイミング、音楽、声)。フィールドのムービー背景には高解像度が必要です。収集すると元のフレームをそこに書き出します。"
+
+#: port/src/ui/sections.cpp
+msgid "Khronos glslang (BSD, MIT, Apache 2.0; shader presets)"
+msgstr "Khronos glslang(BSD、MIT、Apache 2.0; シェーダープリセット)"
+
+#: port/src/ui/sections.cpp
+msgid "dav1d (BSD 2-clause licence; AV1 movie videos)"
+msgstr "dav1d(BSD 2-clause ライセンス; AV1 のムービー映像)"
+
+#: port/src/ui/gametext.cpp
+msgid "Text image"
+msgstr "テキストイメージ"
+
+#: port/src/ui/gametext.cpp
+msgid "Text images"
+msgstr "テキストイメージ"
+
+#: port/src/ui/gametext.cpp
+msgid "The pack prints its text with proportional glyphs."
+msgstr "このパックは文字ごとに違う字の間隔で表示します。"
+
+#: port/src/ui/gametext.cpp
+msgid "The pack gives the dialogue windows' sizes."
+msgstr "会話ウィンドウの大きさはパックのものです。"
+
+#: port/src/ui/gametext.cpp
+msgid "The dialogue windows grow to fit the pack's text."
+msgstr "会話ウィンドウはパックの文字に合わせて大きくなります。"
+
+#: port/src/ui/gametext.cpp
+#, c-format
+msgid "Disc %d"
+msgstr "ディスク %d"
+
+#: port/src/ui/gametext.cpp
+msgid ""
+"A translation patch (PPF, xdelta...) applied to your own image: the game "
+"keeps running from your verified image; the patched one is only read for "
+"its text, window sizes and font, chosen above as Text image. A patch's own "
+"code (a variable-width font, other window sizes) does not apply. Texts and "
+"fields the patch changed beyond text keep the disc's."
+msgstr ""
+"あなた自身のイメージに当てた訳のパッチ(PPF、xdelta など): "
+"ゲームは確認済みのイメージから動き続け、パッチを当てたイメージは文字、ウィンドウの大きさ、フォントだけを読みます。上の「テキストイメージ」で選んでください。パッチ自体のコード(文字ごとに違う字の間隔、別のウィンドウの大きさ)は働きません。パッチが文字以外も変えた文字やフィールドはディスクのままです。"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Up"
+msgstr "上"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Down"
+msgstr "下"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Left"
+msgstr "左"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Right"
+msgstr "右"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Cross"
+msgstr "バツ"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Circle"
+msgstr "マル"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Square"
+msgstr "シカク"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Triangle"
+msgstr "サンカク"
+
+#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
+msgid "Select"
+msgstr "セレクト"
+
+#: port/src/ui/arena.cpp
+msgid "Party in its Gears"
+msgstr "パーティはギアで"
+
+#: port/src/ui/arena.cpp
+msgid "Gear against Gear: the members who have a Gear fight in it (pick a formation of Gears)."
+msgstr "ギア対ギア: ギアを持つメンバーはギアで戦います(ギアの編成を選んでください)。"
+
+#: port/src/ui/gametext.cpp
+msgid "Pictures with text too"
+msgstr "文字入りの絵も"
+
+#: port/src/ui/gametext.cpp
+msgid "The word pictures (menu and battle labels) from the same source: its own, or the pack's pictures. From the next menu or battle."
+msgstr "言葉の絵(メニューとバトルの見出し)も同じ元から: その元のもの、またはパックの絵。次のメニューかバトルから。"
+
+#: port/src/ui/gametext.cpp
+msgid "With Pictures with text too, the patched image's word pictures as well."
+msgstr "「文字入りの絵も」で、パッチを当てたイメージの言葉の絵も使います。"
+
+#: port/src/ui/gametext.cpp
+msgid "A pack of this release's text has its word pictures too (pictures/, a PNG for each in its own size and colours): draw over them in the same places, then choose Pictures with text too."
+msgstr "このリリースの文字のパックには言葉の絵もあります(pictures/、それぞれの大きさと色の PNG): 同じ場所に描き直して、「文字入りの絵も」を選んでください。"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "Member %d"
+msgstr "メンバー %d"
+
+#: port/src/ui/gauntlet.cpp
+msgid " (Gear)"
+msgstr "(ギア)"
+
+#: port/src/ui/gauntlet.cpp
+msgid " - skipped"
+msgstr " - スキップ"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Gear"
+msgstr "ギア"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Character"
+msgstr "キャラクター"
+
+#: port/src/ui/gauntlet.cpp
+msgid "about "
+msgstr "約"
+
+#: port/src/ui/gauntlet.cpp
+msgid "; skipped: nobody picked can fight it"
+msgstr "; スキップ: 選んだメンバーでは戦えません"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Remove"
+msgstr "外す"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Add"
+msgstr "追加"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Every boss, story order"
+msgstr "すべてのボス、ストーリー順"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Character bosses"
+msgstr "キャラクターのボス"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Gear bosses"
+msgstr "ギアのボス"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Cleared"
+msgstr "クリア"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "%s: %d fights in %s, %d retries, recovery %s, %s (%s)"
+msgstr "%s: %d 戦を %s で、リトライ %d 回、回復 %s、%s(%s)"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Gauntlet"
+msgstr "ボス連戦"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "%s: %d fights, waiting to start."
+msgstr "%s: %d 戦、始まるのを待っています。"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "%d skipped: nobody picked can fight them."
+msgstr "%d 戦スキップ: 選んだメンバーでは戦えません。"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "%s: fight %d of %d"
+msgstr "%s: %d 戦目 / %d"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "Retries: %d"
+msgstr "リトライ: %d"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Quit after this fight"
+msgstr "この戦いの後でやめる"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Find the bosses on the discs"
+msgstr "ディスクからボスを探す"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Reading the discs"
+msgstr "ディスクを読んでいます"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Story order"
+msgstr "ストーリー順"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Full"
+msgstr "全快"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Revive only"
+msgstr "復活"
+
+#: port/src/ui/menu.cpp
+msgid "Save states"
+msgstr "ステートセーブ"
+
+#: port/src/ui/menu.cpp
+msgid "States"
+msgstr "ステート"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Slot %d"
+msgstr "No.%d"
+
+#: port/src/ui/states.cpp
+msgid "Empty"
+msgstr "空き"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Disc %d  %s"
+msgstr "ディスク %d  %s"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Play time %u:%02u:%02u"
+msgstr "プレイ時間 %u:%02u:%02u"
+
+#: port/src/ui/states.cpp
+msgid "Another build's"
+msgstr "別のビルドのもの"
+
+#: port/src/ui/states.cpp
+msgid "F7 saves to the selected slot, F8 loads it, F9 and Shift+F9 choose the slot, Shift+F8 undoes the last load."
+msgstr "F7 で選んだスロットにセーブ、F8 でロード、F9 と Shift+F9 でスロットを選び、Shift+F8 で最後のロードを取り消します。"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Save to slot %d"
+msgstr "スロット %d にセーブ"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Load slot %d"
+msgstr "スロット %d をロード"
+
+#: port/src/ui/states.cpp
+msgid "Undo the last load"
+msgstr "最後のロードを取り消す"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Back to the game as it was when a state was last loaded (%s, %s)."
+msgstr "最後にステートをロードしたときのゲームにもどります(%s、%s)。"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Slot %d cannot be loaded: %s."
+msgstr "スロット %d はロードできません: %s。"
+
+#: port/src/ui/states.cpp
+msgid "A save state is the whole game at a moment: loading it goes back there exactly. Loading never changes the memory cards: saves made since stay on them, and the game reads the cards again. States load only in the build of the port that saved them: after the port is updated or rebuilt, older states are refused. Keep long-term progress on memory cards."
+msgstr "ステートセーブはある瞬間のゲーム全体です: ロードするとそのときへそのままもどります。ロードでメモリーカードは変わりません: その後のセーブはカードに残り、ゲームはカードを読み直します。ステートはセーブしたポートのビルドでだけロードできます: ポートを更新またはビルドし直すと、前のステートは使えません。長く残す進み具合はメモリーカードにセーブしてください。"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Save over slot %d?"
+msgstr "スロット %d に上書きしますか?"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Delete the state in slot %d?"
+msgstr "スロット %d のステートを消しますか?"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Slot %d deleted."
+msgstr "スロット %d を消しました。"
+
+#: port/src/ui/gametext.cpp
+msgid "Make a pack of the text image's text"
+msgstr "テキストイメージの文字のパックを作る"
+
+#: port/src/ui/gametext.cpp
+msgid "A pack of the text image's text keeps the patch's font (font.bin; font.png shows its glyphs, font.map their characters): glyphs the patch added are <g:N> until font.map gives them a character. The pack is yours to edit; the image is no longer needed."
+msgstr "テキストイメージの文字のパックはパッチのフォントを持ちます(font.bin。font.png にその文字の形、font.map にその文字): パッチが加えた文字は、font.map で文字を決めるまで <g:N> です。パックは自由に編集でき、イメージはもう要りません。"
+
+#: port/src/extras/battle.cpp port/src/extras/battlefx.cpp
+msgid "Open a disc image"
+msgstr "ディスクイメージを開く"
+
+#: port/src/extras/bestiary.cpp
+msgid "Story"
+msgstr "ストーリー"
+
+#: port/src/extras/bestiary.cpp
+msgid "A-Z"
+msgstr "A-Z"
+
+#: port/src/extras/bestiary.cpp
+msgid "Bosses"
+msgstr "ボス"
+
+#: port/src/extras/bestiary.cpp
+msgid "Water"
+msgstr "水"
+
+#: port/src/extras/bestiary.cpp
+msgid "Fire"
+msgstr "火"
+
+#: port/src/extras/bestiary.cpp
+msgid "Earth"
+msgstr "地"
+
+#: port/src/extras/bestiary.cpp
+msgid "Wind"
+msgstr "風"
+
+#: port/src/extras/bestiary.cpp
+msgid "Dark*"
+msgstr "闇*"
+
+#: port/src/extras/bestiary.cpp
+msgid "Light*"
+msgstr "光*"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "%s (field %d)"
+msgstr "%s(フィールド %d)"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Field %d"
+msgstr "フィールド %d"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Set %d, type %d"
+msgstr "セット %d、タイプ %d"
+
+#: port/src/extras/bestiary.cpp
+msgid "Not placed in the story"
+msgstr "ストーリーにいない"
+
+#: port/src/extras/bestiary.cpp
+msgid "(an unnamed chapter)"
+msgstr "(名前のない章)"
+
+#: port/src/extras/bestiary.cpp
+msgid "Find (keyboard)"
+msgstr "探す(キーボード)"
+
+#: port/src/extras/bestiary.cpp
+msgid "Overview"
+msgstr "概要"
+
+#: port/src/extras/bestiary.cpp
+msgid "  (met)"
+msgstr "  (出会った)"
+
+#: port/src/extras/bestiary.cpp
+msgid "HP"
+msgstr "HP"
+
+#: port/src/extras/bestiary.cpp
+msgid "Attack"
+msgstr "攻撃"
+
+#: port/src/extras/bestiary.cpp
+msgid "Defence"
+msgstr "防御"
+
+#: port/src/extras/bestiary.cpp
+msgid "Ether"
+msgstr "エーテル"
+
+#: port/src/extras/bestiary.cpp
+msgid "Ether defence"
+msgstr "エーテル防御"
+
+#: port/src/extras/bestiary.cpp
+msgid "Agility"
+msgstr "素早さ"
+
+#: port/src/extras/bestiary.cpp
+msgid "Hit %"
+msgstr "命中 %"
+
+#: port/src/extras/bestiary.cpp
+msgid "Evade %"
+msgstr "回避 %"
+
+#: port/src/extras/bestiary.cpp
+msgid "Your options"
+msgstr "あなたの設定"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Weak to: %s%s"
+msgstr "弱点: %s%s"
+
+#: port/src/extras/bestiary.cpp
+msgid "nothing"
+msgstr "なし"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Resists: %s%s"
+msgstr "耐性: %s%s"
+
+#: port/src/extras/bestiary.cpp
+msgid " (absorbs)"
+msgstr "(吸収)"
+
+#: port/src/extras/bestiary.cpp
+msgid " (strongly)"
+msgstr "(強く)"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Its own element: %s"
+msgstr "それ自身の属性: %s"
+
+#: port/src/extras/bestiary.cpp
+msgid "Damage heals it and healing hurts it."
+msgstr "ダメージで回復し、回復で傷つきます。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Ether attacks heal it."
+msgstr "エーテル攻撃で回復します。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Non-elemental Ether attacks heal it."
+msgstr "無属性のエーテル攻撃で回復します。"
+
+#: port/src/extras/bestiary.cpp port/src/extras/gallery.cpp port/src/extras/jukebox.cpp
+msgid "Stop"
+msgstr "ストップ"
+
+#: port/src/extras/bestiary.cpp
+msgid "Slow"
+msgstr "スロウ"
+
+#: port/src/extras/bestiary.cpp
+msgid "Poison"
+msgstr "毒"
+
+#: port/src/extras/bestiary.cpp
+msgid "Accuracy down"
+msgstr "命中ダウン"
+
+#: port/src/extras/bestiary.cpp
+msgid "Attack down"
+msgstr "攻撃ダウン"
+
+#: port/src/extras/bestiary.cpp
+msgid "Confusion"
+msgstr "混乱"
+
+#: port/src/extras/bestiary.cpp
+msgid "Sleep"
+msgstr "眠り"
+
+#: port/src/extras/bestiary.cpp
+msgid "Forget"
+msgstr "忘却"
+
+#: port/src/extras/bestiary.cpp
+msgid "Ether down"
+msgstr "エーテルダウン"
+
+#: port/src/extras/bestiary.cpp
+msgid "every status (a Gear)"
+msgstr "すべての状態(ギア)"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Immune to: %s"
+msgstr "効かない: %s"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "EXP %d, gold %d (your options: EXP %d, gold %d)"
+msgstr "経験値 %d、ゴールド %d(あなたの設定: 経験値 %d、ゴールド %d)"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "EXP %d, gold %d"
+msgstr "経験値 %d、ゴールド %d"
+
+#: port/src/extras/bestiary.cpp
+msgid "an item the font cannot spell"
+msgstr "フォントで書けないアイテム"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Drops %s (always)"
+msgstr "%s を落とす(必ず)"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Drops %s (%d%%)"
+msgstr "%s を落とす(%d%%)"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "otherwise %s (%d%%)"
+msgstr "でなければ %s(%d%%)"
+
+#: port/src/extras/bestiary.cpp
+msgid "Drops nothing."
+msgstr "何も落としません。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Ability effect"
+msgstr "技の効果"
+
+#: port/src/extras/bestiary.cpp
+msgid "physical"
+msgstr "物理"
+
+#: port/src/extras/bestiary.cpp
+msgid ", power "
+msgstr "、威力 "
+
+#: port/src/extras/bestiary.cpp
+msgid "effect "
+msgstr "効果 "
+
+#: port/src/extras/bestiary.cpp
+msgid ", when hit"
+msgstr "、受けたとき"
+
+#: port/src/extras/bestiary.cpp
+msgid ", after the party's turn"
+msgstr "、パーティの番の後"
+
+#: port/src/extras/bestiary.cpp
+msgid "In the game's words"
+msgstr "ゲームの言葉で"
+
+#: port/src/extras/bestiary.cpp
+msgid "Lines its own battle scripts show:"
+msgstr "それ自身のバトルスクリプトが見せるセリフ:"
+
+#: port/src/extras/bestiary.cpp
+msgid ", disc 2"
+msgstr "、ディスク 2"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "World map %d, area %d"
+msgstr "ワールドマップ %d、エリア %d"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "random battles: %d in %d%s"
+msgstr "ランダムバトル: %d / %d%s"
+
+#: port/src/extras/bestiary.cpp
+msgid ", when its scripts enable them"
+msgstr "、スクリプトが許すとき"
+
+#: port/src/extras/bestiary.cpp
+msgid "a story battle (with its battle event)"
+msgstr "ストーリーのバトル(バトルイベントつき)"
+
+#: port/src/extras/bestiary.cpp
+msgid "a story battle"
+msgstr "ストーリーのバトル"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "%zu enemies on these discs. You have met %d and defeated %d."
+msgstr "このディスクの敵は %zu 体。出会ったのは %d 体、倒したのは %d 体です。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Show"
+msgstr "表示"
+
+#: port/src/extras/bestiary.cpp
+msgid "Everything"
+msgstr "すべて"
+
+#: port/src/extras/bestiary.cpp
+msgid "My progress"
+msgstr "自分の進み具合"
+
+#: port/src/extras/bestiary.cpp
+msgid "Catch up from a save"
+msgstr "セーブから追いつく"
+
+#: port/src/extras/bestiary.cpp
+msgid "The game in progress"
+msgstr "進行中のゲーム"
+
+#: port/src/extras/bestiary.cpp
+msgid "Read the memory cards"
+msgstr "メモリーカードを読む"
+
+#: port/src/extras/bestiary.cpp
+msgid "Whose progress"
+msgstr "誰の記録"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"Each game keeps its own record, by the id its saves carry from their first "
+"save on. Games saved before ids existed share one record."
+msgstr "各ゲームは最初のセーブから持つ ID ごとに自分の記録を持ちます。ID ができる前にセーブしたゲームは共通の記録を使います。"
+
+#: port/src/extras/bestiary.cpp
+msgid "This game"
+msgstr "このゲーム"
+
+#: port/src/extras/bestiary.cpp
+msgid "Games saved before ids (the shared record)"
+msgstr "ID より前にセーブしたゲーム（共通の記録）"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Slot %d: %s (%s, story %d) - shared record"
+msgstr "スロット %d: %s（%s、ストーリー %d）- 共通の記録"
+
+#: port/src/extras/bestiary.cpp
+msgid "Catch up"
+msgstr "追いつく"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"Marks as met, in the record shown, every enemy whose estimated first "
+"appearance is no later than the story reached."
+msgstr "表示中の記録で、推定初登場が到達したストーリー以前の敵をすべて「会った」にします。"
+
+#: port/src/extras/bestiary.cpp
+msgid "To the game in progress"
+msgstr "進行中のゲームまで"
+
+#: port/src/extras/bestiary.cpp
+msgid "To this save's story"
+msgstr "このセーブのストーリーまで"
+
+#: port/src/extras/bestiary.cpp
+msgid "Carry into a new game"
+msgstr "新しいゲームへ引き継ぐ"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"The next new game starts with a copy of the record shown (its own progress "
+"then goes on from there), once that game saves for the first time. Loading a "
+"save instead leaves the choice for a later new game."
+msgstr "次の新しいゲームは、最初にセーブした時点で表示中の記録のコピーから始まります（以後はそのゲーム自身の記録として進みます）。セーブをロードした場合、この選択は後の新しいゲームに残ります。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Carry this record"
+msgstr "この記録を引き継ぐ"
+
+#: port/src/extras/bestiary.cpp
+msgid "The next new game starts with this bestiary"
+msgstr "次の新しいゲームはこの図鑑から始まります"
+
+#: port/src/extras/bestiary.cpp
+msgid "Pending: the shared record carries into the next new game."
+msgstr "予約中: 共通の記録が次の新しいゲームに引き継がれます。"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Pending: record %08x carries into the next new game."
+msgstr "予約中: 記録 %08x が次の新しいゲームに引き継がれます。"
+
+#: port/src/extras/bestiary.cpp
+msgid "Cancel the carry-over"
+msgstr "引き継ぎを取り消す"
+
+#: port/src/extras/bestiary.cpp
+msgid "No record carries into the next new game"
+msgstr "次の新しいゲームに引き継ぐ記録はありません"
+
+#: port/src/extras/bestiary.cpp
+msgid "Forget this record"
+msgstr "この記録を忘れる"
+
+#: port/src/extras/bestiary.cpp
+msgid "Forget every enemy met and defeated in the record shown?"
+msgstr "表示中の記録の、会った敵と倒した敵をすべて忘れますか？"
+
+#: port/src/extras/bestiary.cpp
+msgid ""
+"Records are kept beside settings.ini (bestiary-<id>.txt per game, "
+"bestiary.txt shared), never on a memory card."
+msgstr "記録は settings.ini の隣に保存されます（ゲームごとに bestiary-<id>.txt、共通は bestiary.txt）。メモリーカードには書きません。"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Slot %d: %s (%s, story %d)"
+msgstr "スロット %d: %s(%s、ストーリー %d)"
+
+#: port/src/extras/bestiary.cpp
+msgid "Start over"
+msgstr "最初から"
+
+#: port/src/extras/bestiary.cpp
+msgid "Forget my progress"
+msgstr "進み具合を忘れる"
+
+#: port/src/extras/bestiary.cpp
+msgid "Forget every enemy met and defeated?"
+msgstr "出会った敵と倒した敵をすべて忘れますか?"
+
+#: port/src/extras/bestiary.cpp
+msgid "Keep"
+msgstr "残す"
+
+#: port/src/extras/bestiary.cpp
+msgid "A 3D model"
+msgstr "3D モデル"
+
+#: port/src/extras/bestiary.cpp
+msgid "A sprite"
+msgstr "スプライト"
+
+#: port/src/extras/bestiary.cpp
+msgid ", a Gear"
+msgstr "、ギア"
+
+#: port/src/extras/bestiary.cpp
+msgid "Battle scene"
+msgstr "バトルシーン"
+
+#: port/src/extras/bestiary.cpp
+msgid "Where"
+msgstr "場所"
+
+#: port/src/extras/bestiary.cpp
+msgid "Numbers"
+msgstr "数値"
+
+#: port/src/extras/bestiary.cpp
+msgid "Weaknesses"
+msgstr "弱点"
+
+#: port/src/extras/bestiary.cpp
+msgid "Rewards"
+msgstr "ほうび"
+
+#: port/src/extras/bestiary.cpp
+msgid "Attacks"
+msgstr "攻撃"
+
+#: port/src/extras/bestiary.cpp
+#, c-format
+msgid "Disc %d, enemy set %d (0D/%03X), type %d"
+msgstr "ディスク %d、敵セット %d(0D/%03X)、タイプ %d"
+
+#: port/src/extras/bestiary.cpp
+msgid "; the same enemy is in other sets too"
+msgstr "; 同じ敵はほかのセットにもいます"
+
+#: port/src/extras/bestiary.cpp
+msgid "Reading the enemies' battles from the discs: the fields' random tables and story battles, the world map's areas."
+msgstr "ディスクから敵のバトルを読んでいます: フィールドのランダムの表とストーリーのバトル、ワールドマップのエリア。"
+
+#: port/src/extras/browser.cpp
+msgid "Open a Xenogears disc image"
+msgstr "ゼノギアスのディスクイメージを開く"
+
+#: port/src/extras/gallery.cpp
+msgid "Pictures"
+msgstr "絵"
+
+#: port/src/extras/gallery.cpp
+msgid "Scenes"
+msgstr "シーン"
+
+#: port/src/extras/gallery.cpp
+msgid "Portraits"
+msgstr "顔グラフィック"
+
+#: port/src/extras/gallery.cpp
+msgid "Event pictures"
+msgstr "イベントの絵"
+
+#: port/src/extras/gallery.cpp
+msgid "Logo"
+msgstr "ロゴ"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "field %d, %s"
+msgstr "フィールド %d、%s"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "field %d"
+msgstr "フィールド %d"
+
+#: port/src/extras/gallery.cpp
+msgid "Reading the discs: movie streams, field scripts and battle events."
+msgstr "ディスクを読んでいます: ムービーのストリーム、フィールドのスクリプト、バトルイベント。"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Battle event %d: frames %d-%d"
+msgstr "バトルイベント %d: フレーム %d-%d"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "The opening (the kernel's movie mode): frames %d-%d"
+msgstr "オープニング(カーネルのムービーモード): フレーム %d-%d"
+
+#: port/src/extras/gallery.cpp
+msgid "op 60, full screen"
+msgstr "op 60、全画面"
+
+#: port/src/extras/gallery.cpp
+msgid "op 67, a background"
+msgstr "op 67、背景"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "In %s at PC %04X: frames %d-%d (%s)"
+msgstr "%s の PC %04X: フレーム %d-%d(%s)"
+
+#: port/src/extras/gallery.cpp
+msgid "Disc 1"
+msgstr "ディスク 1"
+
+#: port/src/extras/gallery.cpp
+msgid "Disc 2"
+msgstr "ディスク 2"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "battle event %d"
+msgstr "バトルイベント %d"
+
+#: port/src/extras/gallery.cpp
+msgid "the opening"
+msgstr "オープニング"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Movie %s, disc %d"
+msgstr "ムービー %s、ディスク %d"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "%s disc %d - field %d, script PC %04X, frames %d-%d"
+msgstr "%s ディスク %d - フィールド %d、スクリプト PC %04X、フレーム %d-%d"
+
+#: port/src/extras/gallery.cpp port/src/extras/models.cpp port/src/extras/sprites.cpp
+msgid "Pause"
+msgstr "一時停止"
+
+#: port/src/extras/gallery.cpp
+msgid "Go on"
+msgstr "続ける"
+
+#: port/src/extras/gallery.cpp
+msgid "PNG"
+msgstr "PNG"
+
+#: port/src/extras/gallery.cpp
+msgid "WAV"
+msgstr "WAV"
+
+#: port/src/extras/gallery.cpp port/src/extras/jukebox.cpp port/src/extras/models.cpp port/src/extras/sprites.cpp
+msgid "Bookmark"
+msgstr "しおり"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "%s / %s   frame %d"
+msgstr "%s / %s   フレーム %d"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Stream %d (sector %d), %dx%d, %d frames at 15 a second"
+msgstr "ストリーム %d(セクタ %d)、%dx%d、%d フレーム(毎秒 15)"
+
+#: port/src/extras/gallery.cpp
+msgid "Portrait"
+msgstr "顔グラフィック"
+
+#: port/src/extras/gallery.cpp
+msgid "Picture"
+msgstr "絵"
+
+#: port/src/extras/gallery.cpp
+msgid "Event picture"
+msgstr "イベントの絵"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "%s disc %d - field %d, script PC %04X - 04/%03X"
+msgstr "%s ディスク %d - フィールド %d、スクリプト PC %04X - 04/%03X"
+
+#: port/src/extras/gallery.cpp
+msgid "CLUT"
+msgstr "CLUT"
+
+#: port/src/extras/gallery.cpp
+msgid "Texel 0 clear"
+msgstr "テクセル 0 は透明"
+
+#: port/src/extras/gallery.cpp port/src/extras/models.cpp
+msgid "Export PNG"
+msgstr "PNG を書き出す"
+
+#: port/src/extras/gallery.cpp
+msgid "Export all of these"
+msgstr "これを全部書き出す"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid ", %d CLUTs"
+msgstr "、CLUT %d 個"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid ", %d CLUT"
+msgstr "、CLUT %d 個"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "%d x %d, %d-bit%s"
+msgstr "%d x %d、%d ビット%s"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Shown in %s"
+msgstr "%s で表示"
+
+#: port/src/extras/gallery.cpp
+msgid " [Verified]"
+msgstr " [確認済み]"
+
+#: port/src/extras/gallery.cpp
+msgid "  (movie)"
+msgstr "  (ムービー)"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Scene: story %d"
+msgstr "シーン: ストーリー %d"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Story: %s"
+msgstr "ストーリー: %s"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Its script sets the story progress to %d."
+msgstr "そのスクリプトはストーリーの進み具合を %d にします。"
+
+#: port/src/extras/gallery.cpp
+msgid "Verified preset (US + JP)"
+msgstr "確認済みのプリセット(US + JP)"
+
+#: port/src/extras/gallery.cpp
+msgid "Custom start - unverified"
+msgstr "カスタムの始まり - 未確認"
+
+#: port/src/extras/gallery.cpp
+msgid "Restore verified preset"
+msgstr "確認済みのプリセットにもどす"
+
+#: port/src/extras/gallery.cpp
+msgid "Inferred start - unverified"
+msgstr "推定の始まり - 未確認"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "It plays a movie: %s"
+msgstr "ムービーを再生します: %s"
+
+#: port/src/extras/gallery.cpp
+msgid "Start the game here"
+msgstr "ここからゲームを始める"
+
+#: port/src/extras/gallery.cpp
+msgid "Override unverified start"
+msgstr "未確認の始まりを変える"
+
+#: port/src/extras/gallery.cpp
+msgid "Invalid"
+msgstr "無効"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Party: %s"
+msgstr "パーティ: %s"
+
+#: port/src/extras/gallery.cpp port/src/extras/models.cpp
+msgid "Field"
+msgstr "フィールド"
+
+#: port/src/extras/gallery.cpp
+msgid "Entrance"
+msgstr "入口"
+
+#: port/src/extras/gallery.cpp
+msgid "Story progress"
+msgstr "ストーリーの進み具合"
+
+#: port/src/extras/gallery.cpp
+msgid "Party and story flags"
+msgstr "パーティとストーリーのフラグ"
+
+#: port/src/extras/gallery.cpp
+msgid "Party IDs"
+msgstr "パーティの ID"
+
+#: port/src/extras/gallery.cpp
+msgid "Field variables"
+msgstr "フィールド変数"
+
+#: port/src/extras/gallery.cpp
+msgid "Variable slot"
+msgstr "変数の番号"
+
+#: port/src/extras/gallery.cpp
+msgid "Value"
+msgstr "値"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "Disc %d does not hold field %d."
+msgstr "ディスク %d にフィールド %d はありません。"
+
+#: port/src/extras/gallery.cpp
+msgid "Play this scene"
+msgstr "このシーンを遊ぶ"
+
+#: port/src/extras/gallery.cpp
+msgid "Try this start"
+msgstr "この始まりを試す"
+
+#: port/src/extras/gallery.cpp
+msgid "The game restarts there: what is not saved is lost."
+msgstr "ゲームはそこから始め直します: セーブしていないものは失われます。"
+
+#: port/src/extras/gallery.cpp
+msgid "The game starts there."
+msgstr "ゲームはそこから始まります。"
+
+#: port/src/extras/jukebox.cpp
+msgid "off"
+msgstr "オフ"
+
+#: port/src/extras/jukebox.cpp
+msgid "room"
+msgstr "部屋"
+
+#: port/src/extras/jukebox.cpp
+msgid "studio small"
+msgstr "スタジオ小"
+
+#: port/src/extras/jukebox.cpp
+msgid "studio medium"
+msgstr "スタジオ中"
+
+#: port/src/extras/jukebox.cpp
+msgid "studio large"
+msgstr "スタジオ大"
+
+#: port/src/extras/jukebox.cpp
+msgid "hall"
+msgstr "ホール"
+
+#: port/src/extras/jukebox.cpp
+msgid "space echo"
+msgstr "スペースエコー"
+
+#: port/src/extras/jukebox.cpp
+msgid "echo"
+msgstr "エコー"
+
+#: port/src/extras/jukebox.cpp
+msgid "delay"
+msgstr "ディレイ"
+
+#: port/src/extras/jukebox.cpp
+msgid "pipe"
+msgstr "パイプ"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Effects of %s"
+msgstr "%s の効果音"
+
+#: port/src/extras/jukebox.cpp
+msgid "Other game cues"
+msgstr "ほかのゲームの合図"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "movie %d, disc %d  %s"
+msgstr "ムービー %d、ディスク %d  %s"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Franz / field sounds (%d)"
+msgstr "フランツ / フィールドの音(%d)"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Music %s  %s  %d tracks"
+msgstr "曲 %s  %s  %d トラック"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Banks %s  reverb %s %d%%"
+msgstr "バンク %s  リバーブ %s %d%%"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Loops from %s, %s long"
+msgstr "%s からループ、長さ %s"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Plays once, %s"
+msgstr "1 回だけ、%s"
+
+#: port/src/extras/jukebox.cpp
+msgid "Timing its loop..."
+msgstr "ループを計っています..."
+
+#: port/src/extras/jukebox.cpp
+msgid "Again"
+msgstr "もう一度"
+
+#: port/src/extras/jukebox.cpp port/src/extras/sprites.cpp
+msgid "Next"
+msgstr "次"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Vol %d%%"
+msgstr "音量 %d%%"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s  bar %d.%d  tempo %d  loop %d%s"
+msgstr "%s  小節 %d.%d  テンポ %d  ループ %d%s"
+
+#: port/src/extras/jukebox.cpp
+msgid "  fading"
+msgstr "  フェード中"
+
+#: port/src/extras/jukebox.cpp
+msgid "Stopped"
+msgstr "停止"
+
+#: port/src/extras/jukebox.cpp
+msgid "Channels"
+msgstr "チャンネル"
+
+#: port/src/extras/jukebox.cpp
+msgid "Export"
+msgstr "書き出し"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Exporting %d of %d: %s"
+msgstr "書き出し中 %d / %d: %s"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Exporting %s"
+msgstr "書き出し中 %s"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s rendered%s"
+msgstr "%s 生成%s"
+
+#: port/src/extras/jukebox.cpp
+msgid ", fading"
+msgstr "、フェード中"
+
+#: port/src/extras/jukebox.cpp
+msgid ", ending"
+msgstr "、終わり"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%d loop"
+msgstr "ループ %d 回"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%d loops"
+msgstr "ループ %d 回"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "fade %.0f s"
+msgstr "フェード %.0f 秒"
+
+#: port/src/extras/jukebox.cpp
+msgid "Export WAV"
+msgstr "WAV を書き出す"
+
+#: port/src/extras/jukebox.cpp
+msgid "Export all music"
+msgstr "曲を全部書き出す"
+
+#: port/src/extras/jukebox.cpp
+msgid "missing"
+msgstr "なし"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Bank id %d, %d effects, %d bytes; %d sample banks%s"
+msgstr "バンク ID %d、効果音 %d、%d バイト; サンプルバンク %d%s"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "The same bank is at %d more places on this disc"
+msgstr "同じバンクがこのディスクのほか %d か所にあります"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Effect %d%s%s%s"
+msgstr "効果音 %d%s%s%s"
+
+#: port/src/extras/jukebox.cpp
+msgid "  (playing)"
+msgstr "  (再生中)"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Sample banks %s"
+msgstr "サンプルバンク %s"
+
+#: port/src/extras/jukebox.cpp
+msgid "Export the bank"
+msgstr "バンクを書き出す"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "Movie %d of disc %d: %02X/%03X, %d sectors"
+msgstr "ディスク %d のムービー %d: %02X/%03X、%d セクタ"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "XA audio (file 1, channel 1), about %s: decoded by the port's XA decoder into the SPU's CD input, as the drive sends it; the stream may hold several of the game's movies."
+msgstr "XA オーディオ(ファイル 1、チャンネル 1)、約 %s: ポートの XA デコーダーがドライブの送るとおりに SPU の CD 入力へデコードします。ストリームにはゲームのムービーがいくつか入っていることがあります。"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s of %s"
+msgstr "%s / %s"
+
+#: port/src/extras/jukebox.cpp
+msgid "Sound effects"
+msgstr "効果音"
+
+#: port/src/extras/jukebox.cpp
+msgid "Play once"
+msgstr "1 回だけ"
+
+#: port/src/extras/jukebox.cpp
+msgid "Next track"
+msgstr "次の曲"
+
+#: port/src/extras/jukebox.cpp
+msgid "Repeat track"
+msgstr "1 曲くりかえし"
+
+#: port/src/extras/jukebox.cpp
+msgid "Repeat list"
+msgstr "リストくりかえし"
+
+#: port/src/extras/jukebox.cpp
+msgid "Playback"
+msgstr "再生のしかた"
+
+#: port/src/extras/jukebox.cpp
+msgid "Keep music in menus"
+msgstr "メニューでも曲を続ける"
+
+#: port/src/extras/jukebox.cpp
+msgid "Titles"
+msgstr "曲名"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%d scores, %d effect banks"
+msgstr "曲 %d、効果音バンク %d"
+
+#: port/src/extras/jukebox.cpp
+#, c-format
+msgid "%s disc %d, %s"
+msgstr "%s ディスク %d、%s"
+
+#: port/src/extras/jukebox.cpp
+msgid "Music"
+msgstr "曲"
+
+#: port/src/extras/models.cpp
+msgid "Gears"
+msgstr "ギア"
+
+#: port/src/extras/models.cpp
+msgid "Battle"
+msgstr "バトル"
+
+#: port/src/extras/models.cpp
+msgid "Enemies"
+msgstr "敵"
+
+#: port/src/extras/models.cpp
+msgid "Arenas"
+msgstr "闘技場"
+
+#: port/src/extras/models.cpp
+msgid "Fields"
+msgstr "フィールド"
+
+#: port/src/extras/models.cpp
+msgid "World map"
+msgstr "ワールドマップ"
+
+#: port/src/extras/models.cpp port/src/ui/arena.cpp
+msgid "Battling"
+msgstr "バトリング"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "MIMe targets (%d)"
+msgstr "MIMe ターゲット(%d)"
+
+#: port/src/extras/models.cpp
+msgid "Target"
+msgstr "ターゲット"
+
+#: port/src/extras/models.cpp
+msgid "Strength"
+msgstr "強さ"
+
+#: port/src/extras/models.cpp
+msgid "4096 is full strength. Field scripts choose these weights."
+msgstr "4096 が最大の強さです。フィールドのスクリプトがこの重みを選びます。"
+
+#: port/src/extras/models.cpp
+msgid "Transition ticks"
+msgstr "移り変わりのティック"
+
+#: port/src/extras/models.cpp
+msgid "Blend in"
+msgstr "ブレンドイン"
+
+#: port/src/extras/models.cpp
+msgid "Blend out"
+msgstr "ブレンドアウト"
+
+#: port/src/extras/models.cpp port/src/extras/sprites.cpp
+msgid "Step"
+msgstr "ステップ"
+
+#: port/src/extras/models.cpp port/src/extras/sprites.cpp
+msgid "Loop"
+msgstr "ループ"
+
+#: port/src/extras/models.cpp
+msgid " (loops)"
+msgstr "(ループ)"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Clip %d  tick %d  frame %d%s"
+msgstr "クリップ %d  ティック %d  フレーム %d%s"
+
+#: port/src/extras/models.cpp
+msgid " (end)"
+msgstr "(終わり)"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Tracks %d  bones %d"
+msgstr "トラック %d  ボーン %d"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "pc %s%04X op %02X wait %d tracks %d%s"
+msgstr "pc %s%04X op %02X 待ち %d トラック %d%s"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Frame %d  pc %s%04X%s"
+msgstr "フレーム %d  pc %s%04X%s"
+
+#: port/src/extras/models.cpp
+msgid "  (end)"
+msgstr "  (終わり)"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Op %02X %02X  %04X %04X %04X"
+msgstr "Op %02X %02X  %04X %04X %04X"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Wait %d  loop %d  tracks %d"
+msgstr "待ち %d  ループ %d  トラック %d"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Events %d  bones %d/%d"
+msgstr "イベント %d  ボーン %d/%d"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Rigs %d (%d temporary)"
+msgstr "リグ %d(一時 %d)"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "%d unsafe references omitted in this file"
+msgstr "このファイルの危ない参照 %d 個を省きました"
+
+#: port/src/extras/models.cpp
+msgid "Names keyframes its file lacks"
+msgstr "ファイルにないキーフレームを指しています"
+
+#: port/src/extras/models.cpp
+msgid "The game never runs this program with this file: keyframe 0 stands in."
+msgstr "ゲームはこのファイルでこのプログラムを動かしません: キーフレーム 0 で代わりにします。"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "%s VM, %.2f ticks/s"
+msgstr "%s の VM、毎秒 %.2f ティック"
+
+#: port/src/extras/models.cpp
+msgid "The battle's copy of the Gear code runs it (with no target, damage, camera or effect of a battle around it)."
+msgstr "バトルの中のギアのコードで動かします(ターゲット、ダメージ、カメラ、バトルのエフェクトはなし)。"
+
+#: port/src/extras/models.cpp
+msgid "The field's Gear overlay runs it."
+msgstr "フィールドのギアのオーバーレイで動かします。"
+
+#: port/src/extras/models.cpp
+msgid "Textures"
+msgstr "テクスチャ"
+
+#: port/src/extras/models.cpp port/src/extras/sprites.cpp
+msgid "Edges"
+msgstr "辺"
+
+#: port/src/extras/models.cpp
+msgid "Light"
+msgstr "光"
+
+#: port/src/extras/models.cpp
+msgid "The light turns with the view (else it stays where the game's is)"
+msgstr "光は視点とともに回ります(でなければゲームの光の位置のまま)"
+
+#: port/src/extras/models.cpp
+msgid "Shadow"
+msgstr "影"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Page (%d, %d) %d-bit, CLUT (%d, %d): %d polygons%s"
+msgstr "ページ(%d, %d)%d ビット、CLUT(%d, %d): ポリゴン %d%s"
+
+#: port/src/extras/models.cpp
+msgid ", semi-transparent"
+msgstr "、半透明"
+
+#: port/src/extras/models.cpp
+msgid "Export glTF"
+msgstr "glTF を書き出す"
+
+#: port/src/extras/models.cpp
+msgid "All"
+msgstr "全部"
+
+#: port/src/extras/models.cpp
+msgid "Every program and MIMe target (else the current program and selected target).\nMIMe clips go from zero to full weight and back, using Transition ticks."
+msgstr "すべてのプログラムと MIMe ターゲット(でなければ今のプログラムと選んだターゲット)。\nMIMe のクリップは「移り変わりのティック」で 0 から最大の重みまで行ってもどります。"
+
+#: port/src/extras/models.cpp
+msgid "Folder"
+msgstr "フォルダ"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "Animation %02d/%02d"
+msgstr "アニメーション %02d/%02d"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "%d parts  %d polygons"
+msgstr "パーツ %d  ポリゴン %d"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "%s disc %d"
+msgstr "%s ディスク %d"
+
+#: port/src/extras/models.cpp
+#, c-format
+msgid "%d parts, %d polygons, %d bones, %d animations"
+msgstr "パーツ %d、ポリゴン %d、ボーン %d、アニメーション %d"
+
+#: port/src/extras/models.cpp
+msgid "Animation details"
+msgstr "アニメーションの詳細"
+
+#: port/src/extras/models.cpp
+msgid "Bytecode"
+msgstr "バイトコード"
+
+#: port/src/extras/picker.cpp
+msgid "Open"
+msgstr "開く"
+
+#: port/src/extras/shell.cpp
+msgid "Name"
+msgstr "名前"
+
+#: port/src/extras/sprites.cpp
+msgid "Party (field)"
+msgstr "パーティ(フィールド)"
+
+#: port/src/extras/sprites.cpp
+msgid "Gears (field)"
+msgstr "ギア(フィールド)"
+
+#: port/src/extras/sprites.cpp
+msgid "Field NPCs"
+msgstr "フィールドの NPC"
+
+#: port/src/extras/sprites.cpp
+msgid "Battle party"
+msgstr "バトルのパーティ"
+
+#: port/src/extras/sprites.cpp
+msgid "Battle specials"
+msgstr "バトルの特殊"
+
+#: port/src/extras/sprites.cpp
+msgid "Spells / effects"
+msgstr "術 / エフェクト"
+
+#: port/src/extras/sprites.cpp
+msgid "Battle enemies"
+msgstr "バトルの敵"
+
+#: port/src/extras/sprites.cpp
+msgid "Retail placeholder: the field's sheet for this NPC is the \"No Image Printing\" card, not artwork."
+msgstr "製品のプレースホルダー: このフィールドのこの NPC のシートは「No Image Printing」のカードで、絵ではありません。"
+
+#: port/src/extras/sprites.cpp
+msgid "Placeholder sheet"
+msgstr "プレースホルダーのシート"
+
+#: port/src/extras/sprites.cpp
+msgid "The field gives this NPC no sheet of its own: it shows what its VRAM slot holds."
+msgstr "フィールドはこの NPC に自分のシートをあたえません: VRAM の場所にあるものが見えます。"
+
+#: port/src/extras/sprites.cpp
+msgid "No own sheet"
+msgstr "自分のシートなし"
+
+#: port/src/extras/sprites.cpp
+msgid "The field's texture file then loads over this sheet's page: the picture is the page as the field leaves it, which the frames read."
+msgstr "そのあとフィールドのテクスチャファイルがこのシートのページの上に読まれます: 絵はフィールドが残すページで、フレームはそれを読みます。"
+
+#: port/src/extras/sprites.cpp
+msgid "Page loaded over by the field"
+msgstr "フィールドが上書きしたページ"
+
+#: port/src/extras/sprites.cpp
+msgid "No frame of this record draws a visible pixel (with any of its palettes): there is nothing to show."
+msgstr "このレコードのどのフレームも(どのパレットでも)見えるピクセルを描きません: 見せるものはありません。"
+
+#: port/src/extras/sprites.cpp
+msgid "Draws nothing"
+msgstr "何も描かない"
+
+#: port/src/extras/sprites.cpp
+msgid "Its animations draw nothing as the field starts them; Frames shows its frames one at a time."
+msgstr "フィールドが始めるときアニメーションは何も描きません。「フレーム」で一枚ずつ見られます。"
+
+#: port/src/extras/sprites.cpp
+msgid "Animations draw nothing"
+msgstr "アニメーションは何も描かない"
+
+#: port/src/extras/sprites.cpp
+msgid "up"
+msgstr "上"
+
+#: port/src/extras/sprites.cpp
+msgid "up-right"
+msgstr "右上"
+
+#: port/src/extras/sprites.cpp
+msgid "right"
+msgstr "右"
+
+#: port/src/extras/sprites.cpp
+msgid "down-right"
+msgstr "右下"
+
+#: port/src/extras/sprites.cpp
+msgid "down"
+msgstr "下"
+
+#: port/src/extras/sprites.cpp
+msgid "down-left"
+msgstr "左下"
+
+#: port/src/extras/sprites.cpp
+msgid "left"
+msgstr "左"
+
+#: port/src/extras/sprites.cpp
+msgid "up-left"
+msgstr "左上"
+
+#: port/src/extras/sprites.cpp
+msgid " (mirrored)"
+msgstr "(反転)"
+
+#: port/src/extras/sprites.cpp
+msgid "  - placeholder"
+msgstr "  - プレースホルダー"
+
+#: port/src/extras/sprites.cpp
+msgid "  - blank"
+msgstr "  - 空"
+
+#: port/src/extras/sprites.cpp
+msgid "Restart"
+msgstr "最初から"
+
+#: port/src/extras/sprites.cpp
+msgid "Previous"
+msgstr "前"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "%s disc %d, %02X/%03X"
+msgstr "%s ディスク %d、%02X/%03X"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "%d animations / %d frames / %.3f ticks/s"
+msgstr "アニメーション %d / フレーム %d / 毎秒 %.3f ティック"
+
+#: port/src/extras/sprites.cpp
+msgid "Speed"
+msgstr "速さ"
+
+#: port/src/extras/sprites.cpp
+msgid "Facing"
+msgstr "向き"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "Shares retail animation %d"
+msgstr "製品のアニメーション %d と同じ"
+
+#: port/src/extras/sprites.cpp
+msgid "Unsafe bytecode; use Frames to inspect poses."
+msgstr "危ないバイトコードです。ポーズは「フレーム」で見てください。"
+
+#: port/src/extras/sprites.cpp
+msgid "Battle audio, hit logic and scene commands omitted."
+msgstr "バトルの音、当たりの判定、シーンのコマンドは省いています。"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "Frame %d / step %d / %d effects%s"
+msgstr "フレーム %d / ステップ %d / エフェクト %d%s"
+
+#: port/src/extras/sprites.cpp
+msgid " / heap full"
+msgstr " / ヒープがいっぱい"
+
+#: port/src/extras/sprites.cpp
+msgid "Mirror"
+msgstr "反転"
+
+#: port/src/extras/sprites.cpp
+msgid "Palette"
+msgstr "パレット"
+
+#: port/src/extras/sprites.cpp
+msgid "Clear background"
+msgstr "透明な背景"
+
+#: port/src/extras/sprites.cpp
+msgid "PNG frame"
+msgstr "PNG フレーム"
+
+#: port/src/extras/sprites.cpp
+msgid "PNG sheet"
+msgstr "PNG シート"
+
+#: port/src/extras/sprites.cpp
+msgid "PNG sequence"
+msgstr "PNG 連番"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "Source: field %03d, NPC %02d"
+msgstr "元: フィールド %03d、NPC %02d"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "%zu field location"
+msgstr "フィールドの場所 %zu"
+
+#: port/src/extras/sprites.cpp
+#, c-format
+msgid "%zu field locations"
+msgstr "フィールドの場所 %zu"
+
+#: port/src/extras/sprites.cpp
+msgid "Location"
+msgstr "場所"
+
+#: port/src/extras/sprites.cpp
+msgid "Animations"
+msgstr "アニメーション"
+
+#: port/src/extras/sprites.cpp
+msgid "Frames"
+msgstr "フレーム"
+
+#: port/src/extras/sprites.cpp
+msgid "Animation"
+msgstr "アニメーション"
+
+#: port/src/extras/sprites.cpp
+msgid "Frame"
+msgstr "フレーム"
+
+#: port/src/extras/tablesview.cpp
+msgid "Compare with a Xenogears disc image"
+msgstr "ゼノギアスのディスクイメージとくらべる"
+
+#: port/src/ui/arena.cpp
+msgid "Not in an online session's window."
+msgstr "オンラインセッションのウィンドウではありません。"
+
+#: port/src/ui/arena.cpp
+msgid "Battling was left (EXIT in its menu)."
+msgstr "バトリングを出ました(メニューの EXIT)。"
+
+#: port/src/ui/arena.cpp
+msgid "The versus battle is over: player 1 (the host) won."
+msgstr "対戦は終わりました: プレイヤー 1(ホスト)の勝ちです。"
+
+#: port/src/ui/arena.cpp
+msgid "The versus battle is over: player 2 won."
+msgstr "対戦は終わりました: プレイヤー 2 の勝ちです。"
+
+#: port/src/ui/arena.cpp
+msgid "The versus battle is over: player 1 (the host) escaped."
+msgstr "対戦は終わりました: プレイヤー 1(ホスト)が逃げました。"
+
+#: port/src/ui/arena.cpp
+msgid "The other player left."
+msgstr "相手のプレイヤーが出ました。"
+
+#: port/src/ui/arena.cpp
+msgid "The other player stopped answering."
+msgstr "相手のプレイヤーの応答がなくなりました。"
+
+#: port/src/ui/arena.cpp
+msgid "The session's window was closed."
+msgstr "セッションのウィンドウが閉じられました。"
+
+#: port/src/ui/arena.cpp
+msgid "Nobody joined in time."
+msgstr "時間内にだれも参加しませんでした。"
+
+#: port/src/ui/arena.cpp
+msgid "No answer from the host: check the address, the port, the host's firewall and the code."
+msgstr "ホストの応答がありません: アドレス、ポート、ホストのファイアウォール、コードを確かめてください。"
+
+#: port/src/ui/arena.cpp
+msgid "The host runs another build of the game: both players need the same one."
+msgstr "ホストのゲームは別のビルドです: 二人とも同じビルドが必要です。"
+
+#: port/src/ui/arena.cpp
+msgid "The host plays the other region's game (US/JP)."
+msgstr "ホストはもう一方の地域のゲーム(US/JP)を遊んでいます。"
+
+#: port/src/ui/arena.cpp
+msgid "The host is busy."
+msgstr "ホストは手がふさがっています。"
+
+#: port/src/ui/arena.cpp
+msgid "The other player's disc is not the same as yours."
+msgstr "相手のプレイヤーのディスクはあなたのものと同じではありません。"
+
+#: port/src/ui/arena.cpp
+msgid "The address is not host:port, or that host is unknown."
+msgstr "アドレスが host:port の形でないか、そのホストが見つかりません。"
+
+#: port/src/ui/arena.cpp
+msgid "The network could not be used (is the port in use?)."
+msgstr "ネットワークが使えませんでした(ポートが使用中?)。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "The two games went apart at vblank %s, so the session stopped."
+msgstr "二つのゲームが vblank %s でずれたので、セッションを止めました。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "The session's window closed (exit code %s)."
+msgstr "セッションのウィンドウが閉じました(終了コード %s)。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "The session could not start: %s"
+msgstr "セッションを始められませんでした: %s"
+
+#: port/src/ui/arena.cpp
+msgid "Online"
+msgstr "オンライン"
+
+#: port/src/ui/arena.cpp
+msgid "This window is an online session. It ends when Battling is left (EXIT), or when either player closes their window."
+msgstr "このウィンドウはオンラインセッションです。バトリングを出る(EXIT)か、どちらかのプレイヤーがウィンドウを閉じると終わります。"
+
+#: port/src/ui/arena.cpp
+msgid "Battling's PLAYER1 VS PLAYER2, or a versus battle, with a player elsewhere: on your network, at an address you share, or over a VPN you both use. The session plays in a window of its own, from power-on; this game waits until it ends. Both players need the same build of the game and the same disc."
+msgstr "バトリングの PLAYER1 VS PLAYER2 か対戦を、別の場所のプレイヤーと: 同じネットワークで、教えたアドレスで、または二人で使う VPN で。セッションは電源オンから自分のウィンドウで動き、このゲームは終わるまで待ちます。二人とも同じビルドのゲームと同じディスクが必要です。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Waiting for player 2 on UDP port %s. They join with your address, this port and the code."
+msgstr "UDP ポート %s でプレイヤー 2 を待っています。相手はあなたのアドレス、このポート、コードで参加します。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Joining %s..."
+msgstr "%s に参加しています..."
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Playing with %s (input delay %d). They see your address, as you see theirs."
+msgstr "%s と対戦中(入力の遅れ %d)。相手からもあなたのアドレスが見えます。"
+
+#: port/src/ui/arena.cpp
+msgid "Starting the session..."
+msgstr "セッションを始めています..."
+
+#: port/src/ui/arena.cpp
+msgid "The other player paused."
+msgstr "相手のプレイヤーが一時停止しました。"
+
+#: port/src/ui/arena.cpp
+msgid "End the session"
+msgstr "セッションを終える"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "The last session: %s"
+msgstr "前のセッション: %s"
+
+#: port/src/ui/arena.cpp
+msgid "Host (player 1)"
+msgstr "ホスト(プレイヤー 1)"
+
+#: port/src/ui/arena.cpp
+msgid "Join (player 2)"
+msgstr "参加(プレイヤー 2)"
+
+#: port/src/ui/arena.cpp
+msgid "Session code"
+msgstr "セッションのコード"
+
+#: port/src/ui/arena.cpp
+msgid "The same word for both players. It keeps others out of the session; it does not encrypt it."
+msgstr "二人で同じ言葉です。ほかの人をセッションに入れないためのもので、暗号化はしません。"
+
+#: port/src/ui/arena.cpp
+msgid "UDP port"
+msgstr "UDP ポート"
+
+#: port/src/ui/arena.cpp
+msgid "Input delay"
+msgstr "入力の遅れ"
+
+#: port/src/ui/arena.cpp
+msgid "Vblanks between a press and what it does, the same on both screens: 2 on a home network, 3 to 6 over the internet."
+msgstr "押してから動くまでの vblank、両方の画面で同じ: 家のネットワークで 2、インターネットで 3 から 6。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Player 2 commands %s (the formation chosen above) against your party as a new game makes them: their starting levels, equipment and Gears, never anyone's save."
+msgstr "プレイヤー 2 は %s(上で選んだ編成)を操り、ニューゲームのときのあなたのパーティと戦います: 始めのレベル、装備、ギアで、だれのセーブも使いません。"
+
+#: port/src/ui/arena.cpp
+msgid "Choose a formation in the Versus battle list above."
+msgstr "上の対戦のリストで編成を選んでください。"
+
+#: port/src/ui/arena.cpp
+msgid "Your Gear list (as far as your story has reached, or Every Gear above) is both players'."
+msgstr "あなたのギアのリスト(ストーリーが進んだところまで、または上の「すべてのギア」)を二人で使います。"
+
+#: port/src/ui/arena.cpp
+msgid "Your gameplay settings (difficulty, text speed...) are both players' for the session."
+msgstr "あなたのゲームプレイの設定(難しさ、文字の速さ...)をセッションの間二人で使います。"
+
+#: port/src/ui/arena.cpp
+msgid "The host's address:port"
+msgstr "ホストのアドレス:ポート"
+
+#: port/src/ui/arena.cpp
+msgid "The other player sees your IP address, as you see theirs: play with people you trust. Hosting needs the UDP port reachable: the same network, a VPN you both use (Tailscale, ZeroTier...), or the port forwarded on your router."
+msgstr "相手のプレイヤーにはあなたの IP アドレスが見えます(あなたにも相手のものが): 信頼できる人と遊んでください。ホストには届く UDP ポートが必要です: 同じネットワーク、二人で使う VPN(Tailscale、ZeroTier...)、またはルーターでのポート転送。"
+
+#: port/src/ui/arena.cpp
+msgid "Host"
+msgstr "ホスト"
+
+#: port/src/ui/arena.cpp
+msgid "Join"
+msgstr "参加"
+
+#: port/src/ui/menu.cpp
+msgid "Locked for this online session: both players play with the host's setting."
+msgstr "このオンラインセッションでは固定: 二人ともホストの設定で遊びます。"
+
+#: port/src/extras/visuals.cpp
+msgid "Party sprites"
+msgstr "パーティのスプライト"
+
+#: port/src/extras/visuals.cpp
+msgid "Gear sprites"
+msgstr "ギアのスプライト"
+
+#: port/src/extras/visuals.cpp
+msgid "Battle party sprites"
+msgstr "バトルのパーティのスプライト"
+
+#: port/src/extras/visuals.cpp
+msgid "Spell sprites"
+msgstr "術のスプライト"
+
+#: port/src/extras/visuals.cpp
+msgid "Enemy sprites"
+msgstr "敵のスプライト"
+
+#: port/src/extras/visuals.cpp
+msgid "Field Gear models"
+msgstr "フィールドのギアのモデル"
+
+#: port/src/extras/visuals.cpp
+msgid "Battle Gear models"
+msgstr "バトルのギアのモデル"
+
+#: port/src/extras/visuals.cpp
+msgid "Enemy models"
+msgstr "敵のモデル"
+
+#: port/src/extras/visuals.cpp
+msgid "Arena models"
+msgstr "闘技場のモデル"
+
+#: port/src/extras/visuals.cpp
+msgid "Field models"
+msgstr "フィールドのモデル"
+
+#: port/src/extras/visuals.cpp
+msgid "World map models"
+msgstr "ワールドマップのモデル"
+
+#: port/src/extras/visuals.cpp
+msgid "Battling models"
+msgstr "バトリングのモデル"
+
+#: port/src/extras/visuals.cpp
+msgid "Ability effects"
+msgstr "技のエフェクト"
+
+#: port/src/extras/visuals.cpp
+msgid "Common effects"
+msgstr "共通のエフェクト"
+
+#: port/src/extras/visuals.cpp
+msgid "Gear trails"
+msgstr "ギアの軌跡"
+
+#: port/src/extras/visuals.cpp
+msgid "Characters, poses and animation."
+msgstr "キャラクター、ポーズ、アニメーション。"
+
+#: port/src/extras/visuals.cpp
+msgid "Gear models, parts and animation."
+msgstr "ギアのモデル、パーツ、アニメーション。"
+
+#: port/src/extras/visuals.cpp
+msgid "Actors, arena and battle camera."
+msgstr "登場するもの、闘技場、バトルのカメラ。"
+
+#: port/src/extras/visuals.cpp
+msgid "Spells, effects and Gear trails."
+msgstr "術、エフェクト、ギアの軌跡。"
+
+#: port/src/extras/visuals.cpp
+msgid "Explore fields and the world map."
+msgstr "フィールドとワールドマップを歩く。"
+
+#: port/src/extras/visuals.cpp
+msgid "Pictures, movies and story scenes."
+msgstr "絵、ムービー、ストーリーのシーン。"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "South"
+msgstr "下ボタン"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "East"
+msgstr "右ボタン"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "West"
+msgstr "左ボタン"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "North"
+msgstr "上ボタン"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Left trigger"
+msgstr "左トリガー"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Right trigger"
+msgstr "右トリガー"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Left shoulder"
+msgstr "左ショルダー"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Right shoulder"
+msgstr "右ショルダー"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Left stick click"
+msgstr "左スティック押しこみ"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Right stick click"
+msgstr "右スティック押しこみ"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Create"
+msgstr "クリエイト"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Share"
+msgstr "シェア"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Minus"
+msgstr "マイナス"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "View"
+msgstr "ビュー"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Plus"
+msgstr "プラス"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Menu"
+msgstr "メニュー"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "D-pad up"
+msgstr "方向キー上"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "D-pad down"
+msgstr "方向キー下"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "D-pad left"
+msgstr "方向キー左"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "D-pad right"
+msgstr "方向キー右"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Guide"
+msgstr "ガイド"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Touchpad"
+msgstr "タッチパッド"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Microphone"
+msgstr "マイク"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Capture"
+msgstr "キャプチャー"
+
+#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
+msgid "Misc 1"
+msgstr "その他 1"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Gear move %02d"
+msgstr "ギアの動き %02d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Pose %02d"
+msgstr "ポーズ %02d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Special %02d"
+msgstr "特殊 %02d"
+
+#: port/src/extras/battle.cpp
+msgid "Omnigear"
+msgstr "オムニギア"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Arena %02d"
+msgstr "闘技場 %02d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Enemy %03d / %d"
+msgstr "敵 %03d / %d"
+
+#: port/src/extras/battle.cpp
+msgid "Attack: 3 AP"
+msgstr "攻撃: 3 AP"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Attack: %d AP, hit %d"
+msgstr "攻撃: %d AP、%d 回目"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Deathblow: %s"
+msgstr "必殺技: %s"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Deathblow %d"
+msgstr "必殺技 %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Ether: %s"
+msgstr "エーテル: %s"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Ether %d"
+msgstr "エーテル %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Attack: level %d"
+msgstr "攻撃: レベル %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Attack: level %d, target on foot"
+msgstr "攻撃: レベル %d、生身の相手"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Infinity: %s"
+msgstr "インフィニティ: %s"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Infinity %d"
+msgstr "インフィニティ %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Special: %s"
+msgstr "特殊: %s"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Special %d"
+msgstr "特殊 %d"
+
+#: port/src/extras/battle.cpp
+msgid "approach"
+msgstr "接近"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "attack %d"
+msgstr "攻撃 %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "ability %d"
+msgstr "能力 %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "animation %d"
+msgstr "動き %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Turn %d"
+msgstr "ターン %d"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "%s, when attacked"
+msgstr "%s、攻撃を受けたとき"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "%s, after the party's turn"
+msgstr "%s、パーティのターンの後"
+
+#: port/src/extras/battle.cpp
+msgid "return"
+msgstr "戻る"
+
+#: port/src/extras/battle.cpp
+msgid "turn start"
+msgstr "ターン開始"
+
+#: port/src/extras/battle.cpp
+msgid "turn end"
+msgstr "ターン終了"
+
+#: port/src/extras/battle.cpp
+msgid "cancel"
+msgstr "取り消し"
+
+#: port/src/extras/battle.cpp
+msgid "Ether casting"
+msgstr "エーテルの動作"
+
+#: port/src/extras/battle.cpp
+msgid "counterattack"
+msgstr "反撃"
+
+#: port/src/extras/battle.cpp
+msgid "deathblow casting"
+msgstr "必殺技の動作"
+
+#: port/src/extras/battle.cpp
+msgid "A Gear's turn is played against a Gear: choose Gear or Omnigear for the party"
+msgstr "ギアのターンはギアに対して再生します: パーティにギアかオムニギアを選んでください"
+
+#: port/src/extras/battle.cpp
+msgid "This turn plays programs its battle event loads: the scene cannot show it"
+msgstr "このターンはバトルのイベントが読み込む動きを使います: この場面では再生できません"
+
+#: port/src/extras/battle.cpp
+msgid "This Gear move is used against Gears: choose a Gear enemy"
+msgstr "このギアの技はギアに使います: ギアの敵を選んでください"
+
+#: port/src/extras/bestiary.cpp
+msgid "No turn of its scripts plays this ability with fixed values"
+msgstr "この能力を固定の値で使うターンはスクリプトにありません"
+
+#: port/src/extras/bestiary.cpp
+msgid "Choose an attack or ability to play the enemy's turn that uses it in the Battle scene."
+msgstr "攻撃か能力を選ぶと、それを使う敵のターンをバトルの場面で再生します。"
+
+#: port/src/extras/battle.cpp
+msgid "Enemy acts"
+msgstr "敵が動く"
+
+#: port/src/extras/battle.cpp
+msgid "Load scene"
+msgstr "シーンを読む"
+
+#: port/src/extras/battle.cpp
+msgid "Moves"
+msgstr "動き"
+
+#: port/src/extras/battle.cpp
+msgid "Poses"
+msgstr "ポーズ"
+
+#: port/src/extras/battle.cpp
+msgid "All animations"
+msgstr "全アニメーション"
+
+#: port/src/extras/battle.cpp
+msgid "Find a move"
+msgstr "動きを探す"
+
+#: port/src/extras/battle.cpp
+msgid "Choose an arena and actors, then load the scene."
+msgstr "闘技場と登場するものを選んで、シーンを読んでください。"
+
+#: port/src/extras/battle.cpp
+msgid "Full battle"
+msgstr "バトル全体"
+
+#: port/src/extras/battle.cpp port/src/extras/battlefx.cpp
+msgid "Options / export"
+msgstr "オプション / 書き出し"
+
+#: port/src/extras/battle.cpp
+msgid "Include all ability banks"
+msgstr "すべての技のバンクを入れる"
+
+#: port/src/extras/battle.cpp
+msgid "Battle audio"
+msgstr "バトルの音"
+
+#: port/src/extras/battle.cpp
+msgid "Open disc image..."
+msgstr "ディスクイメージを開く..."
+
+#: port/src/extras/battle.cpp
+msgid "L2/R2: previous/next arena. X: play/pause. Y: one frame. R3: fit."
+msgstr "L2/R2: 前/次の闘技場。X: 再生/一時停止。Y: 1 フレーム。R3: 合わせる。"
+
+#: port/src/extras/battle.cpp
+#, c-format
+msgid "Frame %d"
+msgstr "フレーム %d"
+
+#: port/src/extras/battlefx.cpp
+msgid "Ability sprites"
+msgstr "技のスプライト"
+
+#: port/src/extras/battlefx.cpp
+msgid "Common sprites"
+msgstr "共通のスプライト"
+
+#: port/src/extras/battlefx.cpp
+msgid "Open image..."
+msgstr "イメージを開く..."
+
+#: port/src/extras/battlefx.cpp
+msgid "No effect assets in this image."
+msgstr "このイメージにエフェクトのデータはありません。"
+
+#: port/src/extras/battlefx.cpp
+msgid "Follow effect bounds"
+msgstr "エフェクトの範囲を追う"
+
+#: port/src/extras/battlefx.cpp
+#, c-format
+msgid "%d effect tasks / %d native commands"
+msgstr "エフェクトのタスク %d / ゲームのコマンド %d"
+
+#: port/src/extras/battlefx.cpp
+msgid "Effect assets isolate the effect on a preview stage. Use Battle scene for the arena, actor, camera and audio."
+msgstr "エフェクトのデータはエフェクトだけを確認用の舞台に置きます。闘技場、登場するもの、カメラ、音は「バトルシーン」で。"
+
+#: port/src/extras/battlefx.cpp
+msgid "Orbit"
+msgstr "周回"
+
+#: port/src/extras/battlefx.cpp
+#, c-format
+msgid "Animation %d"
+msgstr "アニメーション %d"
+
+#: port/src/extras/battlefx.cpp
+#, c-format
+msgid "Tick %d"
+msgstr "ティック %d"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Source: %s disc %d (%s)"
+msgstr "元: %s ディスク %d(%s)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Section %d: %s (archive offset %X)"
+msgstr "セクション %d: %s(アーカイブのオフセット %X)"
+
+#: port/src/extras/browser.cpp
+msgid "Field archive: 9 compressed sections"
+msgstr "フィールドのアーカイブ: 圧縮されたセクション 9 個"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Directory %02X, file %03X: table entry %d"
+msgstr "ディレクトリ %02X、ファイル %03X: 表のエントリー %d"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "A group of %d entries from LBA %d, read as one"
+msgstr "LBA %d からの %d エントリーのグループ、まとめて読む"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "LBA %d, %d bytes"
+msgstr "LBA %d、%d バイト"
+
+#: port/src/extras/browser.cpp
+msgid ", the same"
+msgstr "、同じ"
+
+#: port/src/extras/browser.cpp
+msgid ", DIFFERENT"
+msgstr "、違う"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "File map: %s"
+msgstr "ファイルマップ: %s"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%s: %d bytes"
+msgstr "%s: %d バイト"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Kind: %s"
+msgstr "種類: %s"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "An LZSS stream of %d bytes"
+msgstr "%d バイトの LZSS ストリーム"
+
+#: port/src/extras/browser.cpp
+msgid "Decompress (the game's decoder)"
+msgstr "展開する(ゲームのデコーダー)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "TIM, %d-bit, %d x %d at VRAM (%d, %d)"
+msgstr "TIM、%d ビット、%d x %d、VRAM(%d, %d)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%d CLUTs at (%d, %d), %d x %d"
+msgstr "CLUT %d 個、(%d, %d)、%d x %d"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Offset bundle of %d members%s"
+msgstr "メンバー %d 個のオフセットバンドル%s"
+
+#: port/src/extras/browser.cpp
+msgid " (with its end offset)"
+msgstr "(終わりのオフセットつき)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%d TIM pictures back to back"
+msgstr "続いた TIM の絵 %d 枚"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Packed VRAM uploads: %d records"
+msgstr "まとめた VRAM 転送: レコード %d"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Model archive of %d parts"
+msgstr "パーツ %d のモデルアーカイブ"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Sample bank %d: %d presets"
+msgstr "サンプルバンク %d: プリセット %d"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%d sound effects, sample bank %d"
+msgstr "効果音 %d、サンプルバンク %d"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Music score \"%s\""
+msgstr "楽譜「%s」"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "Also reads as an LZSS stream of %d bytes"
+msgstr "%d バイトの LZSS ストリームとしても読めます"
+
+#: port/src/extras/browser.cpp
+msgid "Check the game's relocation"
+msgstr "ゲームのリロケーションを確かめる"
+
+#: port/src/extras/browser.cpp
+msgid "pcRelocTable gives every member's address"
+msgstr "pcRelocTable はすべてのメンバーのアドレスをあたえます"
+
+#: port/src/extras/browser.cpp
+msgid "the relocation differs"
+msgstr "リロケーションが違います"
+
+#: port/src/extras/browser.cpp
+msgid "All CLUTs"
+msgstr "すべての CLUT"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%d x %d, %d-bit, zoom %.2f"
+msgstr "%d x %d、%d ビット、拡大 %.2f"
+
+#: port/src/extras/browser.cpp
+msgid "Yaw"
+msgstr "ヨー"
+
+#: port/src/extras/browser.cpp
+msgid "Pitch"
+msgstr "ピッチ"
+
+#: port/src/extras/browser.cpp
+msgid "Turn"
+msgstr "回転"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%d primitives drawn"
+msgstr "プリミティブ %d 個を描画"
+
+#: port/src/extras/browser.cpp
+msgid "Preset"
+msgstr "プリセット"
+
+#: port/src/extras/browser.cpp
+msgid "Effect"
+msgstr "効果音"
+
+#: port/src/extras/browser.cpp
+msgid "Image..."
+msgstr "イメージ..."
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%s %02X  (%d files)"
+msgstr "%s %02X  (ファイル %d)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "group %d"
+msgstr "グループ %d"
+
+#: port/src/extras/browser.cpp
+msgid "empty"
+msgstr "空"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%s, disc %d (%s)"
+msgstr "%s、ディスク %d(%s)"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%d table entries, %d sectors"
+msgstr "表のエントリー %d、セクタ %d"
+
+#: port/src/extras/browser.cpp
+msgid "The game's own file lookups (filesystem.c, in a sandbox) agree with the table."
+msgstr "ゲーム自身のファイルの探し方(filesystem.c、サンドボックスで)は表と合っています。"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "The game's own lookups differ in %d files."
+msgstr "ゲーム自身の探し方は %d ファイルで違います。"
+
+#: port/src/extras/browser.cpp
+msgid "Export raw"
+msgstr "そのまま書き出す"
+
+#: port/src/extras/browser.cpp
+#, c-format
+msgid "%s, %d bytes"
+msgstr "%s、%d バイト"
+
+#: port/src/extras/browser.cpp
+msgid "Info"
+msgstr "情報"
+
+#: port/src/extras/browser.cpp
+msgid "Hex"
+msgstr "16 進"
+
+#: port/src/extras/browser.cpp
+msgid "Members"
+msgstr "メンバー"
+
+#: port/src/extras/browser.cpp
+msgid "Model"
+msgstr "モデル"
+
+#: port/src/extras/browser.cpp
+msgid "Sound"
+msgstr "音"
+
+#: port/src/extras/browser.cpp
+msgid "Sections"
+msgstr "セクション"
+
+#: port/src/extras/maps.cpp
+msgid "Actors"
+msgstr "登場するもの"
+
+#: port/src/extras/maps.cpp
+msgid "Walkmesh"
+msgstr "ウォークメッシュ"
+
+#: port/src/extras/maps.cpp port/src/extras/scripts.cpp
+msgid "Exits"
+msgstr "出口"
+
+#: port/src/extras/maps.cpp
+msgid "The fields are on disc 1: no disc 1 image was found."
+msgstr "フィールドはディスク 1 にあります: ディスク 1 のイメージが見つかりません。"
+
+#: port/src/extras/maps.cpp
+msgid "No field"
+msgstr "フィールドなし"
+
+#: port/src/extras/maps.cpp
+msgid "  (free camera)"
+msgstr "  (自由カメラ)"
+
+#: port/src/extras/maps.cpp
+msgid "  (the game's camera)"
+msgstr "  (ゲームのカメラ)"
+
+#: port/src/extras/maps.cpp
+msgid "Choose a field."
+msgstr "フィールドを選んでください。"
+
+#: port/src/extras/maps.cpp
+msgid "The game's camera"
+msgstr "ゲームのカメラ"
+
+#: port/src/extras/maps.cpp
+msgid "Free camera"
+msgstr "自由カメラ"
+
+#: port/src/extras/maps.cpp
+msgid "Animate"
+msgstr "動かす"
+
+#: port/src/extras/maps.cpp
+msgid "Models"
+msgstr "モデル"
+
+#: port/src/extras/maps.cpp
+msgid "Background, Gears"
+msgstr "背景、ギア"
+
+#: port/src/extras/maps.cpp
+msgid "Filled"
+msgstr "塗りつぶし"
+
+#: port/src/extras/maps.cpp
+msgid "Triggers"
+msgstr "トリガー"
+
+#: port/src/extras/maps.cpp
+msgid "Field of view"
+msgstr "視野"
+
+#: port/src/extras/maps.cpp
+msgid "the game's"
+msgstr "ゲームの"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%.0f degrees"
+msgstr "%.0f 度"
+
+#: port/src/extras/maps.cpp
+msgid "The game's view"
+msgstr "ゲームの視点"
+
+#: port/src/extras/maps.cpp
+msgid "Drag: orbit. Right drag or Shift: pan. Wheel: closer. W A S D Q E: move. Right stick, triggers."
+msgstr "ドラッグ: 周回。右ドラッグか Shift: 移動。ホイール: 近づく。W A S D Q E: 動く。右スティック、トリガー。"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Actor %d: model %d, NPC bundle %d, character %d"
+msgstr "アクター %d: モデル %d、NPC バンドル %d、キャラクター %d"
+
+#: port/src/extras/maps.cpp
+msgid "Open actor's model"
+msgstr "アクターのモデルを開く"
+
+#: port/src/extras/maps.cpp
+msgid "Open actor's sprite"
+msgstr "アクターのスプライトを開く"
+
+#: port/src/extras/maps.cpp
+msgid "Uses a game variable"
+msgstr "ゲームの変数を使います"
+
+#: port/src/extras/maps.cpp
+msgid "Incomplete or invalid request"
+msgstr "不完全か無効な要求"
+
+#: port/src/extras/maps.cpp
+msgid "Frame range unavailable on this image"
+msgstr "このイメージにはフレームの範囲がありません"
+
+#: port/src/extras/maps.cpp
+msgid "Picture unavailable on this image"
+msgstr "このイメージには絵がありません"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%s disc %d  -  field %d"
+msgstr "%s ディスク %d  -  フィールド %d"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Open field archive 04/%03X"
+msgstr "フィールドのアーカイブ 04/%03X を開く"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Open texture uploads 04/%03X"
+msgstr "テクスチャの転送 04/%03X を開く"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Play requested music %d"
+msgstr "求められた曲 %d を再生"
+
+#: port/src/extras/maps.cpp
+msgid "Archive sections"
+msgstr "アーカイブのセクション"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Open %s"
+msgstr "%s を開く"
+
+#: port/src/extras/maps.cpp
+msgid "Back returns to this field with its camera and selection preserved."
+msgstr "「もどる」でカメラと選択をそのままにこのフィールドへもどります。"
+
+#: port/src/extras/maps.cpp
+msgid "Movies and event pictures"
+msgstr "ムービーとイベントの絵"
+
+#: port/src/extras/maps.cpp
+msgid "No reachable media requests in this field script."
+msgstr "このフィールドのスクリプトに届くメディアの要求はありません。"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Open movie %d, frames %d-%d (PC %04X)"
+msgstr "ムービー %d を開く、フレーム %d-%d(PC %04X)"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Open event picture %d (PC %04X)"
+msgstr "イベントの絵 %d を開く(PC %04X)"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Unavailable: %s"
+msgstr "使えません: %s"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%d entities: %d script actors, %d placed models (%d in the archive)"
+msgstr "エンティティ %d: スクリプトのアクター %d、置かれたモデル %d(アーカイブに %d)"
+
+#: port/src/extras/maps.cpp
+msgid "sprite"
+msgstr "スプライト"
+
+#: port/src/extras/maps.cpp
+msgid "actor"
+msgstr "アクター"
+
+#: port/src/extras/maps.cpp
+msgid "model"
+msgstr "モデル"
+
+#: port/src/extras/maps.cpp
+msgid "  hidden"
+msgstr "  隠れ"
+
+#: port/src/extras/maps.cpp
+msgid "  party"
+msgstr "  パーティ"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "flags %04X, rotation %d %d %d, facing %d, walkmesh %d triangle %d"
+msgstr "フラグ %04X、回転 %d %d %d、向き %d、ウォークメッシュ %d 三角形 %d"
+
+#: port/src/extras/maps.cpp
+msgid "Inspect script"
+msgstr "スクリプトを調べる"
+
+#: port/src/extras/maps.cpp
+msgid "Look at it"
+msgstr "それを見る"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%d layers, %d triangles, %d trigger zones"
+msgstr "レイヤー %d、三角形 %d、トリガーの範囲 %d"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Layer %d: %d triangles"
+msgstr "レイヤー %d: 三角形 %d"
+
+#: port/src/extras/maps.cpp
+msgid "Materials"
+msgstr "材質"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%3d: %4d triangles, flags %08X"
+msgstr "%3d: 三角形 %4d、フラグ %08X"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%s, entry %d"
+msgstr "%s、入口 %d"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "the world map: %s (place %d, start %d)"
+msgstr "ワールドマップ: %s(場所 %d、始まり %d)"
+
+#: port/src/extras/maps.cpp
+msgid "Found by the field's own scripts: the player put in each trigger zone and at each actor."
+msgstr "フィールド自身のスクリプトで見つけました: プレイヤーを各トリガーの範囲と各アクターに置いて。"
+
+#: port/src/extras/maps.cpp
+msgid "No exits found in this field's scripts."
+msgstr "このフィールドのスクリプトに出口は見つかりません。"
+
+#: port/src/extras/maps.cpp
+msgid "trigger"
+msgstr "トリガー"
+
+#: port/src/extras/maps.cpp
+msgid "Script routine 0 places the actors from the game's state: the story progress (field variable 0) and the entry point (variable 2)."
+msgstr "スクリプトのルーチン 0 がゲームの状態からアクターを置きます: ストーリーの進み具合(フィールド変数 0)と入口(変数 2)。"
+
+#: port/src/extras/maps.cpp
+msgid "The start of a new game"
+msgstr "ニューゲームの始まり"
+
+#: port/src/extras/maps.cpp
+msgid "The paused game's state"
+msgstr "一時停止中のゲームの状態"
+
+#: port/src/extras/maps.cpp
+msgid "Chapters"
+msgstr "章"
+
+#: port/src/extras/maps.cpp
+msgid "Entry point (-1: the state's)"
+msgstr "入口(-1: 状態のもの)"
+
+#: port/src/extras/maps.cpp
+msgid "Pictures (PNG)"
+msgstr "絵(PNG)"
+
+#: port/src/extras/maps.cpp
+msgid "The free camera's picture"
+msgstr "自由カメラの絵"
+
+#: port/src/extras/maps.cpp
+msgid "The game camera's picture"
+msgstr "ゲームのカメラの絵"
+
+#: port/src/extras/maps.cpp
+msgid "Top-down map"
+msgstr "真上からの地図"
+
+#: port/src/extras/maps.cpp
+msgid "The layers shown (View) are drawn: models, sprites, walkmesh, triggers, exits, actors."
+msgstr "表示中のレイヤー(表示)を描きます: モデル、スプライト、ウォークメッシュ、トリガー、出口、アクター。"
+
+#: port/src/extras/maps.cpp
+msgid "Scene (glTF binary)"
+msgstr "シーン(glTF バイナリ)"
+
+#: port/src/extras/maps.cpp
+msgid "Trigger zones"
+msgstr "トリガーの範囲"
+
+#: port/src/extras/maps.cpp
+msgid "Export the scene"
+msgstr "シーンを書き出す"
+
+#: port/src/extras/maps.cpp
+msgid "Models and Gears in their current poses and places, textured from the field (nearest filtering; semi-transparency approximated); y up, 512 field units to the metre."
+msgstr "今のポーズと場所のモデルとギア、フィールドのテクスチャつき(ニアレスト、半透明は近似); y が上、512 フィールド単位で 1 メートル。"
+
+#: port/src/extras/maps.cpp
+msgid "Open the folder"
+msgstr "フォルダを開く"
+
+#: port/src/extras/maps.cpp
+msgid "The fields are read from disc 1 and set up by the field overlay's own code; the scene is drawn by its own renderers."
+msgstr "フィールドはディスク 1 から読み、フィールドのオーバーレイ自身のコードで用意します。シーンは自前のレンダラーで描きます。"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Special map %d"
+msgstr "特別なマップ %d"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "Stage %d (from %d)%s%s"
+msgstr "ステージ %d(%d から)%s%s"
+
+#: port/src/extras/maps.cpp
+msgid "The world map is read from disc 1: no disc 1 image was found."
+msgstr "ワールドマップはディスク 1 から読みます: ディスク 1 のイメージが見つかりません。"
+
+#: port/src/extras/maps.cpp
+msgid "  (overview)"
+msgstr "  (全体)"
+
+#: port/src/extras/maps.cpp
+msgid "Choose a stage."
+msgstr "ステージを選んでください。"
+
+#: port/src/extras/maps.cpp
+msgid "The world map is set up by its overlay's own code; the terrain is streamed in and drawn by its own renderers."
+msgstr "ワールドマップはそのオーバーレイ自身のコードで用意します。地形は読み込みながら自前のレンダラーで描きます。"
+
+#: port/src/extras/maps.cpp
+msgid "Ground"
+msgstr "地面"
+
+#: port/src/extras/maps.cpp
+msgid "Landmarks"
+msgstr "目印"
+
+#: port/src/extras/maps.cpp
+msgid "Trees"
+msgstr "木"
+
+#: port/src/extras/maps.cpp
+msgid "Sky"
+msgstr "空"
+
+#: port/src/extras/maps.cpp
+msgid "Depth fog"
+msgstr "奥の霧"
+
+#: port/src/extras/maps.cpp
+msgid "Landmark marks"
+msgstr "目印の印"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%s; the camera at %.0f, %.0f"
+msgstr "%s; カメラは %.0f, %.0f"
+
+#: port/src/extras/maps.cpp
+msgid "Right click: the free camera there. Wheel and drag: zoom and pan."
+msgstr "右クリック: そこに自由カメラ。ホイールとドラッグ: 拡大と移動。"
+
+#: port/src/extras/maps.cpp
+msgid "Drag: orbit. Right drag or Shift: pan. Wheel: closer. W A S D Q E: move. The game draws the ground to about 3800 units."
+msgstr "ドラッグ: 周回。右ドラッグか Shift: 移動。ホイール: 近づく。W A S D Q E: 動く。ゲームは地面を約 3800 単位まで描きます。"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%d exit areas"
+msgstr "出口の範囲 %d"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%s  (table %d, at %d %d)"
+msgstr "%s  (表 %d、位置 %d %d)"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "field value %04X, type %d"
+msgstr "フィールドの値 %04X、タイプ %d"
+
+#: port/src/extras/maps.cpp
+#, c-format
+msgid "%3d at %6d %6d %6d%s"
+msgstr "%3d 位置 %6d %6d %6d%s"
+
+#: port/src/extras/maps.cpp
+msgid "Pixels a chunk"
+msgstr "チャンクごとのピクセル"
+
+#: port/src/extras/maps.cpp
+msgid "The whole area top-down (PNG)"
+msgstr "エリア全体を真上から(PNG)"
+
+#: port/src/extras/maps.cpp
+msgid "The camera's picture (PNG)"
+msgstr "カメラの絵(PNG)"
+
+#: port/src/extras/maps.cpp
+msgid "The top-down map is drawn chunk by chunk, each seen straight down with the terrain's heights flattened (a flat ground seen from above is an exact map)."
+msgstr "真上からの地図はチャンクごとに、地形の高さを平らにしてまっすぐ下に見て描きます(上から見た平らな地面は正確な地図です)。"
+
+#: port/src/extras/scripts.cpp
+msgid "Variables"
+msgstr "変数"
+
+#: port/src/extras/scripts.cpp
+msgid "Trace"
+msgstr "トレース"
+
+#: port/src/extras/scripts.cpp
+msgid "Dialogue history"
+msgstr "会話の履歴"
+
+#: port/src/extras/scripts.cpp
+msgid "No readable field script on this image."
+msgstr "このイメージに読めるフィールドのスクリプトはありません。"
+
+#: port/src/extras/scripts.cpp
+msgid "Choose disc 1."
+msgstr "ディスク 1 を選んでください。"
+
+#: port/src/extras/scripts.cpp
+msgid "Choose an image matching the running game's region."
+msgstr "動いているゲームと同じ地域のイメージを選んでください。"
+
+#: port/src/extras/scripts.cpp
+msgid "Actor"
+msgstr "アクター"
+
+#: port/src/extras/scripts.cpp
+msgid "Routine"
+msgstr "ルーチン"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "%d actors; %d code bytes; routine entry %04X"
+msgstr "アクター %d; コード %d バイト; ルーチンの入口 %04X"
+
+#: port/src/extras/scripts.cpp
+msgid "Reachable instructions, including calls and conditional branches. Hex bytes retain operands for unnamed operations."
+msgstr "届く命令、呼び出しと条件分岐も。名前のない操作は 16 進のバイトでオペランドを残します。"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "%s PC %04X, slot %d, routine %d"
+msgstr "%s PC %04X、スロット %d、ルーチン %d"
+
+#: port/src/extras/scripts.cpp
+msgid "Paused game"
+msgstr "一時停止中のゲーム"
+
+#: port/src/extras/scripts.cpp
+msgid "Sandbox"
+msgstr "サンドボックス"
+
+#: port/src/extras/scripts.cpp
+msgid "All actor routine entries"
+msgstr "アクターのすべてのルーチンの入口"
+
+#: port/src/extras/scripts.cpp
+msgid "Read-only values from the paused field or after sandbox setup. Addresses are even byte offsets 000-7FE; signedness comes from this field's script header."
+msgstr "一時停止中のフィールド、またはサンドボックスの用意の後の読み取り専用の値。アドレスは偶数のバイトオフセット 000-7FE。符号はこのフィールドのスクリプトのヘッダーによります。"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "No actor snapshot: %s"
+msgstr "アクターのスナップショットなし: %s"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "Actor %d: PC %04X, running slot %d"
+msgstr "アクター %d: PC %04X、動いているスロット %d"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "Slot %d: routine %3d, PC %04X, priority %d, delay %d"
+msgstr "スロット %d: ルーチン %3d、PC %04X、優先 %d、遅れ %d"
+
+#: port/src/extras/scripts.cpp
+msgid "Hex variable"
+msgstr "16 進の変数"
+
+#: port/src/extras/scripts.cpp
+msgid "Add watch"
+msgstr "見張りを追加"
+
+#: port/src/extras/scripts.cpp
+msgid "Static requests in the selected routine are annotated in Scripts. Probe triggers below in a separate sandbox; the paused game stays unchanged."
+msgstr "選んだルーチンの静的な要求は「スクリプト」に注記されます。下で別のサンドボックスでトリガーを調べます。一時停止中のゲームは変わりません。"
+
+#: port/src/extras/scripts.cpp
+msgid "Probe field exits"
+msgstr "フィールドの出口を調べる"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "Actor %d, trigger %d -> %s %d, entry %d"
+msgstr "アクター %d、トリガー %d -> %s %d、入口 %d"
+
+#: port/src/extras/scripts.cpp
+msgid "world place"
+msgstr "ワールドの場所"
+
+#: port/src/extras/scripts.cpp
+msgid "field"
+msgstr "フィールド"
+
+#: port/src/extras/scripts.cpp
+msgid "Record execution trace"
+msgstr "実行のトレースを記録"
+
+#: port/src/extras/scripts.cpp
+msgid "Clear trace"
+msgstr "トレースを消す"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "Latest %d / %d operations from the running game, oldest first. Recording takes effect on resume; inspection never executes a script or advances paused time."
+msgstr "動いているゲームの最新の操作 %d / %d、古い順。記録は再開すると働きます。調べてもスクリプトは動かず、止めた時間も進みません。"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "%llu v%llu field %d actor %d slot %d routine %d PC %04X %02X %s"
+msgstr "%llu v%llu フィールド %d アクター %d スロット %d ルーチン %d PC %04X %02X %s"
+
+#: port/src/extras/scripts.cpp
+msgid "Keep dialogue history"
+msgstr "会話の履歴を残す"
+
+#: port/src/extras/scripts.cpp
+msgid "Clear history"
+msgstr "履歴を消す"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "The last %d dialogue entries as printed by the game. Only revealed text is retained, including Japanese glyphs, names and number substitutions. History lasts for this run."
+msgstr "ゲームが表示した最後の会話 %d 件。表示された文字だけを残します(日本語の文字、名前、数の置き換えも)。履歴はこの実行の間だけです。"
+
+#: port/src/extras/scripts.cpp
+msgid "Entry"
+msgstr "項目"
+
+#: port/src/extras/scripts.cpp
+msgid "Newest"
+msgstr "最新"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "%d: field %d, actor %d, dialogue %d"
+msgstr "%d: フィールド %d、アクター %d、会話 %d"
+
+#: port/src/extras/scripts.cpp
+msgid "No dialogue recorded yet."
+msgstr "まだ会話の記録はありません。"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "Field %d, actor %d, dialogue %d; %d lines%s"
+msgstr "フィールド %d、アクター %d、会話 %d; %d 行%s"
+
+#: port/src/extras/scripts.cpp
+msgid " (limit reached)"
+msgstr "(上限)"
+
+#: port/src/extras/scripts.cpp
+msgid "Text scale"
+msgstr "文字の大きさ"
+
+#: port/src/extras/scripts.cpp
+msgid "Sandbox from paused state"
+msgstr "一時停止の状態からサンドボックス"
+
+#: port/src/extras/scripts.cpp
+msgid "Inspect paused field"
+msgstr "一時停止中のフィールドを調べる"
+
+#: port/src/extras/scripts.cpp
+msgid "Inspect sandbox"
+msgstr "サンドボックスを調べる"
+
+#: port/src/extras/scripts.cpp
+#, c-format
+msgid "%s disc %d: %s"
+msgstr "%s ディスク %d: %s"
+
+#: port/src/extras/tablesview.cpp
+msgid "Field names"
+msgstr "フィールドの名前"
+
+#: port/src/extras/tablesview.cpp
+msgid "Each field's name: the world map place whose exit enters it, or the nearest such field along the fields' own exits."
+msgstr "各フィールドの名前: そこへ入る出口のあるワールドマップの場所、またはフィールド自身の出口をたどって一番近いそのようなフィールド。"
+
+#: port/src/extras/tablesview.cpp
+msgid "Story chapters"
+msgstr "ストーリーの章"
+
+#: port/src/extras/tablesview.cpp
+msgid "The save screen's location line for each story progress value (field variable 0): file 11/01."
+msgstr "ストーリーの進み具合の値(フィールド変数 0)ごとのセーブ画面の場所の行: ファイル 11/01。"
+
+#: port/src/extras/tablesview.cpp
+msgid "World places"
+msgstr "ワールドの場所"
+
+#: port/src/extras/tablesview.cpp
+msgid "The names the world map shows at its exits, and the field each one enters."
+msgstr "ワールドマップが出口で見せる名前と、それぞれが入るフィールド。"
+
+#: port/src/extras/tablesview.cpp
+msgid "Music selector"
+msgstr "曲の選び方"
+
+#: port/src/extras/tablesview.cpp
+msgid "The field's music table: score (1C/14+2n), sample bank (1C/13+2b; none: keep the loaded one), flags, and each score's name, reverb and loop point."
+msgstr "フィールドの曲の表: 曲(1C/14+2n)、サンプルバンク(1C/13+2b; なし: 読み込み済みのまま)、フラグ、各曲の名前、リバーブ、ループの位置。"
+
+#: port/src/extras/tablesview.cpp
+msgid "Effects the game's code plays at fixed places, named after what that code does (the game has no names for them). Effects play with the reverb of the score playing."
+msgstr "ゲームのコードが決まった場所で鳴らす効果音。そのコードのすることから名付けています(ゲームに名前はありません)。効果音は再生中の曲のリバーブで鳴ります。"
+
+#: port/src/extras/tablesview.cpp
+msgid "Each ability effect's file (0E/22+2n): a sprite bundle, then sound banks and more sprites; the mode says who stays on screen (0 all, 1 none of the party, 2-3 the user)."
+msgstr "各技のエフェクトのファイル(0E/22+2n): スプライトのバンドル、それからサウンドバンクとほかのスプライト。モードは画面に残るものです(0 全員、1 パーティはなし、2-3 使う人)。"
+
+#: port/src/extras/tablesview.cpp
+msgid "Playback rates"
+msgstr "再生の速さ"
+
+#: port/src/extras/tablesview.cpp
+msgid "How often the game steps sprite and Gear animation, from its own frame code."
+msgstr "ゲームがスプライトとギアのアニメーションを進める頻度、ゲーム自身のフレームのコードから。"
+
+#: port/src/extras/tablesview.cpp
+msgid "US and JP"
+msgstr "US と JP"
+
+#: port/src/extras/tablesview.cpp
+msgid "This disc's tables against another disc's (choose one below)."
+msgstr "このディスクの表と別のディスクの表(下で選ぶ)。"
+
+#: port/src/extras/tablesview.cpp
+msgid "Export this"
+msgstr "これを書き出す"
+
+#: port/src/extras/tablesview.cpp
+msgid "Export all"
+msgstr "全部書き出す"
+
+#: port/src/extras/tablesview.cpp
+msgid "Export folder"
+msgstr "書き出しフォルダ"
+
+#: port/src/extras/tablesview.cpp
+#, c-format
+msgid "Disc: %s"
+msgstr "ディスク: %s"
+
+#: port/src/extras/tablesview.cpp
+msgid "Compare with a disc image..."
+msgstr "ディスクイメージとくらべる..."
+
+#: port/src/extras/tablesview.cpp
+msgid "Nothing compared yet."
+msgstr "まだ何もくらべていません。"
+
+#: port/src/extras/tablesview.cpp
+msgid "The disc has no such table."
+msgstr "ディスクにその表はありません。"
+
+#: port/src/ui/states.cpp
+msgid "Rewind"
+msgstr "巻きもどし"
+
+#: port/src/ui/states.cpp
+msgid "Hold R (F10 when R plays a button) or Select+L2 on a gamepad to go back; let go to play on from there."
+msgstr "R(R がボタンに使われているときは F10)かゲームパッドの Select+L2 を押し続けるともどります。はなすとそこから続きます。"
+
+#: port/src/ui/states.cpp
+msgid "How far back"
+msgstr "もどる長さ"
+
+#: port/src/ui/states.cpp
+msgid "A capture every N frames"
+msgstr "N フレームごとに記録"
+
+#: port/src/ui/states.cpp
+msgid "Memory at most"
+msgstr "メモリーの上限"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Kept now: %.1f s in %.0f MB; a capture takes %.1f ms of the game's time (at worst %.1f)."
+msgstr "今の記録: %.1f 秒、%.0f MB; 1 回の記録はゲームの時間で %.1f ms(最悪 %.1f)。"
+
+#: port/src/ui/states.cpp
+msgid "Off: nothing is kept and the game runs as without it. On, each capture costs a few milliseconds."
+msgstr "オフ: 何も残さず、ゲームはないときと同じに動きます。オンでは記録ごとに数ミリ秒かかります。"
+
+#: port/src/extras/tablesview.cpp
+msgid "Exits away"
+msgstr "出口まで"
+
+#: port/src/extras/tablesview.cpp
+msgid "Exits to"
+msgstr "移動先"
+
+#: port/src/extras/tablesview.cpp
+msgid "Progress"
+msgstr "進行度"
+
+#: port/src/extras/tablesview.cpp
+msgid "Chapter"
+msgstr "章"
+
+#: port/src/extras/tablesview.cpp
+msgid "Place"
+msgstr "場所"
+
+#: port/src/extras/tablesview.cpp
+msgid "Id"
+msgstr "番号"
+
+#: port/src/extras/tablesview.cpp
+msgid "Bank"
+msgstr "バンク"
+
+#: port/src/extras/tablesview.cpp
+msgid "Flags"
+msgstr "フラグ"
+
+#: port/src/extras/tablesview.cpp
+msgid "Score"
+msgstr "スコア"
+
+#: port/src/extras/tablesview.cpp
+msgid "Bank file"
+msgstr "バンクファイル"
+
+#: port/src/extras/tablesview.cpp
+msgid "Tracks"
+msgstr "トラック"
+
+#: port/src/extras/tablesview.cpp
+msgid "Reverb"
+msgstr "リバーブ"
+
+#: port/src/extras/tablesview.cpp
+msgid "Loops"
+msgstr "ループ"
+
+#: port/src/extras/tablesview.cpp
+msgid "Sound id"
+msgstr "効果音番号"
+
+#: port/src/extras/tablesview.cpp
+msgid "Holds"
+msgstr "内容"
+
+#: port/src/extras/tablesview.cpp
+msgid "SEDS"
+msgstr "SEDS"
+
+#: port/src/extras/tablesview.cpp
+msgid "WDS"
+msgstr "WDS"
+
+#: port/src/extras/tablesview.cpp
+msgid "Sprite/s"
+msgstr "スプライト毎秒"
+
+#: port/src/extras/tablesview.cpp
+msgid "Gear/s"
+msgstr "ギア毎秒"
+
+#: port/src/extras/tablesview.cpp
+msgid "Frames/s"
+msgstr "毎秒フレーム数"
+
+#: port/src/extras/tablesview.cpp
+msgid "Vblanks a frame"
+msgstr "フレームごとのVBlank"
+
+#: port/src/extras/tablesview.cpp
+msgid "Keeps time"
+msgstr "時間を合わせる"
+
+#: port/src/extras/tablesview.cpp
+msgid "Table"
+msgstr "テーブル"
+
+#: port/src/extras/tablesview.cpp
+msgid "Differences"
+msgstr "差分"
+
+#: port/src/extras/tablesview.cpp
+msgid "Here / there"
+msgstr "こちら / あちら"
+
+#: port/src/extras/tablesview.cpp
+msgid "Mode"
+msgstr "モード"
+
+#: port/src/extras/tablesview.cpp
+msgid "Size"
+msgstr "サイズ"
+
+#: port/src/extras/tablesview.cpp
+msgid "Texture"
+msgstr "テクスチャ"
+
+#: port/src/ui/sections.cpp
+msgid "Screen effects"
+msgstr "画面効果"
+
+#: port/src/ui/sections.cpp
+msgid "High-resolution pause blur"
+msgstr "高解像度のポーズぼかし"
+
+#: port/src/ui/sections.cpp
+msgid "Keeps rendered detail through the Gear arena pause blur above 1x. Uses the original blur radius and colour steps. Off by default."
+msgstr "1倍を超える解像度で、ギア闘技場のポーズ画面をぼかすときにも描画の細部を保ちます。ぼかしの範囲と色の段階は原作と同じです。初期設定はオフです。"
+
+msgid "Portrait packs"
+msgstr "顔グラフィックパック"
+
+msgid "Reload portrait sets"
+msgstr "顔グラフィックセットを再読込"
+
+msgid "Upscaled"
+msgstr "高解像度版"
+
+msgid "Compare"
+msgstr "くらべる"
+
+msgid "Original: texel 0 clear"
+msgstr "オリジナル: 色番号0を透明に"
+
+msgid "Export original PNG"
+msgstr "オリジナルPNGを書き出す"
+
+msgid "Original (fallback)"
+msgstr "オリジナル (代替)"
+
+msgid "No replacement in this set; showing the original."
+msgstr "このセットに差し替え画像がないため、オリジナルを表示しています。"
+
+msgid "Also applies in dialogue."
+msgstr "会話中にも適用します。"
+
+msgid "Add sets in F1, Display, Portrait packs. Dialogue replacements require enhanced resolution or subpixel geometry."
+msgstr "F1の「表示」にある顔グラフィックパックでセットを追加します。会話中の差し替えには解像度の拡大またはサブピクセル描画が必要です。"
+
+msgid "Original artwork"
+msgstr "オリジナルの画像"
+
+msgid "Selected set unavailable; using originals"
+msgstr "選択したセットが見つからないため、オリジナルを使用"
+
+msgid "Regional set unavailable; using originals"
+msgstr "この地域用のセットが見つからないため、オリジナルを使用"
+
+msgid "Ready; missing pictures use originals"
+msgstr "準備完了。画像がない場合はオリジナルを使用"
+
+msgid "Portraits use their own set, independently of texture and movie packs. Add another named folder to try a new style. Applies with upscaling or subpixel geometry; compare all sets in Extras, Gallery, Pictures."
+msgstr "顔グラフィックはテクスチャやムービーとは別のセットを使います。別の名前のフォルダを追加すると、新しいスタイルを試せます。解像度の拡大またはサブピクセル描画で適用されます。「エクストラ」→「ギャラリー」→「絵」でくらべられます。"
+
+msgid "Reload"
+msgstr "再読込"
+
+#: port/src/ui/sections.cpp
+msgid "Speedup"
+msgstr "高速化"
+
+#: port/src/ui/sections.cpp
+msgid "Reduces card/loading waits and field/battle stalls, and enables smooth field motion at 60 Hz by default. Gameplay, animation events, movies and audio stay at normal speed. Off keeps original timing and frame cadence."
+msgstr "カード・読み込み・フィールド・戦闘の待ち時間を減らし、標準で60 Hzのなめらかなフィールド表示を有効にします。ゲーム進行・アニメのイベント・ムービー・音声の速度は変わりません。オフで原作のタイミングとフレーム周期に戻ります。"
+
+msgid "Available with Speedup. Supports wide/expanded framing, texture filters, packs and enhanced text. Scene cuts and unsafe state changes use the original picture."
+msgstr "高速化を有効にすると使用できます。ワイド・拡張表示、テクスチャフィルタ、パック、高精細文字に対応します。場面転換や安全に補間できない状態変更では元の画像を表示します。"
+
+msgid "Speedup defaults to 60 Hz in supported fields. Higher rates add display samples. Shader presets and unsupported scenes use native presentation. Speedup off keeps authentic frame cadence."
+msgstr "高速化は対応フィールドで標準60 Hz表示になります。より高い設定では表示フレームを追加します。シェーダープリセットや対応していない場面では元の表示周期になります。高速化がオフの場合は原作のフレーム周期を保ちます。"
+
+#: port/src/ui/sections.cpp
+msgid "VSync wait"
+msgstr "VSync待機"
+
+msgid "Sleep between frames"
+msgstr "フレーム間はスリープ"
+
+msgid "Spin (steady clock)"
+msgstr "スピン（クロック安定）"
+
+msgid "Sleep rests the game thread until its next event, so the CPU may clock down between frames. Spin keeps it busy-waiting: a steady CPU clock and vblanks delivered on time, with one core always busy and more power used."
+msgstr "スリープはゲームスレッドを次のイベントまで休ませるため、フレーム間にCPUのクロックが下がることがあります。スピンはビジーウェイトを続けます。CPUクロックが安定し、VBlankが時間どおりに届きますが、コアを1つ常に占有し、消費電力が増えます。"

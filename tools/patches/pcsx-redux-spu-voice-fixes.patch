@@ -1,0 +1,90 @@
+diff --git a/src/spu/adpcm.cc b/src/spu/adpcm.cc
+index 1e7e43e..0b0e811 100644
+--- a/src/spu/adpcm.cc
++++ b/src/spu/adpcm.cc
+@@ -19,6 +19,8 @@
+ 
+ #include "spu/adpcm.h"
+ 
++#include <algorithm>
++
+ void PCSX::SPU::AdpcmDecoder::saveTo(Protobuf::Int32 &history1, Protobuf::Int32 &history2, Protobuf::Int32 &startOffset,
+                                      Protobuf::Int32 &currOffset, Protobuf::Int32 &loopOffset, uint8_t *ramBase,
+                                      Protobuf::Int32 *sb, Protobuf::Int32 &sbPos) const {
+@@ -72,10 +74,14 @@ PCSX::SPU::AdpcmDecoder::DecodeResult PCSX::SPU::AdpcmDecoder::decodeBlock(uint8
+     int history2 = m_s2;
+ 
+     // Decode one 4-bit sample already positioned at bits 12..15 and sign-extended
+-    // to 16 bits: shift it down, then add the predictor's feedback.
++    // to 16 bits: shift it down, then add the predictor's feedback. The result
++    // saturates to int16 before it is output or fed back, as on hardware: left
++    // unclamped, a high-gain filter on a block that loops onto itself runs away
++    // (filter 2's DC gain is 64), and an FM source hands that straight to its target.
+     auto decodeSample = [&](int sample) {
+-        const int out = (sample >> shift) + ((history1 * kFilterCoeff[predictor][0]) >> kCoeffShift) +
+-                        ((history2 * kFilterCoeff[predictor][1]) >> kCoeffShift);
++        const int out = std::clamp((sample >> shift) + ((history1 * kFilterCoeff[predictor][0]) >> kCoeffShift) +
++                                       ((history2 * kFilterCoeff[predictor][1]) >> kCoeffShift),
++                                   -32768, 32767);
+         history2 = history1;
+         history1 = out;
+         return out;
+diff --git a/src/spu/registers.cc b/src/spu/registers.cc
+index a13aa1e..4b84866 100644
+--- a/src/spu/registers.cc
++++ b/src/spu/registers.cc
+@@ -140,7 +140,7 @@ bool PCSX::SPU::impl::adpcmWalkReachedStop(EnvelopeCheckpoint &cp) {
+             uint32_t next = cp.block + 16;
+             if ((flags & 4) && !cp.ignoreLoop) cp.loop = cp.block;
+             if (flags & 1) {
+-                const bool repeat = flags == 3 && cp.loop != EnvelopeCheckpoint::kNoLoop;
++                const bool repeat = (flags & 2) && cp.loop != EnvelopeCheckpoint::kNoLoop;
+                 next = repeat ? cp.loop : EnvelopeCheckpoint::kStopped;
+             }
+             if (next != EnvelopeCheckpoint::kStopped && next >= sizeof(spuMem)) next -= sizeof(spuMem);
+@@ -788,6 +788,12 @@ void PCSX::SPU::impl::FModOn(int start, int end, uint16_t val) {
+             }
+             // Turn off frequency modulation. A target that was modulated during this
+             // play stays untracked until its next KEY ON.
++            if (s_chan[ch].data.get<Chan::FMod>().value == 1) {
++                // Its step still holds the last modulated pitch: go back to the programmed one.
++                auto &data = s_chan[ch].data;
++                data.get<Chan::ActFreq>().value = std::max(1L, (44100L * data.get<Chan::RawPitch>().value) / 4096L);
++                data.get<Chan::UsedFreq>().value = -1;
++            }
+             s_chan[ch].data.get<Chan::FMod>().value = 0;
+         }
+     }
+diff --git a/src/spu/spu.cc b/src/spu/spu.cc
+index ad7bc6f..389a3ec 100644
+--- a/src/spu/spu.cc
++++ b/src/spu/spu.cc
+@@ -212,10 +212,12 @@ bool PCSX::SPU::impl::decodeNextBlock(int ch, SPUCHAN *voice) {
+         // ENDX latches on the end flag.
+         spuEndx |= 1u << ch;
+ 
+-        // Only loop when the flag byte is exactly 3 (loop-end + repeat) and a loop address was
+-        // latched. Requiring exactly 3 avoids loop hang-ups (e.g. DQ4), and the null-loop guard
+-        // avoids following an address that was never set.
+-        cursor = (blockFlags != 3 || voice->adpcm.loop() == nullptr) ? AdpcmDecoder::kStopped : voice->adpcm.loop();
++        // Loop when the repeat bit is set, whatever bit 2 says: a one-block loop carries
++        // loop-start + repeat + end (7) and repeats itself forever on hardware. Requiring the
++        // flag byte to be exactly 3 stopped such voices after one pass (an FM modulator going
++        // quiet leaves its target unmodulated). The null-loop guard avoids following an
++        // address that was never set.
++        cursor = (!(blockFlags & 2) || voice->adpcm.loop() == nullptr) ? AdpcmDecoder::kStopped : voice->adpcm.loop();
+     }
+ 
+     // The address counter is 19 bits wide: a stream with no end flag runs off the top of
+@@ -313,8 +315,9 @@ void PCSX::SPU::impl::synthesizeVoice(int ch, SPUCHAN *voice, int32_t &capVoice1
+         }
+ 
+         if constexpr (Role == FModRole::Target) {
+-            // Modulated by the voice below us.
+-            if (fmodInput[ns]) FModChangeFrequency(voice, ns);
++            // Modulated by the voice below us, every sample: a zero from the source means the
++            // programmed pitch, not "keep the last modulated one".
++            FModChangeFrequency(voice, ns);
+         }
+ 
+         // A noise voice still walks its ADPCM stream. The decoded samples are
