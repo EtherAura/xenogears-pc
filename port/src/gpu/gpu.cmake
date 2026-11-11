@@ -44,6 +44,7 @@ xg_gpu_shader(draw.frag draw_wide_interlock.frag -DINTERLOCK -DWIDE)
 xg_gpu_shader(present.vert present.vert)
 xg_gpu_shader(present.frag present.frag)
 xg_gpu_shader(present.frag present_picture.frag -DPICTURE_PREPASS)
+xg_gpu_shader(rotate.frag rotate.frag)
 # The hi-res copy (hires.c): its draws into the copy of VRAM and of the wide
 # target, and its transfers.
 xg_gpu_shader(hires.vert hires.vert)

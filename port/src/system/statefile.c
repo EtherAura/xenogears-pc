@@ -149,6 +149,21 @@ static int computeId(uint64_t* a, uint64_t* b) {
 }
 #endif
 
+const char* stateAppVersion(void) {
+    static char version[16];
+    static int known;
+    if (!known) {
+        known = 1;
+        char full[128];
+        const char* v = getenv("XG_APP_VERSION");
+        snprintf(full, sizeof full, "%s", v != NULL ? v : "");
+        char* dot = strstr(full, ".changes"); /* a development build's mark: no room for it */
+        if (dot != NULL) *dot = '\0';
+        snprintf(version, sizeof version, "%s", full);
+    }
+    return version;
+}
+
 const uint8_t* stateBuildId(void) {
     if (!buildKnown) {
         uint64_t a = 0x243F6A8885A308D3ull, b = 0x13198A2E03707344ull;
@@ -202,7 +217,7 @@ enum {
     H_BUILD = 16, H_REGION = 32, H_DISC = 36, H_SERIAL = 40, H_SECTORS = 56, H_VBLANK = 60, H_SAVED = 64,
     H_PLAY = 72, H_MODE = 76, H_PLACE = 80, H_LABEL = 84, H_FLAGS = 180, H_DUMP = 184, H_THUMBW = 192,
     H_THUMBH = 196, H_BODY = 200, H_HASH = 208, H_THUMBPACKED = 216, H_ENGINE = 220, H_BODYPACKED = 224,
-    H_IMAGE = 232
+    H_IMAGE = 232, H_APPVERSION = 240 /* 16 bytes, to the header's end */
 };
 
 static void headerPack(const StateHeader* h, uint32_t thumbPacked, uint64_t bodyPacked, uint8_t out[HEADER_SIZE]) {
@@ -235,6 +250,9 @@ static void headerPack(const StateHeader* h, uint32_t thumbPacked, uint64_t body
      * holds too (a PIE or a library at other addresses is another build to a
      * state); 0 in files from before it. */
     put64(out + H_IMAGE, (uint64_t)stateImageBias());
+    /* The app's version (stateAppVersion); zeros in files from before it. */
+    memcpy(out + H_APPVERSION, h->appVersion, sizeof(h->appVersion));
+    out[H_APPVERSION + sizeof(h->appVersion) - 1] = 0;
 }
 
 static int headerUnpack(const uint8_t in[HEADER_SIZE], StateHeader* h, uint32_t* thumbPacked, uint64_t* bodyPacked) {
@@ -265,6 +283,8 @@ static int headerUnpack(const uint8_t in[HEADER_SIZE], StateHeader* h, uint32_t*
     *thumbPacked = get32(in + H_THUMBPACKED);
     h->engine = get32(in + H_ENGINE);
     *bodyPacked = get64(in + H_BODYPACKED);
+    memcpy(h->appVersion, in + H_APPVERSION, sizeof(h->appVersion));
+    h->appVersion[sizeof(h->appVersion) - 1] = 0;
     if (h->thumbW > 1024 || h->thumbH > 1024 || h->bodySize > (1ull << 31)) {
         return 0;
     }

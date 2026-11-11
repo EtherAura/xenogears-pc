@@ -9,6 +9,8 @@
 
 system/engine.c * host the engine choice's arguments, note and executable path (settings.ini carries the choice)
 
+system/backup.c * host the menu's saves backup: its status and its worker (files on disk, never in a state)
+
 system/invariants.c * host the XG_INVARIANT_LOG file (tools/engine_diff.py): never in a state
 
 system/gamedata.c retailHeapStarts host original boot-header boundaries from the current disc image
@@ -502,6 +504,7 @@ system/quit_at.c * host XG_QUIT_AT (its event handled by quitAtStateIo)
 system/rewind.c * host rewind's history: captures of the game kept by the host, never in a state
 system/workers.c * host helper threads for work the game thread splits into parts (the Battling between's page compares), never in a state
 system/rumble.c * host vibration devices
+system/touch.c * host live touch input and the touch pad's state (as the mouse's: never in a state)
 system/rumble_game.c * host the port's feedback
 system/savestate.c * host save states
 system/settings.c * host settings

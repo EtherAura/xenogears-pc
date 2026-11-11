@@ -9,6 +9,7 @@
 void autoResolutionReset(AutoResolution* a, int ceiling) {
     memset(a, 0, sizeof(*a));
     a->ceiling = a->limit = ceiling;
+    a->factor = 1;
 }
 
 void autoResolutionRestart(AutoResolution* a) {
@@ -25,9 +26,19 @@ void autoResolutionCeiling(AutoResolution* a, int ceiling) {
     a->total = 0;
 }
 
+/* Restarting sets a new-scale warm-up (60 vblanks), which also discards the
+ * samples of the old speed that arrive late (about one vblank). */
+void autoResolutionSpeed(AutoResolution* a, int factor) {
+    factor = factor > 1 ? factor : 1;
+    if (factor == a->factor) return;
+    a->factor = factor;
+    autoResolutionRestart(a);
+}
+
 void autoResolutionSample(AutoResolution* a, int scale, double budget, double ms, unsigned frames) {
     if (scale < 1 || scale > 12 || !isfinite(budget) || budget <= 0 ||
         !isfinite(ms) || ms < 0 || frames == 0 || frames > 120) return;
+    if (a->factor > 1) budget /= a->factor; /* a video frame's budget shared by its game vblanks */
     if (scale != a->scale) {
         a->scale = scale;
         a->cooldown = 60; /* discard allocation/refill and shader warm-up */

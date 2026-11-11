@@ -171,7 +171,7 @@ PLAIN = [
     "gametext_spritetest",
     "cpueffecttest", "textureedgetest", "texturefiltertest", "texturetest", "ui_l10ntest", "ui_motiontest", "verticaltest",
     "state_codectest", "rewindpacktest", "seamreusetest", "spansteptest", "battlepacingtest", "spu_outputtest",
-    "hostpolltest", "battlespeedtest",
+    "hostpolltest", "battlespeedtest", "backuptest",
 ]
 
 # Settings tests: DIR check, then DIR write and DIR read in a fresh DIR.

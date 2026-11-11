@@ -33,6 +33,7 @@ extern "C" {
 #include "system/pad.h"
 #include "system/rumble.h"
 #include "system/settings.h"
+#include "system/touch.h"
 #include "system/system.h"
 #include "ui/ui.h"
 void extrasJukeboxTick(void) __attribute__((weak));
@@ -2018,6 +2019,11 @@ extern "C" int uiEvent(const SDL_Event* e) {
             }
             return 1;
         }
+        if (e->key.scancode == SDL_SCANCODE_AC_BACK) {
+            // Android's Back goes back, as Esc (and the right button).
+            ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, e->type == SDL_EVENT_KEY_DOWN);
+            return 1;
+        }
         // The display hotkeys and Alt+Enter work in the menu too (pad.c).
         if ((e->key.scancode >= SDL_SCANCODE_F2 && e->key.scancode <= SDL_SCANCODE_F12) ||
             ((e->key.scancode == SDL_SCANCODE_RETURN || e->key.scancode == SDL_SCANCODE_KP_ENTER) &&
@@ -2044,6 +2050,20 @@ extern "C" int uiEvent(const SDL_Event* e) {
             return 1;
         }
         ImGui_ImplSDL3_ProcessEvent(e);
+        return 1;
+    case SDL_EVENT_FINGER_MOTION: {
+        // A finger dragged up or down scrolls what it is on, as a wheel
+        // (SDL makes the finger a mouse too: taps are clicks).
+        int w = 0, h = 0;
+        SDL_Window* win = SDL_GetWindowFromID(e->tfinger.windowID);
+        if (win != NULL && SDL_GetWindowSizeInPixels(win, &w, &h) && h > 0) {
+            ImGui::GetIO().AddMouseWheelEvent(0, e->tfinger.dy * h / (40 * scale()));
+        }
+        return 1;
+    }
+    case SDL_EVENT_FINGER_DOWN:
+    case SDL_EVENT_FINGER_UP:
+    case SDL_EVENT_FINGER_CANCELED:
         return 1;
     case SDL_EVENT_TEXT_INPUT:
     case SDL_EVENT_TEXT_EDITING:
@@ -2123,36 +2143,47 @@ extern "C" void uiVulkanReady(const UiVulkan* dev) {
 
 extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture) {
     if (!st.open) {
+        // Over the game: a movie's captions, the touch pad (touchpad.cpp).
         const char* text = picture ? regionalSubtitle() : nullptr;
-        if (!text || !begin() || !skin::native()) return;
+        bool pad = touchShown() != 0;
+        if ((!text && !pad) || !begin()) return;
+        if (!skin::native()) text = nullptr;
         // Zoom may put the movie's edges outside the presentation target.
         // Captions belong to the visible picture, including after a resize.
-        ImVec2 visibleMin(float(std::max(0,picture[0])), float(std::max(0,picture[1])));
-        ImVec2 visibleMax(float(std::min(w,picture[0]+picture[2])), float(std::min(h,picture[1]+picture[3])));
-        float visibleWidth=visibleMax.x-visibleMin.x, visibleHeight=visibleMax.y-visibleMin.y;
-        if (visibleWidth<16 || visibleHeight<24) return;
+        ImVec2 visibleMin, visibleMax;
+        float visibleWidth = 0, visibleHeight = 0;
+        if (text) {
+            visibleMin = ImVec2(float(std::max(0,picture[0])), float(std::max(0,picture[1])));
+            visibleMax = ImVec2(float(std::min(w,picture[0]+picture[2])), float(std::min(h,picture[1]+picture[3])));
+            visibleWidth=visibleMax.x-visibleMin.x, visibleHeight=visibleMax.y-visibleMin.y;
+            if (visibleWidth<16 || visibleHeight<24) text = nullptr;
+        }
+        if (!text && !pad) return;
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGuiIO& io = ImGui::GetIO();
         io.DisplaySize = ImVec2(float(w), float(h));
         io.DisplayFramebufferScale = ImVec2(1, 1);
         ImGui::NewFrame();
-        float u = std::max(1.0f, floorf(std::min(visibleWidth/320, visibleHeight/224)));
-        ImFont* font = io.FontDefault != nullptr ? io.FontDefault : io.Fonts->Fonts[0];
-        float width;
-        ImVec2 size;
-        do {
-            width=std::min(288*u, visibleWidth-8*u);
-            size=font->CalcTextSizeA(14*u, FLT_MAX, width, text);
-            if (size.y+16*u<=visibleHeight || u<=1) break;
-            --u;
-        } while (true);
-        ImVec2 at(floorf(visibleMin.x+(visibleWidth-size.x)*0.5f),
-                  floorf(visibleMax.y-size.y-8*u));
         ImDrawList* overlay=ImGui::GetForegroundDrawList();
-        overlay->PushClipRect(visibleMin,visibleMax,true);
-        overlay->AddText(font,14*u,at,IM_COL32_WHITE,text,nullptr,width);
-        overlay->PopClipRect();
+        if (text) {
+            float u = std::max(1.0f, floorf(std::min(visibleWidth/320, visibleHeight/224)));
+            ImFont* font = io.FontDefault != nullptr ? io.FontDefault : io.Fonts->Fonts[0];
+            float width;
+            ImVec2 size;
+            do {
+                width=std::min(288*u, visibleWidth-8*u);
+                size=font->CalcTextSizeA(14*u, FLT_MAX, width, text);
+                if (size.y+16*u<=visibleHeight || u<=1) break;
+                --u;
+            } while (true);
+            ImVec2 at(floorf(visibleMin.x+(visibleWidth-size.x)*0.5f),
+                      floorf(visibleMax.y-size.y-8*u));
+            overlay->PushClipRect(visibleMin,visibleMax,true);
+            overlay->AddText(font,14*u,at,IM_COL32_WHITE,text,nullptr,width);
+            overlay->PopClipRect();
+        }
+        if (pad) touchpadDraw(overlay, float(w), float(h));
         ImGui::Render();
     } else if (!st.rendered || !st.vkReady) return;
     ImDrawData* dd = ImGui::GetDrawData();

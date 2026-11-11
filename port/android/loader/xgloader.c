@@ -9,8 +9,16 @@
  *     can write, then the activity's arguments "--env KEY=VALUE" (am start
  *     --es env "KEY=VALUE;KEY=VALUE"): an app has no environment of its own,
  *     and the port reads its XG_* options there (port/src/system/options.c);
+ *   - takes the disc images the activity opened in the player's disc folder
+ *     ("--image FD:NAME", "--bios FD:NAME": Storage Access Framework file
+ *     descriptors, read in place through /proc/self/fd/FD), reads each
+ *     image's SYSTEM.CNF for its release and disc, and sets XG_DISC,
+ *     XG_DISC2 and XG_BIOS (unless the options set them already), and the
+ *     app's version, "--app-version NAME" (XG_APP_VERSION: save states
+ *     record it, port/src/system/statefile.c);
  *   - picks the game library of the region (libxenogears-us.so or -jp.so:
- *     "--region jp", or XG_REGION=jp), loads it at a fixed reserved address
+ *     "--region jp", XG_REGION=jp, else the region of the discs found, US
+ *     first), loads it at a fixed reserved address
  *     (android_dlopen_ext into a reservation of our own, as Linux PIE builds
  *     run at fixed addresses: save states hold addresses and load only where
  *     they were made; port/src/system/statefile.c), or anywhere if that
@@ -150,6 +158,91 @@ static void setOptions(const char* list) {
     for (char* item = strtok(copy, ";"); item != NULL; item = strtok(NULL, ";")) setOption(item);
 }
 
+/* ---- disc images from file descriptors ----------------------------------------- */
+
+#define SECTOR 2352
+
+/* The user data of sector lba of a raw image (Mode 1 or Mode 2 Form 1), 2048 bytes. */
+static int readUser(int fd, long lba, unsigned char* out) {
+    unsigned char raw[SECTOR];
+    if (pread(fd, raw, SECTOR, (off_t)lba * SECTOR) != SECTOR) return 0;
+    memcpy(out, raw + (raw[15] == 2 ? 24 : 16), 2048);
+    return 1;
+}
+
+/* The boot file SYSTEM.CNF names (cdrom:\SLUS_006.64;1 -> SLUS_006.64), from the ISO 9660
+ * root directory. */
+static int bootName(int fd, char* out, size_t size) {
+    unsigned char s[2048];
+    if (!readUser(fd, 16, s) || memcmp(s + 1, "CD001", 5) != 0) return 0;
+    uint32_t root = s[156 + 2] | s[156 + 3] << 8 | s[156 + 4] << 16 | (uint32_t)s[156 + 5] << 24;
+    uint32_t rootSize = s[156 + 10] | s[156 + 11] << 8 | s[156 + 12] << 16 | (uint32_t)s[156 + 13] << 24;
+    for (uint32_t at = 0; at < rootSize && at < 16 * 2048; at += 2048) {
+        if (!readUser(fd, root + at / 2048, s)) return 0;
+        for (int i = 0; i < 2048 && s[i] != 0; i += s[i]) {
+            int len = s[i + 32];
+            if (len >= 10 && memcmp(s + i + 33, "SYSTEM.CNF", 10) == 0) {
+                uint32_t lba = s[i + 2] | s[i + 3] << 8 | s[i + 4] << 16 | (uint32_t)s[i + 5] << 24;
+                unsigned char cnf[2049];
+                if (!readUser(fd, lba, cnf)) return 0;
+                cnf[2048] = 0;
+                const char* p = strstr((const char*)cnf, "cdrom:");
+                if (p == NULL) return 0;
+                p += 6;
+                while (*p == '\\' || *p == '/') p++;
+                size_t n = strcspn(p, ";\r\n ");
+                if (n == 0 || n >= size) return 0;
+                memcpy(out, p, n);
+                out[n] = 0;
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+typedef struct {
+    char path[64];
+    int region; /* 0 US, 1 JP */
+    int disc;   /* 1, 2 */
+} Image;
+
+static Image images[8];
+static int imageCount;
+static char biosPath[64];
+
+/* "--image FD:NAME": the release and disc by the boot file. */
+static void addImage(const char* arg) {
+    int fd = atoi(arg);
+    const char* name = strchr(arg, ':');
+    char boot[32];
+    if (fd <= 0 || !bootName(fd, boot, sizeof boot)) {
+        fprintf(stderr, "loader: %s: not a disc image of this game\n", name ? name + 1 : arg);
+        return;
+    }
+    static const struct { const char* boot; int region, disc; } known[] = {
+        {"SLUS_006.64", 0, 1}, {"SLUS_006.69", 0, 2}, {"SLPS_011.60", 1, 1}, {"SLPS_011.61", 1, 2}};
+    for (size_t k = 0; k < sizeof known / sizeof known[0]; k++) {
+        if (strcmp(boot, known[k].boot) == 0 && imageCount < 8) {
+            Image* im = &images[imageCount++];
+            snprintf(im->path, sizeof im->path, "/proc/self/fd/%d", fd);
+            im->region = known[k].region;
+            im->disc = known[k].disc;
+            fprintf(stderr, "loader: %s: %s Disc %d (%s)\n", name ? name + 1 : arg, im->region ? "JP" : "US",
+                    im->disc, boot);
+            return;
+        }
+    }
+    fprintf(stderr, "loader: %s: boot file %s is not Xenogears\n", name ? name + 1 : arg, boot);
+}
+
+static const char* imageFor(int region, int disc) {
+    for (int i = 0; i < imageCount; i++) {
+        if (images[i].region == region && images[i].disc == disc) return images[i].path;
+    }
+    return NULL;
+}
+
 /* ---- the game library -------------------------------------------------------- */
 
 static void* reservation;
@@ -245,14 +338,28 @@ int SDL_main(int argc, char* argv[]) {
             region = argv[++i];
         } else if (strcmp(argv[i], "--env") == 0 && i + 1 < argc) {
             setOptions(argv[++i]);
+        } else if (strcmp(argv[i], "--image") == 0 && i + 1 < argc) {
+            addImage(argv[++i]);
+        } else if (strcmp(argv[i], "--app-version") == 0 && i + 1 < argc) {
+            i++;
+            if (getenv("XG_APP_VERSION") == NULL) setenv("XG_APP_VERSION", argv[i], 1);
+        } else if (strcmp(argv[i], "--bios") == 0 && i + 1 < argc) {
+            snprintf(biosPath, sizeof biosPath, "/proc/self/fd/%d", atoi(argv[++i]));
         } else {
             argv[out++] = argv[i];
         }
     }
     argv[out] = NULL;
     argc = out;
+    /* The region: asked for, else the discs' (US first), else US. */
+    int jp = region != NULL ? SDL_strcasecmp(region, "jp") == 0 : imageFor(0, 1) == NULL && imageFor(1, 1) != NULL;
+    const char* disc1 = imageFor(jp, 1);
+    const char* disc2 = imageFor(jp, 2);
+    if (disc1 != NULL && getenv("XG_DISC") == NULL) setenv("XG_DISC", disc1, 1);
+    if (disc2 != NULL && getenv("XG_DISC2") == NULL) setenv("XG_DISC2", disc2, 1);
+    if (getenv("XG_BIOS") == NULL) setenv("XG_BIOS", biosPath[0] ? biosPath : "none", 1);
     char name[64];
-    snprintf(name, sizeof name, "libxenogears-%s.so", region != NULL && SDL_strcasecmp(region, "jp") == 0 ? "jp" : "us");
+    snprintf(name, sizeof name, "libxenogears-%s.so", jp ? "jp" : "us");
     void* game = loadGame(name);
     if (game == NULL) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Xenogears", "The game library did not load (logcat: xenogears).",

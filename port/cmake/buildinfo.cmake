@@ -5,7 +5,8 @@
 # only when its text changes, so an unchanged tree recompiles nothing.
 #
 #   cmake -DOUT=<header> -DROOT=<repository> -DVERSION=US|JP -DTYPE=<build type>
-#         -DIMGUI_LICENSE=<file> -DSDL_LICENSE=<file or empty> [-DGLSLANG_LICENSE=<file>] [-DDAV1D_LICENSE=<file>] -P buildinfo.cmake
+#         -DIMGUI_LICENSE=<file> -DSDL_LICENSE=<file or empty> [-DGLSLANG_LICENSE=<file>] [-DDAV1D_LICENSE=<file>]
+#         [-DLIBCXX_LICENSE=<file>] -P buildinfo.cmake
 
 set(rev "unknown")
 execute_process(COMMAND git -C "${ROOT}" rev-parse --short HEAD
@@ -60,6 +61,11 @@ endif()
 if(GLSLANG_LICENSE AND EXISTS "${GLSLANG_LICENSE}")
     file(READ "${GLSLANG_LICENSE}" glslang)
     string(APPEND text "#define XG_LICENSE_GLSLANG 1\nstatic const char xgLicenseGlslang[] = R\"xglicence(${glslang})xglicence\";\n")
+endif()
+# LLVM libc++ and libunwind, in an Android build (the NDK's runtime: libc++_shared.so in the APK).
+if(LIBCXX_LICENSE AND EXISTS "${LIBCXX_LICENSE}")
+    file(READ "${LIBCXX_LICENSE}" libcxx)
+    string(APPEND text "#define XG_LICENSE_LIBCXX 1\nstatic const char xgLicenseLibcxx[] = R\"xglicence(${libcxx})xglicence\";\n")
 endif()
 file(READ "${ROOT}/port/third_party/jukebox-font/LICENSE.txt" jukebox_font)
 file(READ "${ROOT}/port/COPYING" port_licence)

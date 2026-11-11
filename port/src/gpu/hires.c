@@ -75,6 +75,10 @@
 #include "system/engine.h"
 #include "pc_effect.h"
 
+/* system/battlespeed.c: the game speed now, 1 outside battles and while a
+ * battle holds 1x (weak: the GPU tests link no battle speed). */
+extern int battleSpeedFactor(void) __attribute__((weak));
+
 #define AUTO_SETTLE 30 /* vblanks a new auto N must last before it is made */
 #define KEEP_SHARE 90  /* % of an upload's pixels whose colour must match */
 
@@ -436,6 +440,9 @@ void hiresVBlank(const GpuDisplay* d, int W, int H) {
     }
     if (active) {
         autoResolutionCeiling(&hr.automatic, ceiling);
+        /* hw.c's vblank set this frame's factor (battleSpeedVBlank) just
+         * before this one, on this thread; the sample below is older. */
+        autoResolutionSpeed(&hr.automatic, battleSpeedFactor != NULL ? battleSpeedFactor() : 1);
         double ms;
         unsigned frames;
         int scale;
@@ -443,8 +450,8 @@ void hiresVBlank(const GpuDisplay* d, int W, int H) {
             int before = hr.automatic.limit;
             autoResolutionSample(&hr.automatic, scale, hr.gpuMs, ms, frames);
             if (before != hr.automatic.limit) {
-                gpuLog("hires: Auto GPU %.3f ms/vblank, budget %d ms: limit %dx -> %dx",
-                       hr.automatic.mean, hr.gpuMs, before, hr.automatic.limit);
+                gpuLog("hires: Auto GPU %.3f ms/vblank, budget %d ms at %dx speed: limit %dx -> %dx",
+                       hr.automatic.mean, hr.gpuMs, hr.automatic.factor, before, hr.automatic.limit);
             }
         }
         if (ceiling > hr.automatic.limit) {

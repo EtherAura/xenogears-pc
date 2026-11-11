@@ -9,9 +9,42 @@ def home = System.getProperty('user.home')
 def sdlSource = providers.gradleProperty('xg.sdlSource').getOrElse("${home}/Android/src/SDL3-3.4.16")
 def jniLibsDir = providers.gradleProperty('xg.jniLibs').getOrElse("${rootDir}/../../build/android/jniLibs")
 def abis = providers.gradleProperty('xg.abis').getOrElse('x86_64,arm64-v8a').split(',')
+// The licence files the APK carries (assets/licenses: tools/build_android.sh puts them there).
+def assetsDir = providers.gradleProperty('xg.assets').getOrElse("${rootDir}/../../build/android/assets")
 
-// A release is signed with the user's own key, from the environment (never in a file here).
+// The version from git (the user's decision): versionCode the commit count, versionName the
+// latest tag plus the short hash ("0.0" before any tag; ".changes" for uncommitted changes).
+// git -C works the same in a worktree; outside git: 1 and "0.0+unknown".
+def git = { List<String> args ->
+    try {
+        def run = providers.exec {
+            commandLine(['git', '-C', rootDir.path] + args)
+            ignoreExitValue = true
+        }
+        return run.result.get().exitValue == 0 ? run.standardOutput.asText.get().trim() : null
+    } catch (Exception ignored) {
+        return null
+    }
+}
+def gitCount = git(['rev-list', '--count', 'HEAD'])
+def gitHash = git(['rev-parse', '--short', 'HEAD'])
+def gitTag = git(['describe', '--tags', '--abbrev=0'])
+def gitChanges = git(['status', '--porcelain', '--untracked-files=no'])
+def appVersionCode = gitCount ? gitCount.toInteger() : 1
+def appVersionName = "${gitTag ?: '0.0'}+${gitHash ?: 'unknown'}${gitChanges ? '.changes' : ''}"
+logger.lifecycle("xenogears: version ${appVersionCode} (${appVersionName})")
+
+// A release is signed with the user's own key, from the environment, never from a file
+// here (docs/ANDROID_PLAN.md "Release signing"): all four variables, or no release.
+// Only their names are ever printed.
+def signingNames = ['XG_ANDROID_KEYSTORE', 'XG_ANDROID_KEY_ALIAS', 'XG_ANDROID_KEYSTORE_PASSWORD',
+                    'XG_ANDROID_KEY_PASSWORD']
+def signingMissing = signingNames.findAll { !System.getenv(it) }
 def keystore = System.getenv('XG_ANDROID_KEYSTORE')
+if (keystore && !file(keystore).canRead()) {
+    signingMissing += 'XG_ANDROID_KEYSTORE (it names no readable file)'
+}
+def canSign = signingMissing.isEmpty()
 
 android {
     namespace = 'io.github.etheraura.xgport'
@@ -23,8 +56,8 @@ android {
         applicationId = 'io.github.etheraura.xgport'
         minSdk = 33
         targetSdk = 36
-        versionCode = 1
-        versionName = '0.1'
+        versionCode = appVersionCode
+        versionName = appVersionName
         ndk {
             abiFilters.addAll(abis)
         }
@@ -34,6 +67,7 @@ android {
         main {
             java.srcDirs += ["${sdlSource}/android-project/app/src/main/java"]
             jniLibs.srcDirs = [jniLibsDir]
+            assets.srcDirs = [assetsDir]
         }
     }
 
@@ -47,7 +81,7 @@ android {
     }
 
     signingConfigs {
-        if (keystore) {
+        if (canSign) {
             release {
                 storeFile = file(keystore)
                 storePassword = System.getenv('XG_ANDROID_KEYSTORE_PASSWORD')
@@ -60,7 +94,7 @@ android {
     buildTypes {
         release {
             minifyEnabled = false
-            if (keystore) {
+            if (canSign) {
                 signingConfig = signingConfigs.release
             }
         }
@@ -68,5 +102,17 @@ android {
 
     lint {
         abortOnError = false
+    }
+}
+
+// No unsigned or debug-signed release: a release task with the key unset stops here.
+gradle.taskGraph.whenReady { graph ->
+    def release = graph.allTasks.any { t ->
+        t.project == project && t.name.contains('Release') &&
+            (t.name.startsWith('assemble') || t.name.startsWith('package') || t.name.startsWith('bundle'))
+    }
+    if (release && !canSign) {
+        throw new GradleException('A release APK is signed with your own key; not set: ' +
+            signingMissing.join(', ') + '. See docs/ANDROID_PLAN.md, "Release signing". Nothing was built.')
     }
 }

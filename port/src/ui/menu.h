@@ -37,6 +37,8 @@ void sectionsVulkan(void* physical, void* getInstanceProcAddr, void* instance); 
 
 // menu.cpp
 float scale();                   // window pixels per game pixel (sizes are in game pixels times this)
+// touchpad.cpp: the touch pad (system/touch.h) over the game, w x h the target in pixels.
+void touchpadDraw(ImDrawList* d, float w, float h);
 void markBlock();                // an option's block starts here (at the cursor): scrolling shows it whole
 SDL_Window* window();
 void closeMenu();                // leave the menu at the end of this frame

@@ -35,6 +35,7 @@
 #include "system/rewind.h"
 #include "system/settings.h"
 #include "system/engine.h"
+#include "system/android.h"
 #include "system/system.h"
 #include "ui/ui.h"
 #ifdef VERSION_JP
@@ -219,6 +220,9 @@ int main(int argc, char** argv) {
     /* Gamepads through the kernel's drivers, not libusb: reading some devices'
      * descriptors through libusb blocks SDL_Init indefinitely. */
     SDL_SetHint(SDL_HINT_HIDAPI_LIBUSB, "0");
+    /* Android's Back comes as a key (SDL_SCANCODE_AC_BACK: the menu, pad.c)
+     * instead of leaving the app. */
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
     /* Headless runs (tests, sweeps) take no gamepads: they would read the
      * controller of whoever is playing on the same machine (scripted input
      * comes from XG_PAD_SCRIPT and the UI/extras scripts instead). */
@@ -238,6 +242,9 @@ int main(int argc, char** argv) {
         SDL_Quit();
         return 1;
     }
+#ifdef __ANDROID__
+    androidUpdateCheck(window); /* an update's note on the save states it cannot load */
+#endif
 
     /* The starting image (cd/setup.h): valid, or the setup screen (from an
      * image found elsewhere, or with none: then before the disc opens). */

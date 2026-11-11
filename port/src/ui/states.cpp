@@ -140,7 +140,11 @@ bool slotRow(int i, bool selected) {
     if (s.info.usable) {
         ImGui::Text(tr("Play time %u:%02u:%02u"), t / 3600, t / 60 % 60, t % 60);
     } else {
-        ImGui::TextUnformatted(tr("Another build's"));
+        if (s.info.otherBuild && s.info.appVersion[0] != '\0') {
+            ImGui::Text(tr("Version %s's"), s.info.appVersion);
+        } else {
+            ImGui::TextUnformatted(tr("Another build's"));
+        }
         ImGui::PopStyleColor();
     }
     return pressed;
@@ -318,6 +322,23 @@ void statesSection() {
             ImGui::TextWrapped(tr("Slot %d cannot be loaded: %s."), selected, cur.info.why);
             ImGui::PopStyleColor();
         }
+#ifdef __ANDROID__
+        // An update leaves the earlier version's states: kept (that version loads them), marked,
+        // and deleted here on request (system/android.c says so once after the update).
+        int others = 0;
+        for (int i = 0; i <= STATE_SLOTS; i++) others += S.slot[i].known && S.slot[i].info.exists && S.slot[i].info.otherBuild;
+        if (others > 0) {
+            char label[96];
+            if (others == 1) snprintf(label, sizeof label, "%s", tr("Delete the state another version made"));
+            else snprintf(label, sizeof label, tr("Delete the %d states other versions made"), others);
+            if (ImGui::Button(label)) {
+                sfx::play(sfx::CHOOSE);
+                S.ask = 3;
+            }
+            hint("States made before an update of the app cannot be loaded by this version: a state holds the "
+                 "program's own memory, which an update moves. Memory card saves carry over.");
+        }
+#endif
         if (S.message[0] != '\0') {
             textLines(S.message);
         }
@@ -361,6 +382,9 @@ void statesSection() {
         char q[160];
         if (S.ask == 1) {
             snprintf(q, sizeof q, tr("Save over slot %d?"), selected);
+        } else if (S.ask == 3) {
+            snprintf(q, sizeof q, "%s", tr("Delete every state other versions of the app made? This version cannot "
+                                           "load them."));
         } else {
             snprintf(q, sizeof q, tr("Delete the state in slot %d?"), selected);
         }
@@ -370,6 +394,13 @@ void statesSection() {
             if (S.ask == 1) {
                 stateRequestSave(selected);
                 closeMenu();
+            } else if (S.ask == 3) {
+                int gone = 0;
+                for (int i = 0; i <= STATE_SLOTS; i++) {
+                    if (S.slot[i].known && S.slot[i].info.exists && S.slot[i].info.otherBuild) gone += stateDeleteSlot(i);
+                }
+                snprintf(S.message, sizeof S.message, tr("%d states deleted."), gone);
+                readSlots();
             } else {
                 stateDeleteSlot(selected);
                 snprintf(S.message, sizeof S.message, tr("Slot %d deleted."), selected);

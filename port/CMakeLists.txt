@@ -137,7 +137,7 @@ target_include_directories(card_speeduptest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}
 target_compile_definitions(card_speeduptest PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
 target_link_libraries(card_speeduptest PRIVATE SDL3::SDL3)
 add_executable(pad_profiletest EXCLUDE_FROM_ALL src/system/test/padtest.c
-    src/system/pad.c src/system/mouse.c src/system/rumble.c src/system/settings.c)
+    src/system/pad.c src/system/mouse.c src/system/touch.c src/system/rumble.c src/system/settings.c)
 target_include_directories(pad_profiletest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
 target_compile_definitions(pad_profiletest PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
 target_link_libraries(pad_profiletest PRIVATE SDL3::SDL3)
@@ -172,12 +172,14 @@ add_executable(battlepacingtest EXCLUDE_FROM_ALL src/system/test/battlepacingtes
 add_executable(hostpolltest EXCLUDE_FROM_ALL src/system/test/hostpolltest.c)
 # The game's identity in a save's free tail (gameid.c).
 add_executable(gameidtest EXCLUDE_FROM_ALL src/system/test/gameidtest.c src/system/gameid.c)
+# Saves backup (system/backup.c): a folder into a .zip and back; damaged archives refused.
+add_executable(backuptest EXCLUDE_FROM_ALL src/system/test/backuptest.c src/system/backup.c)
 # Battle speed (xg-mrj.2): hw.c's audio clock, libapi.c's root counter 2 and
 # battlespeed.c's decisions (includes the three whole); gameplay.c's enemy-info
 # Select rule beside its chord.
 add_executable(battlespeedtest EXCLUDE_FROM_ALL src/system/test/battlespeedtest.c src/system/settings.c
     src/system/gameplay.c)
-foreach(tool rewindpacktest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest)
+foreach(tool rewindpacktest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest)
     target_include_directories(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
     target_compile_definitions(${tool} PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
     target_compile_options(${tool} PRIVATE -fno-strict-aliasing)
@@ -235,8 +237,12 @@ target_link_libraries(gallery_scenetest PRIVATE SDL3::SDL3)
 # signed arithmetic, type punning, tentative definitions shared across files,
 # and explicit zero initialisers in .data, not .bss, as GCC 2.x places them
 # (the soft reset clears main's BSS and keeps its data, as the PS1's does).
+# One .data and one .bss per object, never a section per symbol (the Android
+# NDK's toolchain turns -fdata-sections on): the module link renames .data
+# and .bss into the module's own sections, which the overlay resets and save
+# states cover.
 set(XG_GAME_OPTIONS -std=gnu89 -nostdinc -fno-builtin -funsigned-char -fwrapv -fno-strict-aliasing -fcommon
-    -fno-zero-initialized-in-bss ${XG_PIC_OPTIONS})
+    -fno-zero-initialized-in-bss -fno-data-sections -fno-function-sections ${XG_PIC_OPTIONS})
 if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     list(APPEND XG_GAME_OPTIONS -fpermissive -w)
 else()
@@ -446,12 +452,18 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(${XG_UI_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wno-unused-parameter")
 endif()
 target_link_libraries(ui PRIVATE SDL3::SDL3 Vulkan::Headers)
-# The About section's build line, made again at each build (port/cmake/buildinfo.cmake).
+# The About section's build line, made again at each build (port/cmake/buildinfo.cmake);
+# an Android build ships the NDK's C++ runtime, whose licence About shows too.
+set(XG_LIBCXX_LICENSE "")
+if(ANDROID)
+    set(XG_LIBCXX_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/llvm-libcxx/LICENSE.txt")
+endif()
 add_custom_target(ui_buildinfo
     COMMAND ${CMAKE_COMMAND} -DOUT=${CMAKE_BINARY_DIR}/gen/ui_buildinfo.h -DROOT=${XG_ROOT}
             -DVERSION=${XG_VERSION} "-DTYPE=${CMAKE_BUILD_TYPE}${XG_BUILD_TYPE_SUFFIX}" -DIMGUI_LICENSE=${XG_IMGUI_DIR}/LICENSE.txt
             -DSDL_LICENSE=${SDL3_DIR}/../../../share/licenses/SDL3/LICENSE.txt
             "-DGLSLANG_LICENSE=${XG_GLSLANG_LICENSE}" "-DDAV1D_LICENSE=${XG_DAV1D_LICENSE}"
+            "-DLIBCXX_LICENSE=${XG_LIBCXX_LICENSE}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/buildinfo.cmake"
     BYPRODUCTS "${CMAKE_BINARY_DIR}/gen/ui_buildinfo.h"
     VERBATIM)
@@ -550,7 +562,7 @@ set(XG_MODULE_OBJECTS)
 set(XG_SRCDATA_SOURCES)
 foreach(module IN LISTS XG_MODULES)
     add_library(gen_${module} OBJECT "${XG_GEN_DIR}/${module}.c")
-    target_compile_options(gen_${module} PRIVATE -w ${XG_PIC_OPTIONS})
+    target_compile_options(gen_${module} PRIVATE -w -fno-data-sections ${XG_PIC_OPTIONS})
     set(out "${CMAKE_BINARY_DIR}/modules/${module}.o")
     # Each module's data and BSS in sections of their own: the overlays are
     # reset at each load, main's BSS at the soft reset (port/src/system/memory.c).
@@ -606,6 +618,9 @@ if(XG_SHARED)
         # The app (port/android): SDL's activity runs libxgloader.so's SDL_main,
         # which loads the region's game library, libxenogears-us.so or -jp.so,
         # at a fixed reserved address (port/android/loader/xgloader.c).
+        # Images the activity opened through the Storage Access Framework are read
+        # through their descriptors (/proc/self/fd/N): port/src/system/android.c.
+        target_link_options(xenogears_game PRIVATE -Wl,--wrap=fopen)
         add_library(xgloader SHARED android/loader/xgloader.c)
         target_link_libraries(xgloader PRIVATE SDL3::SDL3 log dl)
     else()

@@ -692,7 +692,7 @@ static Entry* oldest(Entry* keep) {
     }
     return out?out:busy;
 }
-/* A decoded replacement: RGBA, or an index map with its RGBA buffer for recolouring. */
+/* A decoded replacement: RGBA, or an index map (its RGBA buffer is made later, entryRgba). */
 typedef struct { uint8_t *rgba, *indices; int scale; } Decoded;
 /* Decode one replacement file for a w x h texture (any thread: no shared state). An index
  * map stored uncompressed as 8-bit grey (pngfast) is read straight into indices; anything
@@ -712,7 +712,7 @@ static int decodeImage(const char* path, int w, int h, int indexed, int limit, D
                 int ok=sw%w==0 && sh%h==0 && sw/w==sh/h && sw/w>=1 && sw/w<=8;
                 size_t count=(size_t)sw*sh;
                 for (size_t i=0;ok && i<count;++i) if (px[i]>=limit) ok=0;
-                if (!ok || !(out->rgba=malloc(count*4))) { free(px); return 0; }
+                if (!ok) { free(px); return 0; }
                 out->indices=px; out->scale=sw/w; return 1;
             }
         }
@@ -720,8 +720,8 @@ static int decodeImage(const char* path, int w, int h, int indexed, int limit, D
     SDL_Surface* image=texturePackReadPng(path,w,h,&out->scale,found);
     if (!image) return 0;
     size_t count=(size_t)image->w*image->h;
-    out->rgba=malloc(count*4); if (indexed) out->indices=malloc(count);
-    int ok=out->rgba && (!indexed || out->indices);
+    if (indexed) out->indices=malloc(count); else out->rgba=malloc(count*4);
+    int ok=indexed?out->indices!=NULL:out->rgba!=NULL;
     for (int y=0;ok && y<image->h;++y) for (int x=0;x<image->w;++x) {
         uint8_t* p=(uint8_t*)image->pixels+(size_t)y*image->pitch+x*4;
         size_t at=(size_t)y*image->w+x;
@@ -791,19 +791,34 @@ static int decodeBeetle(const char* path, int w, int h, Decoded* out, int* found
     SDL_CloseIO(io); return 0;
 #endif
 }
-static void install(Entry* e, Decoded* dec) {
-    size_t count=(size_t)e->w*e->h*dec->scale*dec->scale, bytes=count*(e->indexed && e->indexed!=BEETLE_KIND?5:4);
-    if (e->indexed==BEETLE_KIND) { ++bstats.loads; ++beetleGeneration; }
+/* Loaded: an RGBA image, or an index map (with or without its RGBA buffer yet). */
+static int entryLoaded(const Entry* e) { return e->rgba || e->indices; }
+/* The least recently used other entries dropped until bytes more fit the cache. */
+static void cacheRoom(Entry* keep, size_t bytes) {
     while (stats.bytes+bytes>cacheBudget()) {
         Entry* victim=NULL;
-        for (int i=0;i<PACK_SLOTS;++i) if (&entries[i]!=e && entries[i].bytes &&
+        for (int i=0;i<PACK_SLOTS;++i) if (&entries[i]!=keep && entries[i].bytes &&
             (!victim || entries[i].touched<victim->touched)) victim=&entries[i];
         if (!victim) break;
         ++stats.evictions; drop(victim);
     }
+}
+static void install(Entry* e, Decoded* dec) {
+    size_t count=(size_t)e->w*e->h*dec->scale*dec->scale, bytes=count*(e->indexed && e->indexed!=BEETLE_KIND?1:4);
+    if (e->indexed==BEETLE_KIND) { ++bstats.loads; ++beetleGeneration; }
+    cacheRoom(e,bytes);
     e->rgba=dec->rgba; e->indices=dec->indices; e->scale=dec->scale;
     e->bytes=bytes; stats.bytes+=bytes; ++stats.loads;
     e->revision=e->loaded=newRevision();
+}
+/* An index map's RGBA buffer, made lazily at its first CPU-path recolour (the game thread; never on the GPU path). */
+static int entryRgba(Entry* e) {
+    if (e->rgba) return 1;
+    size_t bytes=(size_t)e->w*e->h*e->scale*e->scale*4;
+    cacheRoom(e,bytes);
+    if (!(e->rgba=malloc(bytes))) return 0;
+    e->bytes+=bytes; stats.bytes+=bytes; e->livePalette=0;   /* recoloured next (sampleEntry) */
+    return 1;
 }
 static void invalid(const char* path, uint64_t key) {
     ++stats.invalid;
@@ -1383,7 +1398,7 @@ int texturePackBeetleImage(uint32_t upload, uint32_t palette, int w, int h, Text
     if (!bstats.enabled || w<1 || h<1 || !beetleName(upload,palette)) return 0;
     Entry* e=lookupKey(upload,palette,BEETLE_KIND,w,h,0);
     if (e->pending) return -1;
-    if (!e->rgba) return 0;
+    if (!entryLoaded(e)) return 0;
     out->rgba=e->rgba; out->w=e->w; out->h=e->h; out->scale=e->scale; out->revision=e->loaded;
     return 1;
 }
@@ -1425,19 +1440,19 @@ static int packSample(const DecodedTexture* d, TextureRequest patch, int filter,
     if (beetleFirstSetting && beetleSample(d,patch,out)) return !replacementsHidden;
     if (!stats.enabled) return !beetleFirstSetting && beetleSample(d,patch,out) && !replacementsHidden;
     Entry* e=lookup(d,0); /* Exact RGBA pair wins; indexed file ignores CLUT key. */
-    if (!e->rgba && d->paletteSize) e=lookup(d,1);
-    if (!e->rgba && d->request.stableTo && rectKeys) {
+    if (!entryLoaded(e) && d->paletteSize) e=lookup(d,1);
+    if (!entryLoaded(e) && d->request.stableTo && rectKeys) {
         /* Before stable regions this patch was a texture of its own: packs
          * made then name it by its own content. */
         TextureRequest plain=patch; plain.stableFrom=plain.stableTo=0;
         const DecodedTexture* p=textureCacheGet(plain);
         if (p) {
             Entry* f=lookup(p,0);
-            if (!f->rgba && p->paletteSize) f=lookup(p,1);
-            if (f->rgba) { d=p; e=f; }
+            if (!entryLoaded(f) && p->paletteSize) f=lookup(p,1);
+            if (entryLoaded(f)) { d=p; e=f; }
         }
     }
-    if (!e->rgba) return !beetleFirstSetting && beetleSample(d,patch,out) && !replacementsHidden;
+    if (!entryLoaded(e)) return !beetleFirstSetting && beetleSample(d,patch,out) && !replacementsHidden;
     if (replacementsHidden) return 0;
     return sampleEntry(d,e,patch,filter,out);
 }
@@ -1454,13 +1469,13 @@ int texturePackFind(int library, uint64_t texel, uint64_t palette, int w, int h,
     if (library==TEXTURE_FIND_PACK) {
         if (!texturePackEnabled()) return 0;
         e=lookupKey(texel,palette,0,w,h,limit);
-        if (!e->rgba && !e->pending && limit) e=lookupKey(texel,0,1,w,h,limit);
+        if (!entryLoaded(e) && !e->pending && limit) e=lookupKey(texel,0,1,w,h,limit);
     } else if (library==TEXTURE_FIND_CEL) {
         if (!textureSpriteCelEnabled() || !limit || !cellKnown(texel)) return 0;
         e=lookupKey(texel,0,4,w,h,limit);
     } else return 0;
     if (e->pending) return -1;
-    if (!e->rgba) return 0;
+    if (!entryLoaded(e)) return 0;
     out->rgba=e->indexed?NULL:e->rgba; out->indices=e->indexed?e->indices:NULL;
     out->w=e->w; out->h=e->h; out->scale=e->scale; out->revision=e->loaded;
     return 1;
@@ -1563,12 +1578,12 @@ int textureSpriteCelSample(const DecodedTexture* d, TextureRequest patch, int fi
     if (!d || !d->paletteSize || !textureSpriteCelEnabled() || patch.w<1 || patch.h<1 || patch.u<d->request.u || patch.v<d->request.v ||
         patch.u+patch.w>d->request.u+d->request.w || patch.v+patch.h>d->request.v+d->request.h) return 0;
     Entry* e=lookup(d,4);
-    if (!e->rgba) {
+    if (!entryLoaded(e)) {
         const DecodedTexture* cell=spriteCellAround(d);
         if (cell) { d=cell; e=lookup(d,4); }
     }
-    if (spriteLogOn()) fprintf(stderr,"sprite cel: %s tpage %04x clut %04x uv %d,%d %dx%d in %d,%d %dx%d key %016llx\n",e->rgba?"hit":"MISS",d->request.tpage,d->request.clut,patch.u,patch.v,patch.w,patch.h,d->request.u,d->request.v,d->request.w,d->request.h,(unsigned long long)d->texelKey);
-    if (!e->rgba || replacementsHidden) return 0;
+    if (spriteLogOn()) fprintf(stderr,"sprite cel: %s tpage %04x clut %04x uv %d,%d %dx%d in %d,%d %dx%d key %016llx\n",entryLoaded(e)?"hit":"MISS",d->request.tpage,d->request.clut,patch.u,patch.v,patch.w,patch.h,d->request.u,d->request.v,d->request.w,d->request.h,(unsigned long long)d->texelKey);
+    if (!entryLoaded(e) || replacementsHidden) return 0;
     return sampleEntry(d,e,patch,filter,out);
 }
 static int sampleEntry(const DecodedTexture* d, Entry* e, TextureRequest patch, int filter, TextureSample* out) {
@@ -1625,6 +1640,7 @@ static int sampleEntry(const DecodedTexture* d, Entry* e, TextureRequest patch, 
         *out=(TextureSample){c->rgba,c->revision,c->u,c->v,c->w,c->h,e->scale,NULL,0};
         return 1;
     }
+    if (e->indexed && !entryRgba(e)) return 0;
     if (e->indexed && (e->livePalette!=d->paletteKey || e->revision==0 || !e->livePalette)) {
         size_t count=(size_t)e->w*e->h*e->scale*e->scale;
         for (size_t i=0;i<count;++i) {

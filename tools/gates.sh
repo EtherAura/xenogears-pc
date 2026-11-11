@@ -41,6 +41,8 @@
 #               tools/pc_link.py with the JP symbol files and layouts, which the
 #               US build never runs; skipped when an explicit one is missing
 #   payload-jp  the payload gate on that JP executable
+#   payload-android  the payload gate on each Android game library built in
+#               build/android (tools/build_android.sh); skipped when none is
 #   beetle-capture frame-boundary capture regressions, without a core or discs
 #   retail-heap retail heap address-model and read-only inspection regressions
 #   interpolation-coverage sampled motion evidence and honest coverage reports
@@ -191,6 +193,24 @@ if [ "$TESTS" = 1 ] && [ -f "$TEST_BUILD_JP/CMakeCache.txt" ]; then
     fi
 elif [ "$TESTS" = 1 ]; then
     record port-jp 0 "skipped: no configured build in $TEST_BUILD_JP"
+fi
+
+# The Android game libraries (tools/build_android.sh), when built in this tree: what an APK
+# carries, checked as the Linux executable is.
+android_libs=()
+for lib in build/android/*-*/libxenogears-*.so; do
+    [ -f "$lib" ] && android_libs+=("$lib")
+done
+if [ ${#android_libs[@]} -gt 0 ]; then
+    : > "$OUT/payload-android.txt"
+    st=0
+    for lib in "${android_libs[@]}"; do
+        echo "== $lib" >> "$OUT/payload-android.txt"
+        "$PY" tools/payloadcheck.py --build "$(dirname "$lib")" --exe "$lib" >> "$OUT/payload-android.txt" 2>&1 || st=1
+    done
+    record payload-android "$st" "$(grep -c '^payload ok' "$OUT/payload-android.txt") of ${#android_libs[@]} Android libraries hold no retail module data"
+else
+    record payload-android 0 "skipped: no Android libraries in build/android (tools/build_android.sh)"
 fi
 
 echo "gates (full outputs in ${OUT#"$ROOT"/}/):"

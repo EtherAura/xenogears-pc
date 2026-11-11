@@ -39,6 +39,7 @@ typedef struct {
     uint64_t bodySize;   /* raw */
     uint64_t bodyHash;   /* stateHash of the raw body */
     uint32_t engine;     /* system/engine.h: 0 Original, 1 Enhanced (older files: 0) */
+    char appVersion[16]; /* the app's version that saved it (stateAppVersion; "" if none) */
 } StateHeader;
 
 #define STATE_FLAG_STEPPED 1u /* saved with XG_CLOCK=step */
@@ -46,6 +47,10 @@ typedef struct {
 /* This executable's id: its code and its sections' places (16 bytes). */
 const uint8_t* stateBuildId(void);
 const char* stateBuildText(void); /* the same in hex, for messages */
+/* The app's version as players know it (XG_APP_VERSION: the Android app's versionName,
+ * set by its loader), at most 15 characters; "" elsewhere. States record it, so a state
+ * another build refuses can say which version made it. */
+const char* stateAppVersion(void);
 /* Where this build's image sits against its link addresses (its ELF load
  * bias: 0 for a non-PIE executable and on Windows), as states record it for
  * tools (statecheck.py turns symbol addresses into a state's addresses). */

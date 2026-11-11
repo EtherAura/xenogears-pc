@@ -216,6 +216,14 @@ def main() -> int:
         # -d gives the module's tentative definitions (common symbols, -fcommon) their space in the
         # partial link, before objcopy makes the module's names local: a local common is no
         # definition (LLVM's lld keeps commons in -r and turned one into address 8: xg-mrj.3.6).
+        # A section per symbol (.data.<name>, .bss.<name>: -fdata-sections) would escape the rename into
+        # the module's own sections (port/CMakeLists.txt), so the overlay resets and save states.
+        headers = subprocess.run(["objdump", "-h", a.out_partial], capture_output=True, text=True).stdout
+        split = sorted({m.group(1) for m in re.finditer(r"^\s*\d+\s+(\.(?:data|bss|sdata|sbss)\.\S+)", headers, re.M)
+                        if not m.group(1).startswith(".data.rel")})
+        if split:
+            raise SystemExit(f"pc_srcdata: {a.out_partial} has sections per symbol ({', '.join(split[:5])}...): "
+                             "compile the game C with -fno-data-sections")
         nm_out = subprocess.run(["nm", a.out_partial], capture_output=True, text=True).stdout
         commons = [line.split()[-1] for line in nm_out.splitlines() if re.match(r"^\S*\s+C\s", line)]
         if commons:

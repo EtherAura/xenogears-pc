@@ -19,7 +19,9 @@ executable's symbol at that place, else by the objects that hold its bytes):
               any left fail, unless tools/payload_allow.txt allows them
   port        the port's own code (port/src, third_party): fails unless
               tools/payload_allow.txt allows it, with a reason and a byte budget
-  other       bytes no object explains: fails
+  other       bytes no object explains: fails, unless a "bytes:<hex>" entry of
+              tools/payload_allow.txt holds them (toolchain runtimes linked into
+              the image without objects of ours, as the NDK's libunwind)
 
 A 16-byte window counts only when it carries information: at least 4 distinct
 byte values and at least 4 non-zero bytes. Windows of zeros with a few small
@@ -346,7 +348,7 @@ def audit() -> int:
                 per.setdefault(k, []).append((start + lo, start + hi, nbytes))
 
     def source_part(pat: str) -> str:
-        return pat.split(":", 1)[0]
+        return pat if pat.startswith("bytes:") else pat.split(":", 1)[0]
 
     def entry_for(src: str, sym: str) -> tuple[str, int, str, bool] | None:
         """The first entry for source:symbol, or, where the symbol is not known (merged strings,
@@ -365,6 +367,14 @@ def audit() -> int:
     strict_used: dict[str, tuple[int, int]] = {}
     totals = {k: [0, 0] for k in ("generated", "src", "allowed", "port", "library", "other", "names")}
     report = []
+    # Bytes no object explains, held by a "bytes:<hex>" entry: allowed under that entry.
+    byte_entries = [(pat, budget, why) for pat, budget, why, strict in allow if pat.startswith("bytes:")]
+    other = per.pop(("other", "no object holds these bytes", "-"), [])
+    for s, e, nb in other:
+        run = data[s:e].strip(b"\0")
+        e_ = next((x for x in byte_entries if run in bytes.fromhex(x[0][6:])), None)
+        key = ("port", e_[0], "-") if e_ else ("other", "no object holds these bytes", "-")
+        per.setdefault(key, []).append((s, e, nb))
     for (cat, src, sym), rs in sorted(per.items()):
         nbytes = sum(b for _, _, b in rs)
         kind = cat

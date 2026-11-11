@@ -163,6 +163,8 @@ typedef struct {
     char label[96];
     int thumbW, thumbH;
     unsigned char* thumb;
+    int otherBuild;        /* saved by another build (an update, a rebuild): never loads here */
+    char appVersion[16];   /* the app's version that saved it, "" if unknown */
 } XgStateInfo;
 int stateSlotInfo(int slot, XgStateInfo* out); /* 1 if a file is there */
 void stateInfoFree(XgStateInfo* info);

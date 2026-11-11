@@ -84,3 +84,9 @@ pe library/libglslang.a/glslang_tab.cpp.obj:_ZL7yytable 3226 # glslang GLSL gram
 pe library/libmingwex.a/lib64_libmingwex_a-g__fmt.o:string_9f9f5111f7b27a78 16 # MinGW/C++ standard-library hexadecimal digit string
 pe library/libstdc++.a/locale_facets.o:string_9f9f5111f7b27a78 16 # MinGW/C++ standard-library hexadecimal digit string
 pe library/libstdc++.a/locale_facets.o:string_f02ae380606c48d6 32 # MinGW/C++ standard-library hexadecimal digit string
+
+# Bytes no object of ours holds (an Android library: the NDK links its runtime into it), by content:
+# "bytes:<hex>" holds a run that lies within those bytes.
+bytes:206e6f7420696d706c656d656e746564     64  # LLVM libunwind's messages ("DW_OP_piece not implemented", "DWARF opcode not implemented"), linked into every NDK library: " not implemented" is coincidence
+bytes:0001000000020000000400000008000004000000050000000600000007000000  32  # clang builds (arm64 NEON): a merged vector constant pool (lane masks 0x100..0x800, lane indices 4..7) no single object holds: coincidence
+port/src/gpu/present.c                   64  # clang builds (arm64 NEON): the vectoriser's lane-index constant pools (u32 1,2,3,4,... and 16,17,18,...) beside present.c's code: coincidence

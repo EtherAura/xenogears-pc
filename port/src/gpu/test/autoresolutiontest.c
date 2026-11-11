@@ -68,6 +68,52 @@ static int policy(void) {
     return 0;
 }
 
+/* Battle speed: a 12 ms budget per video frame is 12 / factor per game
+ * vblank. 5 ms a vblank fits 1x and 2x but not 4x. */
+static int speed(void) {
+    AutoResolution a, b;
+    autoResolutionReset(&a, 4); autoResolutionReset(&b, 4);
+    CHECK(b.factor == 1);
+    autoResolutionSpeed(&b, 0); autoResolutionSpeed(&b, 1); /* 1x: as before */
+    samples(&a, 4, 18, 120); samples(&b, 4, 18, 120);
+    samples(&a, 3, 6, 400); samples(&b, 3, 6, 400);
+    CHECK(a.limit == 3 && !memcmp(&a, &b, sizeof(a)));
+
+    static const int factors[] = {1, 2, 4}, fits[] = {4, 4, 3};
+    for (int i = 0; i < 3; ++i) {
+        autoResolutionReset(&a, 4); autoResolutionSpeed(&a, factors[i]);
+        CHECK(a.factor == factors[i]);
+        samples(&a, 4, 5, 180); CHECK(a.limit == fits[i]);
+    }
+    autoResolutionReset(&a, 4); autoResolutionSpeed(&a, 2);
+    samples(&a, 4, 7, 120); CHECK(a.limit == 3); /* 7 > 12 / 2 */
+
+    /* A change restarts: the old speed's late samples fall in the warm-up. */
+    autoResolutionReset(&a, 4); autoResolutionSpeed(&a, 4);
+    samples(&a, 4, 5, 89); CHECK(a.limit == 4);
+    autoResolutionSpeed(&a, 1); CHECK(a.factor == 1 && a.count == 0 && a.over == 0);
+    samples(&a, 4, 100, 59); samples(&a, 4, 5, 300); CHECK(a.limit == 4);
+    autoResolutionSpeed(&a, 1); samples(&a, 4, 5, 1); CHECK(a.cooldown == 0); /* same factor: no restart */
+
+    /* 4x lowers the limit; back at 1x (4x still chosen, the battle holding
+     * 1x) the normal budget applies again and lets it recover. */
+    autoResolutionReset(&a, 4); autoResolutionSpeed(&a, 4);
+    samples(&a, 4, 4, 120); CHECK(a.limit == 3 && a.constrained);
+    samples(&a, 3, 2, 1000); CHECK(a.limit == 3); /* 2 * (4/3)^2 > 12 / 4 * 0.7: no recovery */
+    autoResolutionRestart(&a); CHECK(a.factor == 4); /* a restart keeps the speed */
+    autoResolutionSpeed(&a, 1);
+    samples(&a, 3, 2, 359); CHECK(a.limit == 3);
+    samples(&a, 3, 2, 1); CHECK(a.limit == 4); /* 2 * (4/3)^2 < 12 * 0.7 */
+    return 0;
+}
+
+/* system/battlespeed.c's, which hires.c reads (weakly) on its Auto path. */
+static int factorNow = 1, factorReads;
+int battleSpeedFactor(void) {
+    factorReads++;
+    return factorNow;
+}
+
 static void draw(void) {
     TILE t; SetTile(&t); setRGB0(&t, 248, 0, 0);
     t.x0 = t.y0 = 20; t.w = t.h = 32;
@@ -86,6 +132,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     CHECK(!policy());
+    CHECK(!speed());
     testSetEnv("XG_SETTINGS", "none");
     CHECK(hiresUpscale() == 1); CHECK(hiresGpuBudget() == 0);
     hiresSetGpuBudget(-1); hiresSetGpuBudget(51); CHECK(hiresGpuBudget() == 0);
@@ -94,12 +141,15 @@ int main(int argc, char** argv) {
     DRAWENV env; SetDefDrawEnv(&env, 0, 0, 320, 224); PutDrawEnv(&env);
     DISPENV disp; SetDefDispEnv(&disp, 0, 0, 320, 224); PutDispEnv(&disp); SetDispMask(1);
     hiresSetGpuBudget(1); hiresSetUpscale(3);
+    factorNow = 4;
     for (int i = 0; i < 150; ++i) { draw(); gpuVBlank(); }
     CHECK(gvkHiScale() == 3); /* fixed N ignores the budget */
+    CHECK(factorReads == 0); /* ... and the game speed */
     double ms; unsigned frames; int scale;
     CHECK(!gvkGpuTimeTake(&ms, &frames, &scale));
     hiresSetUpscale(1); gpuVBlank(); CHECK(gvkHiScale() == 0);
     CHECK(!gvkGpuTimeTake(&ms, &frames, &scale));
+    factorNow = 1;
 
     hiresSetGpuBudget(50); hiresSetUpscale(0); gpuVBlank();
     int available = gvkGpuTimeEnable(1), measured = 0;
@@ -119,6 +169,7 @@ int main(int argc, char** argv) {
         gpuVBlank();
     }
     CHECK(!available || measured > 10);
+    CHECK(!available || factorReads >= 90); /* Auto with a budget: every vblank */
     printf("Auto GPU timing: %d samples, %.3f ms over %u video frames\n", measured, total, elapsed);
     gvkGpuTimeReset(); CHECK(!gvkGpuTimeTake(&ms, &frames, &scale));
     hiresGpuTimePause(); CHECK(!gvkGpuTimeTake(&ms, &frames, &scale));
@@ -127,7 +178,10 @@ int main(int argc, char** argv) {
     CHECK(!gvkGpuTimeTake(&ms, &frames, &scale));
     disp.isrgb24 = 0; PutDispEnv(&disp); gpuVBlank();
     hiresStateLoaded(); CHECK(!gvkGpuTimeTake(&ms, &frames, &scale));
+    int reads = factorReads;
+    factorNow = 4;
     hiresSetGpuBudget(0); gpuVBlank(); CHECK(!gvkGpuTimeTake(&ms, &frames, &scale));
+    gpuVBlank(); CHECK(factorReads == reads); /* no budget: no timing, no speed */
     CHECK(hiresGpuBudget() == 0 && hiresUpscale() == 0);
     gpuShutdown(); SDL_Quit();
     printf("Auto resolution: %d checks passed\n", checks);

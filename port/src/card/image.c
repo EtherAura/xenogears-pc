@@ -16,20 +16,21 @@
 Card cards[2];
 int cardQuiet; /* the command line: no slot messages */
 
-void cardSetFrameChecksum(uint8_t* frame) {
+/* XOR of the frame's first CARD_FRAME - 1 bytes: what its last byte holds. */
+static uint8_t frameChecksum(const uint8_t* frame) {
     uint8_t x = 0;
     for (int i = 0; i < CARD_FRAME - 1; i++) {
         x ^= frame[i];
     }
-    frame[CARD_FRAME - 1] = x;
+    return x;
+}
+
+void cardSetFrameChecksum(uint8_t* frame) {
+    frame[CARD_FRAME - 1] = frameChecksum(frame);
 }
 
 int cardFrameChecksumOk(const uint8_t* frame) {
-    uint8_t x = 0;
-    for (int i = 0; i < CARD_FRAME - 1; i++) {
-        x ^= frame[i];
-    }
-    return frame[CARD_FRAME - 1] == x;
+    return frame[CARD_FRAME - 1] == frameChecksum(frame);
 }
 
 int cardIsFormatted(const uint8_t* data) {

@@ -189,6 +189,9 @@ static const uint32_t presentFragSpv[] =
 static const uint32_t presentPictureFragSpv[] =
 #include "present_picture.frag.spv.inc"
     ;
+static const uint32_t rotateFragSpv[] =
+#include "rotate.frag.spv.inc"
+    ;
 
 static const uint32_t draw_ordered_vertSpv[] =
 #include "draw_ordered.vert.spv.inc"
@@ -276,6 +279,8 @@ static const uint32_t ordered_compSpv[] =
     X(vkCreateGraphicsPipelines)        \
     X(vkDestroyPipeline)                \
     X(vkCreateDescriptorPool)           \
+    X(vkCreateSampler)                  \
+    X(vkDestroySampler)                 \
     X(vkDestroyDescriptorPool)          \
     X(vkAllocateDescriptorSets)         \
     X(vkUpdateDescriptorSets)           \
@@ -523,6 +528,20 @@ static struct {
     uint64_t swapchainRetryNs; /* after a failed creation, when to try again */
     int windowW, windowH;      /* the window's pixel size the swapchain was made for */
     int surfaceLost;           /* the window had a surface; it is gone, made again at the retry time */
+    /* Pre-rotation (below): quarter turns clockwise from the player's view to the swapchain
+     * image; XG_VK_ROTATE's (-1: none); the image the present pass draws into, and the turn. */
+    int rotate, rotateForced;
+    VkImage rotImage;
+    VkDeviceMemory rotMemory;
+    VkImageView rotView;
+    int rotW, rotH;
+    VkFormat rotFormat, rotPipelineFormat;
+    VkSampler rotSampler;
+    VkDescriptorSetLayout rotSetLayout;
+    VkPipelineLayout rotLayout;
+    VkDescriptorPool rotPool;
+    VkDescriptorSet rotSet;
+    VkPipeline rotPipeline;
 
     /* Presentation health (gvkPresentStats, XG_PRESENT_LOG, the stall guard). */
     int lastAcquire;           /* VkResult of this vblank's acquire; PRESENT_NOT_TRIED */
@@ -2220,6 +2239,8 @@ static int remakeSurface(void) {
     return 1;
 }
 
+static int quarterOf(VkSurfaceTransformFlagBitsKHR t);         /* pre-rotation, below */
+static void ensureRotation(int w, int h, VkFormat format);
 static int createSwapchain(void) {
     VkSurfaceCapabilitiesKHR caps;
     VkResult cr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk.physical, vk.surface, &caps);
@@ -2244,6 +2265,22 @@ static int createSwapchain(void) {
         destroySwapchain();
         vk.swapchainRetryNs = SDL_GetTicksNS() + 250000000ull;
         return 0;
+    }
+    /* Pre-rotation (ensureRotation): the images in the display's own orientation. The
+     * window's size is the player's view; the display's is that turned (Android reports
+     * currentExtent in either: the window decides). */
+    vk.rotate = vk.rotateForced >= 0 ? vk.rotateForced : quarterOf(caps.currentTransform);
+    if (vk.rotate & 1) {
+        uint32_t viewW = vk.windowW > 0 ? (uint32_t)vk.windowW : extent.width;
+        uint32_t viewH = vk.windowH > 0 ? (uint32_t)vk.windowH : extent.height;
+        VkExtent2D turned = {viewH, viewW};
+        if (turned.width < caps.minImageExtent.width || turned.width > caps.maxImageExtent.width ||
+            turned.height < caps.minImageExtent.height || turned.height > caps.maxImageExtent.height) {
+            gpuWarnOnce("rotate", "vulkan: the surface takes no %ux%u images: no pre-rotation", turned.width,
+                        turned.height);
+            vk.rotate = vk.rotateForced >= 0 ? 0 : vk.rotate; /* the display's own turn stays the compositor's */
+        }
+        if (vk.rotate & 1) extent = turned;
     }
     uint32_t n = 0;
     vkGetPhysicalDeviceSurfaceFormatsKHR(vk.physical, vk.surface, &n, NULL);
@@ -2286,7 +2323,7 @@ static int createSwapchain(void) {
     si.imageExtent = extent;
     si.imageArrayLayers = 1;
     si.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    vk.copyPresent=vk.copyQueue && (caps.supportedUsageFlags&VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+    vk.copyPresent=vk.copyQueue && (caps.supportedUsageFlags&VK_IMAGE_USAGE_TRANSFER_DST_BIT) && !vk.rotate;
     if(vk.copyPresent)si.imageUsage|=VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     si.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     uint32_t sharingFamilies[2]={vk.queueFamily,vk.copyFamily};
@@ -2351,6 +2388,10 @@ static int createSwapchain(void) {
     }
     vk.swapchainFormat = format.format;
     vk.swapchainStale = 0;
+    if (vk.rotate) {
+        ensureRotation(vk.rotate & 1 ? (int)extent.height : (int)extent.width,
+                       vk.rotate & 1 ? (int)extent.width : (int)extent.height, format.format);
+    }
     return 1;
 }
 
@@ -6255,13 +6296,196 @@ static void recordPresentPass(VkCommandBuffer cmd, VkImageView view, VkPipeline 
     vkCmdEndRendering(cmd);
 }
 
-/* XG_DUMP_PRESENT: the same pass into the dump image, copied out for the host. */
-static void recordDumpPass(VkCommandBuffer cmd, const PresentConstants* pc, int chain) {
+/* ---- pre-rotation (xg-mrj.3.9) -------------------------------------------------------------
+ * A phone shows its landscape picture on a display whose own orientation is
+ * portrait, and its surface says so (currentTransform ROTATE_90 or
+ * ROTATE_270). The swapchain then takes images in the display's orientation,
+ * marked as already turned (preTransform = currentTransform), and the present
+ * pass draws as everywhere else, into an image of the window's size (the
+ * player's view), which one more draw turns into the swapchain image
+ * (shaders/rotate.frag): the compositor shows it as it is, without turning it
+ * itself (what Android calls pre-rotation). XG_VK_ROTATE=90|180|270 turns the
+ * picture so wherever the surface allows the turned size (a test: the window
+ * shows it turned; XG_DUMP_PRESENT's dumps are turned as well, headless too). */
+
+static int quarterOf(VkSurfaceTransformFlagBitsKHR t) {
+    switch (t) {
+    case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR: return 1;
+    case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: return 2;
+    case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: return 3;
+    default: return 0;
+    }
+}
+
+static void destroyRotationTarget(void) {
+    if (vk.rotImage != VK_NULL_HANDLE) {
+        vkDestroyImageView(vk.device, vk.rotView, NULL);
+        vkDestroyImage(vk.device, vk.rotImage, NULL);
+        vkFreeMemory(vk.device, vk.rotMemory, NULL);
+        vk.rotImage = VK_NULL_HANDLE;
+        vk.rotView = VK_NULL_HANDLE;
+        vk.rotMemory = VK_NULL_HANDLE;
+    }
+    vk.rotW = vk.rotH = 0;
+}
+
+static void destroyRotation(void) {
+    destroyRotationTarget();
+    if (vk.rotPipeline != VK_NULL_HANDLE) vkDestroyPipeline(vk.device, vk.rotPipeline, NULL);
+    if (vk.rotLayout != VK_NULL_HANDLE) vkDestroyPipelineLayout(vk.device, vk.rotLayout, NULL);
+    if (vk.rotSetLayout != VK_NULL_HANDLE) vkDestroyDescriptorSetLayout(vk.device, vk.rotSetLayout, NULL);
+    if (vk.rotPool != VK_NULL_HANDLE) vkDestroyDescriptorPool(vk.device, vk.rotPool, NULL);
+    if (vk.rotSampler != VK_NULL_HANDLE) vkDestroySampler(vk.device, vk.rotSampler, NULL);
+    vk.rotPipeline = VK_NULL_HANDLE;
+    vk.rotLayout = VK_NULL_HANDLE;
+    vk.rotSetLayout = VK_NULL_HANDLE;
+    vk.rotPool = VK_NULL_HANDLE;
+    vk.rotSampler = VK_NULL_HANDLE;
+}
+
+/* The w x h image the present pass draws into (the player's view), and the draw that turns it. */
+static void ensureRotation(int w, int h, VkFormat format) {
+    if (vk.rotSetLayout == VK_NULL_HANDLE) {
+        VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        si.magFilter = VK_FILTER_NEAREST;
+        si.minFilter = VK_FILTER_NEAREST;
+        si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        VK_CHECK(vkCreateSampler(vk.device, &si, NULL, &vk.rotSampler));
+        VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT,
+                                          &vk.rotSampler};
+        VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        li.bindingCount = 1;
+        li.pBindings = &b;
+        VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &li, NULL, &vk.rotSetLayout));
+        VkPushConstantRange pr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(int32_t)};
+        VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        pli.setLayoutCount = 1;
+        pli.pSetLayouts = &vk.rotSetLayout;
+        pli.pushConstantRangeCount = 1;
+        pli.pPushConstantRanges = &pr;
+        VK_CHECK(vkCreatePipelineLayout(vk.device, &pli, NULL, &vk.rotLayout));
+        VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+        VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        dpi.maxSets = 1;
+        dpi.poolSizeCount = 1;
+        dpi.pPoolSizes = &ps;
+        VK_CHECK(vkCreateDescriptorPool(vk.device, &dpi, NULL, &vk.rotPool));
+        VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool = vk.rotPool;
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &vk.rotSetLayout;
+        VK_CHECK(vkAllocateDescriptorSets(vk.device, &ai, &vk.rotSet));
+    }
+    if (vk.rotPipeline == VK_NULL_HANDLE || vk.rotPipelineFormat != format) {
+        if (vk.rotPipeline != VK_NULL_HANDLE) vkDestroyPipeline(vk.device, vk.rotPipeline, NULL);
+        /* createPipeline builds with vk.pipelineLayout: this draw's own for the call. */
+        VkPipelineLayout keep = vk.pipelineLayout;
+        vk.pipelineLayout = vk.rotLayout;
+        vk.rotPipeline = createPipeline(presentVertSpv, sizeof(presentVertSpv), rotateFragSpv, sizeof(rotateFragSpv), 0,
+                                        format);
+        vk.pipelineLayout = keep;
+        vk.rotPipelineFormat = format;
+    }
+    if (vk.rotImage != VK_NULL_HANDLE && vk.rotW == w && vk.rotH == h && vk.rotFormat == format) return;
+    if (vk.rotImage != VK_NULL_HANDLE) {
+        presentDrain();
+        vkDeviceWaitIdle(vk.device);
+        for (int i = 0; i < FRAMES; i++) {
+            vk.frames[i].submitted = 0;
+        }
+        destroyRotationTarget();
+    }
+    VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = format;
+    ii.extent.width = (uint32_t)w;
+    ii.extent.height = (uint32_t)h;
+    ii.extent.depth = 1;
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    VK_CHECK(vkCreateImage(vk.device, &ii, NULL, &vk.rotImage));
+    VkMemoryRequirements req;
+    vkGetImageMemoryRequirements(vk.device, vk.rotImage, &req);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    mai.allocationSize = req.size;
+    mai.memoryTypeIndex = findMemory(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+    VK_CHECK(vkAllocateMemory(vk.device, &mai, NULL, &vk.rotMemory));
+    VK_CHECK(vkBindImageMemory(vk.device, vk.rotImage, vk.rotMemory, 0));
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = vk.rotImage;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = format;
+    vi.subresourceRange = colorRange;
+    VK_CHECK(vkCreateImageView(vk.device, &vi, NULL, &vk.rotView));
+    VkDescriptorImageInfo di = {vk.rotSampler, vk.rotView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    wr.dstSet = vk.rotSet;
+    wr.descriptorCount = 1;
+    wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    wr.pImageInfo = &di;
+    vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
+    vk.rotW = w;
+    vk.rotH = h;
+    vk.rotFormat = format;
+    gpuLog("vulkan: pre-rotation: %dx%d turned %d degrees", w, h, vk.rotate * 90);
+}
+
+/* The rotation image, ready for the present pass (its last picture already read). */
+static void rotationTargetBarrier(VkCommandBuffer cmd) {
+    imageBarrier(cmd, vk.rotImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+}
+
+/* The rotation image, drawn, turned into `target` (tw x th, ready for colour writes). */
+static void recordRotation(VkCommandBuffer cmd, VkImageView target, int tw, int th) {
+    imageBarrier(cmd, vk.rotImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    att.imageView = target;
+    att.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    att.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; /* every pixel is written */
+    att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea.extent.width = (uint32_t)tw;
+    ri.renderArea.extent.height = (uint32_t)th;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &att;
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.rotPipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.rotLayout, 0, 1, &vk.rotSet, 0, NULL);
+    VkViewport viewport = {0.0f, 0.0f, (float)tw, (float)th, 0.0f, 1.0f};
+    VkRect2D scissor = {{0, 0}, {(uint32_t)tw, (uint32_t)th}};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    int32_t quarter = vk.rotate;
+    vkCmdPushConstants(cmd, vk.rotLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(quarter), &quarter);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+}
+
+/* XG_DUMP_PRESENT: the same pass into the dump image, copied out for the host; w x h the
+ * player's view (the dump image is that turned, with pre-rotation). */
+static void recordDumpPass(VkCommandBuffer cmd, const PresentConstants* pc, int chain, int w, int h) {
     imageBarrier(cmd, vk.dumpImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                  VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     int q = gtStart(cmd, GT_PRESENT); /* timed too: headless runs have only this one */
-    recordPresentPass(cmd, vk.dumpView, vk.dumpPipeline, vk.dumpFormat, vk.dumpW, vk.dumpH, pc, chain);
+    if (vk.rotate) {
+        ensureRotation(w, h, vk.dumpFormat);
+        rotationTargetBarrier(cmd);
+        recordPresentPass(cmd, vk.rotView, vk.dumpPipeline, vk.dumpFormat, w, h, pc, chain);
+        recordRotation(cmd, vk.dumpView, vk.dumpW, vk.dumpH);
+    } else {
+        recordPresentPass(cmd, vk.dumpView, vk.dumpPipeline, vk.dumpFormat, vk.dumpW, vk.dumpH, pc, chain);
+    }
     gtStop(cmd, q);
     imageBarrier(cmd, vk.dumpImage, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -6573,6 +6797,11 @@ static void presentPicture(const GpuDisplay* d, uint32_t vblank, int menu, const
     if (shown) {
         w = (int)vk.swapchainExtent.width;
         h = (int)vk.swapchainExtent.height;
+        if (vk.rotate & 1) { /* the player's view: the swapchain's turned back */
+            int t = w;
+            w = h;
+            h = t;
+        }
     } else if (dump) {
         /* No image to show: the dump still gets the window's picture. */
         w = 960, h = 720;
@@ -6623,8 +6852,8 @@ static void presentPicture(const GpuDisplay* d, uint32_t vblank, int menu, const
         recordPicturePrepass(cmd, f, &pc);
     }
     if (dump) {
-        ensureDumpTarget(w, h);
-        recordDumpPass(cmd, &pc, chain);
+        ensureDumpTarget(vk.rotate & 1 ? h : w, vk.rotate & 1 ? w : h);
+        recordDumpPass(cmd, &pc, chain, w, h);
     }
     if (shown) {
         VkImage output=copy?copy->image:vk.swapchainImages[index];
@@ -6632,7 +6861,16 @@ static void presentPicture(const GpuDisplay* d, uint32_t vblank, int menu, const
                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
         int q = gtStart(cmd, GT_PRESENT);
-        recordPresentPass(cmd, copy?copy->view:vk.swapchainViews[index], vk.presentPipeline, vk.swapchainFormat, w, h, &pc, chain);
+        if (vk.rotate && !copy) {
+            /* pre-rotation: the pass into the player's view, turned into the image */
+            ensureRotation(w, h, vk.swapchainFormat);
+            rotationTargetBarrier(cmd);
+            recordPresentPass(cmd, vk.rotView, vk.presentPipeline, vk.swapchainFormat, w, h, &pc, chain);
+            recordRotation(cmd, vk.swapchainViews[index], (int)vk.swapchainExtent.width,
+                           (int)vk.swapchainExtent.height);
+        } else {
+            recordPresentPass(cmd, copy?copy->view:vk.swapchainViews[index], vk.presentPipeline, vk.swapchainFormat, w, h, &pc, chain);
+        }
         gtStop(cmd, q);
         imageBarrier(cmd, output, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                      copy?VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -6968,6 +7206,11 @@ int gvkInit(void* sdlWindow) {
     vk.env.immediateResolve = getenv("XG_TEST_IMMEDIATE_RESOLVE") != NULL;
     vk.env.interpolationSpill = envFlag("XG_TEST_INTERPOLATION_SPILL");
     int headless = envFlag("XG_HEADLESS") || sdlWindow == NULL;
+    {
+        const char* turn = getenv("XG_VK_ROTATE"); /* pre-rotation's test: degrees clockwise */
+        vk.rotateForced = turn != NULL && turn[0] != '\0' ? (atoi(turn) / 90) & 3 : -1;
+        vk.rotate = vk.rotateForced > 0 ? vk.rotateForced : 0;
+    }
     if (!loadLoader()) {
         return 0;
     }
@@ -7164,6 +7407,7 @@ void gvkShutdown(void) {
     destroyHostBuffer(&late.bufs[1]);
     memset(&late, 0, sizeof(late));
     destroyDumpTarget();
+    destroyRotation();
     destroyPicturePrepass();
     if (vk.dumpPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(vk.device, vk.dumpPipeline, NULL);

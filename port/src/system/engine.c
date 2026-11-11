@@ -26,6 +26,7 @@
 #endif
 
 #include "engine.h"
+#include "android.h"
 #include "settings.h"
 
 #ifndef XG_ENGINE_ENHANCED
@@ -99,6 +100,11 @@ static int isDir(const char* path) {
 }
 
 char* enginePackDir(const char* name, char* out, unsigned long size) {
+#ifdef __ANDROID__
+    /* The app's packs folder (system/android.c): an app has no folder of its own beside its code. */
+    snprintf(out, size, "%s/%s", androidPacksRoot(), name);
+    return out;
+#endif
     const char* base = SDL_GetBasePath();
     snprintf(out, size, "%s%s", base != NULL ? base : "", name);
     if (isDir(out)) return out;

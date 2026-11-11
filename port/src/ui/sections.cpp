@@ -53,6 +53,9 @@ extern "C" {
 #include "system/battlespeed.h"
 #include "system/mouse.h"
 #include "system/rumble.h"
+#include "system/android.h"
+#include "system/backup.h"
+#include "system/touch.h"
 }
 
 #define CAPTURE_TIMEOUT_NS 8000000000ull // a capture gives up after 8 s
@@ -1102,9 +1105,149 @@ void libraryRow(const char* label, const char* key, int tag, const char* default
     overrideNote(key);
 }
 
+#ifdef __ANDROID__
+// ---- Android (port/android: the activity's folders; system/backup.c) -----------------------------
+
+// System > Discs and BIOS: the folder the activity reads the images from.
+void androidDiscRow() {
+    if (!row("Disc folder")) return;
+    char shown[1024];
+    pathText(androidActivityText("discFolder", shown, sizeof shown), "None chosen");
+    if (ImGui::Button(tr("Choose the disc folder"))) androidActivityAction("chooseDiscFolder");
+    hint("The folder that holds your disc images (and a BIOS image), read where it is: nothing is copied. "
+         "A new folder applies at the next start.");
+}
+
+// The packs list's Remove, asked in a modal after the rows (androidPacksModal).
+AndroidPack* packList;
+int packListCount, packRemoveAt = -1, packRemoveDone = -1;
+bool packRemoveAsk;
+char packRemoveName[160];
+
+// Packs > Pack folders: a pack copied into the app's packs folder from a folder the player
+// picks (XgActivity copyPack: the system's folder picker, then PackCopy; it asks before
+// replacing a pack that is there and checks the free space first).
+void androidPacksRow() {
+    if (!row("Copy in a pack")) return;
+    static const char* const kinds[] = {N_("Texture pack"), N_("HUD artwork"), N_("Portrait set"),
+                                        N_("Field sprites"), N_("Glyphs")};
+    static const char* const ids[] = {"texture", "ui", "portrait", "sprite", "glyph"};
+    static int kind;
+    kind = choice("copy_pack_kind", kinds, 5, kind);
+    // the copy's state: "running|done|total|failed|message" (PackCopy.status)
+    char status[1400];
+    androidActivityText("packCopyStatus", status, sizeof status);
+    int running = 0, failed = 0;
+    long long done = 0, total = 0;
+    int used = 0;
+    if (sscanf(status, "%d|%lld|%lld|%d|%n", &running, &done, &total, &failed, &used) < 4) used = 0;
+    const char* message = used > 0 ? status + used : "";
+    ImGui::BeginDisabled(running != 0);
+    if (ImGui::Button(tr("Choose its folder"))) androidActivityActionText("copyPack", ids[kind]);
+    ImGui::EndDisabled();
+    if (running) {
+        sameLineFor("Cancel##copy");
+        if (ImGui::Button(tr("Cancel##copy"))) androidActivityAction("cancelPackCopy");
+        char label[64];
+        snprintf(label, sizeof label, "%lld / %lld MB", done >> 20, total >> 20);
+        ImGui::ProgressBar(total > 0 ? (float)((double)done / (double)total) : 0.0f, ImVec2(-1, 0), label);
+    }
+    if (message[0] != '\0') {
+        ImGui::PushStyleColor(ImGuiCol_Text, failed ? skin::textError : skin::textGood);
+        ImGui::TextWrapped("%s", message);
+        ImGui::PopStyleColor();
+    }
+    hint("Copies the pack into %s: a texture pack's, sprite pack's or glyph pack's folder holds SLUS-00664 or "
+         "SLPS-01160, HUD artwork's cel-2x, cel-4x or cel-8x, a portrait set's portrait.ini. A computer can put "
+         "packs there over USB too. Packs copied in are used from the next start.", androidPacksRoot());
+
+    // The packs there, each with Remove (asked first, below); read again when a copy ends.
+    static AndroidPack packs[64];
+    static int packCount = -1, wasRunning;
+    static Message removeMsg;
+    if (packCount < 0 || (wasRunning && !running)) packCount = androidListPacks(packs, 64);
+    wasRunning = running;
+    if (!row("Packs in the app")) return;
+    if (packCount == 0) ImGui::TextDisabled("%s", tr("None yet"));
+    for (int i = 0; i < packCount; i++) {
+        ImGui::PushID(i);
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("%s/%s  %.1f MB", packs[i].library, packs[i].name, packs[i].bytes / 1048576.0);
+        sameLineFor("Remove");
+        ImGui::BeginDisabled(running != 0);
+        if (ImGui::Button(tr("Remove"))) {
+            packRemoveAt = i;
+            packRemoveAsk = true;
+        }
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+    if (packRemoveDone >= 0) {
+        removeMsg.set(packRemoveDone == 0, packRemoveDone ? "Removed %s: used until the next start"
+                                                        : "%s could not be removed whole", packRemoveName);
+        packRemoveDone = -1;
+        packCount = androidListPacks(packs, 64);
+    }
+    removeMsg.draw();
+    hint("Removes a pack from the app's packs folder (nothing elsewhere). The game keeps what it already read "
+         "until the next start.");
+    packList = packs;
+    packListCount = packCount;
+}
+
+// The Remove's question (outside the rows' table: opt::plain first).
+void androidPacksModal() {
+    if (packRemoveAsk) {
+        ImGui::OpenPopup("Remove pack");
+        packRemoveAsk = false;
+    }
+    if (!beginModal("Remove pack")) return;
+    bool there = packRemoveAt >= 0 && packRemoveAt < packListCount;
+    if (there) {
+        ImGui::TextWrapped(tr("Remove %s/%s from the app's packs folder? Its files are deleted; a copy elsewhere is "
+                              "not touched."), packList[packRemoveAt].library, packList[packRemoveAt].name);
+    }
+    ImGui::BeginDisabled(!there);
+    if (ImGui::Button(tr("Remove the pack"))) {
+        snprintf(packRemoveName, sizeof packRemoveName, "%s/%s", packList[packRemoveAt].library,
+                 packList[packRemoveAt].name);
+        packRemoveDone = androidRemovePack(packList[packRemoveAt].library, packList[packRemoveAt].name);
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+    sameLineFor("Cancel");
+    if (ImGui::Button(tr("Cancel"))) ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+}
+
+// Saves > Backup: the save folder as one .zip file, and back.
+void androidBackupRows() {
+    opt::group(N_("Backup"));
+    if (!row("Saves backup")) return;
+    char text[1200];
+    int error = 0;
+    bool busy = backupStatus(text, sizeof text, &error) != 0;
+    ImGui::BeginDisabled(busy);
+    if (ImGui::Button(tr("Back up to a file"))) backupExport(window());
+    sameLineFor("Restore from a file");
+    if (ImGui::Button(tr("Restore from a file"))) backupImport(window());
+    ImGui::EndDisabled();
+    if (text[0] != '\0') {
+        ImGui::PushStyleColor(ImGuiCol_Text, error ? skin::textError : skin::textGood);
+        ImGui::TextWrapped("%s", text);
+        ImGui::PopStyleColor();
+    }
+    hint("The memory cards, their earlier versions, the save states and the settings, as one .zip file where you "
+         "choose. Uninstalling the app deletes its own copies; a backup stays.");
+}
+#endif
+
 void packsSection() {
     opt::beginPage("packs", PACKS);
     opt::group(N_("Pack folders"));
+#ifdef __ANDROID__
+    androidPacksRow();
+#endif
     if (row("Texture pack", "texture_pack")) {
         static char packPath[3072];
         static bool texturePathsLoaded;
@@ -1238,6 +1381,12 @@ void packsSection() {
         overrideNote("texture_dump");
     }
 
+#ifdef __ANDROID__
+    if (!opt::indexing()) {
+        opt::plain(); // the modal outside the rows' table
+        androidPacksModal();
+    }
+#endif
     // ===== INTEGRATION POINT: port/src/ui/diagnostics.cpp (diagnostics.h) =====
     // The diagnostics' packs page: every library, what it holds, on and off,
     // reload. A weak symbol, so the menu links without diagnostics.cpp.
@@ -1519,8 +1668,34 @@ void bindingTable(const char* id, bool keys, bool gamepad) {
     ImGui::EndTable();
 }
 
+#ifdef __ANDROID__
+// Controls > Touch pad (system/touch.h): when it shows, how strong and how large.
+void touchRows() {
+    opt::group(N_("Touch pad"));
+    if (row("Touch pad", "touch_pad")) {
+        static const char* const modes[] = {N_("Off"), N_("On"), N_("Automatic")};
+        int m = touchMode();
+        int chosen = choice("touch_pad", modes, 3, m);
+        if (chosen != m) touchSetMode(chosen);
+        hint("Automatic: shown from your first touch until you use a controller or a keyboard. The menu button "
+             "opens this menu, the four squares the hotkeys' row (save and load states, the disc, the picture). "
+             "Back opens and leaves the menu.");
+    }
+    if (row("Look", "touch_pad_opacity touch_pad_size")) {
+        int opacity = touchOpacityPercent(), size = touchSizePercent();
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##touch_opacity", &opacity, 10, 100, tr("Opacity: %d%%"))) touchSetOpacityPercent(opacity);
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##touch_size", &size, 60, 140, tr("Size: %d%%"))) touchSetSizePercent(size);
+    }
+}
+#endif
+
 void controlsSection() {
     opt::beginPage("controls", CONTROLS, true); // one column: the tables want the width
+#ifdef __ANDROID__
+    touchRows();
+#endif
     opt::group(N_("Buttons"));
     if (row("Button convention", "jp_controls_us us_controls_jp")) {
         bool jp = padRegionalControls(0), us = padRegionalControls(1);
@@ -2025,6 +2200,9 @@ void savesSection() {
     opt::beginPage("saves", SAVES);
     cardsSection();
     statesSection(); // states.cpp: the Save states group and its Advanced group
+#ifdef __ANDROID__
+    androidBackupRows();
+#endif
     opt::endPage();
 }
 
@@ -2564,6 +2742,9 @@ void systemSection() {
     if (chosenEngine != engine) engineSetSetting(chosenEngine);
 
     opt::group(N_("Discs and BIOS"));
+#ifdef __ANDROID__
+    androidDiscRow();
+#endif
     if (row("BIOS (kanji)", "bios")) {
         pathText(kromPath(), "None read: the save titles on the memory card screens and the text that scrolls over some "
                              "scenes are blank");
@@ -2774,6 +2955,18 @@ void aboutRows() {
             }
             ImGui::PushTextWrapPos(0);
             ImGui::TextUnformatted(dav1dText);
+            ImGui::PopTextWrapPos();
+        }
+        markBlock();
+#endif
+#ifdef XG_LICENSE_LIBCXX
+        if (ImGui::CollapsingHeader(tr("LLVM libc++ and libunwind (Apache 2.0, LLVM exceptions)"))) {
+            static char libcxxText[sizeof(xgLicenseLibcxx)];
+            if (libcxxText[0] == '\0') {
+                reflow(xgLicenseLibcxx, libcxxText, sizeof(libcxxText));
+            }
+            ImGui::PushTextWrapPos(0);
+            ImGui::TextUnformatted(libcxxText);
             ImGui::PopTextWrapPos();
         }
         markBlock();

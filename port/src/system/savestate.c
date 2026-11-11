@@ -546,6 +546,7 @@ static const char* serialOf(int disc) {
 static void fillHeader(StateHeader* h, size_t bodySize, const uint8_t* body) {
     memset(h, 0, sizeof(*h));
     memcpy(h->buildId, stateBuildId(), 16);
+    snprintf(h->appVersion, sizeof h->appVersion, "%s", stateAppVersion());
     h->engine = (uint32_t)engineThis();
     snprintf(h->region, sizeof h->region, "%s", REGION);
     h->disc = (uint32_t)cdBootDiscNumber();
@@ -783,7 +784,12 @@ static int usable(const StateHeader* h, const uint8_t* body, char* why, size_t s
         return 0;
     }
     if (memcmp(h->buildId, stateBuildId(), 16) != 0) {
-        snprintf(why, size, "saved by another build of the port (states load only in the build that saved them)");
+        if (h->appVersion[0] != '\0' && stateAppVersion()[0] != '\0' && strcmp(h->appVersion, stateAppVersion()) != 0) {
+            snprintf(why, size, "saved by version %s of the app; this is %s (a state loads only in the version that "
+                                "saved it)", h->appVersion, stateAppVersion());
+        } else {
+            snprintf(why, size, "saved by another build of the port (states load only in the build that saved them)");
+        }
         return 0;
     }
     if (strcmp(h->region, REGION) != 0) {
@@ -1030,6 +1036,8 @@ int stateSlotInfo(int slot, XgStateInfo* out) {
     }
     out->exists = 1;
     out->usable = usable(&h, NULL, out->why, sizeof out->why);
+    out->otherBuild = memcmp(h.buildId, stateBuildId(), 16) != 0;
+    snprintf(out->appVersion, sizeof out->appVersion, "%s", h.appVersion);
     out->savedAt = h.savedAt;
     out->disc = (int)h.disc;
     out->vblank = h.vblank;

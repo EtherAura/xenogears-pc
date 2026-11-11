@@ -88,6 +88,7 @@
 #include "settings.h"
 #include "netplay.h"
 #include "system.h"
+#include "touch.h"
 #include "ui/ui.h"
 #include "gpu/shaders/prompt.glsl"
 
@@ -711,6 +712,7 @@ static void keyDown(SDL_Scancode key, SDL_Keymod mod) {
     }
     switch (key) {
     case SDL_SCANCODE_F1:
+    case SDL_SCANCODE_AC_BACK: /* Android's Back (main.c traps it): the menu, as F1 */
         uiRequestToggle();
         break;
     case SDL_SCANCODE_F2: {
@@ -771,6 +773,11 @@ static void keyDown(SDL_Scancode key, SDL_Keymod mod) {
     }
 }
 
+/* The hotkeys' functions for the touch pad's row (touch.c): as the key. */
+void padHotkey(int scancode, int mod) {
+    keyDown((SDL_Scancode)scancode, (SDL_Keymod)mod);
+}
+
 /* Guide, or one stick click while the other is held: the settings menu. */
 static void menuButton(const SDL_GamepadButtonEvent* b) {
     SDL_Gamepad* pad = SDL_GetGamepadFromID(b->which);
@@ -796,11 +803,15 @@ void padPumpEvents(void) {
         }
         rumbleEvent(&e); /* the window's focus (rumble.c) */
         padDeviceEvent(&e);
+        touchInputSeen(&e); /* a key or a controller hides an automatic touch pad */
         if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
             menuButton(&e.gbutton);
         }
         if (uiEvent(&e)) {
             continue;
+        }
+        if (touchEvent(&e)) {
+            continue; /* the touch pad's fingers (touch.c), and their mouse */
         }
         mouseEvent(&e); /* the mouse as the game's pad (mouse.c) */
         switch (e.type) {
@@ -1132,7 +1143,7 @@ void padVBlank(void) {
     } else {
         scripted = 0;
         port1 = 0;
-        live1 = mouseVBlank();
+        live1 = mouseVBlank() | touchVBlank();
         if (keyboardPort) {
             live2 = readKeyboard();
         } else {
