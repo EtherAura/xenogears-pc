@@ -706,6 +706,10 @@ else()
     # stay in .data (one section per overlay to reset).
     target_link_options(xenogears PRIVATE -no-pie)
 endif()
+# Linux: install rules and the .deb (port/cmake/deb.cmake; cpack -G DEB).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANDROID AND NOT XG_SHARED)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/deb.cmake")
+endif()
 
 # Link-time optimisation of the platform layer (xg-htn.41.5; on by default:
 # frames and audio stay bit-identical, about 2-3% fewer instructions run): its
