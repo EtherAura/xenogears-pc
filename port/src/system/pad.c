@@ -950,11 +950,20 @@ void padSetRegionalControls(int japaneseGame, int on) {
     heldAfterMenu = 1;
 }
 
-int padJapaneseControls(void) {
+/* Whether this build's buttons are swapped to the other region's layout. */
+static int regionalSwap(void) {
 #if VERSION_JP
-    return !padRegionalControls(1);
+    return padRegionalControls(1);
 #else
     return padRegionalControls(0);
+#endif
+}
+
+int padJapaneseControls(void) {
+#if VERSION_JP
+    return !regionalSwap();
+#else
+    return regionalSwap();
 #endif
 }
 
@@ -962,24 +971,14 @@ const char* padConfirmButton(void) { return padJapaneseControls() ? "circle" : "
 const char* padCancelButton(void) { return padJapaneseControls() ? "cross" : "circle"; }
 
 unsigned pcPadRegionalButtons(unsigned buttons) {
-#if VERSION_JP
-    int swap = padRegionalControls(1);
-#else
-    int swap = padRegionalControls(0);
-#endif
     /* Retail US swaps both pairs: Circle/Cross and Triangle/Square. */
-    if (swap) buttons = (buttons & ~0xf0u) | ((buttons & 0x20u) << 1) | ((buttons & 0x40u) >> 1) |
+    if (regionalSwap()) buttons = (buttons & ~0xf0u) | ((buttons & 0x20u) << 1) | ((buttons & 0x40u) >> 1) |
                         ((buttons & 0x10u) << 3) | ((buttons & 0x80u) >> 3);
     return buttons;
 }
 
 int pcPadPromptSlot(int slot) {
-#if VERSION_JP
-    int swap = padRegionalControls(1);
-#else
-    int swap = padRegionalControls(0);
-#endif
-    return swap && slot >= 0 && slot < 4 ? slot ^ 1 : slot;
+    return regionalSwap() && slot >= 0 && slot < 4 ? slot ^ 1 : slot;
 }
 
 static u16 readKeyboard(void) {
