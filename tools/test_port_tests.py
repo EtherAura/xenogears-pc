@@ -230,15 +230,19 @@ class RunnerTests(unittest.TestCase):
 class Children:
     """A stand-in for subprocess.run: records which tests overlap, never by timing.
 
-    hooks[name](argv) runs inside the child's lifetime; return codes come from codes.
+    hooks[name](argv) runs inside the child's lifetime; return codes come from
+    codes (a number, or a function of the run's index: 0 for the first run).
+    A rerun's overlaps replace the first run's; runs[name] keeps each run's.
     """
-    def __init__(self, hooks=None, codes=None):
-        self.hooks, self.codes = hooks or {}, codes or {}
+    def __init__(self, hooks=None, codes=None, gpu=()):
+        self.hooks, self.codes, self.gpu = hooks or {}, codes or {}, set(gpu)
         self.lock = threading.Lock()
         self.active = set()
         self.started, self.finished = [], []
         self.overlaps = {}  # name -> every other test running at some point during it
+        self.runs = {}      # name -> [its overlaps, per run]
         self.threads = {}
+        self.gpu_peak = 0   # the most tests named in gpu running at once
 
     def __call__(self, argv, **kwargs):
         if argv[0] == "sh":  # the standalone CD and SPU tests' build scripts
@@ -246,16 +250,20 @@ class Children:
         name = Path(kwargs["stdout"].name).stem
         with self.lock:
             self.overlaps[name] = set(self.active)
+            self.runs.setdefault(name, []).append(self.overlaps[name])
             for other in self.active:
                 self.overlaps[other].add(name)
             self.active.add(name)
+            self.gpu_peak = max(self.gpu_peak, len(self.active & self.gpu))
+            run = self.started.count(name)
             self.started.append(name)
             self.threads[name] = threading.current_thread()
         try:
             if name in self.hooks:
                 self.hooks[name](argv)
-            kwargs["stdout"].write(f"{name} says hello\n")
-            return subprocess.CompletedProcess(argv, self.codes.get(name, 0))
+            kwargs["stdout"].write(f"{name} says hello (run {run})\n")
+            code = self.codes.get(name, 0)
+            return subprocess.CompletedProcess(argv, code(run) if callable(code) else code)
         finally:
             with self.lock:
                 self.active.discard(name)
@@ -305,8 +313,9 @@ class SchedulerTests(unittest.TestCase):
         self.assertLess(children.finished.index("c"), children.finished.index("a"))
         self.assertIn("b", children.overlaps["a"])
 
-    def test_serial_tests_run_alone_and_first(self):
-        children = Children()
+    def test_clock_tests_run_alone_and_first(self):
+        gpu = {"gputest", "presenttest", "state-rewind"}
+        children = Children(gpu=gpu)
         runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=4)
         names = ["gameidtest", "gputest", "jpegtest", "netplaytest", "mdectest", "hostpolltest", "presenttest"]
         for name in names:
@@ -314,11 +323,130 @@ class SchedulerTests(unittest.TestCase):
         runner.run("state-rewind", Path(sys.executable), "-c", "", target="xenogears")
         printed = self.execute(runner, children)
         self.assertEqual(printed, names + ["state-rewind"])
-        serial = ["gputest", "netplaytest", "hostpolltest", "presenttest", "state-rewind"]
-        self.assertEqual(children.started[:len(serial)], serial)
-        for name in serial:
+        clock = ["netplaytest", "hostpolltest"]
+        self.assertEqual(children.started[:len(clock)], clock)
+        for name in clock:
             self.assertEqual(children.overlaps[name], set(), name)
             self.assertIs(children.threads[name], threading.main_thread())
+        self.assertEqual([(e, n) for e, n, _ in runner.trace[:2]], [("alone", n) for n in clock])
+        for name in gpu:  # GPU tests are no longer alone, but share at most two at a time
+            self.assertFalse(runner.tests[printed.index(name)].job.alone, name)
+        self.assertLessEqual(children.gpu_peak, P.GPU_SLOTS)
+        for event, name, running in runner.trace:
+            self.assertLessEqual(len(({name} | running) & gpu), P.GPU_SLOTS, (name, running))
+
+    def test_gpu_tests_share_at_most_two(self):
+        # gputest and presenttest must run together (a barrier only both can
+        # pass); the cap is the scheduler's own record of every start, and the
+        # stand-in children's peak.
+        gpu = ["gputest", "presenttest", "slangtest", "texturetest", "verticaltest"]
+        pair = threading.Barrier(2, timeout=10)
+        children = Children({"gputest": lambda _: pair.wait(), "presenttest": lambda _: pair.wait()}, gpu=gpu)
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=8)
+        for name in gpu + ["jpegtest", "mdectest"]:
+            runner.run(name, self.exe(name))
+        self.assertEqual(self.execute(runner, children), gpu + ["jpegtest", "mdectest"])
+        self.assertIn("presenttest", children.overlaps["gputest"])
+        self.assertLessEqual(children.gpu_peak, P.GPU_SLOTS)
+        starts = [(n, r) for e, n, r in runner.trace if e == "start"]
+        self.assertEqual(sorted(n for n, _ in starts), sorted(gpu + ["jpegtest", "mdectest"]))
+        for name, running in starts:
+            self.assertLessEqual(len(({name} | running) & set(gpu)), P.GPU_SLOTS, (name, running))
+        # The first pass fills both slots and starts the CPU tests beside them.
+        self.assertEqual({n for n, _ in starts[:4]}, {"gputest", "presenttest", "jpegtest", "mdectest"})
+        self.assertTrue(all(s == "ok" for _, s, _ in runner.results), runner.results)
+
+    def test_clock_test_inside_a_chain_waits_for_quiescence(self):
+        # battle-speed shares the game with the GPU tests around it: they keep
+        # their order, and it runs with nothing else at all running.
+        children = Children(gpu={"state-equivalence", "state-rewind", "gputest", "presenttest"})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=8)
+        for name in ("state-equivalence", "battle-speed", "state-rewind"):
+            runner.run(name, Path(sys.executable), f"{name}.py", target="xenogears")
+        for name in ("gputest", "presenttest", "jpegtest", "high-refresh"):
+            runner.run(name, self.exe(name), target="highrefreshtest" if name == "high-refresh" else None)
+        printed = self.execute(runner, children)
+        self.assertEqual(printed, ["state-equivalence", "battle-speed", "state-rewind",
+                                   "gputest", "presenttest", "jpegtest", "high-refresh"])
+        for name in ("battle-speed", "high-refresh"):
+            self.assertEqual(children.overlaps[name], set(), name)
+            self.assertIs(children.threads[name], threading.main_thread())
+            self.assertIn(("alone", name, frozenset()), runner.trace)
+        self.assertLess(children.finished.index("state-equivalence"), children.started.index("battle-speed"))
+        self.assertLess(children.finished.index("battle-speed"), children.started.index("state-rewind"))
+        self.assertEqual(runner.trace[0][:2], ("alone", "high-refresh"))   # a chain's head: first
+
+    def test_failure_when_shared_is_rerun_alone_and_kept_alone(self):
+        # flaky fails beside partner (the barrier makes them overlap) and
+        # passes alone; its rerun waits for partner, and next starts after it.
+        both = threading.Barrier(2, timeout=10)
+        hooks = {"flaky": lambda _: both.wait() if children.started.count("flaky") == 1 else None,
+                 "partner": lambda _: both.wait()}
+        children = Children(hooks, codes={"flaky": lambda run: 1 if run == 0 else 0})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=4)
+        runner.run("flaky", self.exe("flakytest"))
+        runner.run("partner", self.exe("pairtest"), "1", target="pairtest")
+        runner.run("next", self.exe("pairtest"), "2", target="pairtest")
+        printed = self.execute(runner, children)
+        self.assertEqual(printed, ["flaky", "partner", "next"])
+        self.assertEqual(set(children.started[:2]), {"flaky", "partner"})
+        self.assertEqual(children.started[2:], ["flaky", "next"])
+        self.assertEqual(children.runs["flaky"][0], {"partner"})
+        self.assertEqual(children.runs["flaky"][1], set())           # alone
+        rerun_end = len(children.finished) - 1 - children.finished[::-1].index("flaky")
+        self.assertLess(children.finished.index("partner"), rerun_end)
+        self.assertIs(children.threads["flaky"], threading.main_thread())
+        self.assertIn(("retry", "flaky", frozenset()), runner.trace)
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("flaky", "ok"), ("partner", "ok"), ("next", "ok")])
+        detail = runner.results[0][2]
+        self.assertIn("FAILED ONLY WHEN SHARED", detail)
+        self.assertIn("exit 1: flaky says hello (run 0)", detail)
+        self.assertIn("flaky.shared.log", detail)
+        self.assertIn(P.ALONE_FILE, detail)
+        self.assertEqual((self.out / "flaky.shared.log").read_text(), "flaky says hello (run 0)\n")
+        self.assertEqual((self.out / "flaky.log").read_text(), "flaky says hello (run 1)\n")
+        self.assertEqual((self.out / P.ALONE_FILE).read_text(), "flaky\n")
+
+        # The next run in this output directory keeps it alone from the start.
+        children = Children({"partner": lambda _: None})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=4)
+        runner.run("flaky", self.exe("flakytest"))
+        runner.run("partner", self.exe("pairtest"), "1", target="pairtest")
+        self.execute(runner, children)
+        self.assertTrue(runner.tests[0].job.alone)
+        self.assertEqual(children.started, ["flaky", "partner"])
+        self.assertEqual(children.overlaps["flaky"], set())
+        self.assertEqual(runner.trace[0], ("alone", "flaky", frozenset()))
+        self.assertEqual((self.out / P.ALONE_FILE).read_text(), "flaky\n")
+
+    def test_failure_alone_too_stays_a_failure(self):
+        both = threading.Barrier(2, timeout=10)
+        hooks = {"broken": lambda _: both.wait() if children.started.count("broken") == 1 else None,
+                 "other": lambda _: both.wait()}
+        children = Children(hooks, codes={"broken": 4})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
+        runner.run("broken", self.exe("brokentest"))
+        runner.run("other", self.exe("othertest"))
+        self.execute(runner, children)
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("broken", "FAIL"), ("other", "ok")])
+        self.assertEqual(children.started.count("broken"), 2)
+        self.assertEqual(children.runs["broken"][1], set())
+        detail = runner.results[0][2]
+        self.assertTrue(detail.startswith("exit 4: broken says hello (run 1)"), detail)
+        self.assertIn("shared too: exit 4: broken says hello (run 0)", detail)
+        self.assertNotIn("ONLY WHEN SHARED", detail)
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+        self.assertTrue((self.out / "broken.shared.log").exists())
+
+    def test_known_failure_is_not_rerun(self):
+        children = Children(codes={"knowntest": 1})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
+        runner.run("knowntest", self.exe("knowntest"))
+        runner.run("other", self.exe("othertest"))
+        with patch.dict(P.KNOWN, {"knowntest": "xg-test"}):
+            self.execute(runner, children)
+        self.assertEqual(runner.results[0][1], "known")
+        self.assertEqual(children.started.count("knowntest"), 1)
 
     def test_shared_scratch_and_executable_stay_ordered(self):
         children = Children()
@@ -357,7 +485,9 @@ class SchedulerTests(unittest.TestCase):
         detail = dict((n, d) for n, _, d in runner.results)
         self.assertIn("exit 3: b says hello", detail["b"])
         self.assertIn("not built", detail["m"])
-        self.assertEqual(sorted(children.started), ["a", "b", "c"])
+        # a, b and c start together: b failed shared, so it reran alone (still failing).
+        self.assertEqual(sorted(children.started), ["a", "b", "b", "c"])
+        self.assertEqual(children.runs["b"][1], set())
 
     def test_timeout_is_a_failure(self):
         def slow(argv):
@@ -402,6 +532,17 @@ class SchedulerTests(unittest.TestCase):
         self.assertTrue(all(t is threading.main_thread() for t in children.threads.values()))
         self.assertTrue(all(not v for v in children.overlaps.values()))
 
+    def test_jobs_1_never_reruns_a_failure(self):
+        children = Children(codes={"atest": 2})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=1)
+        for name in ("atest", "btest"):
+            runner.run(name, self.exe(name))
+        self.execute(runner, children)
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("atest", "FAIL"), ("btest", "ok")])
+        self.assertEqual(children.started, ["atest", "btest"])
+        self.assertFalse((self.out / "atest.shared.log").exists())
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
     def full_plan(self, jobs):
         for reg in ("USA", "Japan"):
             for n in (1, 2):
@@ -426,7 +567,9 @@ class SchedulerTests(unittest.TestCase):
         children = Children()
         stdout = io.StringIO()
         with patch.object(P.subprocess, "run", side_effect=children), redirect_stdout(stdout):
-            runner.all()
+            runner.plan()
+            children.gpu = {t.name for t in runner.tests if t.job and t.job.gpu}
+            runner.execute()
         return runner, children
 
     def test_full_plan_same_report_serial_and_parallel(self):
@@ -435,24 +578,48 @@ class SchedulerTests(unittest.TestCase):
         names = [n for n, _, _ in serial.results]
         self.assertEqual(len(names), len(set(names)))
         self.assertEqual([(n, s) for n, s, _ in parallel.results], [(n, s) for n, s, _ in serial.results])
-        self.assertEqual(sorted(children.started), sorted(serial_children.started))
-        self.assertEqual(len(children.started), len(set(children.started)))
+        self.assertEqual(sorted(set(children.started)), sorted(serial_children.started))
+        self.assertEqual(len(serial_children.started), len(set(serial_children.started)))
+        # Only failures rerun (the extras: the stand-in's output doesn't match), once each, alone.
+        failed = {n for n, s, _ in parallel.results if s == "FAIL"}
+        self.assertTrue(failed)
+        for name in set(children.started):
+            self.assertEqual(children.started.count(name), 2 if name in failed else 1, name)
+            if name in failed:
+                self.assertEqual(children.runs[name][1], set(), name)
+                self.assertIn(("retry", name, frozenset()), parallel.trace)
         jobs = {t.name: t.job for t in parallel.tests if t.job}
         for name, job in jobs.items():
-            if job.serial:
+            if job.alone:
                 self.assertEqual(children.overlaps[name], set(), name)
+        self.assertLessEqual(children.gpu_peak, P.GPU_SLOTS)
+        for event, name, running in parallel.trace:
+            if event != "retry":
+                self.assertEqual(event == "start", not jobs[name].alone, name)
+            if event != "start":
+                self.assertEqual(running, frozenset(), name)
+            self.assertLessEqual(sum(jobs[n].gpu for n in {name} | running), P.GPU_SLOTS, (name, running))
+            self.assertFalse(any(jobs[n].alone for n in running), (name, running))
         # Every pair sharing a resource ran in the planned order, never overlapping.
         order = [t.name for t in parallel.tests if t.job]
         for i, a in enumerate(order):
             for b in order[i + 1:]:
                 if jobs[a].resources & jobs[b].resources:
                     self.assertLess(children.finished.index(a), children.started.index(b), (a, b))
-        for name in ("transitiontest", "distortion-replay", "high-refresh", "gputest", "orderedgputest",
-                     "presenttest", "battle-speed", "state-rewind", "state-equivalence", "text-wordwrap",
-                     "netplaytest", "battlespeedtest", "hostpolltest"):
-            self.assertTrue(jobs[name].serial, name)
+        # The wall clock: alone. The Vulkan device only: shared, two at a time.
+        for name in ("high-refresh", "battle-hw-pacing", "battle-speed", "netplaytest", "battlespeedtest",
+                     "hostpolltest"):
+            self.assertTrue(jobs[name].alone, name)
+        for name in ("transitiontest", "distortion-replay", "gputest", "orderedgputest", "presenttest",
+                     "state-rewind", "state-equivalence", "text-wordwrap", "battle-hw-pacing-step",
+                     "extras-bestiary", "interpolationgputest"):
+            self.assertTrue(jobs[name].gpu, name)
+            self.assertFalse(jobs[name].alone, name)
         for name in ("gameidtest", "jpegtest", "hard-profile-ids", "regional_audiotest-0", "glyphtest"):
-            self.assertFalse(jobs[name].serial, name)
+            self.assertFalse(jobs[name].alone or jobs[name].gpu, name)
+        self.assertEqual({n for n, j in jobs.items() if j.alone},
+                         {"high-refresh", "battle-hw-pacing", "battle-speed", "netplaytest", "battlespeedtest",
+                          "hostpolltest"})
         for pair in (("cdtest", "cdtest-check"), ("card_historytest", "card_historytest-restart"),
                      ("gameplay_combattest-write", "gameplay_combattest-read")):
             self.assertTrue(jobs[pair[0]].resources & jobs[pair[1]].resources, pair)

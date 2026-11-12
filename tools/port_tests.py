@@ -26,9 +26,12 @@ the run.
 
 --jobs N runs independent tests side by side (default: the CPU count, at
 most 8; --jobs 1 runs every test one after another, in order). Tests that
-share a scratch directory or an executable stay in their order on one worker;
-SERIAL tests (the Vulkan device, the wall clock) run first, one at a time,
-with nothing else running.
+share a scratch directory or an executable stay in their order, one at a time;
+at most GPU_SLOTS (2) GPU tests share the Vulkan device; CLOCK tests (the wall
+clock) and ALONE ones run with nothing else running. A test that fails while
+sharing the host is rerun alone; if it then passes, its line says it failed
+only when shared and later runs keep it alone (OUT/alone-only.txt; move it to
+ALONE).
 
 Prints one line per test, in the same order whatever --jobs is, and a summary
 starting with 'port-tests'. Exit status: the number of failed tests.
@@ -133,15 +136,25 @@ GPU = {
     "textureedgetest", "texturepackgputest", "portraitgputest", "texturetest", "verticaltest", "xenogears",
 }
 
-# Tests whose result depends on the host's real clock: netplaytest (loopback
-# peers and wall-clock pauses), hostpolltest (a timer 4 ms ahead of the next
-# vblank, XG_CLOCK unset), battlespeedtest (the hardware clock's rate against
-# SDL's). Other load on the host could fail them.
-CLOCK = {"netplaytest", "hostpolltest", "battlespeedtest"}
+# Tests whose result depends on the host's real clock (keyed by test name, or
+# like GPU): netplaytest (loopback peers and wall-clock pauses), hostpolltest
+# (a timer 4 ms ahead of the next vblank, XG_CLOCK unset), battlespeedtest
+# (the hardware clock's rate against SDL's), high-refresh (its real and poll
+# clocks: host samples against real deadlines, SDL_Delay gaps), battle-hw-pacing
+# (highrefreshtest's real clock: vblanks due over a 25 ms delay), battle-speed
+# (4x on the real clock: vblank spacing, the sound device never dry). Other
+# load on the host could fail them.
+CLOCK = {"netplaytest", "hostpolltest", "battlespeedtest", "high-refresh", "battle-hw-pacing", "battle-speed"}
 
-# Run alone with --jobs > 1 (keyed like GPU: the target, else the executable):
-# the one Vulkan device and the wall clock.
-SERIAL = GPU | CLOCK
+# Tests that failed only while sharing the host (the report says so, and the
+# run lists them in OUT/ALONE_FILE so that later runs there keep them alone):
+# move them here, by test name.
+ALONE: set[str] = set()
+ALONE_FILE = "alone-only.txt"
+
+# With --jobs > 1: CLOCK and ALONE tests run with nothing else running; at
+# most GPU_SLOTS GPU tests share the Vulkan device at a time.
+GPU_SLOTS = 2
 
 # Scripted runs of the extras (xenogears --extras with XG_EXTRAS_SCRIPT): name
 # -> (script, a regular expression its output must match).
@@ -227,10 +240,11 @@ class Job:
     """One test subprocess: what to run and what it shares with other tests."""
 
     def __init__(self, name: str, argv: list[str], env: dict, timeout: int, expect: str | None,
-                 key: str, resources: set):
+                 key: str, resources: set, alone: bool = False):
         self.name, self.argv, self.env, self.timeout, self.expect = name, argv, env, timeout, expect
         self.key = key              # GPU, CLOCK and KNOWN's key: the target, else the executable
-        self.serial = key in SERIAL
+        self.gpu = key in GPU       # one of GPU_SLOTS on the device
+        self.alone = alone or bool({name, key} & (CLOCK | ALONE))  # nothing else running
         self.resources = resources  # tests sharing one stay in order on one worker
 
 
@@ -239,6 +253,12 @@ class Test:
 
     def __init__(self, name: str, job: Job | None = None, result: tuple[str, str] | None = None):
         self.name, self.job, self.result = name, job, result
+
+
+def read_alone() -> set[str]:
+    """The tests earlier runs in OUT found failing only when shared."""
+    path = OUT / ALONE_FILE
+    return {x.strip() for x in path.read_text().splitlines() if x.strip()} if path.exists() else set()
 
 
 def run_job(job: Job) -> tuple[str, str]:
@@ -308,6 +328,10 @@ class Runner:
         self.tests: list[Test] = []    # every report line, in the order planned
         self.printed = 0               # tests[:printed] are in results and printed
         self.scratches: list[Path] = []
+        self.alone_only = read_alone()  # ALONE_FILE's tests, run alone like ALONE's
+        # The scheduler's decisions, in order (main thread): ("start" | "alone" | "retry",
+        # test, the tests running then).
+        self.trace: list[tuple[str, str, frozenset]] = []
         self.env = dict(os.environ, XG_SETTINGS="none", XG_HEADLESS="1",
                         SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
 
@@ -370,7 +394,8 @@ class Runner:
         for d in map(str, self.scratches):
             if any(v == d or v.startswith(d + os.sep) for v in values):
                 resources.add(("scratch", d))
-        self.tests.append(Test(name, Job(name, argv, env, timeout, expect, key, resources)))
+        self.tests.append(Test(name, Job(name, argv, env, timeout, expect, key, resources,
+                                         alone=name in self.alone_only)))
 
     def all(self) -> None:
         self.plan()
@@ -379,63 +404,126 @@ class Runner:
     def execute(self) -> None:
         """Run the planned tests and report them in their planned order.
 
-        --jobs 1: one after another on this thread. Otherwise the SERIAL
-        groups first, one test at a time on this thread, then the others, a
-        group per worker. Only this thread prints and records; a worker's
-        exception stops new tests from starting and is raised here once every
-        worker (and so every subprocess, each ended by its timeout at worst)
-        has finished.
+        --jobs 1: one after another on this thread. Otherwise run_parallel().
         """
         pending = [t for t in self.tests if t.result is None]
-        groups = chains(pending) if self.jobs > 1 else []
-        alone = [any(t.job.serial for t in g) for g in groups]
-        serial = (pending if self.jobs == 1 else
-                  sorted((t for g, a in zip(groups, alone) if a for t in g), key=self.tests.index))
-        parallel = [g for g, a in zip(groups, alone) if not a]
-        for t in serial:
-            t.result = run_job(t.job)
-            self.flush()
-        if parallel:
-            self.run_parallel(parallel)
+        if self.jobs == 1:
+            for t in pending:
+                t.result = run_job(t.job)
+                self.flush()
+        elif pending:
+            self.run_parallel(chains(pending))
         lost = [t.name for t in self.tests if t.result is None]
         if lost or self.printed != len(self.tests):
             raise RuntimeError(f"port-tests: no result for {' '.join(lost) or '?'}")
 
     def run_parallel(self, groups: list[list[Test]]) -> None:
+        """Run the resource chains side by side, each in its order.
+
+        This thread owns every decision and all the state: which tests run
+        (running, and so the GPU slots), which shared the host, the retries,
+        the results and the report. Workers only run one test's subprocess
+        (run_job) and hand back its result or exception; a test leaves running
+        (its slot free) when that arrives, an exception included.
+
+        CLOCK and ALONE tests, and the reruns, run on this thread only when
+        nothing is running, and nothing starts until they end: then no other
+        test subprocess exists. While one waits, no new test starts. A test
+        that fails having shared the host (another test running at some point
+        during it) is rerun alone: still failing, it fails; passing, the report
+        says it failed only when shared and ALONE_FILE keeps it alone from then
+        on. A worker's exception stops new tests from starting and is raised
+        here once every running test (each ended by its timeout at worst) has
+        finished.
+        """
         done: queue.SimpleQueue = queue.SimpleQueue()  # (test, result, exception), from the workers
-        stop = threading.Event()
+        heads = [0] * len(groups)          # groups[i][heads[i]] is the group's next test
+        running: dict[Test, int] = {}      # test -> its group
+        shared: set[Test] = set()          # ran while another test ran
+        retries: list[tuple[Test, int, tuple[str, str]]] = []  # failed shared, to rerun alone
+        error: BaseException | None = None
 
-        def work(group: list[Test]) -> None:
-            for t in group:
-                if stop.is_set():
-                    return
-                try:
-                    done.put((t, run_job(t.job), None))
-                except BaseException as e:
-                    done.put((t, None, e))
-                    return
-
-        remaining = sum(map(len, groups))
-        with ThreadPoolExecutor(max_workers=min(self.jobs, len(groups)), thread_name_prefix="port-tests") as pool:
-            futures = [pool.submit(work, g) for g in groups]
+        def work(t: Test) -> None:
             try:
-                while remaining:
-                    try:
-                        t, result, error = done.get(timeout=1)
-                    except queue.Empty:
-                        if all(f.done() for f in futures) and done.empty():
-                            raise RuntimeError("port-tests: a worker ended without its results")
-                        continue
+                done.put((t, run_job(t.job), None))
+            except BaseException as e:
+                done.put((t, None, e))
+
+        def finished(i: int, t: Test, result: tuple[str, str]) -> None:
+            t.result = result
+            heads[i] += 1
+            self.flush()
+
+        def left(i: int) -> int:  # the group's remaining time limits: the longest first
+            return sum(t.job.timeout for t in groups[i][heads[i]:])
+
+        with ThreadPoolExecutor(max_workers=self.jobs, thread_name_prefix="port-tests") as pool:
+            while True:
+                waiting = {i for _, i, _ in retries}
+                idle = [i for i, g in enumerate(groups)
+                        if heads[i] < len(g) and i not in waiting and i not in running.values()]
+                alone = [i for i in idle if groups[i][heads[i]].job.alone]
+                if error is None and not running and retries:
+                    t, i, first = retries.pop(0)
+                    self.trace.append(("retry", t.name, frozenset()))
+                    finished(i, t, self.rerun_alone(t, first))
+                    continue
+                if error is None and not running and alone:
+                    t = groups[alone[0]][heads[alone[0]]]
+                    self.trace.append(("alone", t.name, frozenset()))
+                    finished(alone[0], t, run_job(t.job))
+                    continue
+                if error is None and not retries and not alone:
+                    gpu = sum(t.job.gpu for t in running)
+                    for i in sorted(idle, key=lambda i: (not groups[i][heads[i]].job.gpu, -left(i), i)):
+                        t = groups[i][heads[i]]
+                        if len(running) >= self.jobs:
+                            break
+                        if t.job.gpu and gpu >= GPU_SLOTS:
+                            continue
+                        self.trace.append(("start", t.name, frozenset(r.name for r in running)))
+                        if running:
+                            shared.add(t)
+                            shared.update(running)
+                        running[t] = i
+                        gpu += t.job.gpu
+                        pool.submit(work, t)
+                if not running:
                     if error is not None:
                         raise error
-                    t.result = result
-                    remaining -= 1
-                    self.flush()
-            except BaseException:
-                stop.set()
-                for f in futures:
-                    f.cancel()
-                raise
+                    if not retries and all(h == len(g) for h, g in zip(heads, groups)):
+                        return
+                    continue
+                try:
+                    t, result, e = done.get(timeout=1)
+                except queue.Empty:
+                    continue
+                i = running.pop(t)
+                if e is not None or error is not None:
+                    error = error or e
+                elif result[0] == "FAIL" and t in shared:
+                    retries.append((t, i, result))
+                else:
+                    finished(i, t, result)
+
+    def rerun_alone(self, t: Test, first: tuple[str, str]) -> tuple[str, str]:
+        """Rerun a test that failed while shared, nothing else running; its result.
+
+        The shared run's log is kept beside the new one as NAME.shared.log.
+        """
+        log, kept = OUT / f"{t.name}.log", OUT / f"{t.name}.shared.log"
+        if log.exists():
+            os.replace(log, kept)
+        when_shared = first[1].replace(str(display_path(log)), str(display_path(kept)))
+        status, detail = run_job(t.job)
+        if status != "ok":
+            return status, f"{detail}; shared too: {when_shared}"
+        if t.name not in self.alone_only:
+            self.alone_only.add(t.name)
+            with (OUT / ALONE_FILE).open("a") as f:
+                f.write(t.name + "\n")
+        return status, (f"FAILED ONLY WHEN SHARED, alone from now on (add it to ALONE; "
+                        f"{display_path(OUT / ALONE_FILE)}): shared {when_shared}; alone {detail}")
 
     def plan(self) -> None:
         b = self.build
