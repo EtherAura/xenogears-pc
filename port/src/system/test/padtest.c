@@ -8,6 +8,7 @@
 #include "common.h"
 #include "system/pad.h"
 #include "system/mouse.h"
+#include "system/settings.h"
 #include "system/system.h"
 #include "ui/ui.h"
 #include "test/env.h"
@@ -75,6 +76,11 @@ static void notify(Uint32 type, SDL_JoystickID id) {
     e.type = type;
     e.gdevice.which = id;
     padDeviceEvent(&e);
+}
+
+static int setting(const char* key, const char* value) {
+    const char* v = settingsGet(key);
+    return v != NULL && strcmp(v, value) == 0;
 }
 
 static void neutral(SDL_Joystick* j) {
@@ -174,6 +180,35 @@ int main(int argc, char** argv) {
         padSetStickDeadzone(25);
         padSelectProfile(1);
         padSetStickDeadzone(75);
+        /* Keyboard: the settings menu's hotkeys can't be bound. */
+        padSetKey(4, 0, SDL_SCANCODE_F1);
+        padSetKey(4, 1, SDL_SCANCODE_ESCAPE);
+        CHECK(padKey(4, 0) == SDL_SCANCODE_X && padKey(4, 1) == SDL_SCANCODE_UNKNOWN);
+        /* A key drives one button: Circle takes X, Cross is left with none. */
+        padSetKey(5, 0, SDL_SCANCODE_X);
+        CHECK(padKey(5, 0) == SDL_SCANCODE_X && padKey(5, 1) == SDL_SCANCODE_UNKNOWN);
+        CHECK(padKey(4, 0) == SDL_SCANCODE_UNKNOWN && padKey(4, 1) == SDL_SCANCODE_UNKNOWN);
+        CHECK(setting("key_cross", "none") && setting("key_circle", "X"));
+        /* A second key with no first becomes the first. */
+        padSetKey(4, 1, SDL_SCANCODE_V);
+        CHECK(padKey(4, 0) == SDL_SCANCODE_V && padKey(4, 1) == SDL_SCANCODE_UNKNOWN);
+        /* Select's second key, taken by Cross's second slot, leaves Select one key. */
+        padSetKey(4, 1, SDL_SCANCODE_RSHIFT);
+        CHECK(padKey(4, 0) == SDL_SCANCODE_V && padKey(4, 1) == SDL_SCANCODE_RSHIFT);
+        CHECK(padKey(13, 0) == SDL_SCANCODE_BACKSPACE && padKey(13, 1) == SDL_SCANCODE_UNKNOWN);
+        CHECK(setting("key_select", "Backspace"));
+        /* The defaults back, for read and the scripts. */
+        padResetKeys();
+        CHECK(padKey(4, 0) == SDL_SCANCODE_X && padKey(4, 1) == SDL_SCANCODE_UNKNOWN);
+        CHECK(padKey(5, 0) == SDL_SCANCODE_C && padKey(5, 1) == SDL_SCANCODE_UNKNOWN);
+        CHECK(padKey(13, 0) == SDL_SCANCODE_BACKSPACE && padKey(13, 1) == SDL_SCANCODE_RSHIFT);
+    }
+    if (strcmp(argv[2], "read") == 0) {
+        /* padResetKeys's defaults, reloaded from settings.ini */
+        CHECK(setting("key_cross", "X") && setting("key_circle", "C"));
+        CHECK(setting("key_select", "Backspace,Right Shift"));
+        CHECK(padKey(13, 0) == SDL_SCANCODE_BACKSPACE && padKey(13, 1) == SDL_SCANCODE_RSHIFT);
+        CHECK(padKey(5, 0) == SDL_SCANCODE_C);
     }
     padSelectProfile(0);
     CHECK(padGamepadInput(4) == SDL_GAMEPAD_BUTTON_EAST && padGamepadInput(5) == PAD_INPUT_NONE);
