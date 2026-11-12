@@ -2,7 +2,7 @@
 """Build and run every PC port unit test with the arguments it needs.
 
     python tools/port_tests.py [--build build/pc/release] [--no-build]
-                               [--no-gpu] [-k SUBSTR] [--list]
+                               [--no-gpu] [-k SUBSTR] [--list] [--jobs N]
 
 The tests are EXCLUDE_FROM_ALL targets in port/CMakeLists.txt plus the
 standalone SPU and CD loader tests (port/src/spu/test/build.sh,
@@ -24,19 +24,28 @@ output must match a pattern: they need the disc image and a Vulkan device.
 KNOWN lists failures tracked in beads: they print as 'known' and don't fail
 the run.
 
-Prints one line per test and a summary starting with 'port-tests'. Exit
-status: the number of failed tests.
+--jobs N runs independent tests side by side (default: the CPU count, at
+most 8; --jobs 1 runs every test one after another, in order). Tests that
+share a scratch directory or an executable stay in their order on one worker;
+SERIAL tests (the Vulkan device, the wall clock) run first, one at a time,
+with nothing else running.
+
+Prints one line per test, in the same order whatever --jobs is, and a summary
+starting with 'port-tests'. Exit status: the number of failed tests.
 """
 
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -53,6 +62,9 @@ OUT = Path(os.environ.get("XG_PORT_TESTS_OUT") or
            (Path(os.environ["XG_GATES_OUT"]) / "port_tests" if os.environ.get("XG_GATES_OUT") else
             ROOT / "build" / "port_tests")).resolve()
 TIMEOUT = 300
+# --jobs: the default's cap, and the most a caller may ask for.
+DEFAULT_JOBS_CAP = 8
+MAX_JOBS = 64
 
 
 class OutputBusy(Exception):
@@ -120,6 +132,16 @@ GPU = {
     "moviepacktest", "presentfiltertest", "presenttest", "promptgputest", "slangtest", "texturefiltertest",
     "textureedgetest", "texturepackgputest", "portraitgputest", "texturetest", "verticaltest", "xenogears",
 }
+
+# Tests whose result depends on the host's real clock: netplaytest (loopback
+# peers and wall-clock pauses), hostpolltest (a timer 4 ms ahead of the next
+# vblank, XG_CLOCK unset), battlespeedtest (the hardware clock's rate against
+# SDL's). Other load on the host could fail them.
+CLOCK = {"netplaytest", "hostpolltest", "battlespeedtest"}
+
+# Run alone with --jobs > 1 (keyed like GPU: the target, else the executable):
+# the one Vulkan device and the wall clock.
+SERIAL = GPU | CLOCK
 
 # Scripted runs of the extras (xenogears --extras with XG_EXTRAS_SCRIPT): name
 # -> (script, a regular expression its output must match).
@@ -201,13 +223,91 @@ def build_version(build: Path) -> str:
     return "US"
 
 
+class Job:
+    """One test subprocess: what to run and what it shares with other tests."""
+
+    def __init__(self, name: str, argv: list[str], env: dict, timeout: int, expect: str | None,
+                 key: str, resources: set):
+        self.name, self.argv, self.env, self.timeout, self.expect = name, argv, env, timeout, expect
+        self.key = key              # GPU, CLOCK and KNOWN's key: the target, else the executable
+        self.serial = key in SERIAL
+        self.resources = resources  # tests sharing one stay in order on one worker
+
+
+class Test:
+    """A line of the report: a skip or a failure known while planning, or a Job's result."""
+
+    def __init__(self, name: str, job: Job | None = None, result: tuple[str, str] | None = None):
+        self.name, self.job, self.result = name, job, result
+
+
+def run_job(job: Job) -> tuple[str, str]:
+    """Run one test to its end (killed at its timeout); its status and detail.
+
+    Touches only the job's own log; the worker threads call it.
+    """
+    log = OUT / f"{job.name}.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    start = time.monotonic()
+    try:
+        with log.open("w") as f:
+            p = subprocess.run(job.argv, env=job.env,
+                               stdout=f, stderr=subprocess.STDOUT, timeout=job.timeout,
+                               cwd=OUT)
+        code = p.returncode
+    except subprocess.TimeoutExpired:
+        code = "timeout"
+    secs = time.monotonic() - start
+    text = log.read_text(errors="replace")
+    lines = [x for x in text.splitlines() if x.strip()]
+    last = lines[-1] if lines else "(no output)"
+    if code == 0 and job.expect is not None:
+        m = re.search(job.expect, text)
+        if m is None:
+            code = "no match"
+        else:
+            last = m.group(0)
+    if code == 0:
+        return "ok", f"{last[:90]} ({secs:.1f}s)"
+    if job.key in KNOWN:
+        return "known", f"{KNOWN[job.key]}: {last[:60]}"
+    return "FAIL", f"exit {code}: {last[:90]} (log {display_path(log)})"
+
+
+def chains(tests: list[Test]) -> list[list[Test]]:
+    """Group the tests that share a resource (transitively), each group in its order."""
+    parent = list(range(len(tests)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    owner: dict = {}
+    for i, t in enumerate(tests):
+        for r in sorted(t.job.resources):
+            if r in owner:
+                parent[find(i)] = find(owner[r])
+            else:
+                owner[r] = i
+    groups: dict[int, list[Test]] = {}
+    for i, t in enumerate(tests):
+        groups.setdefault(find(i), []).append(t)
+    return sorted(groups.values(), key=lambda g: tests.index(g[0]))
+
+
 class Runner:
-    def __init__(self, build: Path, gpu: bool, pattern: str | None, listing: bool):
+    def __init__(self, build: Path, gpu: bool, pattern: str | None, listing: bool, jobs: int = 1):
         self.build = build
         self.gpu = gpu
         self.pattern = pattern
         self.listing = listing
+        self.jobs = jobs
         self.results: list[tuple[str, str, str]] = []  # name, status, detail
+        self.tests: list[Test] = []    # every report line, in the order planned
+        self.printed = 0               # tests[:printed] are in results and printed
+        self.scratches: list[Path] = []
         self.env = dict(os.environ, XG_SETTINGS="none", XG_HEADLESS="1",
                         SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
 
@@ -216,19 +316,31 @@ class Runner:
 
         Some fixtures have multiple consumers (write then read); prepare them
         once per group, preserving their contents between subprocesses.
+        Planning resets them all before any test runs; the tests naming one
+        run in order on one worker.
         """
         d = OUT / "scratch" / name
         if not self.listing and any(self.wanted(t) for t in (tests or (name,))):
             shutil.rmtree(d, ignore_errors=True)
             d.mkdir(parents=True)
+        self.scratches.append(d)
         return d
 
     def wanted(self, name: str) -> bool:
         return self.pattern is None or self.pattern in name
 
     def record(self, name: str, status: str, detail: str) -> None:
-        self.results.append((name, status, detail))
-        print(f"  {status:5} {name:34} {detail}", flush=True)
+        self.tests.append(Test(name, result=(status, detail)))
+        self.flush()
+
+    def flush(self) -> None:
+        """Print the finished tests at the head of the plan (on the main thread only)."""
+        while self.printed < len(self.tests) and self.tests[self.printed].result is not None:
+            t = self.tests[self.printed]
+            status, detail = t.result
+            self.results.append((t.name, status, detail))
+            print(f"  {status:5} {t.name:34} {detail}", flush=True)
+            self.printed += 1
 
     def skip(self, name: str, why: str) -> None:
         if self.wanted(name):
@@ -236,46 +348,96 @@ class Runner:
 
     def run(self, name: str, exe: Path, *args, env: dict | None = None,
             target: str | None = None, expect: str | None = None, timeout: int = TIMEOUT) -> None:
+        """Plan a test; execute() runs it."""
         if not self.wanted(name):
             return
         if self.listing:
             print(f"  {name:34} {exe.name} {' '.join(map(str, args))}")
             return
-        if (target or exe.name) in GPU and not self.gpu:
+        key = target or exe.name
+        if key in GPU and not self.gpu:
             self.record(name, "skip", "--no-gpu")
             return
         if not exe.exists():
             self.record(name, "FAIL", f"not built: {exe}")
             return
-        log = OUT / f"{name}.log"
-        log.parent.mkdir(parents=True, exist_ok=True)
-        start = time.monotonic()
-        try:
-            with log.open("w") as f:
-                p = subprocess.run([str(exe), *map(str, args)], env=env or self.env,
-                                   stdout=f, stderr=subprocess.STDOUT, timeout=timeout,
-                                   cwd=OUT)
-            code = p.returncode
-        except subprocess.TimeoutExpired:
-            code = "timeout"
-        secs = time.monotonic() - start
-        text = log.read_text(errors="replace")
-        lines = [x for x in text.splitlines() if x.strip()]
-        last = lines[-1] if lines else "(no output)"
-        if code == 0 and expect is not None:
-            m = re.search(expect, text)
-            if m is None:
-                code = "no match"
-            else:
-                last = m.group(0)
-        if code == 0:
-            self.record(name, "ok", f"{last[:90]} ({secs:.1f}s)")
-        elif (target or exe.name) in KNOWN:
-            self.record(name, "known", f"{KNOWN[target or exe.name]}: {last[:60]}")
-        else:
-            self.record(name, "FAIL", f"exit {code}: {last[:90]} (log {display_path(log)})")
+        argv = [str(exe), *map(str, args)]
+        env = env or self.env
+        # Runs of one executable stay in order (a test may keep files beside
+        # its scratch, in OUT); the interpreter's scripts are told apart by name.
+        resources = {("exe", name if target is None and exe == Path(sys.executable) else key)}
+        values = [*argv[1:], *env.values()]
+        for d in map(str, self.scratches):
+            if any(v == d or v.startswith(d + os.sep) for v in values):
+                resources.add(("scratch", d))
+        self.tests.append(Test(name, Job(name, argv, env, timeout, expect, key, resources)))
 
     def all(self) -> None:
+        self.plan()
+        self.execute()
+
+    def execute(self) -> None:
+        """Run the planned tests and report them in their planned order.
+
+        --jobs 1: one after another on this thread. Otherwise the SERIAL
+        groups first, one test at a time on this thread, then the others, a
+        group per worker. Only this thread prints and records; a worker's
+        exception stops new tests from starting and is raised here once every
+        worker (and so every subprocess, each ended by its timeout at worst)
+        has finished.
+        """
+        pending = [t for t in self.tests if t.result is None]
+        groups = chains(pending) if self.jobs > 1 else []
+        alone = [any(t.job.serial for t in g) for g in groups]
+        serial = (pending if self.jobs == 1 else
+                  sorted((t for g, a in zip(groups, alone) if a for t in g), key=self.tests.index))
+        parallel = [g for g, a in zip(groups, alone) if not a]
+        for t in serial:
+            t.result = run_job(t.job)
+            self.flush()
+        if parallel:
+            self.run_parallel(parallel)
+        lost = [t.name for t in self.tests if t.result is None]
+        if lost or self.printed != len(self.tests):
+            raise RuntimeError(f"port-tests: no result for {' '.join(lost) or '?'}")
+
+    def run_parallel(self, groups: list[list[Test]]) -> None:
+        done: queue.SimpleQueue = queue.SimpleQueue()  # (test, result, exception), from the workers
+        stop = threading.Event()
+
+        def work(group: list[Test]) -> None:
+            for t in group:
+                if stop.is_set():
+                    return
+                try:
+                    done.put((t, run_job(t.job), None))
+                except BaseException as e:
+                    done.put((t, None, e))
+                    return
+
+        remaining = sum(map(len, groups))
+        with ThreadPoolExecutor(max_workers=min(self.jobs, len(groups)), thread_name_prefix="port-tests") as pool:
+            futures = [pool.submit(work, g) for g in groups]
+            try:
+                while remaining:
+                    try:
+                        t, result, error = done.get(timeout=1)
+                    except queue.Empty:
+                        if all(f.done() for f in futures) and done.empty():
+                            raise RuntimeError("port-tests: a worker ended without its results")
+                        continue
+                    if error is not None:
+                        raise error
+                    t.result = result
+                    remaining -= 1
+                    self.flush()
+            except BaseException:
+                stop.set()
+                for f in futures:
+                    f.cancel()
+                raise
+
+    def plan(self) -> None:
         b = self.build
 
         for t in PLAIN:
@@ -511,8 +673,32 @@ def targets(build: Path) -> list[str]:
     return sorted(names & known) + ["xenogears"]
 
 
+def default_jobs() -> int:
+    """The CPUs this process may use, at most DEFAULT_JOBS_CAP."""
+    if hasattr(os, "process_cpu_count"):
+        cpus = os.process_cpu_count()
+    elif hasattr(os, "sched_getaffinity"):
+        cpus = len(os.sched_getaffinity(0))
+    else:
+        cpus = os.cpu_count()
+    return max(1, min(DEFAULT_JOBS_CAP, cpus or 1))
+
+
+def job_count(text: str) -> int:
+    try:
+        n = int(text)
+    except ValueError:
+        n = 0
+    if not 1 <= n <= MAX_JOBS:
+        raise argparse.ArgumentTypeError(f"--jobs takes a whole number from 1 to {MAX_JOBS}, not {text!r}")
+    return n
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--jobs", "-j", type=job_count, default=default_jobs(),
+                    help=f"tests run side by side (default: the CPU count, at most {DEFAULT_JOBS_CAP}; "
+                         "1 runs them one after another)")
     ap.add_argument("--build", default="build/pc/release", help="configured CMake build directory")
     ap.add_argument("--no-build", action="store_true", help="don't build the test targets first")
     ap.add_argument("--no-gpu", action="store_true", help="skip tests that need a Vulkan device")
@@ -544,7 +730,7 @@ def run_tests(build: Path, a: argparse.Namespace) -> int:
             print(f"port-tests: building the tests failed (see {display_path(OUT / 'build.log')})")
             return 1
 
-    r = Runner(build, gpu=not a.no_gpu, pattern=a.pattern, listing=a.list)
+    r = Runner(build, gpu=not a.no_gpu, pattern=a.pattern, listing=a.list, jobs=a.jobs)
     print(f"port tests ({display_path(build)}, "
           f"{build_version(build)}; logs in {display_path(OUT)}/):")
     r.all()

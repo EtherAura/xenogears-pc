@@ -227,5 +227,252 @@ class RunnerTests(unittest.TestCase):
         self.assertFalse(self.out.exists())
 
 
+class Children:
+    """A stand-in for subprocess.run: records which tests overlap, never by timing.
+
+    hooks[name](argv) runs inside the child's lifetime; return codes come from codes.
+    """
+    def __init__(self, hooks=None, codes=None):
+        self.hooks, self.codes = hooks or {}, codes or {}
+        self.lock = threading.Lock()
+        self.active = set()
+        self.started, self.finished = [], []
+        self.overlaps = {}  # name -> every other test running at some point during it
+        self.threads = {}
+
+    def __call__(self, argv, **kwargs):
+        if argv[0] == "sh":  # the standalone CD and SPU tests' build scripts
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        name = Path(kwargs["stdout"].name).stem
+        with self.lock:
+            self.overlaps[name] = set(self.active)
+            for other in self.active:
+                self.overlaps[other].add(name)
+            self.active.add(name)
+            self.started.append(name)
+            self.threads[name] = threading.current_thread()
+        try:
+            if name in self.hooks:
+                self.hooks[name](argv)
+            kwargs["stdout"].write(f"{name} says hello\n")
+            return subprocess.CompletedProcess(argv, self.codes.get(name, 0))
+        finally:
+            with self.lock:
+                self.active.discard(name)
+                self.finished.append(name)
+
+
+class SchedulerTests(unittest.TestCase):
+    def setUp(self):
+        parent = P.ROOT / "work/port-runner-tests"
+        parent.mkdir(parents=True, exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(prefix="sched-", dir=parent)
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.out = self.root / "out"
+        self.build = self.root / "build"
+        self.build.mkdir()
+        (self.build / "CMakeCache.txt").write_text("XG_VERSION:STRING=US\nXG_EXTRAS:BOOL=ON\n")
+        self.addCleanup(patch.stopall)
+        patch.object(P, "OUT", self.out).start()
+
+    def exe(self, name):
+        path = self.build / name
+        path.touch()
+        return path
+
+    def execute(self, runner, children):
+        stdout = io.StringIO()
+        with patch.object(P.subprocess, "run", side_effect=children), redirect_stdout(stdout):
+            runner.execute()
+        return [line.split()[1] for line in stdout.getvalue().splitlines()]
+
+    def test_independent_tests_overlap_and_report_in_planned_order(self):
+        # c starts only once a and b are both running (they must overlap), and
+        # a ends only after c has: completion order differs from the plan's.
+        both = threading.Barrier(3, timeout=10)
+        c_done = threading.Event()
+        hooks = {"a": lambda _: (both.wait(), c_done.wait(10)), "b": lambda _: both.wait(),
+                 "c": lambda _: (both.wait(), c_done.set())}
+        children = Children(hooks)
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=3)
+        for name in "abc":
+            runner.run(name, self.exe(f"{name}test"))
+        printed = self.execute(runner, children)
+        self.assertEqual(printed, ["a", "b", "c"])
+        self.assertEqual([n for n, _, _ in runner.results], ["a", "b", "c"])
+        self.assertTrue(all(s == "ok" for _, s, _ in runner.results), runner.results)
+        self.assertLess(children.finished.index("c"), children.finished.index("a"))
+        self.assertIn("b", children.overlaps["a"])
+
+    def test_serial_tests_run_alone_and_first(self):
+        children = Children()
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=4)
+        names = ["gameidtest", "gputest", "jpegtest", "netplaytest", "mdectest", "hostpolltest", "presenttest"]
+        for name in names:
+            runner.run(name, self.exe(name))
+        runner.run("state-rewind", Path(sys.executable), "-c", "", target="xenogears")
+        printed = self.execute(runner, children)
+        self.assertEqual(printed, names + ["state-rewind"])
+        serial = ["gputest", "netplaytest", "hostpolltest", "presenttest", "state-rewind"]
+        self.assertEqual(children.started[:len(serial)], serial)
+        for name in serial:
+            self.assertEqual(children.overlaps[name], set(), name)
+            self.assertIs(children.threads[name], threading.main_thread())
+
+    def test_shared_scratch_and_executable_stay_ordered(self):
+        children = Children()
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=8)
+        d = runner.scratch("pair", "pair-write", "pair-read")
+        runner.run("pair-write", self.exe("writer"), d, "write")
+        runner.run("other", self.exe("othertest"))
+        runner.run("pair-read", self.exe("reader"), d / "settings.ini", "read")   # same scratch
+        runner.run("again-1", self.exe("againtest"), "1", target="againtest")
+        runner.run("again-2", self.exe("againtest"), "2", target="againtest")   # same executable
+        self.execute(runner, children)
+        for first, then in (("pair-write", "pair-read"), ("again-1", "again-2")):
+            self.assertLess(children.finished.index(first), children.started.index(then))
+            self.assertNotIn(then, children.overlaps[first])
+        groups = P.chains([t for t in runner.tests])
+        self.assertEqual([[t.name for t in g] for g in groups],
+                         [["pair-write", "pair-read"], ["other"], ["again-1", "again-2"]])
+
+    def test_python_scripts_without_a_target_are_independent(self):
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
+        runner.run("one", Path(sys.executable), "a.py")
+        runner.run("two", Path(sys.executable), "b.py")
+        self.assertEqual(len(P.chains(runner.tests)), 2)
+
+    def test_failures_counted_once_in_order(self):
+        children = Children(codes={"b": 3})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=3)
+        runner.run("a", self.exe("atest"))
+        runner.skip("s", "no fixture")
+        runner.run("b", self.exe("btest"))
+        runner.run("m", self.build / "missingtest")
+        runner.run("c", self.exe("ctest"))
+        self.execute(runner, children)
+        self.assertEqual([(n, s) for n, s, _ in runner.results],
+                         [("a", "ok"), ("s", "skip"), ("b", "FAIL"), ("m", "FAIL"), ("c", "ok")])
+        detail = dict((n, d) for n, _, d in runner.results)
+        self.assertIn("exit 3: b says hello", detail["b"])
+        self.assertIn("not built", detail["m"])
+        self.assertEqual(sorted(children.started), ["a", "b", "c"])
+
+    def test_timeout_is_a_failure(self):
+        def slow(argv):
+            raise subprocess.TimeoutExpired(argv, 1)
+        for jobs in (1, 2):
+            with self.subTest(jobs=jobs):
+                runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=jobs)
+                runner.run("slow", self.exe("slowtest"))
+                runner.run("fast", self.exe("fasttest"))
+                self.execute(runner, Children({"slow": slow}))
+                self.assertEqual([(n, s) for n, s, _ in runner.results], [("slow", "FAIL"), ("fast", "ok")])
+                self.assertIn("exit timeout", runner.results[0][2])
+
+    def test_worker_exception_stops_new_tests_and_waits_for_running_ones(self):
+        b_running = threading.Event()
+        release = threading.Event()
+
+        def boom(_):
+            b_running.wait(10)
+            release.set()
+            raise OSError("exec format error")
+
+        children = Children({"a": boom, "b": lambda _: (b_running.set(), release.wait(10))})
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
+        runner.run("a", self.exe("atest"), target="shared")
+        runner.run("a-next", self.exe("atest"), target="shared")
+        runner.run("b", self.exe("btest"))
+        with self.assertRaisesRegex(OSError, "exec format"):
+            self.execute(runner, children)
+        self.assertNotIn("a-next", children.started)
+        self.assertEqual(children.active, set())          # b finished before the raise
+        self.assertIn("b", children.finished)
+
+    def test_jobs_1_runs_everything_in_order_on_the_main_thread(self):
+        children = Children()
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=1)
+        names = ["gputest", "atest", "netplaytest", "btest"]
+        for name in names:
+            runner.run(name, self.exe(name))
+        self.assertEqual(self.execute(runner, children), names)
+        self.assertEqual(children.started, names)
+        self.assertTrue(all(t is threading.main_thread() for t in children.threads.values()))
+        self.assertTrue(all(not v for v in children.overlaps.values()))
+
+    def full_plan(self, jobs):
+        for reg in ("USA", "Japan"):
+            for n in (1, 2):
+                name = f"Xenogears ({reg}) (Disc {n})"
+                path = self.root / "bin" / name / f"{name}.cue"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+        spu = self.root / "build/pc/spu-test/spu_test"
+        spu.parent.mkdir(parents=True, exist_ok=True)
+        spu.touch()
+        cd = self.root / "build/pc/cdtest/cdtest"
+        cd.parent.mkdir(parents=True, exist_ok=True)
+        cd.touch()
+        patch.object(P, "ROOT", self.root).start()
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=jobs)
+        exes = set(P.PLAIN) | set(P.SETTINGS) | P.GPU | {
+            "highrefreshtest", "pad_profiletest", "texturepacktest", "beetlepacktest", "portraitpacktest",
+            "glyphtest", "celpacktest", "card_biostest", "card_historytest", "card_speeduptest",
+            "gameplay_portraittest", "regional_audiotest", "gametexttest"}
+        for name in exes:
+            (self.build / name).touch()
+        children = Children()
+        stdout = io.StringIO()
+        with patch.object(P.subprocess, "run", side_effect=children), redirect_stdout(stdout):
+            runner.all()
+        return runner, children
+
+    def test_full_plan_same_report_serial_and_parallel(self):
+        serial, serial_children = self.full_plan(1)
+        parallel, children = self.full_plan(4)
+        names = [n for n, _, _ in serial.results]
+        self.assertEqual(len(names), len(set(names)))
+        self.assertEqual([(n, s) for n, s, _ in parallel.results], [(n, s) for n, s, _ in serial.results])
+        self.assertEqual(sorted(children.started), sorted(serial_children.started))
+        self.assertEqual(len(children.started), len(set(children.started)))
+        jobs = {t.name: t.job for t in parallel.tests if t.job}
+        for name, job in jobs.items():
+            if job.serial:
+                self.assertEqual(children.overlaps[name], set(), name)
+        # Every pair sharing a resource ran in the planned order, never overlapping.
+        order = [t.name for t in parallel.tests if t.job]
+        for i, a in enumerate(order):
+            for b in order[i + 1:]:
+                if jobs[a].resources & jobs[b].resources:
+                    self.assertLess(children.finished.index(a), children.started.index(b), (a, b))
+        for name in ("transitiontest", "distortion-replay", "high-refresh", "gputest", "orderedgputest",
+                     "presenttest", "battle-speed", "state-rewind", "state-equivalence", "text-wordwrap",
+                     "netplaytest", "battlespeedtest", "hostpolltest"):
+            self.assertTrue(jobs[name].serial, name)
+        for name in ("gameidtest", "jpegtest", "hard-profile-ids", "regional_audiotest-0", "glyphtest"):
+            self.assertFalse(jobs[name].serial, name)
+        for pair in (("cdtest", "cdtest-check"), ("card_historytest", "card_historytest-restart"),
+                     ("gameplay_combattest-write", "gameplay_combattest-read")):
+            self.assertTrue(jobs[pair[0]].resources & jobs[pair[1]].resources, pair)
+
+
+class JobsOption(unittest.TestCase):
+    def test_default_is_capped(self):
+        self.assertTrue(1 <= P.default_jobs() <= P.DEFAULT_JOBS_CAP)
+
+    def test_invalid_counts_are_refused(self):
+        for text in ("0", "-1", "abc", "2.5", "", str(P.MAX_JOBS + 1)):
+            with self.subTest(text=text):
+                result = subprocess.run([sys.executable, str(Path(P.__file__).resolve()), "--jobs", text,
+                                         "--build", "no-such-build", "--list"],
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn("--jobs", result.stderr)
+        self.assertEqual(P.job_count("1"), 1)
+        self.assertEqual(P.job_count(str(P.MAX_JOBS)), P.MAX_JOBS)
+
+
 if __name__ == "__main__":
     unittest.main()
