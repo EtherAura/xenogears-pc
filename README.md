@@ -1,35 +1,33 @@
+<div align="center">
+
 # Xenogears PC port
 
-Part of -Project Exodus-, an unofficial Xenogears preservation effort.
+**The original game logic. A native PC home.**
 
-Xenogears running natively on Linux and Windows. It's built from the
-[matching decompilation](https://github.com/EtherAura/xenogears), so the game
-logic is the original code, compiled for the PC. Bring your own US or Japanese
-discs: nothing from the game is included, and it reads its data from your disc
-image every time it starts.
+[![Tool checks](https://github.com/EtherAura/xenogears-pc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EtherAura/xenogears-pc/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/EtherAura/xenogears-pc/actions/workflows/codeql.yml/badge.svg)](https://github.com/EtherAura/xenogears-pc/actions/workflows/codeql.yml)
+[![GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+![Linux and Windows](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-627eaa)
 
-<table>
-<tr>
-<td width="50%"><a href="docs/display.md"><img src="docs/img/display.png" alt="Lahan in 16:9 at six times the PlayStation resolution"></a><br>
-<b><a href="docs/display.md">Display</a></b>: widescreen, higher resolutions, smoother motion</td>
-<td width="50%"><a href="docs/packs.md"><img src="docs/img/packs.png" alt="The packs page of the settings menu"></a><br>
-<b><a href="docs/packs.md">Packs</a></b>: replacement textures, sprites, text and portraits, Beetle PSX packs included</td>
-</tr>
-<tr>
-<td width="50%"><a href="docs/gameplay.md"><img src="docs/img/gameplay.png" alt="A forest battle at 2x speed"></a><br>
-<b><a href="docs/gameplay.md">Gameplay</a></b>: battle speed, difficulty, encounters, save states</td>
-<td width="50%"><a href="docs/extras.md"><img src="docs/img/extras.png" alt="The map viewer with a free camera"></a><br>
-<b><a href="docs/extras.md">Extras</a></b>: jukebox, bestiary, gallery, model and map viewers</td>
-</tr>
-</table>
+Built from the [matching decompilation](https://github.com/EtherAura/xenogears).
+Native Linux and Windows, with optional display, gameplay and presentation extras.
+Part of **-Project Exodus-**.
 
-All of it is optional. With the default settings it plays like the PlayStation
-version.
+[**Build and set up**](docs/building.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
 
-To build it, see [Building](docs/building.md).
+<img src="docs/img/clip-smooth.webp" alt="Animated comparison of motion smoothing in the PC port" width="960" />
+</div>
 
-## Licence
+| [Display](docs/display.md) | [Packs](docs/packs.md) |
+|---|---|
+| ![Lahan in widescreen at a higher internal resolution](docs/img/display.png) | ![Settings for replacement textures, sprites, text and portraits](docs/img/packs.png) |
+| [**Gameplay**](docs/gameplay.md) | [**Extras**](docs/extras.md) |
+| ![A forest battle with optional speed settings](docs/img/gameplay.png) | ![Map viewer with a free camera](docs/img/extras.png) |
 
-GPL-3.0 or later, in `LICENSE`. The libraries in `port/third_party/` keep their
-own licences. Xenogears is © Square Enix; this project isn't affiliated with
-them, and no game data is included.
+**Bring your own US or Japanese discs.** The port reads game data from your images; none is included.
+The extras are optional, and default settings preserve the PlayStation presentation.
+GitHub CI covers checks that need no game data; full builds and retail checks run locally.
+
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Discussions](https://github.com/EtherAura/xenogears-pc/discussions)
+
+<sub>Project work: GPL-3.0 or later; third-party libraries retain their licences. Xenogears © Square Enix. Unofficial and unaffiliated.</sub>
