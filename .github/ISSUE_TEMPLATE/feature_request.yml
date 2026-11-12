@@ -1,0 +1,16 @@
+name: Feature request
+description: Something the port could do, or do better.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you would like
+      description: What it should do and when you would use it.
+    validations:
+      required: true
+  - type: textarea
+    id: original
+    attributes:
+      label: How the PlayStation version behaves
+      description: Everything beyond the original is optional, and with the default settings the port plays like the PlayStation version. Say what the original does here, if you know.

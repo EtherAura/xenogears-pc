@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/EtherAura/xenogears-pc/security/advisories/new
+    about: Privately. Please do not open a public issue for it.
+  - name: Ask a question, or show what you made
+    url: https://github.com/EtherAura/xenogears-pc/discussions
+    about: Discussions, for everything that is not a bug or a feature request.
+  - name: Read the guide
+    url: https://github.com/EtherAura/xenogears-pc/wiki
+    about: Building, display, gameplay, packs and extras.
+  - name: The decompilation
+    url: https://github.com/EtherAura/xenogears
+    about: Problems with matching the PlayStation build belong in the decompilation's repository.

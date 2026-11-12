@@ -1,0 +1,61 @@
+name: Bug report
+description: The port crashes, shows or plays something wrong, or does not build.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not attach anything from the game: no disc images, no extracted files, no save
+        states. A screenshot of what looks wrong is fine.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you saw, and what you expected. Where in the game, if it matters.
+    validations:
+      required: true
+  - type: dropdown
+    id: version
+    attributes:
+      label: Game release
+      options:
+        - US (SLUS-00664)
+        - Japanese (SLPS-01160)
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - the default engine (xenogears)
+        - the Enhanced engine (xenogears-enhanced)
+        - both
+        - it does not build
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System, GPU and driver
+      placeholder: "Fedora 42, Radeon RX 7800 XT, Mesa 25.1"
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: The commit you built
+      placeholder: "451de04"
+    validations:
+      required: true
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings and packs
+      description: Anything changed from the defaults (resolution, widescreen, battle speed, ...) and any packs installed. With the default settings it should play like the PlayStation version.
+  - type: textarea
+    id: log
+    attributes:
+      label: Output
+      description: What the terminal printed, or the end of the build log.
+      render: text

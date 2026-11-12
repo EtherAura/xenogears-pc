@@ -1,0 +1,84 @@
+name: CI
+
+# What can be checked without the game. The port itself cannot be built here:
+# its link step takes code and data from a retail disc, and no runner has one.
+# The full build, and the tests that need a disc or a GPU, are run on the
+# maintainer's machine before anything is published to this repository.
+#
+# So this is the rest: every Python tool compiles, every configuration file
+# parses, every shell script parses with the shell it names, and the tool tests
+# that need no game data run. MinGW, clang, numpy and Pillow are installed
+# because those tests skip their cases without them.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: checks (no game data)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install what the checks use
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-yaml python3-numpy python3-pil gcc libc6-dev clang gcc-mingw-w64-x86-64
+
+      # Our own tools and tests; the libraries under port/third_party keep their upstream form.
+      - name: Every Python tool compiles
+        run: python3 -m compileall -q -x 'third_party' .
+
+      - name: Every configuration file parses
+        run: |
+          python3 - <<'PY'
+          import pathlib, sys, yaml
+          bad = 0
+          files = sorted(pathlib.Path("config").rglob("*.yaml"))
+          for path in files:
+              try:
+                  yaml.safe_load(path.read_text(encoding="utf-8"))
+              except Exception as error:
+                  bad += 1
+                  print(f"::error file={path}::{str(error).splitlines()[0]}")
+          print(f"{len(files)} configuration files, {bad} do not parse")
+          sys.exit(1 if bad or not files else 0)
+          PY
+
+      - name: Every shell script parses
+        run: |
+          rc=0
+          for f in $(find . -name '*.sh' -not -path './.git/*' -not -path '*/third_party/*'); do
+            case "$(head -n 1 "$f")" in
+              '#!'*bash*) shell=bash ;;
+              *) shell=sh ;;
+            esac
+            "$shell" -n "$f" || { echo "::error file=$f::$shell -n failed"; rc=1; }
+          done
+          exit $rc
+
+      # The tests of the tools that read no disc, no extracted file and no build. The others
+      # under tools/ (battle speed, game text layout, high refresh, hard profile ids) need a
+      # finished build or disc images and are not run here.
+      - name: Tool tests
+        run: |
+          rc=0
+          for t in beetle interpolation_coverage payloadcheck pc_link port_tests retail_heap statecheck; do
+            echo "::group::tools/test_$t.py"
+            python3 "tools/test_$t.py" || rc=1
+            echo "::endgroup::"
+          done
+          exit $rc

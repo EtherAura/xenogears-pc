@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # The workflows pin every action by commit; this keeps those pins current.
+  # Nothing else is updated automatically: the Python packages in requirements.txt
+  # are the versions the build was matched with, and a newer splat can move a byte.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"

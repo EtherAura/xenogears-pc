@@ -1,0 +1,55 @@
+name: CodeQL
+
+# Security analysis of what can be read without the game: the Python tools and
+# these workflows. The C is not analysed. It compiles only next to code and
+# data taken from a disc, which no runner has, so there is no build for the
+# analysis to follow.
+#
+# It runs on pushes to main and once a week, not on pull requests: a finding
+# shows up as a code scanning alert after the fact, not as a failed check.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE', '.gitignore']
+  schedule:
+    # weekly, early on a Tuesday, off the hour
+    - cron: '41 5 * * 2'
+  workflow_dispatch:
+
+# Read-only by default; the analysis job asks for what uploading its results takes.
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancelled: an analysis cut off while uploading leaves the alerts stale.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, actions]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: '/language:${{ matrix.language }}'
