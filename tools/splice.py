@@ -83,7 +83,11 @@ def strip_comments(s: str) -> str:
 
 def function_name(item: str) -> str | None:
     code = strip_comments(item)
-    m = re.match(r"\s*(?:static\s+)?[\w\s\*]+?\b(\w+)\s*\([^;{]*\)\s*(?:[\w\s\*\[\],]+;\s*)*\{", code, re.S)
+    # K&R parameter declarations sit between ')' and '{'. Each one runs up to
+    # its ';' (which its class lacks), and the whitespace after the last one
+    # is matched once, so no run of whitespace can be split two ways: the
+    # same strings as "\s*(?:[...]+;\s*)*" without its exponential backtracking.
+    m = re.match(r"\s*(?:static\s+)?[\w\s\*]+?\b(\w+)\s*\([^;{]*\)(?:[\w\s\*\[\],]+;)*\s*\{", code, re.S)
     if m and not code.lstrip().startswith(("typedef", "struct", "union", "extern")):
         return m.group(1)
     return None
