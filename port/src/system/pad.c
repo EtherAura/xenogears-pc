@@ -204,6 +204,17 @@ static struct {
 static GamepadBindings profiles[2];
 static int selectedProfile;
 
+/* A dead-zone percent kept to 0..95. */
+static int clampDeadzone(int percent) {
+    return SDL_clamp(percent, 0, 95);
+}
+
+/* The left-stick axis threshold of a profile: the D-pad and the prompts
+ * share it, so a stick past it both presses and claims the prompts. */
+static int stickThreshold(const GamepadBindings* profile) {
+    return profile->deadzone * 32768 / 100;
+}
+
 /* ---- bindings ---- */
 
 static void loadBindings(void) {
@@ -253,7 +264,7 @@ static void loadBindings(void) {
         }
     }
     bind.gamepad.stickDpad = settingsBool("pad_stick_dpad", 1);
-    bind.gamepad.deadzone = SDL_clamp(settingsInt("pad_stick_deadzone", 50), 0, 95);
+    bind.gamepad.deadzone = clampDeadzone(settingsInt("pad_stick_deadzone", 50));
     settingsDescribe("pad_stick_deadzone", "pad_stick_deadzone: left-stick D-pad threshold in percent (0..95, default 50)");
 }
 
@@ -280,7 +291,7 @@ static void loadProfile(int port) {
     profileKey(profile, "stick_dpad", key, sizeof(key));
     profile->stickDpad = settingsBool(key, bind.gamepad.stickDpad);
     profileKey(profile, "stick_deadzone", key, sizeof(key));
-    profile->deadzone = SDL_clamp(settingsInt(key, bind.gamepad.deadzone), 0, 95);
+    profile->deadzone = clampDeadzone(settingsInt(key, bind.gamepad.deadzone));
 }
 
 static GamepadBindings* selectedBindings(void) {
@@ -391,7 +402,7 @@ int padStickDeadzone(void) {
 
 void padSetStickDeadzone(int percent) {
     GamepadBindings* profile = selectedBindings();
-    profile->deadzone = SDL_clamp(percent, 0, 95);
+    profile->deadzone = clampDeadzone(percent);
     saveProfile(profile);
 }
 
@@ -686,7 +697,7 @@ void padDeviceEvent(const SDL_Event* event) {
         int threshold=TRIGGER_THRESHOLD;
         for (int i=0;i<2;++i) if (padProfileDevice(i)==event->gaxis.which) {
             if (axis==SDL_GAMEPAD_AXIS_LEFTX || axis==SDL_GAMEPAD_AXIS_LEFTY)
-                threshold=profiles[i].deadzone*32768/100;
+                threshold=stickThreshold(&profiles[i]);
         }
         if ((axis >= SDL_GAMEPAD_AXIS_LEFT_TRIGGER && value>TRIGGER_THRESHOLD) ||
             (axis < SDL_GAMEPAD_AXIS_LEFT_TRIGGER && (value>threshold || value<-threshold)))
@@ -1066,7 +1077,7 @@ static u16 readGamepad(SDL_Gamepad* pad, const GamepadBindings* profile) {
     }
     Sint16 x = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX);
     Sint16 y = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY);
-    int threshold = profile->deadzone * 32768 / 100;
+    int threshold = stickThreshold(profile);
     if (x < -threshold) {
         buttons |= BTN_LEFT;
     } else if (x > threshold) {
