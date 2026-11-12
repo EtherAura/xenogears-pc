@@ -376,27 +376,67 @@ class SchedulerTests(unittest.TestCase):
         self.assertLess(children.finished.index("battle-speed"), children.started.index("state-rewind"))
         self.assertEqual(runner.trace[0][:2], ("alone", "high-refresh"))   # a chain's head: first
 
-    def test_failure_when_shared_is_rerun_alone_and_kept_alone(self):
-        # flaky fails beside partner (the barrier makes them overlap) and
-        # passes alone; its rerun waits for partner, and next starts after it.
+    def shared_failure(self, first):
+        """flaky fails beside partner (a barrier makes them overlap) and passes
+        alone; next shares partner's executable, so it waits for partner.
+
+        first is the test whose result reaches the scheduler first: the
+        other's child stays running until that result is queued, so the
+        arrival order is fixed, not left to thread timing. The runner's
+        result queue is the stand-in below only to see that moment.
+        """
+        reported = {name: threading.Event() for name in ("flaky", "partner", "next")}
+
+        class Reports(queue.SimpleQueue):
+            def put(self, item, block=True, timeout=None):
+                super().put(item, block, timeout)
+                if isinstance(item, tuple) and item and isinstance(item[0], P.Test):
+                    reported[item[0].name].set()
+
+        def after(name):
+            if not reported[name].wait(10):
+                raise RuntimeError(f"{name}'s result never reached the scheduler")
+
         both = threading.Barrier(2, timeout=10)
-        hooks = {"flaky": lambda _: both.wait() if children.started.count("flaky") == 1 else None,
-                 "partner": lambda _: both.wait()}
-        children = Children(hooks, codes={"flaky": lambda run: 1 if run == 0 else 0})
+        last = "partner" if first == "flaky" else "flaky"
+
+        def flaky(_):
+            if children.started.count("flaky") == 1:  # the shared run; the rerun returns at once
+                both.wait()
+                if last == "flaky":
+                    after(first)
+
+        def partner(_):
+            both.wait()
+            if last == "partner":
+                after(first)
+
+        children = Children({"flaky": flaky, "partner": partner},
+                            codes={"flaky": lambda run: 1 if run == 0 else 0})
         runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=4)
         runner.run("flaky", self.exe("flakytest"))
         runner.run("partner", self.exe("pairtest"), "1", target="pairtest")
         runner.run("next", self.exe("pairtest"), "2", target="pairtest")
-        printed = self.execute(runner, children)
+        with patch.object(P.queue, "SimpleQueue", Reports):
+            printed = self.execute(runner, children)
         self.assertEqual(printed, ["flaky", "partner", "next"])
         self.assertEqual(set(children.started[:2]), {"flaky", "partner"})
-        self.assertEqual(children.started[2:], ["flaky", "next"])
-        self.assertEqual(children.runs["flaky"][0], {"partner"})
+        self.assertEqual(sorted(children.started[2:]), ["flaky", "next"])
+        self.assertIn("partner", children.runs["flaky"][0])
+        # The rerun: nothing running when it started and nothing started
+        # during it (runs[...][1] gains every test that overlaps it).
+        self.assertEqual(len(children.runs["flaky"]), 2)
         self.assertEqual(children.runs["flaky"][1], set())           # alone
         rerun_end = len(children.finished) - 1 - children.finished[::-1].index("flaky")
         self.assertLess(children.finished.index("partner"), rerun_end)
         self.assertIs(children.threads["flaky"], threading.main_thread())
         self.assertIn(("retry", "flaky", frozenset()), runner.trace)
+        # next starts only once partner has ended, in the children and in
+        # the scheduler's own record.
+        self.assertLess(children.finished.index("partner"), children.started.index("next"))
+        self.assertNotIn("partner", children.overlaps["next"])
+        starts = {n: r for e, n, r in runner.trace if e == "start"}
+        self.assertNotIn("partner", starts["next"])
         self.assertEqual([(n, s) for n, s, _ in runner.results], [("flaky", "ok"), ("partner", "ok"), ("next", "ok")])
         detail = runner.results[0][2]
         self.assertIn("FAILED ONLY WHEN SHARED", detail)
@@ -406,6 +446,21 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual((self.out / "flaky.shared.log").read_text(), "flaky says hello (run 0)\n")
         self.assertEqual((self.out / "flaky.log").read_text(), "flaky says hello (run 1)\n")
         self.assertEqual((self.out / P.ALONE_FILE).read_text(), "flaky\n")
+        return children, runner
+
+    def test_known_failure_is_rerun_before_anything_else_starts(self):
+        # flaky's failure is known while partner still runs: the waiting
+        # rerun stops new starts, so it runs before next.
+        children, runner = self.shared_failure(first="flaky")
+        self.assertEqual(children.started[2:], ["flaky", "next"])
+        events = [(e, n) for e, n, _ in runner.trace]
+        self.assertLess(events.index(("retry", "flaky")), events.index(("start", "next")))
+
+    def test_failure_when_shared_is_rerun_alone_and_kept_alone(self):
+        # partner ends first, while flaky's failure is not yet known: next may
+        # start then, beside flaky's shared run, so the rerun and next run in
+        # either order; the rerun still waits until nothing else runs.
+        self.shared_failure(first="partner")
 
         # The next run in this output directory keeps it alone from the start.
         children = Children({"partner": lambda _: None})
