@@ -1,0 +1,82 @@
+name: Release source
+
+# Attaches the source of each release to it: xenogears-pc-<version>.tar.gz, the
+# tree at the release's tag as git archive writes it (tracked files only, so
+# nothing untracked and no game data), its .sha256, and a build-provenance
+# attestation for the tarball (verify it with `gh attestation verify`).
+# Tags are CalVer, vYYYY.MM.N; anything else is refused before checkout.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "An existing release tag (vYYYY.MM.N) to attach the source to again"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  source:
+    name: source tarball and provenance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write      # gh release upload
+      id-token: write      # the attestation's signing identity
+      attestations: write  # store the attestation
+    steps:
+      # The tag reaches the shell only through the environment, never as text in the script.
+      - name: Validate the tag
+        id: tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::not a release tag (vYYYY.MM.N): $(printf '%q' "$TAG")"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
+          persist-credentials: false
+
+      - name: Archive the tagged tree
+        id: archive
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          name="xenogears-pc-$VERSION"
+          commit=$(git rev-parse --verify "refs/tags/$TAG^{commit}")  # before any file: a missing tag writes none
+          mkdir -p dist
+          git archive --format=tar.gz --prefix="$name/" -o "dist/$name.tar.gz" "$commit"
+          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
+          echo "tarball=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/$name.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Attest the tarball's provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.archive.outputs.tarball }}
+
+      - name: Attach the tarball and its checksum to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          TARBALL: ${{ steps.archive.outputs.tarball }}
+          CHECKSUM: ${{ steps.archive.outputs.checksum }}
+        run: |
+          gh release upload "$TAG" "$TARBALL" "$CHECKSUM" --repo "$GITHUB_REPOSITORY" --clobber
