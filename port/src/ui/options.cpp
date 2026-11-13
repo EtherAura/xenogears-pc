@@ -374,7 +374,7 @@ std::vector<Spec>& table() {
         [](int, int v) { pcGameplaySetBattle60(v); }, 0)
         .def = [](int) { return engineThis() == ENGINE_ENHANCED ? 1 : 0; };
     add("field60slow", N_("20 and 15 fps rooms"),
-        [](int) { return engineThis() == ENGINE_ENHANCED ? settingsBool("field60slow", 1) : 1; },
+        [](int) { return pcGameplayField60SlowSetting(); },
         [](int, int v) { keySet("field60slow", v); }, 1);
     add("interpolation", N_("Motion smoothing"), [](int) { return interpolationEnabled(); },
         [](int, int v) { interpolationSetEnabled(v); }, 1);

@@ -212,7 +212,8 @@ PLAIN = [
 # Settings tests: DIR check, then DIR write and DIR read in a fresh DIR.
 SETTINGS = [
     "gameplay_bugfixtest", "gameplay_combattest", "gameplay_deathblowtest",
-    "gameplay_dialoguetest", "gameplay_encountertest", "gameplay_gauntlettest", "gameplay_retrytest",
+    "gameplay_dialoguetest", "gameplay_encountertest", "gameplay_field60slowtest", "gameplay_gauntlettest",
+    "gameplay_retrytest",
     "gameplay_rewardtest",
 ]
 

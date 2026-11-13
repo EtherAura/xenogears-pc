@@ -587,9 +587,13 @@ void pcGameplaySetField60(int on) {
  * D6) run at 60 Hz with the rest of the field (field60; the preview method,
  * engine/src/field/f_8008083C.c pcFieldPreview*), exact against the Original at
  * every native frame (docs/ENGINE_PLAN.md "60 Hz field, remaining motion").
- * field60slow (XG_FIELD60SLOW=0 for one run) only exists to turn them back to
- * their authored cadence for a comparison; on by default, no F1 row: '60 Hz
- * fields' covers them. */
+ * field60slow (XG_FIELD60SLOW=0 for one run; the Enhanced engine's '20 and 15
+ * fps rooms' row) turns them back to their authored cadence; on by default.
+ * pcGameplayField60SlowSetting is the stored value in either engine, for the
+ * options and presets (xg-dzg); pcGameplayField60Slow is what the engine runs. */
+int pcGameplayField60SlowSetting(void) {
+    return settingsBool("field60slow", 1);
+}
 int pcGameplayField60Slow(void) {
 #if XG_ENGINE_ENHANCED
     static int field60SlowChecked, field60SlowOn;

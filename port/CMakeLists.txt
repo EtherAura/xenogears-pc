@@ -311,6 +311,9 @@ xg_gameplay_test(gameplay_deathblowtest SOURCES src/system/test/deathblowtest.c 
 # Dialogue speed, hold and auto-advance settings.
 xg_gameplay_test(gameplay_dialoguetest SOURCES src/system/test/dialoguetest.c)
 
+# The stored field60slow setting the options and presets read (xg-dzg).
+xg_gameplay_test(gameplay_field60slowtest SOURCES src/system/test/field60slowtest.c)
+
 # The retry setting's checkpoint of a battle.
 xg_gameplay_code(gameplay_retry_code "${CMAKE_CURRENT_SOURCE_DIR}/src/game/main/retry.c")
 xg_gameplay_test(gameplay_retrytest SOURCES src/system/test/retrytest.c GAME gameplay_retry_code)

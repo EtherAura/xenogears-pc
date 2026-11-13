@@ -67,8 +67,10 @@ int pcGameplayOriginalBugFixes(void);
 /* The Enhanced engine's 60 Hz field (default on there; the Original never asks). */
 int pcGameplayField60(void);
 void pcGameplaySetField60(int on);
-/* The Enhanced engine's 60 Hz 20/15 fps rooms (field60slow; default off). */
+/* The Enhanced engine's 60 Hz 20/15 fps rooms (field60slow; default on there,
+ * always off in the Original), and the stored setting in either engine. */
 int pcGameplayField60Slow(void);
+int pcGameplayField60SlowSetting(void);
 /* The Enhanced engine's 60 Hz world map (default on there; the Original never asks). */
 int pcGameplayWorldmap60(void);
 void pcGameplaySetWorldmap60(int on);
