@@ -1,0 +1,97 @@
+; The xenogears-pc setup for 64-bit Windows.
+;
+; A template: packaging/windows_release.py render fills each placeholder (a
+; name between at signs) from the release tag and the installed stage (cmake --install of port/), then makensis
+; builds the setup in the rendered script's folder. A rendered script has no
+; placeholder left; the renderer refuses one that would.
+;
+; Where things go: the files of the stage into Program Files, read-only for
+; the game. Everything the port writes (settings.ini, memory cards, save
+; backups, records, logs) is in the player's own folder, %APPDATA%\xenogears
+; (SDL_GetPrefPath), which neither this setup nor its uninstaller touches.
+; The uninstaller deletes the files this setup installed, by name, and then
+; each folder only if it is empty (RMDir without /r): anything else the player
+; put there, such as a disc image beside the executable, stays.
+; No file of the game is in the setup: the port reads the player's own disc.
+
+Unicode true
+ManifestDPIAware true
+SetCompressor /SOLID lzma
+RequestExecutionLevel admin
+
+!include "MUI2.nsh"
+!include "LogicLib.nsh"
+!include "x64.nsh"
+
+!define PRODUCT "Xenogears PC"
+!define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\xenogears-pc"
+
+Name "${PRODUCT} @VERSION@"
+OutFile "@SETUP_NAME@"
+InstallDir "$PROGRAMFILES64\${PRODUCT}"
+InstallDirRegKey HKLM "${UNINSTALL_KEY}" "InstallLocation"
+
+VIProductVersion "@NSIS_VERSION@"
+VIFileVersion "@NSIS_VERSION@"
+VIAddVersionKey "ProductName" "${PRODUCT}"
+VIAddVersionKey "ProductVersion" "@VERSION@"
+VIAddVersionKey "FileVersion" "@VERSION@"
+VIAddVersionKey "FileDescription" "${PRODUCT} @VERSION@ setup"
+VIAddVersionKey "LegalCopyright" "GNU GPL v3 or later (COPYING.txt)"
+
+!define MUI_ABORTWARNING
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_LICENSE "@LICENSE_FILE@"
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+!insertmacro MUI_UNPAGE_CONFIRM
+!insertmacro MUI_UNPAGE_INSTFILES
+!insertmacro MUI_LANGUAGE "English"
+
+Function .onInit
+  ${IfNot} ${RunningX64}
+    MessageBox MB_ICONSTOP "${PRODUCT} needs 64-bit Windows." /SD IDOK
+    Abort
+  ${EndIf}
+  SetRegView 64
+  SetShellVarContext all
+FunctionEnd
+
+Function un.onInit
+  SetRegView 64
+  SetShellVarContext all
+FunctionEnd
+
+Section "Install"
+@INSTALL_FILES@
+  SetOutPath "$INSTDIR"
+  WriteUninstaller "$INSTDIR\uninstall.exe"
+
+  CreateDirectory "$SMPROGRAMS\${PRODUCT}"
+@SHORTCUTS@
+  CreateShortcut "$SMPROGRAMS\${PRODUCT}\Uninstall ${PRODUCT}.lnk" "$INSTDIR\uninstall.exe"
+
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayName" "${PRODUCT}"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayVersion" "@VERSION@"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "Publisher" "xenogears-pc contributors"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\xenogears.exe"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "InstallLocation" "$INSTDIR"
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+  WriteRegStr HKLM "${UNINSTALL_KEY}" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+  WriteRegDWORD HKLM "${UNINSTALL_KEY}" "EstimatedSize" @ESTIMATED_SIZE_KB@
+  WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
+  WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
+SectionEnd
+
+Section "Uninstall"
+@UNINSTALL_FILES@
+  Delete "$INSTDIR\uninstall.exe"
+@UNINSTALL_DIRS@
+  RMDir "$INSTDIR"
+
+@UNSHORTCUTS@
+  Delete "$SMPROGRAMS\${PRODUCT}\Uninstall ${PRODUCT}.lnk"
+  RMDir "$SMPROGRAMS\${PRODUCT}"
+  DeleteRegKey HKLM "${UNINSTALL_KEY}"
+SectionEnd
