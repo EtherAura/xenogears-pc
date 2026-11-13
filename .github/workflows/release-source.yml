@@ -2,7 +2,8 @@ name: Release source
 
 # Attaches the source of each release to it: xenogears-pc-<version>.tar.gz, the
 # tree at the release's tag as git archive writes it (tracked files only, so
-# nothing untracked and no game data), its .sha256, and a build-provenance
+# nothing untracked and no game data), its .sha256, a CycloneDX SBOM of the
+# tarball's files (xenogears-pc-<version>.cdx.json), and a build-provenance
 # attestation for the tarball (verify it with `gh attestation verify`).
 # Tags are CalVer, vYYYY.MM.N; anything else is refused before checkout.
 on:
@@ -27,7 +28,7 @@ defaults:
 
 jobs:
   source:
-    name: source tarball and provenance
+    name: source tarball, SBOM and provenance
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:
@@ -72,11 +73,49 @@ jobs:
         with:
           subject-path: ${{ steps.archive.outputs.tarball }}
 
-      - name: Attach the tarball and its checksum to the release
+      # The SBOM describes the tarball's own files: they are unpacked outside the
+      # checkout and Syft scans only that copy, never the workspace.
+      - name: Unpack the tarball for the SBOM
+        id: sbom-source
+        env:
+          TARBALL: ${{ steps.archive.outputs.tarball }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          name="xenogears-pc-$VERSION"
+          dir="$RUNNER_TEMP/sbom-source"
+          mkdir "$dir"
+          tar -xzf "$TARBALL" -C "$dir"
+          test -d "$dir/$name"
+          echo "tree=$dir/$name" >> "$GITHUB_OUTPUT"
+          echo "sbom=dist/$name.cdx.json" >> "$GITHUB_OUTPUT"
+
+      # Uploads are this workflow's own, below: none by the action itself.
+      - name: Generate the CycloneDX SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          path: ${{ steps.sbom-source.outputs.tree }}
+          format: cyclonedx-json
+          output-file: ${{ steps.sbom-source.outputs.sbom }}
+          upload-artifact: false
+          upload-release-assets: false
+          dependency-snapshot: false
+
+      - name: Check the SBOM
+        env:
+          SBOM: ${{ steps.sbom-source.outputs.sbom }}
+        run: |
+          if ! [[ -s "$SBOM" ]]; then
+            echo "::error::no SBOM was written at $SBOM"
+            exit 1
+          fi
+          python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); sys.exit(not (isinstance(d, dict) and d.get("bomFormat") == "CycloneDX" and d.get("specVersion")))' "$SBOM"
+
+      - name: Attach the tarball, its checksum and its SBOM to the release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
           TARBALL: ${{ steps.archive.outputs.tarball }}
           CHECKSUM: ${{ steps.archive.outputs.checksum }}
+          SBOM: ${{ steps.sbom-source.outputs.sbom }}
         run: |
-          gh release upload "$TAG" "$TARBALL" "$CHECKSUM" --repo "$GITHUB_REPOSITORY" --clobber
+          gh release upload "$TAG" "$TARBALL" "$CHECKSUM" "$SBOM" --repo "$GITHUB_REPOSITORY" --clobber

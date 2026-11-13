@@ -23,8 +23,14 @@ Mode "public" (the default; nothing in it is skipped, a missing tool fails):
    attestations write; the tag is validated first and reaches every script
    only through the environment; actions pinned to the verified commits;
    checkout of the tag without kept credentials; the attestation's
-   subject-path is the archive step's tarball; the upload sends exactly the
-   tarball and its .sha256 with the job's own token.
+   subject-path is the archive step's tarball; after the archive, a step
+   unpacks the tarball outside the checkout and names the SBOM
+   dist/xenogears-pc-<version>.cdx.json, the pinned anchore/sbom-action scans
+   exactly that unpacked tree with only supported inputs, format cyclonedx-json,
+   output-file that name and its own artifact, release-asset and dependency
+   snapshot uploads off, a check step fails on a missing, empty or
+   non-CycloneDX file; the upload, last, sends exactly the tarball, its .sha256
+   and the SBOM with the job's own token.
 4. Its scripts, run with bash as the runner runs them: the tag step refuses
    malformed tags (none of them is executed: a canary file stays absent) and
    gives the version for good ones; the archive step, run in a scratch git
@@ -33,15 +39,25 @@ Mode "public" (the default; nothing in it is skipped, a missing tool fails):
    xenogears-pc-<version>.tar.gz holding exactly the tagged files under
    xenogears-pc-<version>/ (pax comment: the tag's commit) and a .sha256 that
    sha256sum -c accepts; a second run writes the same bytes; a missing tag fails.
+   The unpack step, run on that tarball, gives a tree holding exactly the
+   tagged bytes (nothing untracked or modified) and the version's .cdx.json
+   name, which the SBOM action's path/output-file and the upload resolve to; it
+   fails for a missing tarball. The SBOM check step refuses a missing, empty
+   or non-CycloneDX file and accepts a minimal hand-written CycloneDX fixture
+   (this tests the check only: Syft is not run here).
 5. Mutations of the workflow (no attestation, a missing or extra permission,
-   kept credentials, a tag pin, direct interpolation, a third upload, ...)
-   are each caught; the candidate file is unchanged afterwards.
+   kept credentials, a tag pin, direct interpolation, an unrelated extra
+   upload, no SBOM step, another format, output or scanned path, the action's
+   own uploads left on, ...) are each caught; the candidate file is unchanged
+   afterwards.
 
 Mode "overlay" runs 3 to 5 on the overlay file without assembling the tree; it is
 not the acceptance run and says so.
 
 Not checked here (they need GitHub): the real checkout, the attestation (its
-OIDC token, signing and storage: the workflow only requests it) and the upload.
+OIDC token, signing and storage: the workflow only requests it), the SBOM's
+generation by Syft and its schema validity (the wiring is checked, not a real
+SBOM) and the upload.
 """
 from __future__ import annotations
 
@@ -66,9 +82,18 @@ CANDIDATE = ROOT / "tools/publish/repo-port" / PUBLISHED
 THIS = Path(__file__).resolve()
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 ATTEST = "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8"
+SBOM_ACTION = "anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26"
+# Inputs confirmed in action.yml at that commit (tracker epic xg-4oq; the action may declare more, but
+# the workflow uses none outside this set); an undeclared one is ignored by the runner, with a warning.
+SBOM_INPUTS = {"path", "file", "format", "output-file", "artifact-name", "github-token", "syft-version",
+               "dependency-snapshot", "upload-artifact", "upload-release-assets"}
+SBOM_WITH = {"path": "${{ steps.sbom-source.outputs.tree }}", "format": "cyclonedx-json",
+             "output-file": "${{ steps.sbom-source.outputs.sbom }}",
+             "upload-artifact": False, "upload-release-assets": False, "dependency-snapshot": False}
 JOB_PERMISSIONS = {"contents": "write", "id-token": "write", "attestations": "write"}
 TAG_EXPR = "${{ github.event.release.tag_name || inputs.tag }}"
-UPLOAD = ["gh", "release", "upload", "$TAG", "$TARBALL", "$CHECKSUM", "--repo", "$GITHUB_REPOSITORY", "--clobber"]
+UPLOAD = ["gh", "release", "upload", "$TAG", "$TARBALL", "$CHECKSUM", "$SBOM", "--repo", "$GITHUB_REPOSITORY",
+          "--clobber"]
 TAG = "v2099.12.7"  # a scratch tag, in the scratch repository only
 VERSION = TAG[1:]
 NAME = f"xenogears-pc-{VERSION}"
@@ -138,11 +163,35 @@ def workflow_problems(wf) -> list[str]:
     a = find(steps, lambda s: s.get("id") == "archive")
     t = find(steps, lambda s: str(s.get("uses", "")).startswith("actions/attest-build-provenance@"))
     u = find(steps, lambda s: "gh release upload" in (s.get("run") or ""))
-    missing = [n for n, i in (("tag", v), ("checkout", c), ("archive", a), ("attest", t), ("upload", u)) if i is None]
+    g = find(steps, lambda s: s.get("id") == "sbom-source")
+    b = find(steps, lambda s: str(s.get("uses", "")).startswith("anchore/sbom-action@"))
+    k = find(steps, lambda s: "bomFormat" in (s.get("run") or "") and "gh release upload" not in (s.get("run") or ""))
+    missing = [n for n, i in (("tag", v), ("checkout", c), ("archive", a), ("attest", t), ("sbom-source", g),
+                              ("sbom", b), ("sbom-check", k), ("upload", u)) if i is None]
     if missing:
         return p + [f"steps: no {' '.join(missing)} step"]
-    if not (v < c < a < t and a < u):
-        p.append("order: the tag is not validated before checkout and archive, or attest/upload precede the archive")
+    if not (v < c < a < t and a < g < b < k < u and t < u):
+        p.append("order: not tag, checkout, archive, then attest and unpack, SBOM, SBOM check, upload last")
+    if [s.get("uses") for s in steps if str(s.get("uses", "")).startswith("anchore/sbom-action")] != [SBOM_ACTION]:
+        p.append("sbom: not exactly one anchore/sbom-action step")
+    sb = steps[b]
+    if sb.get("uses") != SBOM_ACTION:
+        p.append(f"pin: sbom is {sb.get('uses')}, not {SBOM_ACTION}")
+    sw = sb.get("with") or {}
+    if set(sw) - SBOM_INPUTS:
+        p.append(f"sbom: unsupported input {sorted(set(sw) - SBOM_INPUTS)}")
+    if sw != SBOM_WITH:
+        p.append(f"sbom: with is {sw}, not {SBOM_WITH}")
+    if sb.get("env") or sb.get("if") is not None or sb.get("continue-on-error") is not None:
+        p.append("sbom: the step has env, a condition or continue-on-error")
+    want_src = {"TARBALL": "${{ steps.archive.outputs.tarball }}", "VERSION": "${{ steps.tag.outputs.version }}"}
+    if steps[g].get("env") != want_src:
+        p.append(f"sbom-source: env is {steps[g].get('env')}, not {want_src}")
+    if steps[k].get("env") != {"SBOM": "${{ steps.sbom-source.outputs.sbom }}"}:
+        p.append(f"sbom-check: env is {steps[k].get('env')}, not the SBOM step's output-file")
+    for i in (g, k):
+        if steps[i].get("if") is not None or steps[i].get("continue-on-error") is not None:
+            p.append(f"sbom: step {steps[i].get('name')} has a condition or continue-on-error")
     if (steps[v].get("env") or {}).get("TAG") != TAG_EXPR:
         p.append(f"tag: the tag step's TAG is not {TAG_EXPR}")
     co = steps[c]
@@ -162,7 +211,8 @@ def workflow_problems(wf) -> list[str]:
     if len(lines) != 1 or shlex.split(lines[0]) != UPLOAD:
         p.append(f"upload: the script is {lines}, not {' '.join(UPLOAD)}")
     want = {"GH_TOKEN": "${{ github.token }}", "TAG": "${{ steps.tag.outputs.tag }}",
-            "TARBALL": "${{ steps.archive.outputs.tarball }}", "CHECKSUM": "${{ steps.archive.outputs.checksum }}"}
+            "TARBALL": "${{ steps.archive.outputs.tarball }}", "CHECKSUM": "${{ steps.archive.outputs.checksum }}",
+            "SBOM": "${{ steps.sbom-source.outputs.sbom }}"}
     if up.get("env") != want:
         p.append(f"upload: env is {up.get('env')}, not {want}")
     return p
@@ -192,7 +242,8 @@ def run_step(step: dict, ctx: dict, cwd: Path, scratch: Path) -> tuple[int, dict
     script, output = scratch / "step.sh", scratch / "step.out"
     script.write_text(step["run"])
     output.write_text("")
-    env = {"PATH": os.environ["PATH"], "HOME": str(scratch), "LC_ALL": "C", "GITHUB_OUTPUT": str(output)}
+    env = {"PATH": os.environ["PATH"], "HOME": str(scratch), "LC_ALL": "C", "GITHUB_OUTPUT": str(output),
+           "RUNNER_TEMP": str(ctx.get("runner_temp", scratch / "runner-temp-unset"))}
     env.update({k: resolve(v, ctx) for k, v in (step.get("env") or {}).items()})
     result = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)],
                             cwd=cwd, env=env, capture_output=True, text=True)
@@ -200,12 +251,36 @@ def run_step(step: dict, ctx: dict, cwd: Path, scratch: Path) -> tuple[int, dict
     return result.returncode, outputs, result.stdout + result.stderr
 
 
+KINDS = {
+    "tag": lambda s: s.get("id") == "tag",
+    "checkout": lambda s: str(s.get("uses", "")).startswith("actions/checkout@"),
+    "archive": lambda s: s.get("id") == "archive",
+    "attest": lambda s: str(s.get("uses", "")).startswith("actions/attest-build-provenance@"),
+    "sbom-source": lambda s: s.get("id") == "sbom-source",
+    "sbom": lambda s: str(s.get("uses", "")).startswith("anchore/sbom-action@"),
+    "sbom-check": lambda s: "bomFormat" in (s.get("run") or "") and "gh release upload" not in (s.get("run") or ""),
+    "upload": lambda s: "gh release upload" in (s.get("run") or ""),
+}
+
+
+def step(w: dict, kind: str) -> dict:
+    """A step of a (mutable) workflow by what it does, not by its index."""
+    return next(s for s in w["jobs"]["source"]["steps"] if KINDS[kind](s))
+
+
 def steps_of(wf: dict) -> dict:
-    steps = wf["jobs"]["source"]["steps"]
-    return {"tag": next(s for s in steps if s.get("id") == "tag"),
-            "archive": next(s for s in steps if s.get("id") == "archive"),
-            "attest": next(s for s in steps if str(s.get("uses", "")).startswith("actions/attest-build-provenance@")),
-            "upload": next(s for s in steps if "gh release upload" in (s.get("run") or ""))}
+    return {kind: step(wf, kind) for kind in KINDS if kind != "checkout"}
+
+
+def drop(w: dict, kind: str) -> None:
+    w["jobs"]["source"]["steps"].remove(step(w, kind))
+
+
+def move_before(w: dict, kind: str, other: str) -> None:
+    steps = w["jobs"]["source"]["steps"]
+    s = step(w, kind)
+    steps.remove(s)
+    steps.insert(steps.index(step(w, other)), s)
 
 
 def check_workflow(path: Path, label: str) -> dict:
@@ -235,7 +310,7 @@ def check_tags(wf: dict, scratch: Path) -> None:
 
 MUTATIONS = [
     ("no attestation step", "steps: no attest",
-     lambda w: w["jobs"]["source"]["steps"].__delitem__(3)),
+     lambda w: drop(w, "attest")),
     ("id-token permission dropped", "permissions: job",
      lambda w: w["jobs"]["source"]["permissions"].pop("id-token")),
     ("attestations permission dropped", "permissions: job",
@@ -247,22 +322,69 @@ MUTATIONS = [
     ("workflow-level contents: write", "permissions: workflow",
      lambda w: w.update(permissions={"contents": "write"})),
     ("checkout keeps credentials", "checkout: credentials",
-     lambda w: w["jobs"]["source"]["steps"][1]["with"].pop("persist-credentials")),
+     lambda w: step(w, "checkout")["with"].pop("persist-credentials")),
     ("attest pinned by tag", "pin:",
-     lambda w: w["jobs"]["source"]["steps"][3].update(uses="actions/attest-build-provenance@v4")),
+     lambda w: step(w, "attest").update(uses="actions/attest-build-provenance@v4")),
     ("attest of the checksum", "attest: subject-path",
-     lambda w: w["jobs"]["source"]["steps"][3]["with"].update({"subject-path": "${{ steps.archive.outputs.checksum }}"})),
+     lambda w: step(w, "attest")["with"].update({"subject-path": "${{ steps.archive.outputs.checksum }}"})),
     ("tag interpolated into the script", "interpolation:",
-     lambda w: w["jobs"]["source"]["steps"][0].update(run="echo \"tag=${{ inputs.tag }}\" >> \"$GITHUB_OUTPUT\"\n")),
-    ("a third upload", "upload: the script",
-     lambda w: w["jobs"]["source"]["steps"][4].update(run=w["jobs"]["source"]["steps"][4]["run"].replace(
-         '"$CHECKSUM"', '"$CHECKSUM" extra.bin'))),
+     lambda w: step(w, "tag").update(run="echo \"tag=${{ inputs.tag }}\" >> \"$GITHUB_OUTPUT\"\n")),
+    ("an unrelated extra upload", "upload: the script",
+     lambda w: step(w, "upload").update(run=step(w, "upload")["run"].replace('"$SBOM"', '"$SBOM" extra.bin'))),
     ("a secret instead of the job token", "upload: env",
-     lambda w: w["jobs"]["source"]["steps"][4]["env"].update(GH_TOKEN="${{ secrets.RELEASE_TOKEN }}")),
+     lambda w: step(w, "upload")["env"].update(GH_TOKEN="${{ secrets.RELEASE_TOKEN }}")),
     ("release created, not published", "trigger:",
      lambda w: w[True if True in w else "on"]["release"].update(types=["created"])),
     ("checkout before the tag is validated", "order:",
-     lambda w: w["jobs"]["source"]["steps"].insert(0, w["jobs"]["source"]["steps"].pop(1))),
+     lambda w: move_before(w, "checkout", "tag")),
+    # The SBOM.
+    ("no SBOM generation", "steps: no sbom",
+     lambda w: drop(w, "sbom")),
+    ("no SBOM check", "steps: no sbom-check",
+     lambda w: drop(w, "sbom-check")),
+    ("no unpacked tree for the SBOM", "steps: no sbom-source",
+     lambda w: drop(w, "sbom-source")),
+    ("SBOM pinned by tag", "pin:",
+     lambda w: step(w, "sbom").update(uses="anchore/sbom-action@v0")),
+    ("SBOM format SPDX", "sbom: with",
+     lambda w: step(w, "sbom")["with"].update(format="spdx-json")),
+    ("SBOM format left to the default (SPDX)", "sbom: with",
+     lambda w: step(w, "sbom")["with"].pop("format")),
+    ("SBOM written over the tarball", "sbom: with",
+     lambda w: step(w, "sbom")["with"].update({"output-file": "${{ steps.archive.outputs.tarball }}"})),
+    ("SBOM output-file a fixed name", "sbom: with",
+     lambda w: step(w, "sbom")["with"].update({"output-file": "dist/sbom.cdx.json"})),
+    ("SBOM of the workspace, not the tarball's files", "sbom: with",
+     lambda w: step(w, "sbom")["with"].update(path=".")),
+    ("SBOM of the tarball file instead of the tree", "sbom: with",
+     lambda w: (step(w, "sbom")["with"].pop("path"),
+                step(w, "sbom")["with"].update(file="${{ steps.archive.outputs.tarball }}"))),
+    ("SBOM release-asset upload left on (default true)", "sbom: with",
+     lambda w: step(w, "sbom")["with"].pop("upload-release-assets")),
+    ("SBOM release-asset upload on", "sbom: with",
+     lambda w: step(w, "sbom")["with"].update({"upload-release-assets": True})),
+    ("SBOM workflow artifact left on (default true)", "sbom: with",
+     lambda w: step(w, "sbom")["with"].pop("upload-artifact")),
+    ("SBOM dependency snapshot on", "sbom: with",
+     lambda w: step(w, "sbom")["with"].update({"dependency-snapshot": True})),
+    ("SBOM given a secret token", "sbom: with",
+     lambda w: step(w, "sbom")["with"].update({"github-token": "${{ secrets.RELEASE_TOKEN }}"})),
+    ("SBOM input not declared by the action", "sbom: unsupported input",
+     lambda w: step(w, "sbom")["with"].update({"upload-assets": False})),
+    ("SBOM failure ignored", "sbom: the step",
+     lambda w: step(w, "sbom").update({"continue-on-error": True})),
+    ("SBOM check reads another file", "sbom-check: env",
+     lambda w: step(w, "sbom-check")["env"].update(SBOM="${{ steps.archive.outputs.checksum }}")),
+    ("unpack from the workspace version, not the tag's", "sbom-source: env",
+     lambda w: step(w, "sbom-source")["env"].update(VERSION="${{ inputs.tag }}")),
+    ("SBOM generated before the archive", "order:",
+     lambda w: move_before(w, "sbom", "archive")),
+    ("upload before the SBOM check", "order:",
+     lambda w: move_before(w, "upload", "sbom-check")),
+    ("upload without the SBOM", "upload: the script",
+     lambda w: step(w, "upload").update(run=step(w, "upload")["run"].replace(' "$SBOM"', ''))),
+    ("upload's SBOM is the checksum", "upload: env",
+     lambda w: step(w, "upload")["env"].update(SBOM="${{ steps.archive.outputs.checksum }}")),
 ]
 
 
@@ -414,6 +536,8 @@ def exercise(wf: dict, tree: Path, scratch: Path) -> None:
     leaked = sorted(n for n in got if n in ("UNTRACKED-PRIVATE.txt",) or n.startswith(("disc/", "dist/", ".git/")))
     check(not leaked, f"no untracked, game-data path, dist or .git entry ({leaked or 'none'})")
 
+    exercise_sbom(steps, ctx, tree, scratch, expected, tarball, sidecar)
+
     first = tarball.read_bytes(), sidecar.read_bytes()
     shutil.rmtree(dist)
     rc, _, _ = run_step(steps["archive"], ctx, tree, scratch)
@@ -422,6 +546,56 @@ def exercise(wf: dict, tree: Path, scratch: Path) -> None:
     missing = {"steps": {"tag": {"tag": "v2099.12.8", "version": "2099.12.8"}}}
     rc, _, _ = run_step(steps["archive"], missing, tree, scratch)
     check(rc != 0 and not (dist / "xenogears-pc-2099.12.8.tar.gz").exists(), "the archive step fails for a missing tag")
+
+
+def exercise_sbom(steps: dict, ctx: dict, tree: Path, scratch: Path, expected: dict,
+                  tarball: Path, sidecar: Path) -> None:
+    """The unpack and SBOM check steps; Syft itself (the action) is not run here."""
+    temp = scratch / "runner-temp"
+    shutil.rmtree(temp, ignore_errors=True)
+    temp.mkdir()
+    ctx["runner_temp"] = temp
+    rc, ctx["steps"]["sbom-source"], log = run_step(steps["sbom-source"], ctx, tree, scratch)
+    if not check(rc == 0, f"unpack step ran ({log.strip() or ctx['steps']['sbom-source']})"):
+        return
+    unpacked, sbom = temp / "sbom-source" / NAME, tree / "dist" / f"{NAME}.cdx.json"
+    check(ctx["steps"]["sbom-source"] == {"tree": str(unpacked), "sbom": f"dist/{NAME}.cdx.json"},
+          f"unpack step gives tree {unpacked.relative_to(scratch)} and sbom dist/{NAME}.cdx.json")
+    check(not unpacked.resolve().is_relative_to(tree.resolve()), "the unpacked tree is outside the checkout")
+    check(snapshot(unpacked) == expected and not (unpacked / "UNTRACKED-PRIVATE.txt").exists()
+          and not (unpacked / "disc").exists(),
+          f"the unpacked tree holds exactly the {len(expected)} tagged files with their tagged bytes")
+    check(sorted(p.name for p in sbom.parent.iterdir()) == sorted([tarball.name, sidecar.name]),
+          "unpacking writes nothing into dist (the SBOM is the action's to write)")
+    w = steps["sbom"]["with"]
+    check(Path(resolve(w["path"], ctx)) == unpacked, "the SBOM action scans the unpacked tagged tree")
+    check(tree / resolve(w["output-file"], ctx) == sbom and sbom.name != tarball.name,
+          f"the SBOM action writes {sbom.name}, beside the tarball, not over it")
+    up = steps["upload"]["env"]
+    check([tree / resolve(up[k], ctx) for k in ("TARBALL", "CHECKSUM", "SBOM")] == [tarball, sidecar, sbom],
+          "the upload's TARBALL, CHECKSUM and SBOM are the tarball, its .sha256 and the SBOM's output-file")
+    check(tree / resolve(steps["sbom-check"]["env"]["SBOM"], ctx) == sbom, "the SBOM check reads the output-file")
+
+    # The check step, on stand-in files (no SBOM is generated here; these only exercise the check).
+    cases = [("missing", None, False), ("empty", "", False), ("not JSON", "not json\n", False),
+             ("SPDX, not CycloneDX", '{"spdxVersion": "SPDX-2.3"}\n', False),
+             ("a JSON list", '["bomFormat"]\n', False),
+             ("CycloneDX without specVersion", '{"bomFormat": "CycloneDX"}\n', False),
+             ("minimal hand-written CycloneDX fixture", '{"bomFormat": "CycloneDX", "specVersion": "1.6"}\n', True)]
+    for label, text, ok in cases:
+        sbom.unlink(missing_ok=True)
+        if text is not None:
+            sbom.write_text(text)
+        rc, _, _ = run_step(steps["sbom-check"], ctx, tree, scratch)
+        check((rc == 0) == ok, f"SBOM check {'accepts' if ok else 'refuses'} {label}")
+    sbom.unlink(missing_ok=True)
+
+    shutil.rmtree(temp)
+    temp.mkdir()
+    gone = dict(ctx, steps=dict(ctx["steps"], archive={"tarball": "dist/absent.tar.gz"}))
+    rc, out, _ = run_step(steps["sbom-source"], gone, tree, scratch)
+    check(rc != 0 and not out, "the unpack step fails for a missing tarball")
+    shutil.rmtree(temp)
 
 
 def main() -> int:
@@ -470,7 +644,8 @@ def report(mode: str) -> int:
     scope = "published tree assembled by the publisher" if mode == "public" else \
         "overlay file only, the published tree was NOT assembled (not the acceptance run)"
     print(f"test_publish_release_source: all checks pass ({scope}; the real checkout, the attestation "
-          "(requested, not verified) and the upload need GitHub and are not checked)")
+          "(requested, not verified), the SBOM's generation by Syft and its schema validity (wiring checked, "
+          "no real SBOM made) and the upload need GitHub and are not checked)")
     return 0
 
 
