@@ -80,6 +80,27 @@ copy list as this link computes it; anything else stops the link.
     python tools/pc_link.py --write-facts facts.json OUTDIR OBJ...   # from disc/<ver>/
     python tools/pc_link.py --facts facts.json OUTDIR OBJ...         # without it
 
+What the link takes from the PS1 build's images (build/<ver>/<module>.elf, for the check
+above) is a few facts per module (PS1 object facts; no section contents): the names of the C
+data its PC objects define (one per place), and the address and PS1 extent of each of those
+the image defines as a global. --write-ps1-objects FILE writes them, read from every linked
+module's image (one that cannot be read stops it); --ps1-objects FILE takes them from such a
+file, and the images are then not opened. The PC objects are read as always. The file is JSON:
+
+    {"format": "xenogears-pc-link-ps1-objects", "version": 1, "region": "us" or "jp",
+     "boot": the boot file (config/<ver>/disc.yaml),
+     "modules": {module: {"names": [name, ...] (ascending),
+                          "objects": [[name, address, extent], ...] (the image's symbol order)}}}
+
+It must be this link's region and boot file, cover every module linked and no other, and give
+each module exactly the names its PC objects give; an object's name is one of them, once, and
+[address, address + extent) a non-empty range of 32-bit addresses; anything else stops the
+link. Without the images it cannot be told whether the addresses are still the current PS1
+build's: a file from an older PS1 build of the same region and C data names is taken as it is.
+
+    python tools/pc_link.py --write-ps1-objects ps1.json OUTDIR OBJ...  # from build/<ver>/
+    python tools/pc_link.py --ps1-objects ps1.json OUTDIR OBJ...        # without them
+
 Sizes come from the game's own declarations: each file that uses a symbol is
 compiled again with `char x[sizeof(sym)]` appended, once for the PC (x86-64)
 and once for the PS1 layout (-m32 with XG_PS1_LAYOUT: 4-byte pointers and tags),
@@ -336,30 +357,58 @@ def elf_symbols(path: Path) -> list[tuple[str, int, int, int, int, int]]:
     return out
 
 
-def ps1_c_objects(ver: str, data: dict[str, dict[str, tuple[str, str, int]]]) -> list[tuple[str, str, int, int, str]]:
+def ps1_elf(ver: str, mod: str) -> Path:
+    """A module's image from the PS1 build (not a PC compiler's object)."""
+    return ROOT / "build" / ver / f"{mod}.elf"
+
+
+def ps1_elf_objects(path: Path) -> list[tuple[str, int, int]]:
+    """(name, address, PS1 extent) of each global data symbol a PS1 build image defines, in its
+    symbol table's order: what ps1_c_objects takes from the image (absolute symbols, such as the
+    linker's, one byte)."""
+    return [(name, value, max(size, 1) if shndx != 0xFFF1 else 1)
+            for name, value, size, typ, bind, shndx in elf_symbols(path) if bind == 1 and typ in (0, 1) and shndx != 0]
+
+
+def c_object_names(where: dict[str, tuple[str, str, int]]) -> set[str]:
+    """One name per place among a module's C data objects (the first by name: aliases are one object)."""
+    names = {}
+    for name in sorted(where):
+        names.setdefault(where[name], name)
+    return set(names.values())
+
+
+def ps1_c_objects(ver: str, data: dict[str, dict[str, tuple[str, str, int]]],
+                  objects: dict[str, dict] | None = None) -> list[tuple[str, str, int, int, str]]:
     """The PS1 memory the C's own data objects stand for, from the PS1 build's images
-    (build/<ver>/<module>.elf; the PS1 build passes before a PC build): (module, name, address,
-    size, '') for each data object a module's PC objects define (one name per place: aliases
-    are the same object): the PS1 C's data where the PS1 build placed it, and the port's own
-    definitions of PS1 data (port/src/game/<module>/bss.c) at the symbol files' addresses, one
-    byte each (their PS1 extent is not recorded). Missing or unreadable images are skipped with
-    a warning."""
+    (build/<ver>/<module>.elf; the PS1 build passes before a PC build), or from `objects`
+    (parse_ps1_objects: the images are then not opened, and each module's names must be the ones
+    its PC objects give, else Ps1ObjectsError):
+    (module, name, address, size, '') for each data object a module's PC objects define (one name
+    per place: aliases are the same object): the PS1 C's data where the PS1 build placed it, and
+    the port's own definitions of PS1 data (port/src/game/<module>/bss.c) at the symbol files'
+    addresses, one byte each (their PS1 extent is not recorded). Missing or unreadable images
+    are skipped with a warning."""
     out = []
     for mod, where in sorted(data.items()):
-        names = {}
-        for name in sorted(where):
-            names.setdefault(where[name], name)
-        names = set(names.values())
-        elf = ROOT / "build" / ver / f"{mod}.elf"
-        try:
-            syms = elf_symbols(elf)
-        except (OSError, ValueError, struct.error, IndexError) as e:
-            print(f"warning: pc_link: {elf.relative_to(ROOT)} not read ({e}): its C data is not checked "
-                  "against the generated data", file=sys.stderr)
-            continue
-        for name, value, size, typ, bind, shndx in syms:
-            if bind == 1 and typ in (0, 1) and shndx != 0 and name in names:
-                out.append((mod, name, value, max(size, 1) if shndx != 0xFFF1 else 1, ""))
+        names = c_object_names(where)
+        if objects is not None:
+            if set(objects[mod]["names"]) != names:
+                missing, extra = names - set(objects[mod]["names"]), set(objects[mod]["names"]) - names
+                raise Ps1ObjectsError(f"PS1 object facts: {mod}: the C data names are not this link's ({len(missing)} "
+                                      f"not in the file, {len(extra)} not linked): the facts are another build's")
+            syms = objects[mod]["objects"]
+        else:
+            elf = ps1_elf(ver, mod)
+            try:
+                syms = ps1_elf_objects(elf)
+            except (OSError, ValueError, struct.error, IndexError) as e:
+                print(f"warning: pc_link: {elf.relative_to(ROOT)} not read ({e}): its C data is not checked "
+                      "against the generated data", file=sys.stderr)
+                continue
+        for name, value, extent in syms:
+            if name in names:
+                out.append((mod, name, value, extent, ""))
     return out
 
 
@@ -927,6 +976,117 @@ def facts_json(ver: str, boot: str | None, facts: dict[str, dict]) -> str:
     return json.dumps(doc, indent=1, sort_keys=True) + "\n"
 
 
+# The PS1 object facts (module docstring): what the link takes from the PS1 build's images.
+PS1_OBJECTS_FORMAT = "xenogears-pc-link-ps1-objects"
+PS1_OBJECTS_VERSION = 1
+PS1_SYMBOL = re.compile(r"[A-Za-z_.$][A-Za-z0-9_.$]*")
+
+
+class Ps1ObjectsError(ValueError):
+    """PS1 object facts that are not this link's, or not PS1 object facts."""
+
+
+def _ps1_no_duplicates(pairs: list[tuple[str, object]]) -> dict:
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            raise Ps1ObjectsError(f"PS1 object facts: key {k!r} given twice")
+        out[k] = v
+    return out
+
+
+def read_ps1_objects(ver: str, modules: list[str]) -> dict[str, list[tuple[str, int, int]]]:
+    """Every linked module's ps1_elf_objects, from build/<ver>/; an image that cannot be read stops
+    (no module is left out of a facts file)."""
+    out = {}
+    for mod in modules:
+        elf = ps1_elf(ver, mod)
+        try:
+            out[mod] = ps1_elf_objects(elf)
+        except (OSError, ValueError, struct.error, IndexError) as e:
+            raise Ps1ObjectsError(f"PS1 object facts: {elf.relative_to(ROOT)} not read ({e})") from None
+    return out
+
+
+def ps1_objects_facts(data: dict[str, dict[str, tuple[str, str, int]]],
+                      elf_objects: dict[str, list[tuple[str, int, int]]]) -> dict[str, dict]:
+    """The PS1 object facts for this link: per module, the C data names its PC objects give
+    (c_object_names) and, of the image's ps1_elf_objects, those with one of them."""
+    out = {}
+    for mod in elf_objects:
+        names = c_object_names(data.get(mod, {}))
+        out[mod] = {"names": sorted(names), "objects": [o for o in elf_objects[mod] if o[0] in names]}
+    return out
+
+
+def parse_ps1_objects(text: str, ver: str, boot: str | None, modules: list[str]) -> dict[str, dict]:
+    """PS1 object facts from their JSON, checked against this link (region `ver`, boot file `boot`,
+    the modules linked): module -> {'names': [name], 'objects': [(name, address, extent)]}
+    (ps1_objects_facts). Ps1ObjectsError on anything else; nothing is filled in."""
+    try:
+        doc = json.loads(text, object_pairs_hook=_ps1_no_duplicates)
+    except json.JSONDecodeError as e:
+        raise Ps1ObjectsError(f"PS1 object facts: not JSON ({e})") from None
+    if not isinstance(doc, dict) or set(doc) != FACTS_KEYS:
+        got = sorted(doc) if isinstance(doc, dict) else type(doc).__name__
+        raise Ps1ObjectsError(f"PS1 object facts: want keys {sorted(FACTS_KEYS)}, got {got}")
+    if doc["format"] != PS1_OBJECTS_FORMAT or type(doc["version"]) is not int or doc["version"] != PS1_OBJECTS_VERSION:
+        raise Ps1ObjectsError(f"PS1 object facts: format {doc['format']!r} version {doc['version']!r}, "
+                              f"want {PS1_OBJECTS_FORMAT!r} version {PS1_OBJECTS_VERSION}")
+    if not isinstance(doc["region"], str) or doc["region"] != ver:
+        raise Ps1ObjectsError(f"PS1 object facts: region {doc['region']!r}, but this link is {ver!r}")
+    if not isinstance(doc["boot"], str) or doc["boot"] != boot:
+        raise Ps1ObjectsError(f"PS1 object facts: boot file {doc['boot']!r}, but config/{ver}/disc.yaml's is {boot!r}")
+    mods = doc["modules"]
+    if not isinstance(mods, dict):
+        raise Ps1ObjectsError("PS1 object facts: modules is not an object")
+    missing, extra = sorted(set(modules) - set(mods)), sorted(set(mods) - set(modules))
+    if missing or extra:
+        raise Ps1ObjectsError(f"PS1 object facts: modules missing {missing}, not linked {extra}")
+    out = {}
+    for m in modules:
+        if not isinstance(mods[m], dict) or set(mods[m]) != {"names", "objects"}:
+            raise Ps1ObjectsError(f"PS1 object facts: {m}: want keys ['names', 'objects']")
+        names, objects = mods[m]["names"], mods[m]["objects"]
+        if (not isinstance(names, list) or any(not isinstance(n, str) or not PS1_SYMBOL.fullmatch(n) for n in names)
+                or names != sorted(set(names))):
+            raise Ps1ObjectsError(f"PS1 object facts: {m}: names is not an ascending list of symbol names")
+        if not isinstance(objects, list):
+            raise Ps1ObjectsError(f"PS1 object facts: {m}: objects is not a list of [name, address, extent]")
+        seen, syms = set(), []
+        for e in objects:
+            if not isinstance(e, list) or len(e) != 3:
+                raise Ps1ObjectsError(f"PS1 object facts: {m}: {e!r} is not [name, address, extent]")
+            name, a, n = e
+            if not isinstance(name, str) or name not in names:
+                raise Ps1ObjectsError(f"PS1 object facts: {m}: object {name!r} is not one of its names")
+            if name in seen:
+                raise Ps1ObjectsError(f"PS1 object facts: {m}: {name} given twice")
+            if type(a) is not int or type(n) is not int or not 0 <= a <= 0xFFFFFFFF or not 1 <= n <= 0x100000000 - a:
+                raise Ps1ObjectsError(f"PS1 object facts: {m} {name}: address {a!r} and extent {n!r} are not "
+                                      "a range of 32-bit addresses")
+            seen.add(name)
+            syms.append((name, a, n))
+        out[m] = {"names": names, "objects": syms}
+    return out
+
+
+def load_ps1_objects(path: Path, ver: str, boot: str | None, modules: list[str]) -> dict[str, dict]:
+    try:
+        text = path.read_text()
+    except OSError as e:
+        raise Ps1ObjectsError(f"PS1 object facts: {e}") from None
+    return parse_ps1_objects(text, ver, boot, modules)
+
+
+def ps1_objects_json(ver: str, boot: str | None, facts: dict[str, dict]) -> str:
+    """The PS1 object facts file for region `ver` (parse_ps1_objects reads it)."""
+    doc = {"format": PS1_OBJECTS_FORMAT, "version": PS1_OBJECTS_VERSION, "region": ver, "boot": boot,
+           "modules": {m: {"names": sorted(f["names"]), "objects": [[name, a, n] for name, a, n in f["objects"]]}
+                       for m, f in sorted(facts.items())}}
+    return json.dumps(doc, indent=1, sort_keys=True) + "\n"
+
+
 def copy_list(owner: str, copies: list[tuple[str, int, int, int, bool]], img: Image | None, info: dict | None,
               source: DiscFacts | MetadataFacts) -> tuple[list[str], list[str], dict, dict]:
     """A module's copy list from its copies (object, offset, PS1 address, size, disc-specific) and
@@ -989,6 +1149,11 @@ def main() -> int:
     ap.add_argument("--facts", type=Path,
                     help="take the link facts from this file (--write-facts) instead of disc/<ver>/")
     ap.add_argument("--write-facts", type=Path, help="write the link facts used to this file")
+    ps1 = ap.add_mutually_exclusive_group()
+    ps1.add_argument("--ps1-objects", type=Path,
+                     help="take the PS1 object facts from this file (--write-ps1-objects) instead of build/<ver>/*.elf")
+    ps1.add_argument("--write-ps1-objects", type=Path,
+                     help="write the PS1 object facts, read from every linked module's build/<ver>/<module>.elf, to this file")
     args = ap.parse_args()
     GAME_FLAGS[GAME_FLAGS.index("-Iinclude")] = f"-I{args.game_root / 'include'}"
 
@@ -1030,6 +1195,11 @@ def main() -> int:
         source = (MetadataFacts(load_facts(args.facts, args.ver, boot_name(files), modules)) if args.facts
                   else DiscFacts())
     except FactsError as e:
+        raise SystemExit(f"pc_link: {e}") from None
+    try:
+        ps1_objects = load_ps1_objects(args.ps1_objects, args.ver, boot_name(files), modules) if args.ps1_objects else None
+        ps1_elf_read = read_ps1_objects(args.ver, modules) if args.write_ps1_objects else None
+    except Ps1ObjectsError as e:
         raise SystemExit(f"pc_link: {e}") from None
     facts_used: dict[str, dict] = {}
     defined: dict[str, set[str]] = {}
@@ -1574,7 +1744,13 @@ def main() -> int:
 
     # One PS1 address, one PC object: the game C's own data (where the PS1 build put it) and what
     # this link generated must not overlap in modules that can be loaded together.
-    c_objects = ps1_c_objects(args.ver, data_objects)
+    try:
+        if ps1_elf_read is not None:  # the file written is read back as --ps1-objects reads it, and used so
+            ps1_objects_text = ps1_objects_json(args.ver, boot_name(files), ps1_objects_facts(data_objects, ps1_elf_read))
+            ps1_objects = parse_ps1_objects(ps1_objects_text, args.ver, boot_name(files), modules)
+        c_objects = ps1_c_objects(args.ver, data_objects, ps1_objects)
+    except Ps1ObjectsError as e:
+        raise SystemExit(f"pc_link: {e}") from None
     separate: set[frozenset] = set()
     collisions = overlapping_storage(storage + c_objects, extents, SEPARATE, separate)
     # Nor may a module hold storage for another module's address (battle_loader's and
@@ -1706,6 +1882,8 @@ def main() -> int:
     (args.outdir / "report.txt").write_text("\n".join(summary + numeric_refs) + "\n")
     if args.write_facts:
         args.write_facts.write_text(facts_json(args.ver, boot_name(files), facts_used))
+    if args.write_ps1_objects:
+        args.write_ps1_objects.write_text(ps1_objects_text)
     print("\n".join(summary))
     return 0
 
