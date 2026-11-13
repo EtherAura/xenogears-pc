@@ -561,6 +561,8 @@ class Runner:
         d = self.scratch("pad", *(f"pad_profiletest-{mode}" for mode in ("write", "read", "script", "script2")))
         for mode in ("write", "read", "script", "script2"):
             self.run(f"pad_profiletest-{mode}", b / "pad_profiletest", d, mode, target="pad_profiletest")
+        d = self.scratch("pad_ini", "pad_profiletest-ini")
+        self.run("pad_profiletest-ini", b / "pad_profiletest", d, "ini", target="pad_profiletest")
 
         for t in ("texturepacktest", "glyphtest", "portraitpacktest", "celgputest"):
             d = self.scratch(t, t, f"{t}-reload")

@@ -68,6 +68,18 @@ the extracted images (disc/<ver>/). The executable carries neither the bytes
 nor anything derived from them beyond offsets, sizes and the hash
 (tools/payloadcheck.py checks it).
 
+What the link takes from the extracted images is a few facts per module (link
+facts): the file's size, a fingerprint of its copy list (addresses and sizes),
+the hash of the bytes copied, and which copies the disc's bytes differ from the
+data assembly's (report.txt). --write-facts FILE writes them (JSON, no game
+bytes); --facts FILE takes them from such a file instead of disc/<ver>/, which
+is then not opened. The file must be this link's: its region and boot file
+(config/<ver>/disc.yaml), every module linked and no other, and each module's
+copy list as this link computes it; anything else stops the link.
+
+    python tools/pc_link.py --write-facts facts.json OUTDIR OBJ...   # from disc/<ver>/
+    python tools/pc_link.py --facts facts.json OUTDIR OBJ...         # without it
+
 Sizes come from the game's own declarations: each file that uses a symbol is
 compiled again with `char x[sizeof(sym)]` appended, once for the PC (x86-64)
 and once for the PS1 layout (-m32 with XG_PS1_LAYOUT: 4-byte pointers and tags),
@@ -81,6 +93,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import concurrent.futures
+import json
 import os
 import re
 import struct
@@ -787,6 +800,160 @@ def disc_files(ver: str) -> dict[str, dict]:
     return out
 
 
+def boot_name(files: dict[str, dict]) -> str | None:
+    """The boot executable's name on the disc (its `iso` entry): one region's, not the other's."""
+    return next((info["iso"] for info in files.values() if "iso" in info), None)
+
+
+# The link facts (module docstring): what the link takes from each module's extracted image.
+FACTS_FORMAT = "xenogears-pc-link-facts"
+FACTS_VERSION = 1
+FACTS_KEYS = {"format", "version", "region", "boot", "modules"}
+MODULE_FACTS_KEYS = {"size", "copies", "hash", "differs"}
+HEX64 = re.compile(r"[0-9a-f]{16}")
+
+
+class FactsError(ValueError):
+    """Link facts that are not this link's, or not link facts."""
+
+
+def copy_fingerprint(runs: list[tuple[str, int, int, int, int, bool]]) -> int:
+    """FNV-1a of a module's copy list as addresses and sizes (PS1 address, file offset, size,
+    disc-specific): facts for one copy list are not used for another."""
+    return fnv1a64(struct.pack("<IIIB", a, rom, n, own) for _, _, a, rom, n, own in runs)
+
+
+class DiscFacts:
+    """Link facts from the extracted images (disc/<ver>/)."""
+
+    def module(self, owner: str, info: dict | None, runs: list, img: Image | None) -> dict:
+        path = info["path"] if info else None
+        size = path.stat().st_size if path is not None and path.exists() else 0
+        hash_chunks, differs = [], []
+        if runs:
+            image = path.read_bytes()
+            for i, (_, _, a, rom, n, own) in enumerate(runs):
+                got = image[rom:rom + n]
+                if len(got) == n and got != img.get(a, n):
+                    differs.append(i)
+                if not own:
+                    hash_chunks.append(got)
+        return {"size": size, "copies": copy_fingerprint(runs), "hash": fnv1a64(hash_chunks), "differs": differs}
+
+
+class MetadataFacts:
+    """Link facts from a file (load_facts); the extracted images are not opened."""
+
+    def __init__(self, doc: dict):
+        self.modules = doc["modules"]
+
+    def module(self, owner: str, info: dict | None, runs: list, img: Image | None) -> dict:
+        facts = self.modules.get(owner)
+        if facts is None:
+            raise FactsError(f"link facts: no entry for {owner}")
+        if facts["copies"] != copy_fingerprint(runs):
+            raise FactsError(f"link facts: {owner}'s copy list is not the one this link computes "
+                             f"(the facts are another build's)")
+        if facts["differs"] and facts["differs"][-1] >= len(runs):
+            raise FactsError(f"link facts: {owner}: differs names copy {facts['differs'][-1]} of {len(runs)}")
+        return facts
+
+
+def _no_duplicates(pairs: list[tuple[str, object]]) -> dict:
+    out = {}
+    for k, v in pairs:
+        if k in out:
+            raise FactsError(f"link facts: key {k!r} given twice")
+        out[k] = v
+    return out
+
+
+def parse_facts(text: str, ver: str, boot: str | None, modules: list[str]) -> dict:
+    """Link facts from their JSON, checked against this link (region `ver`, boot file `boot`,
+    the modules linked): {'format', 'version', 'region', 'boot', 'modules': {module: {'size',
+    'copies', 'hash', 'differs'}}}, with the copy fingerprint and hash as ints. FactsError on
+    anything else; nothing is filled in."""
+    try:
+        doc = json.loads(text, object_pairs_hook=_no_duplicates)
+    except json.JSONDecodeError as e:
+        raise FactsError(f"link facts: not JSON ({e})") from None
+    if not isinstance(doc, dict) or set(doc) != FACTS_KEYS:
+        got = sorted(doc) if isinstance(doc, dict) else type(doc).__name__
+        raise FactsError(f"link facts: want keys {sorted(FACTS_KEYS)}, got {got}")
+    if doc["format"] != FACTS_FORMAT or doc["version"] != FACTS_VERSION or type(doc["version"]) is not int:
+        raise FactsError(f"link facts: format {doc['format']!r} version {doc['version']!r}, "
+                         f"want {FACTS_FORMAT!r} version {FACTS_VERSION}")
+    if doc["region"] != ver:
+        raise FactsError(f"link facts: region {doc['region']!r}, but this link is {ver!r}")
+    if not isinstance(doc["boot"], str) or doc["boot"] != boot:
+        raise FactsError(f"link facts: boot file {doc['boot']!r}, but config/{ver}/disc.yaml's is {boot!r}")
+    mods = doc["modules"]
+    if not isinstance(mods, dict):
+        raise FactsError("link facts: modules is not an object")
+    missing, extra = sorted(set(modules) - set(mods)), sorted(set(mods) - set(modules))
+    if missing or extra:
+        raise FactsError(f"link facts: modules missing {missing}, not linked {extra}")
+    out = {}
+    for m in modules:
+        e = mods[m]
+        if not isinstance(e, dict) or set(e) != MODULE_FACTS_KEYS:
+            raise FactsError(f"link facts: {m}: want keys {sorted(MODULE_FACTS_KEYS)}")
+        size, differs = e["size"], e["differs"]
+        if type(size) is not int or not 0 <= size <= 0xFFFFFFFF:
+            raise FactsError(f"link facts: {m}: size {size!r} is not an unsigned 32-bit number")
+        for k in ("copies", "hash"):
+            if not isinstance(e[k], str) or not HEX64.fullmatch(e[k]):
+                raise FactsError(f"link facts: {m}: {k} {e[k]!r} is not 16 lowercase hex digits")
+        if (not isinstance(differs, list) or any(type(i) is not int or i < 0 for i in differs)
+                or differs != sorted(set(differs))):
+            raise FactsError(f"link facts: {m}: differs is not an ascending list of copy indices")
+        out[m] = {"size": size, "copies": int(e["copies"], 16), "hash": int(e["hash"], 16), "differs": differs}
+    return {**doc, "modules": out}
+
+
+def load_facts(path: Path, ver: str, boot: str | None, modules: list[str]) -> dict:
+    try:
+        text = path.read_text()
+    except OSError as e:
+        raise FactsError(f"link facts: {e}") from None
+    return parse_facts(text, ver, boot, modules)
+
+
+def facts_json(ver: str, boot: str | None, facts: dict[str, dict]) -> str:
+    """The link facts file for region `ver` (parse_facts reads it)."""
+    doc = {"format": FACTS_FORMAT, "version": FACTS_VERSION, "region": ver, "boot": boot,
+           "modules": {m: {"size": f["size"], "copies": f"{f['copies']:016x}", "hash": f"{f['hash']:016x}",
+                           "differs": list(f["differs"])} for m, f in sorted(facts.items())}}
+    return json.dumps(doc, indent=1, sort_keys=True) + "\n"
+
+
+def copy_list(owner: str, copies: list[tuple[str, int, int, int, bool]], img: Image | None, info: dict | None,
+              source: DiscFacts | MetadataFacts) -> tuple[list[str], list[str], dict, dict]:
+    """A module's copy list from its copies (object, offset, PS1 address, size, disc-specific) and
+    the link facts `source` gives: the list's initialiser lines, report.txt notes, its
+    portModuleData entry and the facts used."""
+    runs = []
+    if copies:
+        if len(img.deltas) != 1:
+            raise SystemExit(f"pc_link: {owner}'s data is not one contiguous image ({len(img.deltas)} offsets)")
+        delta = next(iter(img.deltas))
+        runs = [(obj, off, a, a + delta, n, own) for obj, off, a, n, own in copies]
+    facts = source.module(owner, info, runs, img)
+    differs = set(facts["differs"])
+    items, notes = [], []
+    for i, (obj, off, a, rom, n, own) in enumerate(runs):
+        if rom + n > facts["size"]:
+            raise SystemExit(f"pc_link: {owner} {obj}+0x{off:X}: 0x{n:X} bytes at 0x{rom:X} run past "
+                             f"{info['path'].name}")
+        if i in differs:
+            notes.append(f"{owner} {obj}+0x{off:X}: the disc's bytes differ from the data assembly's "
+                         f"(the disc's are used)")
+        ref = f"(char*){obj} + {off}" if off else f"(char*){obj}"
+        items.append(f"    {{{ref}, 0x{rom:X}, 0x{n:X}{' | 0x80000000u' if own else ''}}},")
+    entry = {"count": len(copies), "hash": facts["hash"], "size": facts["size"], **(info or {})}
+    return items, notes, entry, facts
+
+
 def module_of(obj: str) -> str:
     m = re.search(r"game_(\w+)\.dir", obj)
     if not m:
@@ -819,6 +986,9 @@ def main() -> int:
                          "tools/fork_engine.py)")
     ap.add_argument("--platform", nargs="*", default=[],
                     help="the platform layer's objects: what they define is not stubbed, what they use is exported")
+    ap.add_argument("--facts", type=Path,
+                    help="take the link facts from this file (--write-facts) instead of disc/<ver>/")
+    ap.add_argument("--write-facts", type=Path, help="write the link facts used to this file")
     args = ap.parse_args()
     GAME_FLAGS[GAME_FLAGS.index("-Iinclude")] = f"-I{args.game_root / 'include'}"
 
@@ -855,6 +1025,13 @@ def main() -> int:
     for o in args.objects:
         by_module.setdefault(module_of(o), []).append(o)
     modules = sorted(by_module, key=lambda m: (m != "main", m))
+    files = disc_files(args.ver)
+    try:
+        source = (MetadataFacts(load_facts(args.facts, args.ver, boot_name(files), modules)) if args.facts
+                  else DiscFacts())
+    except FactsError as e:
+        raise SystemExit(f"pc_link: {e}") from None
+    facts_used: dict[str, dict] = {}
     defined: dict[str, set[str]] = {}
     undefined: dict[str, dict[str, list[str]]] = {}
     common: dict[str, set[str]] = {}
@@ -1132,7 +1309,6 @@ def main() -> int:
     numeric_refs: list[str] = []
     report = {k: 0 for k in ("bytes", "zero", "pointers", "relaid", "alias", "grown", "pointed-at", "common-init",
                              "unconverted", "no-size", "copies", "copied bytes")}
-    files = disc_files(args.ver)
     module_data: dict[str, dict] = {}
     # Addresses some name there stands for (used by C, named in a symbol file, or pointed at by data),
     # with each module's data end: the extent of data that only other data points at.
@@ -1382,31 +1558,14 @@ def main() -> int:
         info = files.get(owner)
         if copies and info is None:
             raise SystemExit(f"pc_link: {owner} has data but no file in config/{args.ver}/disc.yaml")
-        hash_chunks = []
-        items = []
+        try:
+            items, notes, module_data[owner], facts_used[owner] = copy_list(owner, copies, img, info, source)
+        except FactsError as e:
+            raise SystemExit(f"pc_link: {e}") from None
+        numeric_refs += notes
         if copies:
-            if len(img.deltas) != 1:
-                raise SystemExit(f"pc_link: {owner}'s data is not one contiguous image ({len(img.deltas)} offsets)")
-            delta = next(iter(img.deltas))
-            image = info["path"].read_bytes()
-            for obj, off, a, n, own in copies:
-                rom = a + delta
-                got = image[rom:rom + n]
-                if len(got) != n:
-                    raise SystemExit(f"pc_link: {owner} {obj}+0x{off:X}: 0x{n:X} bytes at 0x{rom:X} run past "
-                                     f"{info['path'].name}")
-                if got != img.get(a, n):
-                    numeric_refs.append(f"{owner} {obj}+0x{off:X}: the disc's bytes differ from the data assembly's "
-                                        f"(the disc's are used)")
-                if not own:
-                    hash_chunks.append(got)
-                ref = f"(char*){obj} + {off}" if off else f"(char*){obj}"
-                items.append(f"    {{{ref}, 0x{rom:X}, 0x{n:X}{' | 0x80000000u' if own else ''}}},")
             report["copies"] += len(copies)
             report["copied bytes"] += sum(c[3] for c in copies)
-        module_data[owner] = {"count": len(copies), "hash": fnv1a64(hash_chunks),
-                              "size": info["path"].stat().st_size if info and info["path"].exists() else 0,
-                              **(info or {})}
         lines += ["/* (object + offset, offset in the module's file, size; 0x80000000: each disc has its own) */",
                   "typedef struct { void* dst; unsigned int src; unsigned int size; } XgDataCopy;",
                   f"const XgDataCopy xgDataCopies_{owner}[] = {{", *items, "    {0, 0, 0},", "};", ""]
@@ -1545,6 +1704,8 @@ def main() -> int:
     summary += [f"  apart on purpose: {' and '.join(' '.join(x) for x in sorted(pair))}: {SEPARATE[pair]}"
                 for pair in sorted(separate, key=sorted)]
     (args.outdir / "report.txt").write_text("\n".join(summary + numeric_refs) + "\n")
+    if args.write_facts:
+        args.write_facts.write_text(facts_json(args.ver, boot_name(files), facts_used))
     print("\n".join(summary))
     return 0
 

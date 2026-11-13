@@ -1,6 +1,6 @@
 /* Real SDL virtual devices exercise profile persistence and input boundaries.
  * Run write, read, script and script2 in separate processes, with the same
- * directory. */
+ * directory; ini runs alone, in a directory of its own. */
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,7 +121,35 @@ int main(int argc, char** argv) {
     SDL_Joystick* xj = SDL_OpenJoystick(xbox);
     CHECK(pj != NULL && xj != NULL);
     neutral(pj); neutral(xj);
+    if (strcmp(argv[2], "ini") == 0) {
+        /* Hand-written values for padInit's loaders: the PlayStation pad's
+         * profile is keyed by its GUID (a virtual device has no serial). */
+        char guid[33];
+        SDL_GUIDToString(SDL_GetJoystickGUIDForID(ps), guid, sizeof(guid));
+        snprintf(path, sizeof(path), "%s/settings.ini", argv[1]);
+        FILE* f = fopen(path, "w");
+        CHECK(f != NULL && fprintf(f, "key_cross=Space,none\nkey_select=none\npad_l2=righttrigger\n"
+                                      "pad_cross=none\npad_circle=bogus\npad_stick_deadzone=200\n"
+                                      "pad_%s_stick_deadzone=-5\n", guid) > 0 && fclose(f) == 0);
+    }
     padInit();
+    if (strcmp(argv[2], "ini") == 0) {
+        padSelectProfile(-1);
+        CHECK(padKey(4, 0) == SDL_SCANCODE_SPACE && padKey(4, 1) == SDL_SCANCODE_UNKNOWN);
+        CHECK(padKey(13, 0) == SDL_SCANCODE_UNKNOWN && padKey(13, 1) == SDL_SCANCODE_UNKNOWN);
+        CHECK(padGamepadInput(10) == PAD_INPUT_RIGHT_TRIGGER);
+        CHECK(padGamepadInput(4) == PAD_INPUT_NONE);
+        CHECK(padGamepadInput(5) == SDL_GAMEPAD_BUTTON_EAST); /* bogus keeps Circle's default */
+        CHECK(padStickDeadzone() == 95);
+        /* The device profile's own clamp; the other pad inherits the global 95. */
+        CHECK(padProfileDevice(0) == ps && padProfileDevice(1) == xbox);
+        padSelectProfile(0);
+        CHECK(padStickDeadzone() == 0);
+        padSelectProfile(1);
+        CHECK(padStickDeadzone() == 95);
+        printf("pad settings.ini (%s): %d checks passed\n", argv[2], checks);
+        SDL_Quit(); return 0;
+    }
     /* Regional conventions compose with bindings; both face pairs change,
      * and directions/shoulders/Start are untouched. */
     padSetRegionalControls(0, 1);
