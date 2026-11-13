@@ -9,6 +9,7 @@ static int checks;
 #include "test/check.h"
 
 /* hw.c's callees outside the clock: nothing of theirs is under test. */
+int cpuTimingOn; /* (hw.c's weak data reference: PE links need a definition) */
 void etcVBlank(void) {}
 void padInit(void) {}
 void padVBlank(void) {}
