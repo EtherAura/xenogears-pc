@@ -1,12 +1,17 @@
-# The Debian/Ubuntu package (amd64; Ubuntu 25.04+ and Debian 13, which package
-# SDL3), made from a Linux Release build with CPack:
+# The Ubuntu package (amd64; Ubuntu 26.04 LTS and later; Debian 14 only if the
+# same package passes the install and start test in a clean debian:forky
+# container, unproven so far; not Debian 13), made from a Linux Release build
+# with CPack:
 #   cmake -S port -B <build> -G Ninja -DCMAKE_BUILD_TYPE=Release -DXG_VERSION=US -DXG_EXTRAS=ON \
 #       -DXG_PACKAGE_VERSION=<release version without the v>
 #   cmake --build <build> && (cd <build> && cpack -G DEB)
 # gives xenogears-pc_<version>_amd64.deb: the executable in /usr/bin and the
 # licences in /usr/share/doc/xenogears-pc (tools/check_deb_package.py checks it).
 # SDL3, glslang and dav1d come from the system's packages, with their licences;
-# Depends is worked out by dpkg-shlibdeps from what the executable links. No
+# Depends is worked out by dpkg-shlibdeps from what the executable links. The
+# release's Depends must come from building in an Ubuntu 26.04 container (its
+# libraries are the oldest of the targets): a host without dpkg records of its
+# libraries gives none, so a package built there proves nothing about them. No
 # game data: the port reads the player's own disc.
 
 # The version comes from the release (its tag without the v), never written
