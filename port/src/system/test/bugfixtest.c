@@ -468,6 +468,100 @@ static int testNisanInn(void) {
     }
     return 0;
 }
+
+/* Field 213's rest after the Baptism as scriptfix.c documents it:
+ * OP_FADE_MUSIC 0 over 60, OP_PLAY_MUSIC 0D, OPX_A2, OP_WAIT 240,
+ * OP_SET_SCREEN_GEOMETRY; fixed, its first 14 bytes are the bed's
+ * OP_PLAY_MUSIC 0D, OPX_A2, OP_WAIT 240, OP_WAIT 90, OP_WAIT 1. Synthetic. */
+static const u8 wardRoutine[] = {
+    0xFE, 0x0E, 0x00, 0x80, 0x3C, 0x80, 0x75, 0x0D, 0x80, 0xFE, 0xA2, 0x26, 0xF0, 0x80, 0xA0,
+};
+static const u8 wardRoutineFixed[] = {
+    0x75, 0x0D, 0x80, 0xFE, 0xA2, 0x26, 0xF0, 0x80, 0x26, 0x5A, 0x80, 0x26, 0x01, 0x80,
+};
+
+/* The inn's filler script (no 0xFE byte in it) around the ward's routine. */
+static void wardScript(u8* code, int at) {
+    memset(code, 0xEE, INN_SCRIPT + 8);
+    innScript(code, -1);
+    if (at >= 0) memcpy(code + at, wardRoutine, sizeof(wardRoutine));
+}
+
+/* Field 213: the fade and the one OP_WAIT 240 become the bed's 14 bytes, only
+ * with the routine's 15 bytes found whole; the last one stays. */
+static int testWardRest(void) {
+    /* Not 0x19: field 282 reads the game's progress with Emeralda's theme. */
+    static const s32 musics[] = {0x0D, 0x26, 0x47, 0xFF, -1};
+    static const int places[] = {0, 40, INN_SCRIPT - (int)sizeof(wardRoutine)};
+    u8 code[INN_SCRIPT + 8], expected[INN_SCRIPT + 8];
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        for (int m = 0; m < (int)(sizeof(musics) / sizeof(musics[0])); ++m)
+        for (int p = 0; p < 3; ++p) {
+            s32 music = musics[m];
+            int at = places[p];
+            /* The routine whole: its first 14 bytes replaced when on. */
+            wardScript(code, at);
+            memcpy(expected, code, sizeof(expected));
+            if (enabled) {
+                memcpy(expected + at, wardRoutineFixed, sizeof(wardRoutineFixed));
+                CHECK(expected[at + 14] == 0xA0);
+            }
+            INN_RUN(213, music, code, INN_SCRIPT, expected);
+            /* Fixed once, the routine no longer matches: a second pass keeps it. */
+            memcpy(expected, code, sizeof(expected));
+            INN_RUN(213, music, code, INN_SCRIPT, expected);
+            /* Another field with the same bytes: nothing. */
+            static const int fields[] = {0, 212, 214, 87, 50, 282, 326, 213 + 0x1000};
+            for (int f = 0; f < (int)(sizeof(fields) / sizeof(fields[0])); ++f) {
+                wardScript(code, at);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(fields[f], music, code, INN_SCRIPT, expected);
+            }
+            /* Any one byte of the routine different (the kept last one too): nothing. */
+            for (int k = 0; k < (int)sizeof(wardRoutine); ++k) {
+                wardScript(code, at);
+                code[at + k] ^= 0x01;
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(213, music, code, INN_SCRIPT, expected);
+            }
+            /* The routine cut short by the script's end: nothing, and nothing
+             * written past the size given. */
+            for (int cut = 1; cut <= (int)sizeof(wardRoutine); ++cut) {
+                wardScript(code, at);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(213, music, code, at + (int)sizeof(wardRoutine) - cut, expected);
+            }
+        }
+        /* No routine at all, and an empty script. */
+        wardScript(code, -1);
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(213, 0x0D, code, INN_SCRIPT, expected);
+        INN_RUN(213, 0x0D, code, 0, expected);
+        /* Only the 14 bytes that are rewritten, without the last: nothing. */
+        wardScript(code, 40);
+        code[40 + 14] = 0x30;
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(213, 0x0D, code, INN_SCRIPT, expected);
+        /* A partial copy before a whole one: the whole one is edited. */
+        wardScript(code, 30);
+        memcpy(code + 10, wardRoutine, 14);
+        memcpy(expected, code, sizeof(expected));
+        if (enabled) memcpy(expected + 30, wardRoutineFixed, sizeof(wardRoutineFixed));
+        INN_RUN(213, 0x0D, code, INN_SCRIPT, expected);
+        /* Two copies: the first one found is the one edited. */
+        wardScript(code, 0);
+        memcpy(code + 48, wardRoutine, sizeof(wardRoutine));
+        memcpy(expected, code, sizeof(expected));
+        if (enabled) memcpy(expected, wardRoutineFixed, sizeof(wardRoutineFixed));
+        INN_RUN(213, 0x0D, code, INN_SCRIPT, expected);
+        /* Field 87's inn routine in field 213: nothing. */
+        innScript(code, 20);
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(213, 0x26, code, INN_SCRIPT, expected);
+    }
+    return 0;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -573,6 +667,7 @@ int main(int argc, char** argv) {
         CHECK(testShopCursor() == 0);
         CHECK(testFieldSfx() == 0);
         CHECK(testNisanInn() == 0);
+        CHECK(testWardRest() == 0);
 #endif
     }
     printf("original bug fixes %s: %d checks passed\n", argv[2], checks);
