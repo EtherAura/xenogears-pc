@@ -92,7 +92,7 @@ def run(build: Path, out: Path, speed: int | None, until: int, jp: bool, real: b
     disc = ROOT / statecheck.DISCS["jp1" if jp else "us1"]
     # The real-clock run measures pacing: on the Intel GPU it waits for the
     # GPU's lock (tools/intel.sh), so another run there can't halve its speed.
-    lock = ["flock", "/tmp/xg-intel-gpu.lock"] if real and e.get("XG_VK_DEVICE") == "intel" else []
+    lock = [str(ROOT / "tools/gpu_lock.sh")] if real and e.get("XG_VK_DEVICE") == "intel" else []
     with open(out / "port.log", "w") as log:
         p = subprocess.run([*lock, "nice", "-n", "19", "timeout", "-s", "INT", "-k", "30", "900", *cmd, str(disc)],
                            env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out)

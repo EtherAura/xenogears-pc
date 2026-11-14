@@ -7,4 +7,4 @@
 [ -n "$XG_SETTINGS" ] || { echo "tools/intel.sh: set XG_SETTINGS (none, or a scratch copy): never the user's settings.ini" >&2; exit 2; }
 [ -n "$XG_CARD_DIR" ] || { echo "tools/intel.sh: set XG_CARD_DIR to a scratch directory: never the user's memory cards" >&2; exit 2; }
 export XG_VK_DEVICE=Intel XG_HEADLESS=1 SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy XG_CLOCK="${XG_CLOCK:-step}"
-exec flock /tmp/xg-intel-gpu.lock "$@"
+exec "$(dirname "$0")/gpu_lock.sh" "$@"
