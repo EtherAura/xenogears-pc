@@ -40,6 +40,7 @@ import re
 import struct
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 ROOT = next((p for p in Path(__file__).absolute().parents if (p / "config" / "us").is_dir()),
@@ -450,6 +451,15 @@ SCENES = {
 }
 
 
+# The port's report of a lost Vulkan device before it aborts (port/src/gpu/vk.c's
+# check: "vulkan: CALL failed (-4) at FILE:LINE"; -4 is VK_ERROR_DEVICE_LOST), on a
+# line of its own: tools/port_tests.py's DEVICE_LOST, which looks for it in this
+# script's output (xg-au4). A run of the game that fails with it in its own log
+# (written by that run alone) passes the line on as it is; nothing else changes.
+DEVICE_LOST = re.compile(r"^vulkan: \S.* failed \(-4\)(?: at \S+)?$", re.M)
+_said = threading.Lock()  # run_port's threads write a whole line each
+
+
 def run_port(build: Path, out: Path, disc: str, quit_at: int, env: dict) -> int:
     out.mkdir(parents=True, exist_ok=True)
     (out / "frames").mkdir(exist_ok=True)
@@ -469,6 +479,12 @@ def run_port(build: Path, out: Path, disc: str, quit_at: int, env: dict) -> int:
         p = subprocess.run(["nice", "-n", "19", "ionice", "-c3", "timeout", "-s", "INT", "-k", "30", "1200",
                             *run, str(ROOT / DISCS[disc])], env=e, stdout=log,
                            stderr=subprocess.STDOUT, cwd=out)
+    if p.returncode != 0:
+        lost = DEVICE_LOST.search((out / "port.log").read_text(errors="replace"))
+        if lost is not None:
+            with _said:
+                sys.stdout.write(lost.group(0) + "\n")
+                sys.stdout.flush()
     return p.returncode
 
 
