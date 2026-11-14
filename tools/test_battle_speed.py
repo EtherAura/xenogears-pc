@@ -39,6 +39,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from pathlib import Path
@@ -51,6 +52,12 @@ import statecheck  # noqa: E402
 PERIOD = 263 / (53693175 / 3412.5)  # the NTSC 240-line vblank (hw.h), seconds
 MUSIC_VOICES = range(16)
 FRAMES = "1000-{until}/3"  # the pictures compared: every third vblank of the battle
+
+# A run of the game that fails having reported a lost Vulkan device in its own
+# port.log (written by that run alone) passes the line on as it is, on a line of
+# its own: tools/port_tests.py's DEVICE_LOST finds it in this script's output
+# (xg-au4), as in tools/statecheck.py's run_port. Nothing else changes.
+_said = threading.Lock()  # main()'s side-by-side runs write a whole line each
 
 
 def run(build: Path, out: Path, speed: int | None, until: int, jp: bool, real: bool = False) -> int:
@@ -109,6 +116,12 @@ def run(build: Path, out: Path, speed: int | None, until: int, jp: bool, real: b
         with open(out / "port.log", "w") as log:
             p = subprocess.run(["nice", "-n", "19", "timeout", "-s", "INT", "-k", "30", "900", *cmd, str(disc)],
                                env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out)
+    if p.returncode != 0:
+        lost = port_tests.DEVICE_LOST.search((out / "port.log").read_text(errors="replace"))
+        if lost is not None:
+            with _said:
+                sys.stdout.write(lost.group(0) + "\n")
+                sys.stdout.flush()
     (out / "device.raw").unlink(missing_ok=True)
     return p.returncode
 
