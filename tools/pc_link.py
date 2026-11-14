@@ -101,6 +101,26 @@ build's: a file from an older PS1 build of the same region and C data names is t
     python tools/pc_link.py --write-ps1-objects ps1.json OUTDIR OBJ...  # from build/<ver>/
     python tools/pc_link.py --ps1-objects ps1.json OUTDIR OBJ...        # without them
 
+--write-asm-layout FILE writes the layout the link reads from the data assembly (asm/<ver>),
+structure only: no instruction, byte, word value, string or path. It is written only when the
+link succeeds, after checking it (asm_layout_check(): every module with data assembly or data
+labels and no other, each list in order and within 32-bit addresses), and it is not read back:
+the link still takes the assembly. The file is JSON:
+
+    {"format": "xenogears-pc-link-asm-layout", "version": 1, "region": "us" or "jp",
+     "boot": the boot file (config/<ver>/disc.yaml),
+     "modules": {module: {"deltas": [file offset - address, ...] (ascending; one: a contiguous image),
+                          "spans": [[start, end], ...] (the addresses data lines fill, merged; ascending,
+                                    apart),
+                          "ends": [address, ...] (where an INCLUDE_RODATA blob ends; ascending),
+                          "refs": [[slot, symbol, addend], ...] (pointer slots by address; a number
+                                  pointing into a blob is that blob's label plus the offset),
+                          "labels": [[name, address], ...] (data labels in the link's scan order:
+                                    sorted files, then lines; a name in several modules keeps its
+                                    first place)}}}
+
+    python tools/pc_link.py --write-asm-layout layout.json OUTDIR OBJ...
+
 Sizes come from the game's own declarations: each file that uses a symbol is
 compiled again with `char x[sizeof(sym)]` appended, once for the PC (x86-64)
 and once for the PS1 layout (-m32 with XG_PS1_LAYOUT: 4-byte pointers and tags),
@@ -1087,6 +1107,92 @@ def ps1_objects_json(ver: str, boot: str | None, facts: dict[str, dict]) -> str:
     return json.dumps(doc, indent=1, sort_keys=True) + "\n"
 
 
+# The assembly layout (module docstring): structure the link reads from asm/<ver>, no contents.
+ASM_LAYOUT_FORMAT = "xenogears-pc-link-asm-layout"
+ASM_LAYOUT_VERSION = 1
+ASM_LAYOUT_MODULE_KEYS = {"deltas", "spans", "ends", "refs", "labels"}
+
+
+class AsmLayoutError(ValueError):
+    """An assembly layout that is not well formed (asm_layout_check)."""
+
+
+def asm_layout_facts(images: dict[str, Image], labels: dict[str, dict[str, int]]) -> dict[str, dict]:
+    """module -> its layout (module docstring) from load_images' images and the data label scan
+    (name -> {module: address}): every module either names."""
+    mods = set(images) | {m for per in labels.values() for m in per}
+    out = {}
+    for m in sorted(mods):
+        img = images.get(m) or Image(m)
+        spans: list[list[int]] = []
+        for a in sorted(img.mem):
+            if spans and spans[-1][1] == a:
+                spans[-1][1] = a + 1
+            else:
+                spans.append([a, a + 1])
+        out[m] = {"deltas": sorted(img.deltas), "spans": spans, "ends": sorted(img.ends),
+                  "refs": [[a, *img.refs[a]] for a in sorted(img.refs)],
+                  "labels": [[n, per[m]] for n, per in labels.items() if m in per]}
+    return out
+
+
+def asm_layout_check(doc, ver: str, boot: str | None, modules: list[str]) -> None:
+    """AsmLayoutError unless doc is region `ver`'s layout for boot file `boot` covering exactly
+    `modules`, every field of the schema's type, order and range."""
+    def u32(x) -> bool:
+        return type(x) is int and 0 <= x <= 0xFFFFFFFF
+
+    def ascending(xs) -> bool:
+        return all(a < b for a, b in zip(xs, xs[1:]))
+    if not isinstance(doc, dict) or set(doc) != FACTS_KEYS:
+        raise AsmLayoutError(f"assembly layout: want keys {sorted(FACTS_KEYS)}")
+    if doc["format"] != ASM_LAYOUT_FORMAT or type(doc["version"]) is not int or doc["version"] != ASM_LAYOUT_VERSION:
+        raise AsmLayoutError(f"assembly layout: format {doc['format']!r} version {doc['version']!r}")
+    if doc["region"] != ver or ver not in ("us", "jp") or doc["boot"] != boot:
+        raise AsmLayoutError(f"assembly layout: region {doc['region']!r} boot {doc['boot']!r}, want {ver!r} {boot!r}")
+    mods = doc["modules"]
+    if not isinstance(mods, dict) or sorted(mods) != sorted(set(modules)) or not modules:
+        raise AsmLayoutError(f"assembly layout: modules {sorted(mods) if isinstance(mods, dict) else mods!r}, "
+                             f"want {sorted(set(modules))}")
+    for m, f in mods.items():
+        if not re.fullmatch(r"\w+", m) or not isinstance(f, dict) or set(f) != ASM_LAYOUT_MODULE_KEYS:
+            raise AsmLayoutError(f"assembly layout: {m}: want keys {sorted(ASM_LAYOUT_MODULE_KEYS)}")
+        deltas, spans, ends, refs, labels = (f[k] for k in ("deltas", "spans", "ends", "refs", "labels"))
+        if not all(isinstance(x, list) for x in (deltas, spans, ends, refs, labels)):
+            raise AsmLayoutError(f"assembly layout: {m}: a field is not a list")
+        if (any(type(d) is not int or not -0xFFFFFFFF <= d <= 0xFFFFFFFF for d in deltas) or not ascending(deltas)
+                or bool(spans) != bool(deltas)):
+            raise AsmLayoutError(f"assembly layout: {m}: deltas are not ascending file offset - address values")
+        if (any(not isinstance(s, list) or len(s) != 2 or not u32(s[0]) or type(s[1]) is not int
+                or not s[0] < s[1] <= 0x100000000 for s in spans)
+                or any(a[1] >= b[0] for a, b in zip(spans, spans[1:]))):
+            raise AsmLayoutError(f"assembly layout: {m}: spans are not ascending, apart, non-empty address ranges")
+        starts = [s[0] for s in spans]
+
+        def inside(a: int) -> bool:
+            i = bisect.bisect_right(starts, a) - 1
+            return i >= 0 and a < spans[i][1]
+        if any(type(e) is not int or not inside(e - 1) for e in ends) or not ascending(ends):
+            raise AsmLayoutError(f"assembly layout: {m}: blob ends are not ascending ends of filled addresses")
+        if (any(not isinstance(r, list) or len(r) != 3 or not u32(r[0]) or not inside(r[0])
+                or not isinstance(r[1], str) or not PS1_SYMBOL.fullmatch(r[1])
+                or type(r[2]) is not int or not -0xFFFFFFFF <= r[2] <= 0xFFFFFFFF for r in refs)
+                or not ascending([r[0] for r in refs])):
+            raise AsmLayoutError(f"assembly layout: {m}: refs are not ascending [slot, symbol, addend] in its spans")
+        if (any(not isinstance(e, list) or len(e) != 2 or not isinstance(e[0], str)
+                or not PS1_SYMBOL.fullmatch(e[0]) or not u32(e[1]) for e in labels)
+                or len({e[0] for e in labels}) != len(labels)):
+            raise AsmLayoutError(f"assembly layout: {m}: labels are not distinct [name, address]")
+
+
+def asm_layout_json(ver: str, boot: str | None, facts: dict[str, dict], modules: list[str]) -> str:
+    """The assembly layout file for region `ver`, checked (asm_layout_check) before it is returned."""
+    doc = {"format": ASM_LAYOUT_FORMAT, "version": ASM_LAYOUT_VERSION, "region": ver, "boot": boot,
+           "modules": {m: facts[m] for m in sorted(facts)}}
+    asm_layout_check(doc, ver, boot, modules)
+    return json.dumps(doc, separators=(",", ":"), sort_keys=True) + "\n"
+
+
 def copy_list(owner: str, copies: list[tuple[str, int, int, int, bool]], img: Image | None, info: dict | None,
               source: DiscFacts | MetadataFacts) -> tuple[list[str], list[str], dict, dict]:
     """A module's copy list from its copies (object, offset, PS1 address, size, disc-specific) and
@@ -1154,6 +1260,8 @@ def main() -> int:
                      help="take the PS1 object facts from this file (--write-ps1-objects) instead of build/<ver>/*.elf")
     ps1.add_argument("--write-ps1-objects", type=Path,
                      help="write the PS1 object facts, read from every linked module's build/<ver>/<module>.elf, to this file")
+    ap.add_argument("--write-asm-layout", type=Path,
+                    help="write the layout read from asm/<ver> (no contents) to this file, when the link succeeds")
     args = ap.parse_args()
     GAME_FLAGS[GAME_FLAGS.index("-Iinclude")] = f"-I{args.game_root / 'include'}"
 
@@ -1182,6 +1290,9 @@ def main() -> int:
                 for n in pending:
                     labels_all.setdefault(n, {}).setdefault(mod, int(m["vram"], 16))
                 pending = []
+    # Taken before the link uses the images; checked and written only once it has succeeded.
+    asm_layout = asm_layout_facts(images, labels_all) if args.write_asm_layout else None
+    asm_modules = sorted(set(images) | {m for per in labels_all.values() for m in per})
     sdk = sdk_functions(args.game_root)
     hand = set(re.findall(r"\b([A-Za-z_]\w+)\b", " ".join(
         l.split("names:", 1)[1] for l in (ROOT / "config/handwritten.yaml").read_text().splitlines() if "names:" in l)))
@@ -1858,6 +1969,12 @@ def main() -> int:
     if outside:
         raise SystemExit("pc_link: generated pointers past the end of the byte object they point into (its "
                          "extent is wrong: a blob or table cut short):\n  " + "\n  ".join(outside[:20]))
+    asm_layout_text = None
+    if asm_layout is not None:
+        try:
+            asm_layout_text = asm_layout_json(args.ver, boot_name(files), asm_layout, asm_modules)
+        except AsmLayoutError as e:
+            raise SystemExit(f"pc_link: {e}") from None
 
     args.outdir.mkdir(parents=True, exist_ok=True)
     for old in args.outdir.glob("*.c"):
@@ -1884,6 +2001,8 @@ def main() -> int:
         args.write_facts.write_text(facts_json(args.ver, boot_name(files), facts_used))
     if args.write_ps1_objects:
         args.write_ps1_objects.write_text(ps1_objects_text)
+    if asm_layout_text is not None:
+        args.write_asm_layout.write_text(asm_layout_text)
     print("\n".join(summary))
     return 0
 
