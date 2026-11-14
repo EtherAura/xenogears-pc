@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Port test runner isolation regressions; no game, GPU or disc data needed."""
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 import io
@@ -237,8 +238,9 @@ class Children:
     codes (a number, or a function of the run's index: 0 for the first run).
     A rerun's overlaps replace the first run's; runs[name] keeps each run's.
     """
-    def __init__(self, hooks=None, codes=None, gpu=()):
+    def __init__(self, hooks=None, codes=None, gpu=(), texts=None):
         self.hooks, self.codes, self.gpu = hooks or {}, codes or {}, set(gpu)
+        self.texts = texts or {}  # name -> function of the run's index: more output, after the hello
         self.lock = threading.Lock()
         self.active = set()
         self.started, self.finished = [], []
@@ -265,6 +267,8 @@ class Children:
             if name in self.hooks:
                 self.hooks[name](argv)
             kwargs["stdout"].write(f"{name} says hello (run {run})\n")
+            if name in self.texts:
+                kwargs["stdout"].write(self.texts[name](run))
             code = self.codes.get(name, 0)
             return subprocess.CompletedProcess(argv, code(run) if callable(code) else code)
         finally:
@@ -683,6 +687,149 @@ class SchedulerTests(unittest.TestCase):
         for pair in (("cdtest", "cdtest-check"), ("card_historytest", "card_historytest-restart"),
                      ("gameplay_combattest-write", "gameplay_combattest-read")):
             self.assertTrue(jobs[pair[0]].resources & jobs[pair[1]].resources, pair)
+
+
+# What the port prints before abort() when the Vulkan device is lost (port/src/gpu/vk.c).
+LOST = "vulkan: vkQueueSubmit(vk.queue, 1, &si, vk.fence) failed (-4) at port/src/gpu/vk.c:2201"
+
+
+class DeviceLossTests(unittest.TestCase):
+    """A host GPU reset (xg-au4): a failure reporting a lost Vulkan device is marked so,
+    and teaches alone-only.txt nothing; every pass, failure and rerun is as before."""
+    exe = SchedulerTests.exe
+
+    def setUp(self):
+        SchedulerTests.setUp(self)
+
+    def shared(self, codes, texts):
+        """lossy and other run together (a barrier only both pass); lossy's rerun alone returns at once."""
+        both = threading.Barrier(2, timeout=10)
+        hooks = {"lossy": lambda _: both.wait() if children.started.count("lossy") == 1 else None,
+                 "other": lambda _: both.wait()}
+        children = Children(hooks, codes={"lossy": codes}, texts={"lossy": texts})
+        return children
+
+    def suite(self, jobs, children):
+        """run_tests() over lossy and other: its exit status, its output and its runner."""
+        runners = []
+
+        def plan(runner):
+            runners.append(runner)
+            runner.run("lossy", self.exe("lossytest"))
+            runner.run("other", self.exe("othertest"))
+        args = argparse.Namespace(no_build=True, list=False, no_gpu=False, pattern=None, jobs=jobs)
+        stdout = io.StringIO()
+        with patch.object(P.Runner, "plan", plan), patch.object(P.subprocess, "run", side_effect=children), \
+             redirect_stdout(stdout):
+            code = P.run_tests(self.build, args)
+        return code, stdout.getvalue(), runners[0]
+
+    def retries(self, runner):
+        return [n for e, n, _ in runner.trace if e == "retry"]
+
+    def test_only_the_vulkan_device_lost_line_is_recognised(self):
+        for text in (LOST, "vulkan: vkCreateDevice failed (-4)", f"before\n{LOST}\nAborted (core dumped)\n"):
+            with self.subTest(text=text):
+                self.assertIsNotNone(P.device_lost(text))
+        self.assertEqual(P.device_lost(f"a\n{LOST}\n"), LOST)
+        for text in ("Aborted (core dumped)", "exit -4", "error -4", "failed (-4)", "VK_ERROR_DEVICE_LOST",
+                     "vulkan: device lost", "vulkan: vkQueueSubmit failed (-3) at port/src/gpu/vk.c:1",
+                     "vulkan: vkQueueSubmit failed (-42) at port/src/gpu/vk.c:1",
+                     "vulkan: vkQueueSubmit failed (-4) at port/src/gpu/vk.c:1 and then",
+                     "vulkan: failed (-4)", "gpu: vkQueueSubmit failed (-4)", "note: " + LOST, "  " + LOST, ""):
+            with self.subTest(text=text):
+                self.assertIsNone(P.device_lost(text))
+
+    def test_serial_device_loss_stays_a_failure_and_fails_the_suite(self):
+        children = Children(codes={"lossy": -6}, texts={"lossy": lambda run: LOST + "\n"})
+        code, out, runner = self.suite(1, children)
+        self.assertEqual(code, 1, out)
+        self.assertIn("port-tests: 1 ok, 1 failed, 0 known, 0 skipped", out)
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "FAIL"), ("other", "ok")])
+        self.assertEqual(children.started, ["lossy", "other"])       # --jobs 1: never rerun
+        self.assertEqual(self.retries(runner), [])
+        detail = runner.results[0][2]
+        self.assertTrue(detail.startswith(f"DEVICE LOST ({LOST}): exit -6: {LOST}"), detail)
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_lost_when_shared_then_passing_alone_is_ok_disclosed_and_not_kept_alone(self):
+        children = self.shared(lambda run: -6 if run == 0 else 0, lambda run: LOST + "\n" if run == 0 else "")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 0, out)
+        self.assertIn("port-tests: 2 ok, 0 failed, 0 known, 0 skipped", out)
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "ok"), ("other", "ok")])
+        self.assertEqual(children.started.count("lossy"), 2)          # the one ordinary rerun, alone
+        self.assertEqual(children.runs["lossy"][1], set())
+        self.assertEqual(self.retries(runner), ["lossy"])
+        detail = runner.results[0][2]
+        self.assertTrue(detail.startswith("DEVICE LOST WHEN SHARED, passed alone; not kept alone"), detail)
+        self.assertIn(f"shared DEVICE LOST ({LOST}): exit -6:", detail)
+        self.assertIn("lossy.shared.log", detail)
+        self.assertIn("alone lossy says hello (run 1)", detail)
+        self.assertNotIn("ONLY WHEN SHARED", detail)
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+        self.assertEqual(runner.alone_only, set())
+        # The next run in this output directory still shares it.
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
+        runner.run("lossy", self.exe("lossytest"))
+        self.assertFalse(runner.tests[0].job.alone)
+
+    def test_device_lost_every_run_fails_marked(self):
+        children = self.shared(lambda run: -6, lambda run: LOST + "\n")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 1, out)
+        self.assertIn("port-tests: 1 ok, 1 failed, 0 known, 0 skipped", out)
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "FAIL"), ("other", "ok")])
+        self.assertEqual(children.started.count("lossy"), 2)
+        self.assertEqual(self.retries(runner), ["lossy"])
+        detail = runner.results[0][2]
+        self.assertTrue(detail.startswith(f"DEVICE LOST ({LOST}): exit -6:"), detail)
+        self.assertIn(f"; shared too: DEVICE LOST ({LOST}): exit -6:", detail)
+        self.assertEqual(runner.tests[0].job.device_lost, [LOST, LOST])
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_lost_when_shared_then_failing_alone_stays_an_ordinary_failure(self):
+        children = self.shared(lambda run: -6 if run == 0 else 4, lambda run: LOST + "\n" if run == 0 else "")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(runner.results[0][1], "FAIL")
+        self.assertEqual(children.started.count("lossy"), 2)
+        detail = runner.results[0][2]
+        self.assertTrue(detail.startswith("exit 4: lossy says hello (run 1)"), detail)
+        self.assertIn(f"shared too: DEVICE LOST ({LOST}): exit -6:", detail)
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_generic_abort_failing_only_when_shared_is_still_kept_alone(self):
+        # SIGABRT, a bare -4 and another Vulkan error are no device loss: the
+        # ordinary sharing-only failure, reported and remembered as before.
+        generic = "error -4\nvulkan: vkQueueSubmit failed (-3) at port/src/gpu/vk.c:1\nAborted (core dumped)\n"
+        children = self.shared(lambda run: -6 if run == 0 else 0, lambda run: generic if run == 0 else "")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "ok"), ("other", "ok")])
+        self.assertEqual(children.started.count("lossy"), 2)
+        self.assertEqual(self.retries(runner), ["lossy"])
+        detail = runner.results[0][2]
+        self.assertTrue(detail.startswith("FAILED ONLY WHEN SHARED, alone from now on"), detail)
+        self.assertIn("shared exit -6: Aborted (core dumped)", detail)
+        self.assertNotIn("DEVICE LOST", detail)
+        self.assertEqual(runner.tests[0].job.device_lost, [])
+        self.assertEqual((self.out / P.ALONE_FILE).read_text(), "lossy\n")
+
+    def test_generic_serial_failure_report_is_unchanged(self):
+        children = Children(codes={"lossy": -6}, texts={"lossy": lambda run: "error -4\nAborted (core dumped)\n"})
+        code, out, runner = self.suite(1, children)
+        self.assertEqual(code, 1, out)
+        log = P.display_path(self.out / "lossy.log")
+        self.assertEqual(runner.results[0][1:], ("FAIL", f"exit -6: Aborted (core dumped) (log {log})"))
+
+    def test_device_lost_line_in_a_passing_run_changes_nothing(self):
+        children = Children(texts={"lossy": lambda run: LOST + "\n"})
+        code, out, runner = self.suite(1, children)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(runner.results[0][1], "ok")
+        self.assertTrue(runner.results[0][2].startswith(LOST), runner.results[0][2])
+        self.assertEqual(runner.tests[0].job.device_lost, [])
 
 
 @unittest.skipIf(P.fcntl is None, "the GPU lock is flock's (not on Windows)")

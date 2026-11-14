@@ -31,7 +31,9 @@ at most GPU_SLOTS (2) GPU tests share the Vulkan device; CLOCK tests (the wall
 clock) and ALONE ones run with nothing else running. A test that fails while
 sharing the host is rerun alone; if it then passes, its line says it failed
 only when shared and later runs keep it alone (OUT/alone-only.txt; move it to
-ALONE).
+ALONE). A failure whose output reports a lost Vulkan device ('vulkan: ...
+failed (-4)') says DEVICE LOST; one that lost it when shared and then passes
+alone is not kept alone.
 
 GPU tests run holding the Intel GPU lock (/tmp/xg-intel-gpu.lock, or
 XG_GPU_LOCK; flock, as tools/gpu_lock.sh and the art chapters' run.sh take
@@ -227,6 +229,21 @@ CLOCK = {"netplaytest", "hostpolltest", "battlespeedtest", "high-refresh", "batt
 ALONE: set[str] = set()
 ALONE_FILE = "alone-only.txt"
 
+# The port's report of a lost Vulkan device before it aborts (port/src/gpu/vk.c's
+# check: "vulkan: CALL failed (-4) at FILE:LINE"; -4 is VK_ERROR_DEVICE_LOST), on a
+# line of its own. A host GPU reset makes every process on the device report it
+# (xg-au4): a failing test's line is marked with DEVICE_LOST_MARK, and a test that
+# lost the device when shared and then passed alone is not written to ALONE_FILE.
+# Only the marking and that file change: the test still fails or passes as before.
+DEVICE_LOST = re.compile(r"^vulkan: \S.* failed \(-4\)(?: at \S+)?$", re.M)
+DEVICE_LOST_MARK = "DEVICE LOST"
+
+
+def device_lost(text: str) -> str | None:
+    """The first line of a test's output reporting a lost Vulkan device, if any."""
+    m = DEVICE_LOST.search(text)
+    return m.group(0) if m else None
+
 # With --jobs > 1: CLOCK and ALONE tests run with nothing else running; at
 # most GPU_SLOTS GPU tests share the Vulkan device at a time.
 GPU_SLOTS = 2
@@ -322,6 +339,9 @@ class Job:
         self.gpu = key in GPU       # one of GPU_SLOTS on the device
         self.alone = alone or bool({name, key} & (CLOCK | ALONE))  # nothing else running
         self.resources = resources  # tests sharing one stay in order on one worker
+        # Each failed run's device-lost line (run_job appends, on the thread running
+        # it; one run at a time, read by the scheduler only once that run's result is in).
+        self.device_lost: list[str] = []
 
 
 class Test:
@@ -374,6 +394,10 @@ def run_job(job: Job) -> tuple[str, str]:
         return "ok", f"{last[:90]} ({secs:.1f}s)"
     if job.key in KNOWN:
         return "known", f"{KNOWN[job.key]}: {last[:60]}"
+    lost = device_lost(text)
+    if lost is not None:
+        job.device_lost.append(lost)
+        return "FAIL", f"{DEVICE_LOST_MARK} ({lost[:90]}): exit {code}: {last[:90]} (log {display_path(log)})"
     return "FAIL", f"exit {code}: {last[:90]} (log {display_path(log)})"
 
 
@@ -592,15 +616,22 @@ class Runner:
     def rerun_alone(self, t: Test, first: tuple[str, str]) -> tuple[str, str]:
         """Rerun a test that failed while shared, nothing else running; its result.
 
-        The shared run's log is kept beside the new one as NAME.shared.log.
+        The shared run's log is kept beside the new one as NAME.shared.log. A
+        shared run that lost the Vulkan device (DEVICE_LOST) and passes alone
+        is ok as before, saying so, but is not written to ALONE_FILE: a host
+        GPU reset is no sign of a test failing only when shared.
         """
         log, kept = OUT / f"{t.name}.log", OUT / f"{t.name}.shared.log"
         if log.exists():
             os.replace(log, kept)
         when_shared = first[1].replace(str(display_path(log)), str(display_path(kept)))
+        lost_shared = bool(t.job.device_lost)  # the shared run's: no run of it is going on now
         status, detail = run_job(t.job)
         if status != "ok":
             return status, f"{detail}; shared too: {when_shared}"
+        if lost_shared:
+            return status, (f"{DEVICE_LOST_MARK} WHEN SHARED, passed alone; not kept alone (a host GPU reset "
+                            f"is not a sharing failure): shared {when_shared}; alone {detail}")
         if t.name not in self.alone_only:
             self.alone_only.add(t.name)
             with (OUT / ALONE_FILE).open("a") as f:
