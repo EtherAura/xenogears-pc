@@ -33,6 +33,11 @@ sharing the host is rerun alone; if it then passes, its line says it failed
 only when shared and later runs keep it alone (OUT/alone-only.txt; move it to
 ALONE).
 
+GPU tests run holding the Intel GPU lock (/tmp/xg-intel-gpu.lock, or
+XG_GPU_LOCK; flock, as tools/gpu_lock.sh and the art chapters' run.sh take
+it), shared by this run's GPU tests and released whenever none is running, so
+another process's GPU jobs never run beside one of them. Not on Windows.
+
 Prints one line per test, in the same order whatever --jobs is, and a summary
 starting with 'port-tests'. Exit status: the number of failed tests.
 """
@@ -41,7 +46,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import os
 import queue
 import re
@@ -120,6 +125,76 @@ def output_lock():
 
 def display_path(path: Path) -> Path:
     return path.relative_to(ROOT) if path.is_relative_to(ROOT) else path
+
+
+# The Intel GPU lock every headless game run on that GPU shares (tools/gpu_lock.sh, the
+# art chapters' run.sh): XG_GPU_LOCK, else this. Two jobs on the device at once from
+# different processes can reset it (xg-dby).
+GPU_LOCK = "/tmp/xg-intel-gpu.lock"
+
+
+def gpu_lock_path() -> str:
+    return os.environ.get("XG_GPU_LOCK") or GPU_LOCK
+
+
+class GpuLock:
+    """This run's hold of the GPU lock: taken while at least one GPU test runs.
+
+    The GPU tests this runner shares the device among (GPU_SLOTS) share one
+    flock; another process using the GPU (an art capture) runs before the
+    first or after the last of them, never beside one. CPU-only tests never
+    take it. Opened read-only, like tools/gpu_lock.sh: the file may belong to
+    another account, and with fs.protected_regular an O_CREAT open of it in
+    /tmp is refused. The descriptor is not inherited (O_CLOEXEC), so a test's
+    own children never hold it. No lock on Windows (no flock).
+    """
+
+    def __init__(self):
+        self.mutex = threading.Lock()  # held while waiting for the flock: other GPU tests wait behind it
+        self.users = 0
+        self.fd: int | None = None
+
+    @staticmethod
+    def take(path: str) -> int:
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+        except FileNotFoundError:  # the first user makes it (tools/gpu_lock.sh's mode)
+            try:
+                os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o644))
+            except FileExistsError:
+                pass
+            fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        except BaseException:
+            os.close(fd)
+            raise
+        return fd
+
+    @contextmanager
+    def held(self):
+        with self.mutex:
+            if self.users == 0:
+                self.fd = self.take(gpu_lock_path())
+            self.users += 1
+        try:
+            yield
+        finally:
+            with self.mutex:
+                self.users -= 1
+                if self.users == 0:
+                    fd, self.fd = self.fd, None
+                    try:
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                    finally:
+                        os.close(fd)
+
+
+gpu_lock = GpuLock()
+
+# GPU tests whose own children take the GPU lock (test_battle_speed.py runs the game
+# under tools/gpu_lock.sh on the Intel GPU): holding it around them would deadlock.
+SELF_LOCKED = {"battle-speed"}
 
 # test -> beads issue; a failure prints as 'known' and doesn't count.
 # (gputest's intermittent 2x resident texture/CLUT failures, xg-htn.35.83,
@@ -265,20 +340,27 @@ def read_alone() -> set[str]:
 def run_job(job: Job) -> tuple[str, str]:
     """Run one test to its end (killed at its timeout); its status and detail.
 
-    Touches only the job's own log; the worker threads call it.
+    Touches only the job's own log; the worker threads call it. A GPU test
+    runs holding the GPU lock (its timeout and time start once it has it).
     """
     log = OUT / f"{job.name}.log"
     log.parent.mkdir(parents=True, exist_ok=True)
-    start = time.monotonic()
-    try:
-        with log.open("w") as f:
-            p = subprocess.run(job.argv, env=job.env,
-                               stdout=f, stderr=subprocess.STDOUT, timeout=job.timeout,
-                               cwd=OUT)
-        code = p.returncode
-    except subprocess.TimeoutExpired:
-        code = "timeout"
-    secs = time.monotonic() - start
+    with ExitStack() as held:
+        if job.gpu and job.name not in SELF_LOCKED and fcntl is not None:
+            try:
+                held.enter_context(gpu_lock.held())
+            except OSError as e:  # the lock file cannot be opened or locked: the test did not run
+                return "FAIL", f"GPU lock {gpu_lock_path()}: {e}"
+        start = time.monotonic()
+        try:
+            with log.open("w") as f:
+                p = subprocess.run(job.argv, env=job.env,
+                                   stdout=f, stderr=subprocess.STDOUT, timeout=job.timeout,
+                                   cwd=OUT)
+            code = p.returncode
+        except subprocess.TimeoutExpired:
+            code = "timeout"
+        secs = time.monotonic() - start
     text = log.read_text(errors="replace")
     lines = [x for x in text.splitlines() if x.strip()]
     last = lines[-1] if lines else "(no output)"

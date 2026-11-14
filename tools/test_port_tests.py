@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -38,6 +39,7 @@ class RunnerTests(unittest.TestCase):
         (self.build / "CMakeCache.txt").write_text("XG_VERSION:STRING=US\nXG_EXTRAS:BOOL=ON\n")
         self.addCleanup(patch.stopall)
         patch.object(P, "OUT", self.out).start()
+        patch.dict(os.environ, XG_GPU_LOCK=str(self.root / "gpu.lock")).start()
 
     def fixtures(self):
         # Empty stand-ins enable every disc-dependent branch, including rewind
@@ -283,6 +285,8 @@ class SchedulerTests(unittest.TestCase):
         (self.build / "CMakeCache.txt").write_text("XG_VERSION:STRING=US\nXG_EXTRAS:BOOL=ON\n")
         self.addCleanup(patch.stopall)
         patch.object(P, "OUT", self.out).start()
+        # Never the host's shared GPU lock: these runs use no GPU.
+        patch.dict(os.environ, XG_GPU_LOCK=str(self.root / "gpu.lock")).start()
 
     def exe(self, name):
         path = self.build / name
@@ -678,6 +682,193 @@ class SchedulerTests(unittest.TestCase):
         for pair in (("cdtest", "cdtest-check"), ("card_historytest", "card_historytest-restart"),
                      ("gameplay_combattest-write", "gameplay_combattest-read")):
             self.assertTrue(jobs[pair[0]].resources & jobs[pair[1]].resources, pair)
+
+
+@unittest.skipIf(P.fcntl is None, "the GPU lock is flock's (not on Windows)")
+class GpuLockTests(unittest.TestCase):
+    """GPU tests run holding the shared GPU lock (xg-dby); CPU-only tests never take it."""
+    exe, execute = SchedulerTests.exe, SchedulerTests.execute
+
+    def setUp(self):
+        SchedulerTests.setUp(self)
+        self.lock = self.root / "gpu.lock"
+        self.assertEqual(P.gpu_lock_path(), str(self.lock))
+
+    def held(self):
+        """Whether anything holds the lock (probed from a descriptor of our own)."""
+        fd = os.open(self.lock, os.O_RDONLY | os.O_CREAT, 0o644)
+        try:
+            P.fcntl.flock(fd, P.fcntl.LOCK_EX | P.fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        finally:
+            os.close(fd)  # closing drops a probe's own lock
+        return False
+
+    def other_process(self):
+        """Another process (an art capture's stand-in) holding the lock until killed."""
+        script = ("import fcntl,os,sys,time; fd = os.open(sys.argv[1], os.O_RDONLY | os.O_CREAT, 0o644); "
+                  "fcntl.flock(fd, fcntl.LOCK_EX); print('locked', flush=True); time.sleep(60)")
+        process = subprocess.Popen([sys.executable, "-c", script, str(self.lock)],
+                                   stdout=subprocess.PIPE, text=True)
+        self.addCleanup(RunnerTests.stop, process)
+        lines = queue.Queue()
+        threading.Thread(target=lambda: lines.put(process.stdout.readline()), daemon=True).start()
+        try:
+            self.assertEqual(lines.get(timeout=10).strip(), "locked")
+        except queue.Empty:
+            self.fail("lock holder failed to start")
+        return process
+
+    def until(self, condition, what, timeout=10):
+        end = time.monotonic() + timeout
+        while not condition():
+            if time.monotonic() > end:
+                self.fail(f"timed out waiting for {what}")
+            time.sleep(0.02)
+
+    def test_default_path_and_override(self):
+        with patch.dict(os.environ):
+            os.environ.pop("XG_GPU_LOCK", None)
+            self.assertEqual(P.gpu_lock_path(), "/tmp/xg-intel-gpu.lock")
+            os.environ["XG_GPU_LOCK"] = ""
+            self.assertEqual(P.gpu_lock_path(), "/tmp/xg-intel-gpu.lock")
+
+    def test_gpu_test_waits_for_another_process_and_cpu_test_does_not(self):
+        # Real child processes: each writes its marker when it starts.
+        holder = self.other_process()
+        marks = {n: self.root / f"{n}.started" for n in ("gpu", "cpu")}
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
+        for n, target in (("gpu", "gputest"), ("cpu", "jpegtest")):
+            runner.run(n, Path(sys.executable), "-c", "import sys; open(sys.argv[1], 'w').close()",
+                       marks[n], target=target)
+        self.assertEqual([t.job.gpu for t in runner.tests], [True, False])
+        errors = []
+
+        def execute():
+            try:
+                with redirect_stdout(io.StringIO()):
+                    runner.execute()
+            except BaseException as e:
+                errors.append(e)
+        thread = threading.Thread(target=execute, daemon=True)
+        thread.start()
+        # The CPU test runs to its end while the other process holds the lock...
+        self.until(lambda: runner.tests[1].result is not None, "the CPU test")
+        self.assertEqual(runner.tests[1].result[0], "ok", runner.tests[1].result)
+        self.assertTrue(marks["cpu"].exists())
+        # ...while the GPU test, started by the scheduler, waits in flock without starting.
+        self.until(lambda: ("start", "gpu") in {(e, n) for e, n, _ in runner.trace}, "the GPU test's start")
+        self.until(P.gpu_lock.mutex.locked, "the GPU test waiting for the lock")
+        time.sleep(0.5)
+        self.assertFalse(marks["gpu"].exists())
+        self.assertIsNone(runner.tests[0].result)
+        self.assertTrue(thread.is_alive())
+        RunnerTests.stop(holder)  # the other process ends: its lock is released
+        thread.join(20)
+        self.assertFalse(thread.is_alive(), "the GPU test never ran after the release")
+        self.assertEqual(errors, [])
+        self.assertTrue(marks["gpu"].exists())
+        self.assertEqual([r[1] for r in runner.results], ["ok", "ok"], runner.results)
+        self.assertFalse(self.held())
+        self.assertEqual(P.gpu_lock.users, 0)
+
+    def probing(self, names):
+        return {n: (lambda _, n=n: self.seen.append((n, self.held()))) for n in names}
+
+    def test_every_route_holds_it_for_gpu_tests_only(self):
+        self.seen = []
+        names = ["gputest", "jpegtest", "distortiontest", "distortion-replay", "mdectest"]
+        # --jobs 1: one after another on the main thread, nothing else running.
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=1)
+        for n in names[:3]:
+            runner.run(n, self.exe(n))
+        runner.run("distortion-replay", self.exe("distortiontest"), self.root, timeout=5 * P.TIMEOUT)
+        runner.run("mdectest", self.exe("mdectest"))
+        self.execute(runner, Children(self.probing(names)))
+        self.assertEqual(self.seen, [("gputest", True), ("jpegtest", False), ("distortiontest", True),
+                                     ("distortion-replay", True), ("mdectest", False)])
+        self.assertFalse(self.held())
+        # Parallel: a CLOCK GPU test and a CPU one alone on the main thread, and a GPU
+        # test's rerun alone after failing when shared.
+        self.seen = []
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=4)
+        runner.run("high-refresh", Path(sys.executable), "-c", "", target="highrefreshtest")
+        runner.run("netplaytest", self.exe("netplaytest"))
+        runner.run("gputest", self.exe("gputest"))
+        runner.run("jpegtest", self.exe("jpegtest"))
+        hooks = self.probing(["high-refresh", "netplaytest", "gputest"])
+        printed = self.execute(runner, Children(hooks, codes={"gputest": lambda run: 1 if run == 0 else 0}))
+        self.assertEqual(printed, ["high-refresh", "netplaytest", "gputest", "jpegtest"])
+        self.assertIn(("retry", "gputest", frozenset()), runner.trace)
+        self.assertEqual(self.seen, [("high-refresh", True), ("netplaytest", False),
+                                     ("gputest", True), ("gputest", True)])
+        self.assertFalse(self.held())
+        self.assertEqual(P.gpu_lock.users, 0)
+
+    def test_the_plans_distortion_replay_is_a_gpu_test(self):
+        self.exe("distortiontest")
+        runner = P.Runner(self.build, gpu=True, pattern="distortion-replay", listing=False)
+        with redirect_stdout(io.StringIO()):
+            runner.plan()
+        self.assertEqual([(t.name, t.job.gpu) for t in runner.tests], [("distortion-replay", True)])
+
+    def test_two_gpu_tests_share_this_runs_hold(self):
+        # Both of this run's GPU slots run together under the one hold; the lock is held
+        # throughout and released once both have ended.
+        pair = threading.Barrier(2, timeout=10)
+        seen = []
+        hook = lambda _: (pair.wait(), seen.append(self.held()))
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=4)
+        for n in ("gputest", "presenttest"):
+            runner.run(n, self.exe(n))
+        self.execute(runner, Children({"gputest": hook, "presenttest": hook}))
+        self.assertEqual(seen, [True, True])
+        self.assertFalse(self.held())
+        self.assertEqual(P.gpu_lock.users, 0)
+
+    def test_released_on_errors(self):
+        def boom(_):
+            raise RuntimeError("child failed to launch")
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=1)
+        runner.run("gputest", self.exe("gputest"))
+        with self.assertRaisesRegex(RuntimeError, "failed to launch"):
+            self.execute(runner, Children({"gputest": boom}))
+        self.assertFalse(self.held())
+        # A timeout is a failure, and releases it too.
+        def slow(argv, **kwargs):
+            raise subprocess.TimeoutExpired(argv, 1)
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=1)
+        runner.run("gputest", self.exe("gputest"))
+        with patch.object(P.subprocess, "run", side_effect=slow), redirect_stdout(io.StringIO()):
+            runner.execute()
+        self.assertEqual(runner.results[0][1], "FAIL")
+        self.assertFalse(self.held())
+        self.assertEqual(P.gpu_lock.users, 0)
+
+    def test_unusable_lock_fails_the_gpu_test_without_running_it(self):
+        patch.dict(os.environ, XG_GPU_LOCK=str(self.root / "no such dir" / "gpu.lock")).start()
+        children = Children()
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=1)
+        runner.run("gputest", self.exe("gputest"))
+        runner.run("jpegtest", self.exe("jpegtest"))
+        self.execute(runner, children)
+        self.assertEqual(children.started, ["jpegtest"])
+        self.assertEqual(runner.results[0][1], "FAIL")
+        self.assertIn("GPU lock", runner.results[0][2])
+        self.assertEqual(P.gpu_lock.users, 0)
+
+    def test_read_only_lock_file_is_usable(self):
+        # Opened read-only, never created over: a lock file this account may not write
+        # (another account's, under fs.protected_regular) still locks.
+        self.lock.touch()
+        self.lock.chmod(0o444)
+        seen = []
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=1)
+        runner.run("gputest", self.exe("gputest"))
+        self.execute(runner, Children({"gputest": lambda _: seen.append(self.held())}))
+        self.assertEqual(seen, [True])
+        self.assertEqual(runner.results[0][1], "ok")
 
 
 class JobsOption(unittest.TestCase):
