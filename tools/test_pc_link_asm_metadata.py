@@ -217,5 +217,127 @@ class CliJP(Cli):
     ver = "jp"
 
 
+def no_scan(ver):
+    raise AssertionError("the data label scan ran on the --asm-labels path")
+
+
+class Reader(Tree):
+    """--asm-labels: the data labels from a layout file. The tree adds D_shared to both modules
+    (at different addresses) and a blob label in main, so main's labels come
+    from its data files and its blob, before and after ovl's in the scan."""
+
+    def setUp(self):
+        super().setUp()
+        d = 0 if self.ver == "us" else 4
+        md, od = (0x800 - 0x80010000, 0x2000 - 0x80100000) if self.ver == "us" else (0x900 - 0x80010000, 0x2100 - 0x80100000)
+        asm = self.root / "asm" / self.ver
+        (asm / "main/data/c.s").write_text("dlabel D_shared\n" + line(0x80040000 + d, md, ".word 0x1"))
+        (asm / "ovl/data/a0.s").write_text("dlabel D_shared\n" + line(0x80100300 + d, od, ".word 0x2")
+                                           + "dlabel D_ovl_first\n" + line(0x80100304 + d, od, ".word 0x3"))
+        (asm / "main/nonmatchings/func_m").mkdir(parents=True)
+        (asm / "main/nonmatchings/func_m/blob.s").write_text(
+            ".section .rodata\n\ndlabel D_mblob\n" + line(0x80050000 + d, md, '.asciz "SECRETTEX"') + "enddlabel D_mblob\n")
+        self.shared = {"main": 0x80040000 + d, "ovl": 0x80100300 + d}
+        self.layout = self.root / "layout.json"
+
+    def written(self) -> dict:
+        self.assertEqual(self.link("write", "--write-asm-layout", str(self.layout)), 0)
+        return json.loads(self.layout.read_text())
+
+    def test_scan_order_and_shared_names(self):
+        scan = pc_link.scan_data_labels(self.ver)
+        self.assertEqual(list(scan)[:4], ["D_asm_head", "D_asm_numeric", "D_asm_tail", "D_shared"])
+        self.assertEqual(list(scan).index("D_mblob"), len(scan) - 2)  # blobs last, main's before ovl's
+        self.assertEqual(scan["D_shared"], self.shared)
+        labels = self.written()["modules"]
+        self.assertEqual([n for n, _ in labels["main"]["labels"]],
+                         ["D_asm_head", "D_asm_numeric", "D_asm_tail", "D_shared", "D_mblob"])
+        self.assertEqual([n for n, _ in labels["ovl"]["labels"]], ["D_shared", "D_ovl_first", "D_ovl_tab", "D_blob"])
+
+    def test_reader_gives_the_scan(self):
+        self.written()
+        images, _ = load_images(self.ver)
+        with mock.patch.object(pc_link, "scan_data_labels", no_scan):
+            got = pc_link.read_asm_labels(self.layout, self.ver, BOOT[self.ver], images)
+        scan = pc_link.scan_data_labels(self.ver)
+        self.assertEqual(got, scan)  # every name, module and address
+        for m in MODULES:  # and every module's order
+            self.assertEqual([n for n in got if m in got[n]], [n for n in scan if m in scan[n]])
+
+    def test_roundtrip_through_main(self):
+        self.assertEqual(self.link("orig"), 0)
+        self.written()
+        again = self.root / "again.json"
+        with mock.patch.object(pc_link, "scan_data_labels", no_scan):
+            self.assertEqual(self.link("read", "--asm-labels", str(self.layout)), 0)
+            self.assertEqual(self.link("both", "--asm-labels", str(self.layout), "--write-asm-layout", str(again)), 0)
+        for out in ("write", "read", "both"):
+            self.assertEqual(self.outputs(out), self.outputs("orig"), out)
+        self.assertEqual(again.read_bytes(), self.layout.read_bytes())
+
+    def test_default_scans(self):
+        calls = []
+        real = pc_link.scan_data_labels
+        with mock.patch.object(pc_link, "scan_data_labels", lambda v: calls.append(v) or real(v)):
+            self.assertEqual(self.link("orig"), 0)
+        self.assertEqual(calls, [self.ver])
+
+    def test_refused_before_output(self):
+        doc = self.written()
+        other = "jp" if self.ver == "us" else "us"
+
+        def changed(f):
+            d = json.loads(json.dumps(doc))
+            f(d)
+            return json.dumps(d)
+        main_labels = lambda d: d["modules"]["main"]["labels"]  # noqa: E731
+        cases = [
+            ("missing", None, "not readable"), ("directory", "dir", "not readable"),
+            ("not json", "{", "not readable"), ("nan", json.dumps(doc).replace(str(doc["modules"]["main"]["labels"][0][1]), "NaN", 1), "not readable"),
+            ("duplicate key", json.dumps(doc)[:-1] + ', "region": "%s"}' % self.ver, "not readable"),
+            ("wrong region", changed(lambda d: d.update(region=other)), "region"),
+            ("wrong boot", changed(lambda d: d.update(boot=BOOT[other])), "region"),
+            ("missing module", changed(lambda d: d["modules"].pop("ovl")), "modules"),
+            ("extra module", changed(lambda d: d["modules"].update(other_ovl=d["modules"]["ovl"])), "modules"),
+            ("bad label", changed(lambda d: main_labels(d)[0].__setitem__(1, "0x80020000")), "labels"),
+            ("repeated label", changed(lambda d: main_labels(d).append(list(main_labels(d)[0]))), "labels"),
+            ("stale spans", changed(lambda d: d["modules"]["main"]["spans"][0].__setitem__(1, d["modules"]["main"]["spans"][0][1] + 1)),
+             "spans are not this assembly's"),
+            ("stale refs", changed(lambda d: d["modules"]["ovl"]["refs"].clear()), "refs are not this assembly's"),
+            ("no one order", changed(lambda d: d["modules"]["ovl"]["labels"].append(list(main_labels(d)[0]))),
+             "orders no one scan gives"),
+        ]
+        for what, text, msg in cases:
+            path = self.root / f"bad-{what.replace(' ', '-')}.json"
+            if text == "dir":
+                path.mkdir()
+            elif text is not None:
+                path.write_text(text)
+            out, again = f"out-{what.replace(' ', '-')}", self.root / f"again-{what.replace(' ', '-')}.json"
+            with self.subTest(what=what), mock.patch.object(pc_link, "scan_data_labels", no_scan), \
+                    self.assertRaises(SystemExit) as cm:
+                self.link(out, "--asm-labels", str(path), "--write-asm-layout", str(again))
+            self.assertIn("assembly layout", str(cm.exception), what)
+            self.assertIn(msg, str(cm.exception), what)
+            self.assertFalse((self.root / out).exists(), what)
+            self.assertFalse(again.exists(), what)
+
+    def test_link_refusals_remain(self):
+        self.written()
+        d = json.loads(ps1_objects_json(self.ver, BOOT[self.ver],
+                                        ps1_objects_facts(self.data, read_ps1_objects(self.ver, MODULES))))
+        d["modules"]["main"]["objects"] = [["D_one", 0x80020000, 8], ["D_two", 0x80020004, 4]]
+        facts = self.root / "ps1.json"
+        facts.write_text(json.dumps(d))
+        with self.assertRaises(SystemExit) as cm:
+            self.link("read", "--asm-labels", str(self.layout), "--ps1-objects", str(facts))
+        self.assertIn("two PC objects for one PS1 address", str(cm.exception))
+        self.assertFalse((self.root / "read").exists())
+
+
+class ReaderJP(Reader):
+    ver = "jp"
+
+
 if __name__ == "__main__":
     unittest.main()

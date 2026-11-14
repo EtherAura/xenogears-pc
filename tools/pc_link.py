@@ -104,8 +104,12 @@ build's: a file from an older PS1 build of the same region and C data names is t
 --write-asm-layout FILE writes the layout the link reads from the data assembly (asm/<ver>),
 structure only: no instruction, byte, word value, string or path. It is written only when the
 link succeeds, after checking it (asm_layout_check(): every module with data assembly or data
-labels and no other, each list in order and within 32-bit addresses), and it is not read back:
-the link still takes the assembly. The file is JSON:
+labels and no other, each list in order and within 32-bit addresses). --asm-labels FILE reads
+back its data labels only, instead of scanning the assembly for them (read_asm_labels(): the
+file must be well formed for this region, boot file and the modules the assembly has, and its
+other lists must be the assembly's own); everything else, and every byte copied, still comes
+from the assembly, so this is not a link without asm/<ver>. With --write-asm-layout too, the
+layout written lists the labels read. The file is JSON:
 
     {"format": "xenogears-pc-link-asm-layout", "version": 1, "region": "us" or "jp",
      "boot": the boot file (config/<ver>/disc.yaml),
@@ -120,6 +124,7 @@ the link still takes the assembly. The file is JSON:
                                     first place)}}}
 
     python tools/pc_link.py --write-asm-layout layout.json OUTDIR OBJ...
+    python tools/pc_link.py --asm-labels layout.json OUTDIR OBJ...  # its labels; asm/<ver> still read
 
 Sizes come from the game's own declarations: each file that uses a symbol is
 compiled again with `char x[sizeof(sym)]` appended, once for the PC (x86-64)
@@ -134,6 +139,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import concurrent.futures
+import heapq
 import json
 import os
 import re
@@ -1185,6 +1191,92 @@ def asm_layout_check(doc, ver: str, boot: str | None, modules: list[str]) -> Non
             raise AsmLayoutError(f"assembly layout: {m}: labels are not distinct [name, address]")
 
 
+def scan_data_labels(ver: str) -> dict[str, dict[str, int]]:
+    """name -> {module: address} of the data labels in asm/<ver>'s data files, then its INCLUDE_RODATA
+    blobs (load_images): a label's address is its next data line's, a module keeps a name's first."""
+    labels: dict[str, dict[str, int]] = {}
+    blob_files = [p for p in sorted((ROOT / "asm" / ver).glob("*/nonmatchings/*/*.s"))
+                  if "\ndlabel " in p.read_text(errors="replace")]  # INCLUDE_RODATA data (load_images)
+    for path in sorted((ROOT / "asm" / ver).glob("*/data/*.s")) + blob_files:
+        mod = path.relative_to(ROOT / "asm" / ver).parts[0]
+        pending = []
+        for line in path.read_text(errors="replace").splitlines():
+            m = LABEL.match(line)
+            if m and not m.group(1).startswith(".L"):
+                pending.append(m.group(1))
+                continue
+            m = DATA_LINE.match(line)
+            if m and pending:
+                for n in pending:
+                    labels.setdefault(n, {}).setdefault(mod, int(m["vram"], 16))
+                pending = []
+    return labels
+
+
+def read_asm_labels(path: Path, ver: str, boot: str | None, images: dict[str, Image]) -> dict[str, dict[str, int]]:
+    """The data labels of assembly layout file `path` (--write-asm-layout), in place of
+    scan_data_labels; AsmLayoutError unless it is well formed (asm_layout_check) for region `ver`,
+    boot file `boot` and exactly the modules load_images found, and its deltas, spans, blob ends and
+    pointer slots are the ones those images give (a layout from another PS1 build is refused).
+
+    Only the labels are taken: the images, and every byte the link copies, still come from the
+    assembly. The file keeps each module's labels in the scan's order; the scan's order across
+    modules is not in it, so the names are put in the one order every module's list keeps (ties by
+    module, then place), and a name's modules in module order. What the link does with the labels
+    depends on neither: it sorts or looks them up, and a layout it writes again (--write-asm-layout)
+    lists each module's in the file's order."""
+    def strict(pairs):
+        keys = [k for k, _ in pairs]
+        if len(set(keys)) != len(keys):
+            raise ValueError(f"duplicate key in {keys}")
+        return dict(pairs)
+
+    def no_constant(c):
+        raise ValueError(f"{c} is not a number")
+    try:
+        doc = json.loads(Path(path).read_text(), object_pairs_hook=strict, parse_constant=no_constant)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        raise AsmLayoutError(f"assembly layout {path}: not readable JSON: {e}") from None
+    asm_layout_check(doc, ver, boot, sorted(images))
+    own = asm_layout_facts(images, {})
+    mods = sorted(doc["modules"])
+    for m in mods:
+        for k in ("deltas", "spans", "ends", "refs"):
+            if doc["modules"][m][k] != own[m][k]:
+                raise AsmLayoutError(f"assembly layout: {m}: {k} are not this assembly's (another PS1 build's layout?)")
+    # Each module's list is a chain; the names go in an order that keeps every chain.
+    after: dict[str, set[str]] = {}
+    before = {}
+    rank: dict[str, tuple[int, int]] = {}
+    for i, m in enumerate(mods):
+        names = [n for n, _ in doc["modules"][m]["labels"]]
+        for j, n in enumerate(names):
+            rank.setdefault(n, (i, j))
+            after.setdefault(n, set())
+            before.setdefault(n, 0)
+        for x, y in zip(names, names[1:]):
+            if y not in after[x]:
+                after[x].add(y)
+                before[y] += 1
+    ready = [(r, n) for n, r in rank.items() if not before[n]]
+    heapq.heapify(ready)
+    order = []
+    while ready:
+        _, n = heapq.heappop(ready)
+        order.append(n)
+        for y in after[n]:
+            before[y] -= 1
+            if not before[y]:
+                heapq.heappush(ready, (rank[y], y))
+    if len(order) != len(rank):
+        raise AsmLayoutError("assembly layout: the modules' labels are in orders no one scan gives")
+    labels: dict[str, dict[str, int]] = {n: {} for n in order}
+    for m in mods:
+        for n, a in doc["modules"][m]["labels"]:
+            labels[n][m] = a
+    return labels
+
+
 def asm_layout_json(ver: str, boot: str | None, facts: dict[str, dict], modules: list[str]) -> str:
     """The assembly layout file for region `ver`, checked (asm_layout_check) before it is returned."""
     doc = {"format": ASM_LAYOUT_FORMAT, "version": ASM_LAYOUT_VERSION, "region": ver, "boot": boot,
@@ -1262,6 +1354,9 @@ def main() -> int:
                      help="write the PS1 object facts, read from every linked module's build/<ver>/<module>.elf, to this file")
     ap.add_argument("--write-asm-layout", type=Path,
                     help="write the layout read from asm/<ver> (no contents) to this file, when the link succeeds")
+    ap.add_argument("--asm-labels", type=Path,
+                    help="take the data labels from this assembly layout file (--write-asm-layout) instead of "
+                         "scanning asm/<ver> for them; the images still come from the assembly")
     args = ap.parse_args()
     GAME_FLAGS[GAME_FLAGS.index("-Iinclude")] = f"-I{args.game_root / 'include'}"
 
@@ -1272,24 +1367,13 @@ def main() -> int:
             if m:
                 syms_all.setdefault(m.group(1), {})[f.stem] = (int(m.group(2), 16), "type:func" in m.group(3))
     images, labels_first = load_images(args.ver)
-    labels_all: dict[str, dict[str, int]] = {}
-    for mod, img in images.items():
-        pass
-    blob_files = [p for p in sorted((ROOT / "asm" / args.ver).glob("*/nonmatchings/*/*.s"))
-                  if "\ndlabel " in p.read_text(errors="replace")]  # INCLUDE_RODATA data (load_images)
-    for path in sorted((ROOT / "asm" / args.ver).glob("*/data/*.s")) + blob_files:
-        mod = path.relative_to(ROOT / "asm" / args.ver).parts[0]
-        pending = []
-        for line in path.read_text(errors="replace").splitlines():
-            m = LABEL.match(line)
-            if m and not m.group(1).startswith(".L"):
-                pending.append(m.group(1))
-                continue
-            m = DATA_LINE.match(line)
-            if m and pending:
-                for n in pending:
-                    labels_all.setdefault(n, {}).setdefault(mod, int(m["vram"], 16))
-                pending = []
+    if args.asm_labels:
+        try:
+            labels_all = read_asm_labels(args.asm_labels, args.ver, boot_name(disc_files(args.ver)), images)
+        except AsmLayoutError as e:
+            raise SystemExit(f"pc_link: {e}") from None
+    else:
+        labels_all = scan_data_labels(args.ver)
     # Taken before the link uses the images; checked and written only once it has succeeded.
     asm_layout = asm_layout_facts(images, labels_all) if args.write_asm_layout else None
     asm_modules = sorted(set(images) | {m for per in labels_all.values() for m in per})
