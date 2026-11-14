@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Port test runner isolation regressions; no game, GPU or disc data needed."""
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 import io
 import os
@@ -869,6 +870,180 @@ class GpuLockTests(unittest.TestCase):
         self.execute(runner, Children({"gputest": lambda _: seen.append(self.held())}))
         self.assertEqual(seen, [True])
         self.assertEqual(runner.results[0][1], "ok")
+
+
+# A stand-in for the game (no GPU, no disc): it notes, in its working directory
+# (the run's scratch), its clock, whether the GPU lock was held while it ran
+# (probed from a descriptor of its own) and whether it inherited one of the lock.
+# FAKE_WAIT_FOR=N: wait (10 s at most) until N runs have started beside it.
+FAKE_GAME = """\
+import fcntl, os, sys, time
+from pathlib import Path
+lock = os.environ["XG_GPU_LOCK"]
+held = False
+if os.path.exists(lock):  # nothing made it: nothing holds it
+    fd = os.open(lock, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        held = True
+    os.close(fd)
+inherited = any(os.path.realpath(f"/proc/self/fd/{n}") == os.path.realpath(lock) for n in os.listdir("/proc/self/fd"))
+Path("child.txt").write_text(f"{os.environ.get('XG_CLOCK', 'real')} held={held} inherited={inherited}\\n")
+n = int(os.environ.get("FAKE_WAIT_FOR", "0"))
+end = time.monotonic() + 10
+while n and len(list(Path("..").glob("*/child.txt"))) < n:
+    if time.monotonic() > end:
+        sys.exit(9)
+    time.sleep(0.02)
+sys.exit(int(os.environ.get("FAKE_EXIT", "0")))
+"""
+
+# test_battle_speed.py's runs with the stand-in game, as a process of their own
+# (port_tests' battle-speed job): the step-clock run, then the real-clock one.
+DRIVER = """\
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import test_battle_speed as B
+fake = sys.argv[4]
+B.statecheck.executable = lambda build: ([sys.executable, fake], Path(fake))
+out = Path(sys.argv[3])
+codes = [B.run(Path(sys.argv[2]), out / n, 4, 10, False, real=r) for n, r in (("step", False), ("real", True))]
+print("driver", codes, flush=True)
+sys.exit(max(codes))
+"""
+
+
+@unittest.skipIf(P.fcntl is None or not Path("/proc/self/fd").is_dir(), "the GPU lock is flock's (not on Windows)")
+class BattleSpeedLockTests(unittest.TestCase):
+    """test_battle_speed.py runs every game, step-clock and real-clock, holding the GPU
+    lock (xg-dby): its own hold, port_tests holding none around it (SELF_LOCKED)."""
+    held, other_process, until = GpuLockTests.held, GpuLockTests.other_process, GpuLockTests.until
+
+    def setUp(self):
+        SchedulerTests.setUp(self)
+        self.lock = self.root / "gpu.lock"
+        self.fake = self.root / "fake_game.py"
+        self.fake.write_text(FAKE_GAME)
+        import test_battle_speed as B
+        self.B = B
+        patch.object(B.statecheck, "executable", lambda build: ([sys.executable, str(self.fake)], self.fake)).start()
+        self.assertIs(B.port_tests, P)
+
+    def launch(self, out, real):
+        """One battle-speed run in a thread of this process: its result box and thread."""
+        box = []
+        thread = threading.Thread(target=lambda: box.append(self.B.run(self.build, out, 4, 10, False, real=real)),
+                                  daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 30)
+        return box, thread
+
+    def test_each_launch_waits_for_another_process(self):
+        for real, clock in ((False, "step"), (True, "real")):
+            with self.subTest(clock=clock):
+                out = self.root / clock
+                holder = self.other_process()
+                try:
+                    box, thread = self.launch(out, real)
+                    self.until(P.gpu_lock.mutex.locked, f"the {clock} run waiting for the lock")
+                    time.sleep(0.5)
+                    self.assertFalse((out / "child.txt").exists(), "the game ran while another process held the lock")
+                    self.assertTrue(thread.is_alive())
+                finally:
+                    RunnerTests.stop(holder)
+                thread.join(20)
+                self.assertFalse(thread.is_alive(), "the game never ran after the release")
+                self.assertEqual(box, [0])
+                self.assertEqual((out / "child.txt").read_text(), f"{clock} held=True inherited=False\n")
+                self.assertFalse(self.held())
+                self.assertEqual(P.gpu_lock.users, 0)
+
+    def test_side_by_side_step_runs_share_one_hold(self):
+        # main()'s pool: the step-clock runs overlap under the one flock (no nested hold
+        # of this process's own lock), each holding it throughout.
+        patch.dict(os.environ, FAKE_WAIT_FOR="4").start()
+        names = ["off", "1x", "2x", "4x"]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(self.B.run, self.build, self.root / "runs" / n, None, 10, False) for n in names]
+            codes = [f.result(timeout=30) for f in futures]
+        self.assertEqual(codes, [0, 0, 0, 0])
+        for n in names:
+            self.assertEqual((self.root / "runs" / n / "child.txt").read_text(), "step held=True inherited=False\n")
+        self.assertFalse(self.held())
+        self.assertEqual(P.gpu_lock.users, 0)
+
+    def test_released_on_failure_and_errors(self):
+        # The game fails: its exit status, and the lock released.
+        patch.dict(os.environ, FAKE_EXIT="3").start()
+        for real in (False, True):
+            self.assertEqual(self.B.run(self.build, self.root / f"fail-{real}", 4, 10, False, real=real), 3)
+            self.assertFalse(self.held())
+        # The launch raises: released too.
+        with patch.object(self.B.subprocess, "run", side_effect=RuntimeError("failed to launch")):
+            with self.assertRaisesRegex(RuntimeError, "failed to launch"):
+                self.B.run(self.build, self.root / "raises", 4, 10, False)
+        self.assertFalse(self.held())
+        self.assertEqual(P.gpu_lock.users, 0)
+        # A lock that cannot be opened: the run fails without the game starting.
+        patch.dict(os.environ, XG_GPU_LOCK=str(self.root / "no such dir" / "gpu.lock")).start()
+        out = self.root / "unusable"
+        self.assertEqual(self.B.run(self.build, out, 4, 10, False), 1)
+        self.assertFalse((out / "child.txt").exists())
+        self.assertIn("GPU lock", (out / "port.log").read_text())
+        self.assertEqual(P.gpu_lock.users, 0)
+
+    def job(self, name, timeout):
+        driver = self.root / "driver.py"
+        driver.write_text(DRIVER)
+        argv = [sys.executable, str(driver), str(P.ROOT / "tools"), str(self.build), str(self.root / name), str(self.fake)]
+        return P.Job(name, argv, dict(os.environ), timeout, None, "xenogears", set())
+
+    def test_port_tests_job_waits_without_nesting_and_cpu_jobs_go_on(self):
+        # port_tests' battle-speed job (a GPU test) holds no lock around the script: the
+        # script's own runs wait for the other process, then both run; a CPU-only job
+        # meanwhile runs to its end without taking the lock.
+        job = self.job("battle-speed", 60)
+        self.assertTrue(job.gpu)
+        self.assertIn(job.name, P.SELF_LOCKED)
+        holder = self.other_process()
+        box = []
+        thread = threading.Thread(target=lambda: box.append(P.run_job(job)), daemon=True)
+        thread.start()
+        self.addCleanup(thread.join, 70)
+        mark = self.root / "cpu.started"
+        cpu = P.Job("jpegtest", [sys.executable, "-c", "import sys; open(sys.argv[1], 'w').close()", str(mark)],
+                    dict(os.environ), 10, None, "jpegtest", set())
+        self.assertFalse(cpu.gpu)
+        self.assertEqual(P.run_job(cpu)[0], "ok")
+        self.assertTrue(mark.exists())
+        self.assertFalse(P.gpu_lock.mutex.locked())
+        self.assertEqual(P.gpu_lock.users, 0)
+        self.until(lambda: (self.root / "battle-speed" / "step" / "pad.txt").exists(), "the script's first run")
+        time.sleep(0.5)
+        self.assertFalse((self.root / "battle-speed" / "step" / "child.txt").exists(),
+                         "the game ran while another process held the lock")
+        self.assertTrue(thread.is_alive())
+        RunnerTests.stop(holder)
+        thread.join(60)
+        self.assertFalse(thread.is_alive(), "the battle-speed job hung")
+        self.assertEqual(box[0][0], "ok", box)
+        self.assertIn("driver [0, 0]", box[0][1])
+        for clock in ("step", "real"):
+            self.assertEqual((self.root / "battle-speed" / clock / "child.txt").read_text(),
+                             f"{clock} held=True inherited=False\n")
+        self.assertFalse(self.held())
+
+    def test_the_exemption_is_what_keeps_it_from_deadlocking(self):
+        # Were port_tests to hold the lock around the script, its own first run would
+        # wait for it forever: here, to the job's timeout.
+        job = self.job("battle-speed-held", 3)
+        self.assertNotIn(job.name, P.SELF_LOCKED)
+        self.assertEqual(P.run_job(job)[1].split(":")[0], "exit timeout")
+        self.assertFalse((self.root / "battle-speed-held" / "step" / "child.txt").exists())
+        self.assertFalse(self.held())
+        self.assertEqual(P.gpu_lock.users, 0)
 
 
 class JobsOption(unittest.TestCase):

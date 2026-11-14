@@ -40,10 +40,12 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+import port_tests  # noqa: E402
 import statecheck  # noqa: E402
 
 PERIOD = 263 / (53693175 / 3412.5)  # the NTSC 240-line vblank (hw.h), seconds
@@ -90,12 +92,23 @@ def run(build: Path, out: Path, speed: int | None, until: int, jp: bool, real: b
                   "XG_DUMP_RANGE": FRAMES.format(until=until)})
     cmd, _ = statecheck.executable(build)
     disc = ROOT / statecheck.DISCS["jp1" if jp else "us1"]
-    # The real-clock run measures pacing: on the Intel GPU it waits for the
-    # GPU's lock (tools/intel.sh), so another run there can't halve its speed.
-    lock = [str(ROOT / "tools/gpu_lock.sh")] if real and e.get("XG_VK_DEVICE") == "intel" else []
-    with open(out / "port.log", "w") as log:
-        p = subprocess.run([*lock, "nice", "-n", "19", "timeout", "-s", "INT", "-k", "30", "900", *cmd, str(disc)],
-                           env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out)
+    # Every run holds the Intel GPU lock (XG_GPU_LOCK, else /tmp/xg-intel-gpu.lock:
+    # tools/gpu_lock.sh's, the art chapters' run.sh's) for the game's whole run, so
+    # another process's GPU job (an art capture) never shares the device with it
+    # (xg-dby). port_tests' hold: the step-clock runs, side by side, share this
+    # process's one flock; the real-clock run takes it after them, so another run
+    # there can't halve its speed either. port_tests runs this script without
+    # holding it (SELF_LOCKED). No lock on Windows (no flock).
+    with ExitStack() as held:
+        if port_tests.fcntl is not None:
+            try:
+                held.enter_context(port_tests.gpu_lock.held())
+            except OSError as err:  # the lock file cannot be opened or locked: the game did not run
+                (out / "port.log").write_text(f"GPU lock {port_tests.gpu_lock_path()}: {err}\n")
+                return 1
+        with open(out / "port.log", "w") as log:
+            p = subprocess.run(["nice", "-n", "19", "timeout", "-s", "INT", "-k", "30", "900", *cmd, str(disc)],
+                               env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out)
     (out / "device.raw").unlink(missing_ok=True)
     return p.returncode
 
