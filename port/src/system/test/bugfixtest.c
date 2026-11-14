@@ -666,6 +666,97 @@ static int testSoldierFade(void) {
     }
     return 0;
 }
+
+/* Field 326's script start as scriptfix.c documents it: byte 0 the entrance
+ * table's 0xFF, bytes 1-6 entrance 0's position, walkmesh and camera facing,
+ * byte 7 its party facing (0xFF: from field variable 6). Synthetic. */
+static const u8 orphanageStart[] = {0xFF, 0xFB, 0xFF, 0xFA, 0xFA, 0x00, 0xFF, 0xFF};
+#define ORPHANAGE_PARTY_FACING 7
+
+/* The inn's filler script (no 0xFF byte in it) after the orphanage's start;
+ * at < 0: the filler alone. */
+static void orphanageScript(u8* code, int at) {
+    memset(code, 0xEE, INN_SCRIPT + 8);
+    innScript(code, -1);
+    if (at >= 0) memcpy(code + at, orphanageStart, sizeof(orphanageStart));
+}
+
+/* Field 326: entrance 0's party facing becomes 0 (up-screen), only with the
+ * script's first 8 bytes the documented ones and the script longer than them. */
+static int testOrphanageFacing(void) {
+    /* Not 0x19: field 282 reads the game's progress with Emeralda's theme. */
+    static const s32 musics[] = {0x0D, 0x26, 0xFF, -1};
+    u8 code[INN_SCRIPT + 8], expected[INN_SCRIPT + 8];
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        for (int m = 0; m < (int)(sizeof(musics) / sizeof(musics[0])); ++m) {
+            s32 music = musics[m];
+            /* The start whole: the one facing byte, when on. */
+            orphanageScript(code, 0);
+            memcpy(expected, code, sizeof(expected));
+            if (enabled) expected[ORPHANAGE_PARTY_FACING] = 0x00;
+            INN_RUN(326, music, code, INN_SCRIPT, expected);
+            /* Fixed once (facing 0), the start no longer matches: a second pass keeps it. */
+            memcpy(expected, code, sizeof(expected));
+            INN_RUN(326, music, code, INN_SCRIPT, expected);
+            /* Another field with the same bytes (302 walks in to entrance 0 too): nothing. */
+            static const int fields[] = {0, 325, 327, 302, 87, 213, 50, 282, 326 + 0x1000};
+            for (int f = 0; f < (int)(sizeof(fields) / sizeof(fields[0])); ++f) {
+                orphanageScript(code, 0);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(fields[f], music, code, INN_SCRIPT, expected);
+            }
+            /* Any one byte of the start different (the facing byte too): nothing. */
+            for (int k = 0; k < (int)sizeof(orphanageStart); ++k) {
+                orphanageScript(code, 0);
+                code[k] ^= 0x01;
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(326, music, code, INN_SCRIPT, expected);
+            }
+            /* The start found later in the script: not the entrance table, nothing. */
+            for (int at = 1; at <= INN_SCRIPT - (int)sizeof(orphanageStart); at += 13) {
+                orphanageScript(code, at);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(326, music, code, INN_SCRIPT, expected);
+            }
+            /* The script's size: up to the start's 8 bytes nothing (the whole
+             * start of a script of 8 bytes too), from 9 the edit; nothing
+             * written past the size given. */
+            for (int size = 0; size <= 16; ++size) {
+                orphanageScript(code, 0);
+                memcpy(expected, code, sizeof(expected));
+                if (enabled && size > (int)sizeof(orphanageStart)) expected[ORPHANAGE_PARTY_FACING] = 0x00;
+                INN_RUN(326, music, code, size, expected);
+            }
+        }
+        /* No start at all, and an empty script. */
+        orphanageScript(code, -1);
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(326, 0x26, code, INN_SCRIPT, expected);
+        INN_RUN(326, 0x26, code, 0, expected);
+        /* Already facing up-screen: nothing. */
+        orphanageScript(code, 0);
+        code[ORPHANAGE_PARTY_FACING] = 0x00;
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(326, 0x26, code, INN_SCRIPT, expected);
+        /* A second copy later: only the script's first one is edited. */
+        orphanageScript(code, 0);
+        memcpy(code + 48, orphanageStart, sizeof(orphanageStart));
+        memcpy(expected, code, sizeof(expected));
+        if (enabled) expected[ORPHANAGE_PARTY_FACING] = 0x00;
+        INN_RUN(326, 0x26, code, INN_SCRIPT, expected);
+        /* Fields 87's, 213's and 50's routines after the start in field 326:
+         * the facing byte only, the routines untouched. */
+        orphanageScript(code, 0);
+        memcpy(code + 10, innRoutine, sizeof(innRoutine));
+        memcpy(code + 50, wardRoutine, sizeof(wardRoutine));
+        memcpy(code + 70, soldierRoutine, sizeof(soldierRoutine));
+        memcpy(expected, code, sizeof(expected));
+        if (enabled) expected[ORPHANAGE_PARTY_FACING] = 0x00;
+        INN_RUN(326, 0x26, code, INN_SCRIPT, expected);
+    }
+    return 0;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -773,6 +864,7 @@ int main(int argc, char** argv) {
         CHECK(testNisanInn() == 0);
         CHECK(testWardRest() == 0);
         CHECK(testSoldierFade() == 0);
+        CHECK(testOrphanageFacing() == 0);
 #endif
     }
     printf("original bug fixes %s: %d checks passed\n", argv[2], checks);
