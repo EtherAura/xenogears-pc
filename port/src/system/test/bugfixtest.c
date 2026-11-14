@@ -562,6 +562,110 @@ static int testWardRest(void) {
     }
     return 0;
 }
+
+/* Field 50's motorcycle trail as scriptfix.c documents it:
+ * OP_RUN_ENTITY_SCRIPT_BLOCKING 0A 24, OP_DELETE_ENTITY 0A, OP_DELETE_ENTITY 09,
+ * OP_START_FADE_TO_BLACK 15, OP_WAIT 15, OP_START_FADE_IN 15; fixed, the fade
+ * and its wait come before the two deletions (same bytes). Synthetic. */
+static const u8 soldierRoutine[] = {
+    0x09, 0x0A, 0x24, 0x29, 0x0A, 0x29, 0x09, 0xB4, 0x0F, 0x80, 0x26, 0x0F, 0x80, 0xB3, 0x0F, 0x80,
+};
+static const u8 soldierRoutineFixed[] = {
+    0x09, 0x0A, 0x24, 0xB4, 0x0F, 0x80, 0x26, 0x0F, 0x80, 0x29, 0x0A, 0x29, 0x09, 0xB3, 0x0F, 0x80,
+};
+#define SOLDIER_DELETES 3 /* the two OP_DELETE_ENTITY, 4 bytes */
+#define SOLDIER_FADE 7    /* OP_START_FADE_TO_BLACK and OP_WAIT, 6 bytes */
+
+/* The inn's filler script (no 0x09 byte in it) around the trail's routine. */
+static void soldierScript(u8* code, int at) {
+    memset(code, 0xEE, INN_SCRIPT + 8);
+    innScript(code, -1);
+    if (at >= 0) memcpy(code + at, soldierRoutine, sizeof(soldierRoutine));
+}
+
+/* Field 50: the deletions and the fade swap places, only with the routine's
+ * 16 bytes found whole; the blocking call before and the fade-in after stay. */
+static int testSoldierFade(void) {
+    /* Not 0x19: field 282 reads the game's progress with Emeralda's theme. */
+    static const s32 musics[] = {0x0D, 0x26, 0xFF, -1};
+    static const int places[] = {0, 40, INN_SCRIPT - (int)sizeof(soldierRoutine)};
+    u8 code[INN_SCRIPT + 8], expected[INN_SCRIPT + 8];
+    /* The fixed bytes are the routine's own, reordered. */
+    CHECK(!memcmp(soldierRoutineFixed, soldierRoutine, SOLDIER_DELETES));
+    CHECK(!memcmp(soldierRoutineFixed + SOLDIER_DELETES, soldierRoutine + SOLDIER_FADE, 6));
+    CHECK(!memcmp(soldierRoutineFixed + SOLDIER_DELETES + 6, soldierRoutine + SOLDIER_DELETES, 4));
+    CHECK(!memcmp(soldierRoutineFixed + 13, soldierRoutine + 13, 3));
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        for (int m = 0; m < (int)(sizeof(musics) / sizeof(musics[0])); ++m)
+        for (int p = 0; p < 3; ++p) {
+            s32 music = musics[m];
+            int at = places[p];
+            /* The routine whole: its 16 bytes reordered when on. */
+            soldierScript(code, at);
+            memcpy(expected, code, sizeof(expected));
+            if (enabled) memcpy(expected + at, soldierRoutineFixed, sizeof(soldierRoutineFixed));
+            INN_RUN(50, music, code, INN_SCRIPT, expected);
+            /* Fixed once, the routine no longer matches: a second pass keeps it. */
+            memcpy(expected, code, sizeof(expected));
+            INN_RUN(50, music, code, INN_SCRIPT, expected);
+            /* Another field with the same bytes: nothing. */
+            static const int fields[] = {0, 49, 51, 87, 213, 282, 326, 50 + 0x1000};
+            for (int f = 0; f < (int)(sizeof(fields) / sizeof(fields[0])); ++f) {
+                soldierScript(code, at);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(fields[f], music, code, INN_SCRIPT, expected);
+            }
+            /* Any one byte of the routine different: nothing. */
+            for (int k = 0; k < (int)sizeof(soldierRoutine); ++k) {
+                soldierScript(code, at);
+                code[at + k] ^= 0x01;
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(50, music, code, INN_SCRIPT, expected);
+            }
+            /* The routine cut short by the script's end: nothing, and nothing
+             * written past the size given. */
+            for (int cut = 1; cut <= (int)sizeof(soldierRoutine); ++cut) {
+                soldierScript(code, at);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(50, music, code, at + (int)sizeof(soldierRoutine) - cut, expected);
+            }
+        }
+        /* No routine at all, and an empty script. */
+        soldierScript(code, -1);
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(50, 0x26, code, INN_SCRIPT, expected);
+        INN_RUN(50, 0x26, code, 0, expected);
+        /* Already in the fixed order: nothing. */
+        soldierScript(code, -1);
+        memcpy(code + 40, soldierRoutineFixed, sizeof(soldierRoutineFixed));
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(50, 0x26, code, INN_SCRIPT, expected);
+        /* Without the fade-in after: nothing. */
+        soldierScript(code, 40);
+        code[40 + 13] = 0x30;
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(50, 0x26, code, INN_SCRIPT, expected);
+        /* A partial copy before a whole one: the whole one is edited. */
+        soldierScript(code, 30);
+        memcpy(code + 10, soldierRoutine, 13);
+        memcpy(expected, code, sizeof(expected));
+        if (enabled) memcpy(expected + 30, soldierRoutineFixed, sizeof(soldierRoutineFixed));
+        INN_RUN(50, 0x26, code, INN_SCRIPT, expected);
+        /* Two copies: the first one found is the one edited. */
+        soldierScript(code, 0);
+        memcpy(code + 48, soldierRoutine, sizeof(soldierRoutine));
+        memcpy(expected, code, sizeof(expected));
+        if (enabled) memcpy(expected, soldierRoutineFixed, sizeof(soldierRoutineFixed));
+        INN_RUN(50, 0x26, code, INN_SCRIPT, expected);
+        /* Fields 87's and 213's routines in field 50: nothing. */
+        innScript(code, 20);
+        memcpy(code + 60, wardRoutine, sizeof(wardRoutine));
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(50, 0x26, code, INN_SCRIPT, expected);
+    }
+    return 0;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -668,6 +772,7 @@ int main(int argc, char** argv) {
         CHECK(testFieldSfx() == 0);
         CHECK(testNisanInn() == 0);
         CHECK(testWardRest() == 0);
+        CHECK(testSoldierFade() == 0);
 #endif
     }
     printf("original bug fixes %s: %d checks passed\n", argv[2], checks);
