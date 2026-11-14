@@ -15,7 +15,7 @@ Part of **-Project Exodus-**.
 
 [**Build and set up**](docs/building.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
 
-<img src="docs/img/clip-smooth.webp" alt="Animated comparison of motion smoothing in the PC port" width="960" />
+<img src="docs/img/clip-readme.webp" alt="Animated comparison in the PC port: 4:3 at 30 pictures a second, and 16:9 with motion smoothing at 60" width="960" />
 </div>
 
 | [Display](docs/display.md) | [Packs](docs/packs.md) |
