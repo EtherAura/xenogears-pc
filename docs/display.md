@@ -65,13 +65,13 @@ Shader takes a RetroArch `.slangp` or `.slang` preset for the whole picture.
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
 
-The game draws 30 pictures a second in most scenes. Motion smoothing draws the
+The game runs at 30 fps in most scenes. Motion smoothing draws the
 in-between pictures of fields and the world map, at 60, 120, 144 or 240 Hz.
 Game logic and sound keep their timing; it adds one game frame of delay.
 F1 > Gameplay > Speedup, Motion smoothing, Motion display rate.
 
 The Enhanced engine (F1 > System > Engine) runs fields, the world map and
-battles at 60 frames per second instead.
+battles at 60 fps instead.
 
 ## Performance overlay
 
