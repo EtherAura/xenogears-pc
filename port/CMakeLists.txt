@@ -338,9 +338,11 @@ xg_gameplay_code(gameplay_bugfix_shop_code "${XG_GAME_ROOT}/src/menu_shop/sh_801
 foreach(helper initMenuContext_1DE0 setupMenuContext364 setupMenuContext4E0)
     target_compile_definitions(gameplay_bugfix_shop_code PRIVATE ${helper}=shop_${helper})
 endforeach()
+# The field-script corrections (the test stubs the variables and music calls).
+xg_gameplay_code(gameplay_bugfix_field_code "${CMAKE_CURRENT_SOURCE_DIR}/src/game/field/scriptfix.c")
 xg_gameplay_test(gameplay_bugfixtest SOURCES src/system/test/bugfixtest.c
     GAME gameplay_bugfix_code gameplay_bugfix_save_code gameplay_bugfix_battle_code gameplay_bugfix_equip_code
-    gameplay_bugfix_shop_code)
+    gameplay_bugfix_shop_code gameplay_bugfix_field_code)
 
 # Dialogue portraits.
 xg_gameplay_code(gameplay_portrait_code "${XG_GAME_ROOT}/src/field/f_8009BB0C.c" "${XG_GAME_ROOT}/src/field/f_8006FDEC.c"

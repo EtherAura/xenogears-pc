@@ -354,6 +354,120 @@ static int testFieldSfx(void) {
     free(pSoundEffectsInstances); pSoundEffectsInstances = NULL;
     return 0;
 }
+
+/* scriptfix.c's game state and calls: the current music, the field, the
+ * script variables and the music instance's pitch and tempo. */
+s32 currentlyPlayingMusic;
+s32 fieldMapNumber;
+static int scriptVariableReads, musicPitchCalls, musicTempoCalls;
+s32 getVariable(s32 varIndex) { (void)varIndex; ++scriptVariableReads; return 0; }
+void setMusicInstancePitch(SoundInstance* inst, s32 val, s32 dur) { (void)inst; (void)val; (void)dur; ++musicPitchCalls; }
+void setMusicInstanceTempo(SoundInstance* inst, s32 tempo, s32 dur) { (void)inst; (void)tempo; (void)dur; ++musicTempoCalls; }
+
+/* Field 87's inn routine as scriptfix.c documents it: OP_PLAY_MUSIC 0D, OPX_A2,
+ * OP_WAIT 0A, OP_START_FADE_TO_BLACK 3C, OP_WAIT 46, OP_RESTORE_HP,
+ * OP_RESTORE_MP, OP_WAIT 1E, OP_START_FADE_IN 3C, OP_WAIT 46,
+ * OP_SHOW_DIALOG_WINDOW_MODE0 0E, OP_WAIT_DIALOG, OP_WAIT 0A,
+ * OP_DISABLE_RANDOM_BATTLES. Synthetic: no script from the disc. */
+static const u8 innRoutine[] = {
+    0x75, 0x0D, 0x80, 0xFE, 0xA2, 0x26, 0x0A, 0x80, 0xB4, 0x3C, 0x80, 0x26, 0x46, 0x80, 0x79, 0x7A, 0x26,
+    0x1E, 0x80, 0xB3, 0x3C, 0x80, 0x26, 0x46, 0x80, 0xD2, 0x0E, 0x00, 0x10, 0x9C, 0x26, 0x0A, 0x80, 0x14,
+};
+#define INN_LAST_WAIT 30 /* the OP_WAIT 0A after the morning line */
+#define INN_SCRIPT 96
+
+/* A filler script around the routine; none of its bytes are 0x75. */
+static void innScript(u8* code, int at) {
+    for (int i = 0; i < INN_SCRIPT; ++i) code[i] = (u8)(0x30 + i % 0x40);
+    if (at >= 0) memcpy(code + at, innRoutine, sizeof(innRoutine));
+}
+
+/* Runs the fix and checks the whole buffer against the expected one, and that
+ * the music state and the stubs saw nothing else. */
+static int innRun(int field, s32 music, u8* code, int size, const u8* expected) {
+    u8 guard[INN_SCRIPT + 8];
+    memcpy(guard, code, INN_SCRIPT + 8);
+    currentlyPlayingMusic = music;
+    scriptVariableReads = musicPitchCalls = musicTempoCalls = 0;
+    pcFieldScriptFixes(field, code, size);
+    CHECK(!memcmp(code, expected, size));
+    CHECK(!memcmp(code + size, guard + size, INN_SCRIPT + 8 - size)); /* past size: untouched */
+    CHECK(currentlyPlayingMusic == music);
+    CHECK(scriptVariableReads == 0 && musicPitchCalls == 0 && musicTempoCalls == 0);
+    return 0;
+}
+#define INN_RUN(...) do { if (innRun(__VA_ARGS__)) return 1; } while (0)
+
+/* Field 87: the inn's last OP_WAIT 0A becomes OP_PLAY_MUSIC of the music that
+ * played as the field loaded, only with the routine's bytes found whole. */
+static int testNisanInn(void) {
+    static const s32 musics[] = {0, 0x26, 0xEF, 0xF0, 0xFF, -1, 0x100};
+    static const int places[] = {0, 40, INN_SCRIPT - (int)sizeof(innRoutine)};
+    u8 code[INN_SCRIPT + 8], expected[INN_SCRIPT + 8];
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        for (int m = 0; m < (int)(sizeof(musics) / sizeof(musics[0])); ++m)
+        for (int p = 0; p < 3; ++p) {
+            s32 music = musics[m];
+            int at = places[p];
+            int fixes = enabled && music >= 0 && music < 0xF0;
+            /* The routine whole: the one edit, three bytes, when on. */
+            memset(code, 0xEE, sizeof(code));
+            innScript(code, at);
+            memcpy(expected, code, sizeof(expected));
+            if (fixes) {
+                expected[at + INN_LAST_WAIT] = 0x75;
+                expected[at + INN_LAST_WAIT + 1] = (u8)music;
+                expected[at + INN_LAST_WAIT + 2] = 0x80;
+            }
+            INN_RUN(87, music, code, INN_SCRIPT, expected);
+            /* Fixed once, the routine no longer matches: a second pass keeps it. */
+            memcpy(expected, code, sizeof(expected));
+            INN_RUN(87, music, code, INN_SCRIPT, expected);
+            /* Another field with the same bytes: nothing. */
+            static const int fields[] = {0, 86, 88, 93, 50, 213, 282, 326};
+            for (int f = 0; f < (int)(sizeof(fields) / sizeof(fields[0])); ++f) {
+                memset(code, 0xEE, sizeof(code));
+                innScript(code, at);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(fields[f], music, code, INN_SCRIPT, expected);
+            }
+            /* Any one byte of the routine different: nothing. */
+            for (int k = 0; k < (int)sizeof(innRoutine); ++k) {
+                memset(code, 0xEE, sizeof(code));
+                innScript(code, at);
+                code[at + k] ^= 0x01;
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(87, music, code, INN_SCRIPT, expected);
+            }
+            /* The routine cut short by the script's end: nothing, and nothing
+             * written past the size given. */
+            for (int cut = 1; cut <= (int)sizeof(innRoutine); ++cut) {
+                memset(code, 0xEE, sizeof(code));
+                innScript(code, at);
+                memcpy(expected, code, sizeof(expected));
+                INN_RUN(87, music, code, at + (int)sizeof(innRoutine) - cut, expected);
+            }
+        }
+        /* No routine at all, and an empty script. */
+        memset(code, 0xEE, sizeof(code));
+        innScript(code, -1);
+        memcpy(expected, code, sizeof(expected));
+        INN_RUN(87, 0x26, code, INN_SCRIPT, expected);
+        INN_RUN(87, 0x26, code, 0, expected);
+        /* Two copies: the first one found is the one edited. */
+        memset(code, 0xEE, sizeof(code));
+        innScript(code, 0);
+        memcpy(code + 48, innRoutine, sizeof(innRoutine));
+        memcpy(expected, code, sizeof(expected));
+        if (enabled) {
+            expected[INN_LAST_WAIT] = 0x75; expected[INN_LAST_WAIT + 1] = 0x26;
+            expected[INN_LAST_WAIT + 2] = 0x80;
+        }
+        INN_RUN(87, 0x26, code, INN_SCRIPT, expected);
+    }
+    return 0;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -458,6 +572,7 @@ int main(int argc, char** argv) {
         CHECK(testDeusCamera() == 0);
         CHECK(testShopCursor() == 0);
         CHECK(testFieldSfx() == 0);
+        CHECK(testNisanInn() == 0);
 #endif
     }
     printf("original bug fixes %s: %d checks passed\n", argv[2], checks);
