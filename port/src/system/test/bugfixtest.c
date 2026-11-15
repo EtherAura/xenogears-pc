@@ -360,7 +360,8 @@ static int testFieldSfx(void) {
 s32 currentlyPlayingMusic;
 s32 fieldMapNumber;
 static int scriptVariableReads, musicPitchCalls, musicTempoCalls;
-s32 getVariable(s32 varIndex) { (void)varIndex; ++scriptVariableReads; return 0; }
+static s32 scriptVariableValue, scriptVariableIndex; /* what getVariable returns, the index it was given */
+s32 getVariable(s32 varIndex) { scriptVariableIndex = varIndex; ++scriptVariableReads; return scriptVariableValue; }
 void setMusicInstancePitch(SoundInstance* inst, s32 val, s32 dur) { (void)inst; (void)val; (void)dur; ++musicPitchCalls; }
 void setMusicInstanceTempo(SoundInstance* inst, s32 tempo, s32 dur) { (void)inst; (void)tempo; (void)dur; ++musicTempoCalls; }
 
@@ -757,6 +758,115 @@ static int testOrphanageFacing(void) {
     }
     return 0;
 }
+
+/* Field 282's cue after Emeralda's laugh as scriptfix.c documents it:
+ * OP_WAIT 6, OP_PLAY_MUSIC 19, OP_SHOW_DIALOG_WINDOW_MODE0 1E. Synthetic. */
+static const u8 emeraldaCue[] = {0x26, 0x06, 0x80, 0x75, 0x19, 0x80, 0xD2, 0x1E, 0x00, 0x11};
+#define EMERALDA_THEME 0x19
+#define EMERALDA_PROGRESS 207
+
+/* The inn's filler script (no 0x26 byte in it) around the cue. */
+static void emeraldaScript(u8* code, int at) {
+    memset(code, 0xEE, INN_SCRIPT + 8);
+    innScript(code, -1);
+    if (at >= 0) memcpy(code + at, emeraldaCue, sizeof(emeraldaCue));
+}
+
+/* Runs the fix with the game's progress (variable 0) at progress: the script
+ * is never written (nor past size), the current music ends as after, the
+ * progress read reads times (variable 0 only) and the pitch and tempo stay. */
+static int emeraldaRun(int field, s32 music, s32 progress, u8* code, int size, s32 after, int reads) {
+    u8 before[INN_SCRIPT + 8];
+    memcpy(before, code, sizeof(before));
+    currentlyPlayingMusic = music;
+    scriptVariableValue = progress;
+    scriptVariableIndex = -1;
+    scriptVariableReads = musicPitchCalls = musicTempoCalls = 0;
+    pcFieldScriptFixes(field, code, size);
+    CHECK(!memcmp(code, before, sizeof(before)));
+    CHECK(currentlyPlayingMusic == after);
+    CHECK(scriptVariableReads == reads);
+    CHECK(scriptVariableIndex == (reads ? 0 : -1));
+    CHECK(musicPitchCalls == 0 && musicTempoCalls == 0);
+    scriptVariableValue = 0;
+    return 0;
+}
+#define EMERALDA_RUN(...) do { if (emeraldaRun(__VA_ARGS__)) return 1; } while (0)
+
+/* Field 282: with Emeralda's theme current, progress 207 and the cue in the
+ * script, the current music becomes 0xFF; the script stays as it is. The
+ * checks run in the hook's order: the field, the music, then the progress
+ * (read only past the first two), then the cue. */
+static int testEmeraldaTheme(void) {
+    static const int places[] = {0, 40, INN_SCRIPT - (int)sizeof(emeraldaCue)};
+    static const s32 musics[] = {0, 0x18, 0x1A, 0x1E, 0x0D, 0xF0, 0xFF, -1, 0x119, -0xE7};
+    static const s32 progresses[] = {0, 206, 208, 0xCF + 0x100, 0x10000 + 207, -1, -207};
+    static const int fields[] = {0, 281, 283, 505, 87, 213, 50, 326, 282 + 0x1000};
+    u8 code[INN_SCRIPT + 8];
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        int reads = enabled; /* off: the hook returns before any guard */
+        s32 fixed = enabled ? 0xFF : EMERALDA_THEME;
+        for (int p = 0; p < 3; ++p) {
+            int at = places[p];
+            /* The cue whole: the theme forgotten when on. */
+            emeraldaScript(code, at);
+            EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, fixed, reads);
+            /* Forgotten once, 0xFF is not the theme: a second pass keeps it, no read. */
+            EMERALDA_RUN(282, 0xFF, EMERALDA_PROGRESS, code, INN_SCRIPT, 0xFF, 0);
+            /* The script ending right after the cue: the same. */
+            EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, at + (int)sizeof(emeraldaCue), fixed, reads);
+            /* Another field with the same bytes and state: nothing, no read. */
+            for (int f = 0; f < (int)(sizeof(fields) / sizeof(fields[0])); ++f)
+                EMERALDA_RUN(fields[f], EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, EMERALDA_THEME, 0);
+            /* Another current music (out of range too): nothing, no read. */
+            for (int m = 0; m < (int)(sizeof(musics) / sizeof(musics[0])); ++m)
+                EMERALDA_RUN(282, musics[m], EMERALDA_PROGRESS, code, INN_SCRIPT, musics[m], 0);
+            /* Another progress: nothing, after the one read when on. */
+            for (int g = 0; g < (int)(sizeof(progresses) / sizeof(progresses[0])); ++g)
+                EMERALDA_RUN(282, EMERALDA_THEME, progresses[g], code, INN_SCRIPT, EMERALDA_THEME, reads);
+            /* Any one byte of the cue different: nothing, after the read. */
+            for (int k = 0; k < (int)sizeof(emeraldaCue); ++k) {
+                emeraldaScript(code, at);
+                code[at + k] ^= 0x01;
+                EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, EMERALDA_THEME, reads);
+            }
+            /* The cue cut short by the script's end: nothing, after the read. */
+            for (int cut = 1; cut <= (int)sizeof(emeraldaCue); ++cut) {
+                emeraldaScript(code, at);
+                EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, at + (int)sizeof(emeraldaCue) - cut,
+                             EMERALDA_THEME, reads);
+            }
+        }
+        /* No cue at all, and an empty script. */
+        emeraldaScript(code, -1);
+        EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, EMERALDA_THEME, reads);
+        EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, 0, EMERALDA_THEME, reads);
+        /* OP_PLAY_MUSIC 19 alone, without the laugh's wait or the dialog: nothing. */
+        emeraldaScript(code, -1);
+        memcpy(code + 40, emeraldaCue + 3, 3);
+        EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, EMERALDA_THEME, reads);
+        /* A partial copy before a whole one, and two copies: forgotten once. */
+        emeraldaScript(code, 30);
+        memcpy(code + 10, emeraldaCue, 9);
+        EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, fixed, reads);
+        emeraldaScript(code, 0);
+        memcpy(code + 48, emeraldaCue, sizeof(emeraldaCue));
+        EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, fixed, reads);
+        /* Fields 326's, 87's, 213's and 50's bytes around the cue in field 282:
+         * the music only, the script untouched. */
+        orphanageScript(code, 0);
+        memcpy(code + 10, innRoutine, sizeof(innRoutine));
+        memcpy(code + 50, wardRoutine, sizeof(wardRoutine));
+        memcpy(code + 70, soldierRoutine, sizeof(soldierRoutine));
+        memcpy(code + 86, emeraldaCue, sizeof(emeraldaCue));
+        EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, fixed, reads);
+        /* The same without the cue: nothing, after the read. */
+        code[86] = 0x30;
+        EMERALDA_RUN(282, EMERALDA_THEME, EMERALDA_PROGRESS, code, INN_SCRIPT, EMERALDA_THEME, reads);
+    }
+    return 0;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -865,6 +975,7 @@ int main(int argc, char** argv) {
         CHECK(testWardRest() == 0);
         CHECK(testSoldierFade() == 0);
         CHECK(testOrphanageFacing() == 0);
+        CHECK(testEmeraldaTheme() == 0);
 #endif
     }
     printf("original bug fixes %s: %d checks passed\n", argv[2], checks);
