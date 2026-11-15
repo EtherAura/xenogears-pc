@@ -3,6 +3,7 @@
 
     python packaging/windows_release.py names  --tag v<YYYY>.<MM>.<N>
     python packaging/windows_release.py render --tag <tag> --stage <installed dir> --out <dir>/xenogears-pc.nsi
+    python packaging/windows_release.py setup  --tag <tag> --script <dir>/xenogears-pc.nsi [--makensis <exe>]
     python packaging/windows_release.py zip    --tag <tag> --stage <installed dir> --out-dir <dir>
     python packaging/windows_release.py sha256 --tag <tag> <asset> [<asset> ...]
 
@@ -10,6 +11,7 @@ The version is the release tag without its v (CalVer vYYYY.MM.N, N from 0),
 spelled as the tag spells it; the assets are
 
   xenogears-pc-<version>-windows-x64-setup.exe   makensis on the rendered script
+  <setup>.build.json                             the makensis version that made it
   xenogears-pc-<version>-windows-x64.zip         the same files, in one folder
   <asset>.sha256                                 sha256sum format
 
@@ -23,16 +25,24 @@ ever packaged: the port reads the player's own disc.
 
 Each step is its own command so that a release can sign the executables in the
 stage before render and zip, and sign setup.exe before sha256. render writes the
-script only: makensis (run in the script's folder, its default) builds setup.exe
-there. Exit status 1, with nothing written, on any bad input.
+script only; setup builds setup.exe from it, in the script's folder (makensis's
+default). setup first asks makensis -VERSION and refuses anything older than
+3.10, or a version it cannot read: setup.exe runs elevated, and NSIS up to 3.09
+leaves the uninstaller's temporary copy open to other users (CVE-2023-37378;
+NVD's CPE range includes 3.09). The same makensis that answered compiles the
+script, and the version it gave is written beside setup.exe. The portable .zip
+needs no makensis. Exit status 1, with nothing written, on any bad input.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import os
+import json
 import re
+import shutil
 import stat
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -59,6 +69,11 @@ PLAYER_FILES = {"settings.ini"}
 DISC_EXE = re.compile(r"(slus|slps|scus|sces|sles)_\d{3}\.\d{2}", re.I)
 CD_SYNC = b"\x00" + b"\xff" * 10 + b"\x00"
 ISO_MARKS = (0x8001, 16 * 2352 + 24 + 1, 16 * 2352 + 16 + 1)  # "CD001": cooked, raw mode 2, raw mode 1
+
+MAKENSIS_MIN = (3, 10)  # CVE-2023-37378: fixed in 3.09, but NVD's CPE range includes 3.09
+# makensis -VERSION prints v<major>.<minor>[.<patch>]; a distribution may add a -<revision>.
+MAKENSIS_VERSION = re.compile(r"v(\d{1,4})\.(\d{1,4})(?:\.(\d{1,4}))?(?:-\d{1,4})?")
+PROBE_SECONDS, COMPILE_SECONDS = 30, 1800
 
 
 class ReleaseError(Exception):
@@ -245,6 +260,64 @@ def zip_stage(tag: str, stage: Path, out_dir: Path) -> Path:
     return target
 
 
+def find_makensis(makensis: str | None) -> str:
+    """The makensis to run, as an absolute path: --makensis if given, else the one on PATH."""
+    name = makensis or "makensis"
+    found = shutil.which(name) if os.sep not in name and "/" not in name else name
+    if not found or not os.path.isfile(found) or not os.access(found, os.X_OK):
+        raise ReleaseError(f"no makensis at {name!r}: setup.exe needs NSIS {'.'.join(map(str, MAKENSIS_MIN))} "
+                           "or later (the portable .zip needs none)")
+    return os.path.abspath(found)
+
+
+def makensis_version(exe: str) -> str:
+    """What exe -VERSION prints, if it is a version of at least MAKENSIS_MIN; else ReleaseError."""
+    least = ".".join(map(str, MAKENSIS_MIN))
+    try:
+        probe = subprocess.run([exe, "-VERSION"], stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                               errors="replace", timeout=PROBE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ReleaseError(f"makensis -VERSION did not run ({error}); nothing compiled") from error
+    printed = probe.stdout.strip()
+    if probe.returncode != 0:
+        raise ReleaseError(f"makensis -VERSION failed (exit {probe.returncode}, {printed[:80]!r}); nothing compiled")
+    m = MAKENSIS_VERSION.fullmatch(printed)
+    if not m:
+        raise ReleaseError(f"makensis -VERSION printed {printed[:80]!r}, not a version; nothing compiled")
+    if (int(m[1]), int(m[2])) < MAKENSIS_MIN:
+        raise ReleaseError(f"makensis {printed} is older than {least}: NSIS before {least} is refused for an "
+                           f"elevated setup.exe (CVE-2023-37378, the uninstaller's temporary copy); "
+                           f"install NSIS {least} or later; nothing compiled")
+    return printed
+
+
+def build_setup(tag: str, script: Path, makensis: str | None = None) -> tuple[Path, Path, str]:
+    """setup.exe from a rendered script, by a makensis of at least MAKENSIS_MIN, and its build record."""
+    names = release_names(tag)
+    if script.suffix != ".nsi" or script.is_symlink() or not script.is_file():
+        raise ReleaseError(f"--script {script}: not a rendered *.nsi")
+    if f'OutFile "{names["setup"]}"' not in script.read_text(encoding="utf-8"):
+        raise ReleaseError(f"--script {script}: not rendered for {tag} (no OutFile {names['setup']})")
+    exe = find_makensis(makensis)
+    version = makensis_version(exe)
+    setup = script.parent / names["setup"]
+    record = setup.with_name(f"{setup.name}.build.json")
+    for stale in (setup, record):
+        stale.unlink(missing_ok=True)
+    try:
+        made = subprocess.run([exe, "-V2", str(script.resolve())], stdin=subprocess.DEVNULL, capture_output=True,
+                              text=True, errors="replace", timeout=COMPILE_SECONDS)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        setup.unlink(missing_ok=True)
+        raise ReleaseError(f"makensis {version} did not finish ({error})") from error
+    if made.returncode != 0 or setup.is_symlink() or not setup.is_file() or setup.stat().st_size == 0:
+        setup.unlink(missing_ok=True)
+        raise ReleaseError(f"makensis {version} failed (exit {made.returncode}): {(made.stdout + made.stderr)[-500:]}")
+    info = {"asset": names["setup"], "makensis_version": version, "makensis_minimum": ".".join(map(str, MAKENSIS_MIN))}
+    write_atomic(record, (json.dumps(info, indent=2, sort_keys=True) + "\n").encode())
+    return setup, record, version
+
+
 def write_sha256(tag: str, assets: list[Path]) -> list[Path]:
     names = release_names(tag)
     allowed = (names["setup"], names["zip"])
@@ -284,6 +357,10 @@ def main() -> int:
     p.add_argument("--stage", type=Path, required=True, help="the folder cmake --install filled")
     p.add_argument("--out", type=Path, required=True, help="the .nsi to write (setup.exe is made beside it)")
     p.add_argument("--template", type=Path, default=TEMPLATE, help="default: the template beside this script")
+    p = sub.add_parser("setup", help="setup.exe from a rendered script (makensis 3.10 or later)")
+    p.add_argument("--tag", required=True)
+    p.add_argument("--script", type=Path, required=True, help="the .nsi render wrote (setup.exe is made beside it)")
+    p.add_argument("--makensis", help="the makensis to run (default: the one on PATH)")
     p = sub.add_parser("zip", help="the portable .zip of a stage")
     p.add_argument("--tag", required=True)
     p.add_argument("--stage", type=Path, required=True)
@@ -298,6 +375,9 @@ def main() -> int:
                 print(f"{key}={value}")
         elif args.command == "render":
             print(render(args.tag, args.stage, args.out, args.template))
+        elif args.command == "setup":
+            setup, record, version = build_setup(args.tag, args.script, args.makensis)
+            print(f"setup={setup}\nbuild_info={record}\nmakensis_version={version}")
         elif args.command == "zip":
             print(zip_stage(args.tag, args.stage, args.out_dir))
         else:

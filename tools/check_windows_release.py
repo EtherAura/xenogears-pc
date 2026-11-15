@@ -26,6 +26,16 @@
    a PS-X EXE, CD sectors, a memory card or settings.ini; output inside the stage;
    a checksum of a file that is not the tag's asset.
 4. makensis, when on PATH, compiles the rendered script (extra proof only).
+5. setup's makensis preflight, on fake makensis executables (scripts that log
+   each call, print a set -VERSION answer and write labelled stand-in bytes as
+   setup.exe; no NSIS needed or run): v3.08, v3.09, v3.9 and v2.51 are refused
+   as older than 3.10, and empty, malformed or failing -VERSION answers and a
+   missing or unrunnable makensis are refused, all with -VERSION the only call
+   (never a compile) and nothing written; a script rendered for another tag is
+   refused before any call; v3.10, v3.10-1, v3.11 and v4.0 are probed and then
+   compiled by the same executable, and the build record beside setup.exe holds
+   the version printed; a failing compile leaves no setup.exe and no record;
+   names, render and zip still work with no makensis on PATH.
 
 Nothing is built, installed, run on Windows, signed or uploaded; all output stays in build/.
 """
@@ -35,6 +45,7 @@ import argparse
 import ast
 import hashlib
 import importlib.util
+import json
 import os
 import re
 import shutil
@@ -66,11 +77,11 @@ def check(ok: bool, what: str) -> bool:
     return ok
 
 
-def helper(public: Path, *args, cwd: Path | None = None) -> subprocess.CompletedProcess:
+def helper(public: Path, *args, cwd: Path | None = None, path: str | None = None) -> subprocess.CompletedProcess:
     """The staged helper, run as the public tree would: isolated, a bare environment."""
-    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C.UTF-8"}
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin") if path is None else path, "LC_ALL": "C.UTF-8"}
     argv = [sys.executable, "-I", str(public / "packaging" / HELPER), *map(str, args)]
-    return subprocess.run(argv, cwd=cwd or public, env=env, capture_output=True, text=True)
+    return subprocess.run(argv, cwd=cwd or public, env=env, capture_output=True, text=True, timeout=300)
 
 
 def stage_public(work: Path) -> Path:
@@ -120,13 +131,13 @@ def stage_files(stage: Path) -> dict[str, bytes]:
     return {p.relative_to(stage).as_posix(): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
 
 
-def refused(public: Path, what: str, outputs: list[Path], *args, expect: str) -> None:
+def refused(public: Path, what: str, outputs: list[Path], *args, expect: str, path: str | None = None) -> None:
     for out in outputs:
         if out.is_dir():
             shutil.rmtree(out)
         else:
             out.unlink(missing_ok=True)
-    result = helper(public, *args)
+    result = helper(public, *args, path=path)
     message = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
     written = [str(o) for o in outputs if o.exists()]
     check(result.returncode == 1 and message.startswith("windows_release: ") and expect in message
@@ -336,6 +347,116 @@ def refusals(public: Path, work: Path, good: Path) -> None:
             "sha256", "--tag", "v2026.11.0", archive, expect="no such file")
 
 
+FAKE_MAKENSIS = """#!{python} -I
+# A fake makensis for check_windows_release.py: logs each call, answers -VERSION as fake.json says,
+# and "compiles" by writing labelled stand-in bytes (not a setup) under the script's OutFile name.
+import json, re, sys
+from pathlib import Path
+here = Path(__file__).resolve().parent
+conf = json.loads((here / "fake.json").read_text())
+with (here / "calls.log").open("a") as log:
+    log.write(json.dumps(sys.argv) + "\\n")
+if sys.argv[1:] == ["-VERSION"]:
+    sys.stdout.write(conf["printed"])
+    sys.exit(conf["probe_exit"])
+if conf["compile_exit"]:
+    sys.exit(conf["compile_exit"])
+script = Path(sys.argv[-1])
+name = re.search(r'^\\s*OutFile "([^"]+)"', script.read_text(), re.M)[1]
+(script.parent / name).write_bytes(b"stand-in bytes from a fake makensis, not a setup\\n")
+"""
+
+
+def fake_makensis(folder: Path, printed: str, probe_exit: int = 0, compile_exit: int = 0) -> Path:
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    exe = folder / "makensis"
+    exe.write_text(FAKE_MAKENSIS.format(python=sys.executable))
+    exe.chmod(0o755)
+    (folder / "fake.json").write_text(json.dumps({"printed": printed, "probe_exit": probe_exit,
+                                                  "compile_exit": compile_exit}))
+    return exe
+
+
+def calls(exe: Path) -> list[list[str]]:
+    log = exe.parent / "calls.log"
+    return [json.loads(line) for line in log.read_text().splitlines()] if log.is_file() else []
+
+
+def compiler(public: Path, work: Path, stage: Path) -> None:
+    tag, version = "v2026.11.0", "2026.11.0"
+    setup_name = f"xenogears-pc-{version}-windows-x64-setup.exe"
+    cases = work / "makensis-cases"
+    shutil.rmtree(cases, ignore_errors=True)
+    out = cases / "out"
+    script = out / "xenogears-pc.nsi"
+    nowhere = cases / "empty-path"
+    nowhere.mkdir(parents=True)
+    # The portable route needs no makensis: names, render and zip with nothing on PATH.
+    names = helper(public, "names", "--tag", tag, path=str(nowhere))
+    result = helper(public, "render", "--tag", tag, "--stage", stage, "--out", script, path=str(nowhere))
+    archive = helper(public, "zip", "--tag", tag, "--stage", stage, "--out-dir", cases / "zip", path=str(nowhere))
+    check(names.returncode == 0 and result.returncode == 0 and script.is_file() and archive.returncode == 0
+          and (cases / "zip" / f"xenogears-pc-{version}-windows-x64.zip").is_file(),
+          f"names, render and zip need no makensis on PATH ({(result.stderr + archive.stderr).strip() or 'ok'})")
+    setup, record = out / setup_name, out / f"{setup_name}.build.json"
+
+    for printed, expect in (("v3.08", "older than 3.10"), ("v3.09", "older than 3.10"),
+                            ("v3.9", "older than 3.10"),  # 3.9 < 3.10 as numbers ("3.9" > "3.10" as text)
+                            ("v2.51\n", "older than 3.10"), ("", "not a version"), ("garbage\n", "not a version"),
+                            ("v3", "not a version"), ("3.10", "not a version"), ("v3.10 beta", "not a version"),
+                            ("v3.10\nv3.08", "not a version")):
+        exe = fake_makensis(cases / "fake", printed)
+        refused(public, f"setup with a makensis printing {printed!r}", [setup, record],
+                "setup", "--tag", tag, "--script", script, "--makensis", exe, expect=expect)
+        check(calls(exe) == [[str(exe), "-VERSION"]], f"  makensis {printed!r}: probed once, never compiled")
+    exe = fake_makensis(cases / "fake", "v3.10", probe_exit=1)
+    refused(public, "setup with a failing makensis -VERSION", [setup, record],
+            "setup", "--tag", tag, "--script", script, "--makensis", exe, expect="failed (exit 1")
+    check(calls(exe) == [[str(exe), "-VERSION"]], "  failing -VERSION: probed once, never compiled")
+    refused(public, "setup with no makensis on PATH", [setup, record],
+            "setup", "--tag", tag, "--script", script, expect="no makensis", path=str(nowhere))
+    refused(public, "setup with a --makensis that does not exist", [setup, record],
+            "setup", "--tag", tag, "--script", script, "--makensis", cases / "none" / "makensis", expect="no makensis")
+    exe = fake_makensis(cases / "fake", "v3.10")
+    exe.chmod(0o644)
+    refused(public, "setup with a makensis that cannot run", [setup, record],
+            "setup", "--tag", tag, "--script", script, "--makensis", exe, expect="no makensis")
+    check(calls(exe) == [], "  unrunnable makensis: never called")
+    exe = fake_makensis(cases / "fake", "v3.10")
+    refused(public, "setup of a script rendered for another tag", [setup, record],
+            "setup", "--tag", "v2026.12.10", "--script", script, "--makensis", exe, expect="not rendered for")
+    check(calls(exe) == [], "  another tag's script: makensis never called")
+    exe = fake_makensis(cases / "fake", "v3.10", compile_exit=2)
+    refused(public, "setup whose makensis compile fails", [setup, record],
+            "setup", "--tag", tag, "--script", script, "--makensis", exe, expect="failed (exit 2)")
+    check(calls(exe) == [[str(exe), "-VERSION"], [str(exe), "-V2", str(script.resolve())]],
+          "  failing compile: probed, then compiled by the same makensis; no setup.exe or record left")
+
+    for printed, via_path in (("v3.10", False), ("v3.10\n", True), ("v3.10-1", False), ("v3.11", False),
+                              ("v4.0", False)):
+        exe = fake_makensis(cases / "fake", printed)
+        for stale in (setup, record):
+            stale.unlink(missing_ok=True)
+        args = ("setup", "--tag", tag, "--script", script) + (() if via_path else ("--makensis", exe))
+        result = helper(public, *args, path=str(exe.parent) if via_path else str(nowhere))
+        got = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        what = f"setup with a makensis printing {printed!r}{' (found on PATH)' if via_path else ''}"
+        check(result.returncode == 0 and got == {"setup": str(setup), "build_info": str(record),
+                                                 "makensis_version": printed.strip()},
+              f"{what}: accepted ({result.stderr.strip() or got})")
+        check(calls(exe) == [[str(exe), "-VERSION"], [str(exe), "-V2", str(script.resolve())]],
+              f"  makensis {printed!r}: probed, then compiled by the same executable")
+        check(setup.is_file() and setup.read_bytes().startswith(b"stand-in bytes from a fake makensis"),
+              f"  makensis {printed!r}: setup.exe (stand-in bytes) beside the script")
+        info = json.loads(record.read_text()) if record.is_file() else None
+        check(info == {"asset": setup_name, "makensis_version": printed.strip(), "makensis_minimum": "3.10"},
+              f"  makensis {printed!r}: build record {info}")
+    result = helper(public, "sha256", "--tag", tag, setup)
+    check(result.returncode == 0, f"sha256 of the setup.exe setup wrote ({result.stderr.strip() or 'written'})")
+    check_sidecar(setup)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--ver", choices=("us", "jp"), default="us",
@@ -348,11 +469,13 @@ def main() -> int:
     for tag, version, nsis in RELEASES:
         release(public, work, stage, tag, version, nsis)
     refusals(public, work, stage)
+    compiler(public, work, stage)
     if failures:
         print(f"check_windows_release: {len(failures)} check(s) failed")
         return 1
     print("check_windows_release: all checks pass (host helper, template and archives only: no NSIS compile "
-          "unless makensis was found, no Windows install or start, no workflow, signing, SBOM or release)")
+          "unless makensis was found, the makensis preflight on fake executables, no Windows install or start, "
+          "no workflow, signing, SBOM or release)")
     return 0
 
 
