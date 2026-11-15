@@ -158,6 +158,8 @@ if [ "$TESTS" = 1 ]; then
     gate payload-tests "$PY" tools/test_payloadcheck.py
     gate port-runner "$PY" tools/test_port_tests.py
     gate state-runner "$PY" tools/test_statecheck.py
+    gate art-tags "$PY" tools/test_art_tags.py
+    gate doll-queue "$PY" tools/test_doll_queue.py
     if [ -f "$TEST_BUILD/CMakeCache.txt" ]; then
         gate port-tests "$PY" tools/port_tests.py --build "$TEST_BUILD"
     else
