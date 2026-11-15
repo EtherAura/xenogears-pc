@@ -338,11 +338,26 @@ xg_gameplay_code(gameplay_bugfix_shop_code "${XG_GAME_ROOT}/src/menu_shop/sh_801
 foreach(helper initMenuContext_1DE0 setupMenuContext364 setupMenuContext4E0)
     target_compile_definitions(gameplay_bugfix_shop_code PRIVATE ${helper}=shop_${helper})
 endforeach()
+xg_gameplay_code(gameplay_bugfix_party_code "${XG_GAME_ROOT}/src/menu_party/pt_801C5018.c")
+# The party overlay carries its own copy of the menu library the shop's has.
+foreach(helper computeMenuBorders disableDraw428 draw380 drawMenu2_sub drawMenu2_sub_sub0 drawMenu2_sub_sub1
+        drawMenu2_sub_sub2 drawMenuBackground drawMenuBoxBackground drawMenuBoxBottomFrame drawMenuBoxCorners
+        drawMenuBoxInnerFrame drawMenuBoxLeftFrame drawMenuBoxRightFrame drawMenuBoxTopFrame drawMenuBoxes
+        drawMenuSpecificElements drawMenu_380 drawMenu_428 fillStringDisplayBuffer iniMenuContext364And380
+        initMemoryCardPolyVerts initMenuContext32C initMenuContext330 initMenuContext33C initMenuContext348
+        initMenuContext350MainMenu initMenuContext354 initMenuContext4E0 initMenuContext_1DE0 initMenuGlobals
+        initMenuTiles1 initMenuTiles1Sub initMenuTiles4 initMenuTiles5 initMenuTiles6 initMenuTilesBottomFrame
+        initMenuTilesTopFrame initPrimitives_348_cursor loadBlankImage loadMenuSharedResources menu2CheckBitmask
+        menuDraw playMenuSoundEffect processLoadSaveMenuSub7Sub0 resetCursorState resetMenuOddOrEven setupDraw428
+        setupMenuContext364 setupMenuContext4E0 setupPolyG4 updateMenuInput)
+    target_compile_definitions(gameplay_bugfix_party_code PRIVATE ${helper}=party_${helper})
+endforeach()
 # The field-script corrections (the test stubs the variables and music calls).
 xg_gameplay_code(gameplay_bugfix_field_code "${CMAKE_CURRENT_SOURCE_DIR}/src/game/field/scriptfix.c")
 xg_gameplay_test(gameplay_bugfixtest SOURCES src/system/test/bugfixtest.c
     GAME gameplay_bugfix_code gameplay_bugfix_save_code gameplay_bugfix_battle_code gameplay_bugfix_equip_code
-    gameplay_bugfix_shop_code gameplay_bugfix_field_code)
+    gameplay_bugfix_shop_code gameplay_bugfix_party_code gameplay_bugfix_field_code HOST src/gpu/prim.c)
+target_compile_options(gameplay_bugfixtest PRIVATE -ffunction-sections -fdata-sections)
 
 # Dialogue portraits.
 xg_gameplay_code(gameplay_portrait_code "${XG_GAME_ROOT}/src/field/f_8009BB0C.c" "${XG_GAME_ROOT}/src/field/f_8006FDEC.c"

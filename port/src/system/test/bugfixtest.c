@@ -267,9 +267,18 @@ s32 shopCursorPosYTable[7] = {205, 185, 166, 205, 185, 166, 148};
 s32 shopCursorPosYTable[7] = {205, 185, 166, 201, 181, 162, 144};
 #endif
 static int arrowX, arrowY;
+/* While the party card test records, every call's arguments, up to the buffer. */
+typedef struct { s32 glyph; void* polys; void* font; s32 oddOrEven; s16 x, y; u16 scale; } LabelCall;
+static int partyLabelRecording, partyLabelCalls;
+static LabelCall partyLabelCall[16];
 s32 setupStringInPolyFT4(struct Font* font, s32 glyphIndex, void* polys, s32 oddOrEven, s16 x, s16 y, u16 scale) {
     (void)font; (void)polys; (void)oddOrEven; (void)scale;
     if (glyphIndex == 0x108) { arrowX = x; arrowY = y; }
+    if (partyLabelRecording) {
+        if (partyLabelCalls < (int)(sizeof(partyLabelCall) / sizeof(partyLabelCall[0])))
+            partyLabelCall[partyLabelCalls] = (LabelCall){glyphIndex, polys, font, oddOrEven, x, y, scale};
+        ++partyLabelCalls;
+    }
     return 1;
 }
 void updateCursorPolysLocation(s32 idx, u8 draw);
@@ -298,6 +307,72 @@ static int testShopCursor(void) {
         }
     }
     return 0;
+}
+
+/* The party menu's info card labels (menu_party setupPartyCardLabels): nine
+ * glyph entries, 0xFFFF skipped, then the name. Entry 6 reads MP/ where every
+ * other menu says EP; the option draws glyph 0x0E there. Synthetic tables. */
+s32 partyMenuCardLabelGlyphs[9];
+s32 partyMenuInfocardNameU[6], partyMenuInfocardNameV[6];
+u16 textSpriteMode0, textSpriteMode1;
+void setupPartyCardLabels(MenuContext_1E08* p, u8 slot, u8 row, s32* xTable, s32* yTable, s32 rowStep);
+
+static int partyLabelsRun(const s32* glyphs) {
+    static MenuContext_1E08 card;
+    s32 xTable[17], yTable[17];
+    for (int i = 0; i < 17; ++i) { xTable[i] = 100 + 7 * i; yTable[i] = 30 + 3 * i; }
+    const u8 slot = 3, row = 2;
+    const s32 rowStep = 40;
+    memcpy(partyMenuCardLabelGlyphs, glyphs, sizeof(partyMenuCardLabelGlyphs));
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        memset(&card, 0, sizeof(card));
+        memset(partyLabelCall, 0, sizeof(partyLabelCall));
+        partyLabelCalls = 0;
+        partyLabelRecording = 1;
+        setupPartyCardLabels(&card, slot, row, xTable, yTable, rowStep);
+        partyLabelRecording = 0;
+        CHECK(!memcmp(partyMenuCardLabelGlyphs, glyphs, sizeof(partyMenuCardLabelGlyphs)));
+        int n = 0;
+        for (int i = 0; i < 9; ++i) {
+            if (glyphs[i] == 0xFFFF) continue;
+            CHECK(n < partyLabelCalls);
+            const LabelCall* c = &partyLabelCall[n];
+            CHECK(c->glyph == (enabled && i == 6 ? 0x0E : glyphs[i]));
+            CHECK(c->x == xTable[i] && c->y == rowStep * row + yTable[i]);
+            CHECK(c->polys == &card.m0_polys[n * 2] && c->scale == 0x1000);
+            CHECK(c->font == gMenuContext->m2DC_font && c->oddOrEven == gMenuContext->m308_oddOrEven);
+            ++n;
+        }
+        CHECK(card.mBE8_0Length == n);
+        CHECK(partyLabelCalls == n + 1);
+        const LabelCall* name = &partyLabelCall[n];
+        CHECK(name->glyph == slot + 0x14E && name->polys == card.m460_poly);
+        CHECK(name->x == xTable[9] && name->y == rowStep * row + yTable[9]);
+    }
+    return 0;
+}
+
+static int testPartyCardLabels(void) {
+    static const s32 shown[9] = {0x41, 0x42, 0xFFFF, 0x16, 0x43, 0x44, 0x16, 0x45, 0xFFFF};
+    static const s32 skipped[9] = {0x41, 0x42, 0xFFFF, 0x16, 0x43, 0x44, 0xFFFF, 0x45, 0x46};
+    void* font = gMenuContext->m2DC_font;
+    s32 oddOrEven = gMenuContext->m308_oddOrEven;
+    int enabled = pcGameplayOriginalBugFixes();
+    static int fontStandIn;
+    gMenuContext->m2DC_font = &fontStandIn;
+    int failed = 0;
+    for (int odd = 0; odd < 2 && !failed; ++odd) {
+        gMenuContext->m308_oddOrEven = odd;
+        failed = partyLabelsRun(shown) || partyLabelsRun(skipped);
+    }
+    partyLabelRecording = 0;
+    partyLabelCalls = 0;
+    memset(partyMenuCardLabelGlyphs, 0, sizeof(partyMenuCardLabelGlyphs));
+    gMenuContext->m2DC_font = font;
+    gMenuContext->m308_oddOrEven = oddOrEven;
+    testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+    return failed;
 }
 
 /* A field's looping sound effect that a menu's sounds cut starts again:
@@ -970,6 +1045,7 @@ int main(int argc, char** argv) {
         CHECK(testBilly() == 0);
         CHECK(testDeusCamera() == 0);
         CHECK(testShopCursor() == 0);
+        CHECK(testPartyCardLabels() == 0);
         CHECK(testFieldSfx() == 0);
         CHECK(testNisanInn() == 0);
         CHECK(testWardRest() == 0);
