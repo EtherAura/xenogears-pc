@@ -22,6 +22,8 @@
 /* port/src/system/options.c (game code has no libc) */
 const char* portOption(const char* name);
 int portSceneReplayActive(void);
+/* port/src/system/fieldspeed.c: a field movie plays (field speed holds 1x) */
+void fieldSpeedMovie(int on);
 
 extern s32 g_frameOddOrEven;
 extern u8* currentModelInstanceDrawPrims;
@@ -174,6 +176,7 @@ void pcFieldWideScene(void) {
  * of src/field/f_800A55B8.c lives in the field's data, reset with it). */
 void pcFieldWideExit(void) {
     pcWideBlock(PC_WIDE_BLOCK_OPTOUT | PC_WIDE_BLOCK_MOVIE | PC_WIDE_BLOCK_EFFECT, 0);
+    fieldSpeedMovie(0); /* no movie plays across the mode's start or end */
 }
 
 /* A field movie (startFieldTransition). Its frames go to the frame buffers
@@ -188,6 +191,9 @@ void pcFieldMovieBlock(s32 on) {
     s32 w = fieldMovieParams.m10_modeAndSize[1];
     s32 h = fieldMovieParams.m10_modeAndSize[2];
 
+    /* Field speed holds 1x for every movie, the ones below that leave the
+     * picture wide too: told before `on` becomes the wide picture's. */
+    fieldSpeedMovie(on);
     if (on && onlyUpdateDirector == 2) {
         on = 0;
         for (i = 0; i < 2; i++) {

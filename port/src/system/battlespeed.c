@@ -51,6 +51,11 @@
 #include "system.h"
 
 void presentShowNote(const char* text) __attribute__((weak)); /* gpu/present.c */
+/* fieldspeed.c: the field's and the world map's factor, and its part of a
+ * state (weak: battlespeedtest links this file without it). */
+extern int fieldSpeedChosen(void) __attribute__((weak));
+extern int fieldSpeedWanted(void) __attribute__((weak));
+extern void fieldSpeedStateIo(XgState* s) __attribute__((weak));
 
 /* Battle frames at most this many vblanks apart are one battle: battleRender
  * waits 1 vblank a frame; its loads (battleLoadFileFrom0xC) take a few more. */
@@ -139,10 +144,15 @@ int battleSpeedHidden(void) {
     return hidden;
 }
 
-/* The factor the next frame runs at. */
+/* The factor the next frame runs at: a battle's by battle_speed, and outside
+ * battles the field's and the world map's by field_speed (fieldspeed.c, 1
+ * when the screen is neither). Neither setting reaches the other's frames.
+ * With both off or at 1x nothing here is touched; with either on, CD audio
+ * is watched on every screen, so its hold is known when a fast one comes. */
 static int wanted(void) {
     int chosen = battleSpeedChosen();
-    if (chosen <= 1) {
+    int fieldOn = fieldSpeedChosen != NULL && fieldSpeedChosen() > 1;
+    if (chosen <= 1 && !fieldOn) {
         return 1;
     }
     uint32_t now = hwVSyncCount();
@@ -150,7 +160,13 @@ static int wanted(void) {
         lastCdAudio = now;
         seenCdAudio = 1;
     }
-    if (!battleSpeedInBattle() || battleWait || textHold > 0 || netplayActive()) {
+    int factor;
+    if (battleSpeedInBattle()) {
+        factor = battleWait || textHold > 0 ? 1 : chosen;
+    } else {
+        factor = fieldOn ? fieldSpeedWanted() : 1;
+    }
+    if (factor <= 1 || netplayActive()) {
         return 1;
     }
     if (seenCdAudio && (uint32_t)(now - lastCdAudio) <= CD_AUDIO_HOLD) {
@@ -160,7 +176,7 @@ static int wanted(void) {
     if (slowdownLogVBlank(&replay)) {
         return 1;
     }
-    return chosen;
+    return factor;
 }
 
 void battleSpeedVBlank(void) {
@@ -317,4 +333,7 @@ void battleSpeedStateIo(XgState* s) {
     XG_STATE_VAR(s, seenCdAudio);
     XG_STATE_VAR(s, sinceShown);
     XG_STATE_VAR(s, hidden);
+    if (fieldSpeedStateIo != NULL) {
+        fieldSpeedStateIo(s); /* the field's movie flag (fieldspeed.c) */
+    }
 }

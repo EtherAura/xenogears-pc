@@ -358,6 +358,10 @@ system/battlespeed.c seenBattle state
 system/battlespeed.c seenCdAudio state
 system/battlespeed.c sinceShown state
 system/battlespeed.c textHold state
+system/fieldspeed.c fieldChosen host the field_speed setting
+system/fieldspeed.c fieldChosenRevision host the field_speed setting
+system/fieldspeed.c fieldChosenValid host the field_speed setting
+system/fieldspeed.c fieldMovie state a field movie plays (fieldSpeedStateIo, called by battleSpeedStateIo)
 system/bios.c * host host files for the extras' sandbox
 system/cputime.c * host XG_CPU_TIMING
 system/displaylock.c * host the display lock

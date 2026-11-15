@@ -376,6 +376,20 @@ foreach(module IN LISTS XG_MODULES)
     target_compile_options(game_${module} PRIVATE ${XG_GAME_OPTIONS})
 endforeach()
 
+# Field speed (xg-mrj.6, tools/test_field_speed.py): fieldspeed.c, battlespeed.c's
+# vblank on hw.c's clock (the test includes those two whole) and the field's
+# own movie calls in game/field/wide.c, compiled as the game's. The rest of
+# wide.c reaches the renderer: --gc-sections drops it, so this links on ELF
+# hosts only (as seamreusetest and spansteptest).
+xg_gameplay_code(fieldspeedtest_wide "${CMAKE_CURRENT_SOURCE_DIR}/src/game/field/wide.c")
+add_executable(fieldspeedtest EXCLUDE_FROM_ALL src/system/test/fieldspeedtest.c src/system/fieldspeed.c
+    src/system/settings.c $<TARGET_OBJECTS:fieldspeedtest_wide>)
+target_include_directories(fieldspeedtest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
+target_compile_definitions(fieldspeedtest PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
+target_compile_options(fieldspeedtest PRIVATE -fno-pie -fno-strict-aliasing -ffunction-sections -fdata-sections)
+target_link_options(fieldspeedtest PRIVATE -Wl,--gc-sections -no-pie)
+target_link_libraries(fieldspeedtest PRIVATE SDL3::SDL3 m)
+
 # Every module is linked into the executable. tools/pc_link.py generates what
 # the game C does not define on the PC: stubs for missing functions (stubs.c),
 # each module's data that lives in the PS1 build's assembly (<module>.c, from
