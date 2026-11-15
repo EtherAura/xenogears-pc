@@ -35,6 +35,12 @@
    refused before any call; v3.10, v3.10-1, v3.11 and v4.0 are probed and then
    compiled by the same executable, and the build record beside setup.exe holds
    the version printed; a failing compile leaves no setup.exe and no record;
+   a -VERSION that never answers (the helper's own CLI with its probe limit cut
+   to 0.5 s in that child process only) is refused, stopped at the limit with no
+   compile and nothing written; a compile that writes part of setup.exe and then
+   fails, after an earlier success, leaves neither that setup.exe nor the earlier
+   record, and nothing else beside the script changes; the next good compile is
+   whole and recorded; no fake makensis is left running;
    names, render and zip still work with no makensis on PATH.
 
 Nothing is built, installed, run on Windows, signed or uploaded; all output stays in build/.
@@ -49,8 +55,10 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -348,39 +356,140 @@ def refusals(public: Path, work: Path, good: Path) -> None:
 
 
 FAKE_MAKENSIS = """#!{python} -I
-# A fake makensis for check_windows_release.py: logs each call, answers -VERSION as fake.json says,
-# and "compiles" by writing labelled stand-in bytes (not a setup) under the script's OutFile name.
-import json, re, sys
+# A fake makensis for check_windows_release.py: logs each call and its process id, answers -VERSION
+# (after an optional sleep) as fake.json says, and "compiles" by writing labelled stand-in bytes (not a
+# setup) under the script's OutFile name; a partial compile writes other stand-in bytes there, then fails.
+import json, os, re, sys, time
 from pathlib import Path
 here = Path(__file__).resolve().parent
 conf = json.loads((here / "fake.json").read_text())
 with (here / "calls.log").open("a") as log:
     log.write(json.dumps(sys.argv) + "\\n")
+with (here / "pids.log").open("a") as log:
+    log.write(str(os.getpid()) + "\\n")
 if sys.argv[1:] == ["-VERSION"]:
+    time.sleep(conf["probe_sleep"])
     sys.stdout.write(conf["printed"])
     sys.exit(conf["probe_exit"])
-if conf["compile_exit"]:
+if conf["compile_exit"] and not conf["partial"]:
     sys.exit(conf["compile_exit"])
 script = Path(sys.argv[-1])
 name = re.search(r'^\\s*OutFile "([^"]+)"', script.read_text(), re.M)[1]
+if conf["partial"]:
+    (script.parent / name).write_bytes(b"partial stand-in bytes from a failing fake makensis\\n")
+    (here / "partial.log").write_text(name)
+    sys.exit(conf["compile_exit"])
 (script.parent / name).write_bytes(b"stand-in bytes from a fake makensis, not a setup\\n")
 """
 
+# The helper's own CLI (main, build_setup, makensis_version) with PROBE_SECONDS cut for this one child
+# process only, so a -VERSION that never answers is tested in a fraction of a second.
+PROBE_CUT = """import importlib.util, sys
+spec = importlib.util.spec_from_file_location("windows_release", sys.argv[1])
+helper = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(helper)
+helper.PROBE_SECONDS = float(sys.argv[2])
+sys.argv = [sys.argv[1]] + sys.argv[3:]
+sys.exit(helper.main())
+"""
 
-def fake_makensis(folder: Path, printed: str, probe_exit: int = 0, compile_exit: int = 0) -> Path:
+
+def fake_makensis(folder: Path, printed: str, probe_exit: int = 0, compile_exit: int = 0,
+                  probe_sleep: float = 0, partial: bool = False) -> Path:
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir(parents=True)
     exe = folder / "makensis"
     exe.write_text(FAKE_MAKENSIS.format(python=sys.executable))
     exe.chmod(0o755)
     (folder / "fake.json").write_text(json.dumps({"printed": printed, "probe_exit": probe_exit,
-                                                  "compile_exit": compile_exit}))
+                                                  "compile_exit": compile_exit, "probe_sleep": probe_sleep,
+                                                  "partial": partial}))
     return exe
 
 
 def calls(exe: Path) -> list[list[str]]:
     log = exe.parent / "calls.log"
     return [json.loads(line) for line in log.read_text().splitlines()] if log.is_file() else []
+
+
+def running(exe: Path) -> list[int]:
+    """The fake's logged processes still alive; any found is killed, so none outlives the check."""
+    log = exe.parent / "pids.log"
+    alive = []
+    for pid in (int(line) for line in log.read_text().split()) if log.is_file() else ():
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            continue
+        alive.append(pid)
+        os.kill(pid, signal.SIGKILL)
+    return alive
+
+
+def last_line(result: subprocess.CompletedProcess) -> str:
+    return result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
+
+
+def failure_paths(public: Path, out: Path, script: Path, tag: str, fakes: Path) -> None:
+    """A -VERSION that times out, and a compile that writes part of setup.exe and then fails."""
+    setup_name = f"xenogears-pc-{tag[1:]}-windows-x64-setup.exe"
+    setup, record = out / setup_name, out / f"{setup_name}.build.json"
+    for stale in (setup, record):
+        stale.unlink(missing_ok=True)
+    # The fake would sleep 10 s and then answer v3.10; the cut limit is 0.5 s.
+    exe = fake_makensis(fakes, "v3.10", probe_sleep=10)
+    started = time.monotonic()
+    result = subprocess.run([sys.executable, "-I", "-c", PROBE_CUT, str(public / "packaging" / HELPER), "0.5",
+                             "setup", "--tag", tag, "--script", str(script), "--makensis", str(exe)],
+                            cwd=public, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C.UTF-8"},
+                            capture_output=True, text=True, timeout=60)
+    elapsed = time.monotonic() - started
+    message = last_line(result)
+    written = [p.name for p in (setup, record) if p.exists()]
+    check(result.returncode == 1 and message.startswith("windows_release: makensis -VERSION did not run")
+          and "timed out after 0.5 seconds" in message and message.endswith("nothing compiled")
+          and not result.stdout and not written,
+          f"refused: setup with a makensis -VERSION that times out ({message or result.stdout.strip()!r}"
+          f"{', wrote ' + str(written) if written else ''})")
+    check(calls(exe) == [[str(exe), "-VERSION"]], "  timed-out -VERSION: probed once, never compiled")
+    left = running(exe)
+    check(elapsed < 8 and len(calls(exe)) == 1 and not left,
+          f"  timed-out -VERSION: stopped at the limit ({elapsed:.1f} s), no makensis left running ({left or 'none'})")
+
+    # An earlier success leaves a setup.exe and its record; the next attempt writes part of setup.exe and fails.
+    exe = fake_makensis(fakes, "v3.10")
+    first = helper(public, "setup", "--tag", tag, "--script", script, "--makensis", exe)
+    keep = out / "unrelated-notes.txt"
+    keep.write_text("not made by setup; must stay\n")
+    others = {p.name: p.read_bytes() for p in out.iterdir() if p not in (setup, record)}
+    check(first.returncode == 0 and setup.is_file() and record.is_file(),
+          f"partial compile: an earlier setup.exe and record beside the script ({first.stderr.strip() or 'made'})")
+    exe = fake_makensis(fakes, "v3.10", compile_exit=3, partial=True)
+    result = helper(public, "setup", "--tag", tag, "--script", script, "--makensis", exe)
+    message = last_line(result)
+    written = [p.name for p in (setup, record) if p.exists()]
+    partial = exe.parent / "partial.log"
+    check(result.returncode == 1 and message.startswith("windows_release: makensis v3.10 failed (exit 3)")
+          and not result.stdout and not written,
+          f"refused: setup whose compile writes part of setup.exe, then fails ({message or result.stdout.strip()!r}"
+          f"{', left ' + str(written) if written else ''})")
+    check(calls(exe) == [[str(exe), "-VERSION"], [str(exe), "-V2", str(script.resolve())]]
+          and partial.is_file() and partial.read_text() == setup_name,
+          "  partial compile: probed, then compiled by the same makensis, which wrote part of setup.exe")
+    check({p.name: p.read_bytes() for p in out.iterdir()} == others,
+          "  partial compile: the script and unrelated files untouched, no temporary file left")
+    check(not running(exe), "  partial compile: no makensis left running")
+
+    # Recovery: the next good compile is whole and its record names the makensis that made it.
+    exe = fake_makensis(fakes, "v3.11")
+    result = helper(public, "setup", "--tag", tag, "--script", script, "--makensis", exe)
+    info = json.loads(record.read_text()) if record.is_file() else None
+    check(result.returncode == 0 and setup.is_file()
+          and setup.read_bytes() == b"stand-in bytes from a fake makensis, not a setup\n"
+          and info == {"asset": setup_name, "makensis_version": "v3.11", "makensis_minimum": "3.10"},
+          f"after the failures, a good compile writes a whole setup.exe and record {info} "
+          f"({result.stderr.strip() or 'made'})")
+    keep.unlink()
 
 
 def compiler(public: Path, work: Path, stage: Path) -> None:
@@ -432,6 +541,7 @@ def compiler(public: Path, work: Path, stage: Path) -> None:
             "setup", "--tag", tag, "--script", script, "--makensis", exe, expect="failed (exit 2)")
     check(calls(exe) == [[str(exe), "-VERSION"], [str(exe), "-V2", str(script.resolve())]],
           "  failing compile: probed, then compiled by the same makensis; no setup.exe or record left")
+    failure_paths(public, out, script, tag, cases / "fake")
 
     for printed, via_path in (("v3.10", False), ("v3.10\n", True), ("v3.10-1", False), ("v3.11", False),
                               ("v4.0", False)):
