@@ -1,0 +1,112 @@
+# The Gentoo ebuild of the Xenogears PC port, for a local overlay. This copy
+# was rendered for release @TAG@ by packaging/gentoo_assets.py, which names it
+# xenogears-pc-<version>.ebuild; nothing here is changed by hand for a release.
+# The version is the file's name alone (the release tag without its v,
+# vYYYY.MM.N), and the source is that release's xenogears-pc-<version>.tar.gz
+# asset: git archive of the tag, everything under xenogears-pc-<version>/.
+#
+# The package has no game data: the port reads the player's own disc. Like
+# the Ubuntu package (port/cmake/deb.cmake) it holds the US executable, built
+# Release with the extras, in /usr/bin and its licences in /usr/share/doc.
+#
+# The source cannot build the port by itself yet: the PC link step reads the
+# split PS1 assembly and link facts that only come from the player's own
+# extracted disc, and the release tarball holds neither. src_prepare says so
+# and stops, rather than failing part way through the link.
+
+EAPI=8
+
+PYTHON_COMPAT=( python3_{11..14} )
+CMAKE_BUILD_TYPE=Release
+CMAKE_MAKEFILE_GENERATOR=ninja
+
+inherit cmake python-any-r1
+
+DESCRIPTION="Xenogears PC port (reads the player's own disc)"
+HOMEPAGE="https://github.com/EtherAura/xenogears-pc"
+SRC_URI="https://github.com/EtherAura/xenogears-pc/releases/download/v${PV}/${P}.tar.gz"
+S="${WORKDIR}/${P}"
+CMAKE_USE_DIR="${S}/port"
+
+# The port (GPL 3 or later), Dear ImGui (MIT) and the Jukebox font (OFL 1.1)
+# are in the executable; their licence files are the ones installed.
+LICENSE="GPL-3+ MIT OFL-1.1"
+SLOT="0"
+KEYWORDS="~amd64"
+# The port's tests are separate targets that need more than this package has.
+RESTRICT="test"
+
+# SDL3 opens the Vulkan loader at run time, so the loader is a dependency no
+# library link shows; glslang (shader presets) and dav1d (movie pack videos)
+# are linked when found, and the package is built with both.
+RDEPEND="
+	media-libs/libsdl3
+	media-libs/vulkan-loader
+	dev-util/glslang
+	media-libs/dav1d
+"
+DEPEND="
+	${RDEPEND}
+	dev-util/vulkan-headers
+"
+# pyyaml: the PC source list is read from the splat configurations.
+# shaderc: glslc, which compiles the renderer's shaders at build time.
+# (cmake.eclass adds CMake and Ninja itself.)
+BDEPEND="
+	${PYTHON_DEPS}
+	$(python_gen_any_dep 'dev-python/pyyaml[${PYTHON_USEDEP}]')
+	media-libs/shaderc
+"
+
+python_check_deps() {
+	python_has_version "dev-python/pyyaml[${PYTHON_USEDEP}]"
+}
+
+src_prepare() {
+	if [[ ! -d ${S}/asm/us ]]; then
+		eerror "This source cannot build the port by itself yet."
+		eerror "The PC link reads the split PS1 assembly (asm/us), which is made from the"
+		eerror "player's own extracted disc; the release tarball carries no game data."
+		die "no split PS1 assembly (asm/us) in the release source"
+	fi
+	cmake_src_prepare
+	# The PC source list CMake requires (build/pc/sources.cmake).
+	cd "${S}" || die
+	"${EPYTHON}" tools/pc_sources.py || die "tools/pc_sources.py failed"
+}
+
+src_configure() {
+	# The release is built with CMake's own Release flags and no others, as
+	# the Ubuntu, Arch and Windows builds are: the port's frames and saves are
+	# checked against builds made with them, not with added flags. Under
+	# cmake.eclass that takes three steps.
+	# 1. The eclass's initial cache sets the build type's own compiler and
+	#    linker flags (CMAKE_<LANG>_FLAGS_RELEASE and the like) to nothing, so
+	#    that only the user's flags apply. CMake's Release compiler flags for
+	#    GCC and Clang, -O3 -DNDEBUG, are therefore given again below: an
+	#    argument on the command line wins over the initial cache. CMake's
+	#    Release linker flags are empty already.
+	# 2. The user's flags are left out. (That also keeps -flto off the game C:
+	#    its per-module partial link needs ordinary objects. The platform
+	#    layer has its own link-time optimisation, XG_LTO.)
+	# 3. The same initial cache turns BUILD_SHARED_LIBS on. Every library of
+	#    the port is an object library, which that setting does not change;
+	#    OFF below keeps it so for any library later added without a type.
+	unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS
+	local mycmakeargs=(
+		-DCMAKE_C_FLAGS_RELEASE="-O3 -DNDEBUG"
+		-DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG"
+		-DBUILD_SHARED_LIBS=OFF
+		-DXG_VERSION=US
+		-DXG_EXTRAS=ON
+		-DXG_PACKAGE_VERSION="${PV}"
+	)
+	cmake_src_configure
+}
+
+src_install() {
+	cmake_src_install
+	# The port's install rules put the licences in /usr/share/doc/xenogears-pc;
+	# Gentoo's documentation folder is named for the version too.
+	mv "${ED}/usr/share/doc/${PN}" "${ED}/usr/share/doc/${PF}" || die
+}
