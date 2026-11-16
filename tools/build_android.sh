@@ -20,7 +20,8 @@
 # <abi>-<region> (the port's CMake builds, -DXG_SHARED=ON), jniLibs/<abi>
 # (what the APK packs: libSDL3.so, libc++_shared.so, libxgloader.so,
 # libxenogears-<region>.so; each game library passes tools/payloadcheck.py),
-# gradle/ (Gradle's outputs; the APK in gradle/app/outputs/apk/).
+# gradle/ (Gradle's outputs; the APK in gradle/app/outputs/apk/). An APK with
+# arm64-v8a passes tools/check_android_alignment.py (16 KB LOAD segments).
 #
 # Signing: debug builds use the Android debug key (~/.android/debug.keystore,
 # made by the Android Gradle plugin). A release build is signed with the
@@ -67,6 +68,7 @@ if [ "$VARIANT" = release ] && [ "$NATIVE_ONLY" = 0 ]; then
 fi
 [ ${#ABIS[@]} -gt 0 ] || ABIS=(x86_64 arm64-v8a)
 [ ${#REGIONS[@]} -gt 0 ] || REGIONS=(us jp)
+case " ${ABIS[*]} " in *" arm64-v8a "*) HAS_ARM64=1 ;; *) HAS_ARM64=0 ;; esac
 
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
 NDK_VERSION="${XG_NDK_VERSION:-29.0.14206865}"
@@ -76,14 +78,28 @@ SDL3_SOURCE="${XG_SDL3_SOURCE:-$HOME/Android/src/SDL3-3.4.16}"
 API=33 # Android 13: Vulkan 1.3 on current drivers (docs/ANDROID_PLAN.md decisions)
 OUT="$ROOT/build/android"
 TOOLCHAIN="$NDK/build/cmake/android.toolchain.cmake"
+READELF="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 for need in "$TOOLCHAIN" "$SDL3_SOURCE/CMakeLists.txt" "$GRADLE" "$ROOT/build/pc/sources.cmake"; do
     if [ ! -e "$need" ]; then
         echo "build_android.sh: missing $need" >&2
         exit 1
     fi
 done
+if [ "$HAS_ARM64" = 1 ] && [ "$NATIVE_ONLY" = 0 ] && [ ! -x "$READELF" ]; then
+    echo "build_android.sh: missing $READELF (the APK's 16 KB alignment check needs it)" >&2
+    exit 1
+fi
 PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
+# 16 KB page devices (xg-6gm): every lib/arm64-v8a/*.so the APK packs, SDL3 and libc++_shared
+# included, must have each LOAD segment aligned to 0x4000 or more; read from the APK itself and
+# cross-checked with the NDK's llvm-readelf (tools/check_android_alignment.py).
+check_alignment() {
+    if ! "$PY" tools/check_android_alignment.py --apk "$1" --require-readelf --readelf "$READELF"; then
+        echo "build_android.sh: $1: arm64-v8a LOAD alignment below 16 KB, or unreadable (above)" >&2
+        exit 1
+    fi
+}
 GLSLC="$(command -v glslc || echo "$NDK/shader-tools/linux-x86_64/glslc")"
 
 mkdir -p "$OUT"
@@ -155,6 +171,13 @@ task=assemble${VARIANT^}
     -Pxg.assets="$OUT/assets" \
     "$task"
 ls -l "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk
+if [ "$HAS_ARM64" = 1 ]; then
+    for built in "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk; do
+        check_alignment "$built"
+    done
+else
+    echo "build_android.sh: note: no arm64-v8a in --abi (${ABIS[*]}): the 16 KB LOAD check is not run; this APK is not for arm64 devices" >&2
+fi
 if [ "$VARIANT" = release ]; then
     # The signature as a device checks it, and the certificate it names (its digest only).
     apk=$(ls "$OUT"/gradle/app/outputs/apk/release/*.apk | head -1)
