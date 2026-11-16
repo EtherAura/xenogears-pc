@@ -42,6 +42,22 @@
    record, and nothing else beside the script changes; the next good compile is
    whole and recorded; no fake makensis is left running;
    names, render and zip still work with no makensis on PATH.
+6. package (render, setup, zip and sha256 in one step), run from another folder
+   on the fake makensis executables (fake-compiler orchestration tests: its
+   setup.exe is stand-in bytes, never a real setup): for each tag of 2., into a
+   folder already holding an unrelated file and a previous release's asset, it
+   adds exactly setup.exe, its build record, the .zip and both .sha256, and says
+   it is the packaging phase only; the same makensis probed and then compiled a
+   rendered script (checked as in 2.) in a temporary folder since removed; the
+   .zip is the stage's, byte for byte what zip makes; the sums are of the bytes
+   written. Refused with --out-dir unchanged and the stage untouched: before any
+   makensis call, bad tags and stages, an --out-dir inside the stage or a file,
+   an --out-dir already holding any of the five names (or a link under one),
+   no makensis; after the probe only, old, malformed, failing and silent
+   -VERSION answers (a missing --out-dir it made is removed again); after the
+   compile, a partial setup.exe then failure, a failure, and no setup.exe at
+   all. A .zip name that appears during the run is kept, and the files package
+   had copied are removed and named. With a real makensis it is run once more.
 
 Nothing is built, installed, run on Windows, signed or uploaded; all output stays in build/.
 """
@@ -359,6 +375,8 @@ FAKE_MAKENSIS = """#!{python} -I
 # A fake makensis for check_windows_release.py: logs each call and its process id, answers -VERSION
 # (after an optional sleep) as fake.json says, and "compiles" by writing labelled stand-in bytes (not a
 # setup) under the script's OutFile name; a partial compile writes other stand-in bytes there, then fails.
+# It keeps a copy of the script it was given (compiled.nsi); it can also exit 0 having written nothing, or
+# first plant a file, as another process might, in the folder above the script's (package's --out-dir).
 import json, os, re, sys, time
 from pathlib import Path
 here = Path(__file__).resolve().parent
@@ -371,10 +389,15 @@ if sys.argv[1:] == ["-VERSION"]:
     time.sleep(conf["probe_sleep"])
     sys.stdout.write(conf["printed"])
     sys.exit(conf["probe_exit"])
+script = Path(sys.argv[-1])
+(here / "compiled.nsi").write_text(script.read_text())
 if conf["compile_exit"] and not conf["partial"]:
     sys.exit(conf["compile_exit"])
-script = Path(sys.argv[-1])
+if conf["no_output"]:
+    sys.exit(0)
 name = re.search(r'^\\s*OutFile "([^"]+)"', script.read_text(), re.M)[1]
+if conf["plant"]:
+    (script.parent.parent / conf["plant"]).write_bytes(b"planted by a fake makensis: another process's file\\n")
 if conf["partial"]:
     (script.parent / name).write_bytes(b"partial stand-in bytes from a failing fake makensis\\n")
     (here / "partial.log").write_text(name)
@@ -395,7 +418,8 @@ sys.exit(helper.main())
 
 
 def fake_makensis(folder: Path, printed: str, probe_exit: int = 0, compile_exit: int = 0,
-                  probe_sleep: float = 0, partial: bool = False) -> Path:
+                  probe_sleep: float = 0, partial: bool = False, no_output: bool = False,
+                  plant: str = "") -> Path:
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir(parents=True)
     exe = folder / "makensis"
@@ -403,7 +427,7 @@ def fake_makensis(folder: Path, printed: str, probe_exit: int = 0, compile_exit:
     exe.chmod(0o755)
     (folder / "fake.json").write_text(json.dumps({"printed": printed, "probe_exit": probe_exit,
                                                   "compile_exit": compile_exit, "probe_sleep": probe_sleep,
-                                                  "partial": partial}))
+                                                  "partial": partial, "no_output": no_output, "plant": plant}))
     return exe
 
 
@@ -567,6 +591,207 @@ def compiler(public: Path, work: Path, stage: Path) -> None:
     check_sidecar(setup)
 
 
+def snapshot(path: Path):
+    """A folder's (or file's) names and bytes, to tell whether a refused package run changed it."""
+    if not os.path.lexists(path):
+        return None
+    if path.is_symlink() or not path.is_dir():
+        return os.readlink(path) if path.is_symlink() else path.read_bytes()
+    return {p.name: snapshot(p) for p in sorted(path.iterdir())}
+
+
+def package_checks(public: Path, work: Path, stage: Path) -> None:
+    """package (render, guarded setup, zip, sha256 in one step), on fake makensis executables: fake-compiler
+    orchestration tests. setup.exe here is labelled stand-in bytes, never a real setup."""
+    root = work / "package"
+    shutil.rmtree(root, ignore_errors=True)
+    fakes, nowhere = root / "fake", root / "empty-path"
+    nowhere.mkdir(parents=True)
+    files = stage_files(stage)
+    stand_in = b"stand-in bytes from a fake makensis, not a setup\n"
+    keep = {"unrelated-notes.txt": b"not made by package; must stay\n",
+            "xenogears-pc-2026.10.0-windows-x64.zip": b"a previous release's asset; must stay\n"}
+
+    def run(*args, path: str | None = None) -> subprocess.CompletedProcess:
+        # From another folder than the public tree's, with nothing on PATH unless asked.
+        return helper(public, "package", *args, path=str(nowhere) if path is None else path, cwd=root)
+
+    def assets(version: str) -> list[str]:
+        setup, archive = f"xenogears-pc-{version}-windows-x64-setup.exe", f"xenogears-pc-{version}-windows-x64.zip"
+        return [setup, f"{setup}.build.json", archive, f"{setup}.sha256", f"{archive}.sha256"]
+
+    def fill(out: Path, extra: dict | None = None) -> None:
+        shutil.rmtree(out, ignore_errors=True)
+        out.mkdir(parents=True)
+        for name, data in {**keep, **(extra or {})}.items():
+            (out / name).write_bytes(data)
+
+    def compiled_once(exe: Path, out: Path) -> bool:
+        log = calls(exe)
+        if len(log) != 2 or log[0] != [str(exe), "-VERSION"] or log[1][:2] != [str(exe), "-V2"] or len(log[1]) != 3:
+            return False
+        script = Path(log[1][2])
+        return script.name == "xenogears-pc.nsi" and script.parent.parent == out.resolve() and not script.parent.exists()
+
+    def refuse(what: str, out: Path, *args, expect: str, exe: Path | None = None, probed: bool = False,
+               compiled: bool = False, path: str | None = None) -> str:
+        before = snapshot(out)
+        result = run(*args, path=path)
+        message = last_line(result)
+        if compiled:
+            called = compiled_once(exe, out)
+        else:
+            called = calls(exe) == ([[str(exe), "-VERSION"]] if probed else []) if exe else True
+        after = snapshot(out)
+        check(result.returncode == 1 and message.startswith("windows_release: ") and expect in message
+              and not result.stdout and after == before and stage_files(stage) == files and called,
+              f"refused: package with {what} ({message or result.stdout.strip()!r}"
+              f"{'' if after == before else ', changed ' + str(out)}{'' if called else ', calls ' + str(calls(exe))})")
+        return message
+
+    # Accepted: a zero-sequence tag, a later one and the last N; into a folder already holding unrelated files.
+    for tag, version, nsis in RELEASES:
+        exe = fake_makensis(fakes, "v3.10")
+        out = root / f"out-{version}"
+        fill(out)
+        names = assets(version)
+        result = run("--tag", tag, "--stage", stage, "--out-dir", out, "--makensis", exe)
+        got = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        want = {"setup": str(out / names[0]), "build_info": str(out / names[1]), "zip": str(out / names[2]),
+                "setup_sha256": str(out / names[3]), "zip_sha256": str(out / names[4]), "makensis_version": "v3.10"}
+        scope = got.pop("scope", "")
+        check(result.returncode == 0 and got == want, f"package {tag} (fake makensis): {got or last_line(result)}")
+        check(scope.startswith("the packaging phase only") and "payload audit" in scope and "signing" in scope
+              and "SBOM" in scope, f"  package {tag}: says it is the packaging phase only ({scope[:60]!r}...)")
+        check(sorted(p.name for p in out.iterdir()) == sorted(names + list(keep)),
+              f"  package {tag}: exactly the five assets added; no .nsi, workspace or temporary file left")
+        check(all((out / n).read_bytes() == b for n, b in keep.items()),
+              f"  package {tag}: an unrelated file and a previous release's asset untouched")
+        check(compiled_once(exe, out), f"  package {tag}: probed, then compiled once by the same makensis, "
+              "in a temporary folder inside --out-dir, since removed")
+        script = fakes / "compiled.nsi"
+        if check(script.is_file(), f"  package {tag}: the fake makensis was given a rendered script"):
+            check_script(script.read_text(), version, nsis, names[0], files, Path(calls(exe)[1][2]), stage)
+        check((out / names[0]).read_bytes() == stand_in, f"  package {tag}: setup.exe is the fake's stand-in bytes")
+        info = json.loads((out / names[1]).read_text()) if (out / names[1]).is_file() else None
+        check(info == {"asset": names[0], "makensis_version": "v3.10", "makensis_minimum": "3.10"},
+              f"  package {tag}: build record {info}")
+        check_zip(out / names[2], f"xenogears-pc-{version}-windows-x64", files)
+        alone = helper(public, "zip", "--tag", tag, "--stage", stage, "--out-dir", root / f"zip-{version}")
+        check(alone.returncode == 0 and (root / f"zip-{version}" / names[2]).read_bytes() == (out / names[2]).read_bytes(),
+              f"  package {tag}: its .zip has the same bytes as zip's of the same stage")
+        check_sidecar(out / names[0])
+        check_sidecar(out / names[2])
+        check(stage_files(stage) == files, f"  package {tag}: the stage is unchanged")
+        check(not running(exe), f"  package {tag}: no makensis left running")
+
+    # Refused before any makensis call, with nothing written.
+    exe = fake_makensis(fakes, "v3.10")
+    absent = root / "never-made"
+    for tag in ("v2026.11", "2026.11.0", "v2026.11.01", "V2026.11.0", " v2026.11.0", "v2026.11.0-rc1",
+                "v2026.11.65536"):
+        refuse(f"tag {tag!r}", absent, "--tag", tag, "--stage", stage, "--out-dir", absent, "--makensis", exe,
+               exe=exe, expect="16-bit" if tag == "v2026.11.65536" else "vYYYY.MM.N")
+    bad = root / "bad-stages"
+    for what, drop, extra, expect in (("no xenogears.exe", ["xenogears.exe"], {}, "no xenogears.exe"),
+                                      ("settings.ini", [], {"settings.ini": b"x\n"}, "player's file"),
+                                      ("a PS-X EXE", [], {"data.dat": b"PS-X EXE" + bytes(2040)}, "PlayStation")):
+        s = make_stage(bad / str(len(list(bad.iterdir())) if bad.is_dir() else 0),
+                       [n for n in INSTALLED if n not in drop])
+        for name, data in extra.items():
+            (s / name).write_bytes(data)
+        refuse(f"a stage with {what}", absent, "--tag", "v2026.11.0", "--stage", s, "--out-dir", absent,
+               "--makensis", exe, exe=exe, expect=expect)
+    refuse("a stage that does not exist", absent, "--tag", "v2026.11.0", "--stage", bad / "none",
+           "--out-dir", absent, "--makensis", exe, exe=exe, expect="not a folder")
+    refuse("--out-dir inside the stage", stage / "dist", "--tag", "v2026.11.0", "--stage", stage,
+           "--out-dir", stage / "dist", "--makensis", exe, exe=exe, expect="inside the stage")
+    a_file = root / "a-file"
+    a_file.write_bytes(b"a file, not a folder\n")
+    refuse("--out-dir that is a file", a_file, "--tag", "v2026.11.0", "--stage", stage, "--out-dir", a_file,
+           "--makensis", exe, exe=exe, expect="not a folder")
+    collide = root / "collide"
+    for name in assets("2026.11.0"):
+        fill(collide, {name: b"a previous run's file of the same name; must stay\n"})
+        refuse(f"--out-dir already holding {name}", collide, "--tag", "v2026.11.0", "--stage", stage,
+               "--out-dir", collide, "--makensis", exe, exe=exe, expect=f"already holds {name}")
+    fill(collide)
+    (collide / assets("2026.11.0")[2]).symlink_to(root / "nowhere.zip")
+    refuse("--out-dir holding a dangling link named as the .zip", collide, "--tag", "v2026.11.0", "--stage", stage,
+           "--out-dir", collide, "--makensis", exe, exe=exe, expect="already holds")
+    refuse("no makensis on PATH", absent, "--tag", "v2026.11.0", "--stage", stage, "--out-dir", absent,
+           expect="no makensis")
+    refuse("a --makensis that does not exist", absent, "--tag", "v2026.11.0", "--stage", stage, "--out-dir", absent,
+           "--makensis", fakes / "none", expect="no makensis")
+
+    # Refused by setup's own -VERSION checks: probed once, never compiled, nothing left in --out-dir.
+    out = root / "probe"
+    for printed, probe_exit, expect in (("v3.09", 0, "older than 3.10"), ("v2.51\n", 0, "older than 3.10"),
+                                        ("garbage\n", 0, "not a version"), ("", 0, "not a version"),
+                                        ("v3.10", 1, "failed (exit 1")):
+        exe = fake_makensis(fakes, printed, probe_exit=probe_exit)
+        fill(out)
+        message = refuse(f"a makensis printing {printed!r} (exit {probe_exit})", out, "--tag", "v2026.11.0",
+                         "--stage", stage, "--out-dir", out, "--makensis", exe, exe=exe, probed=True, expect=expect)
+        check(message.endswith(f"no asset written in {out}"), "  says no asset was written")
+    exe = fake_makensis(fakes, "v3.09")
+    nested = root / "made" / "deeper"
+    message = refuse("an old makensis and a missing --out-dir", root / "made", "--tag", "v2026.11.0",
+                     "--stage", stage, "--out-dir", nested, "--makensis", exe, exe=exe, probed=True,
+                     expect="older than 3.10")
+    check("made and then removed the folder" in message and "left behind" not in message,
+          "  the folders it made are removed again, and it says so")
+    exe = fake_makensis(fakes, "v3.10", probe_sleep=10)
+    fill(out)
+    before = snapshot(out)
+    started = time.monotonic()
+    result = subprocess.run([sys.executable, "-I", "-c", PROBE_CUT, str(public / "packaging" / HELPER), "0.5",
+                             "package", "--tag", "v2026.11.0", "--stage", str(stage), "--out-dir", str(out),
+                             "--makensis", str(exe)], cwd=root, env={"PATH": "/usr/bin:/bin", "LC_ALL": "C.UTF-8"},
+                            capture_output=True, text=True, timeout=60)
+    elapsed, message = time.monotonic() - started, last_line(result)
+    check(result.returncode == 1 and "timed out after 0.5 seconds" in message and snapshot(out) == before
+          and calls(exe) == [[str(exe), "-VERSION"]] and elapsed < 8 and not running(exe),
+          f"refused: package with a -VERSION that never answers ({message!r}, {elapsed:.1f} s)")
+
+    # Refused after the compile: nothing copied into --out-dir, no sum of a missing setup.exe.
+    for what, kwargs, expect in (("a compile that writes part of setup.exe, then fails",
+                                  {"compile_exit": 3, "partial": True}, "failed (exit 3)"),
+                                 ("a compile that fails", {"compile_exit": 2}, "failed (exit 2)"),
+                                 ("a compile that exits 0 and writes no setup.exe", {"no_output": True},
+                                  "failed (exit 0)")):
+        exe = fake_makensis(fakes, "v3.10", **kwargs)
+        fill(out)
+        refuse(what, out, "--tag", "v2026.11.0", "--stage", stage, "--out-dir", out, "--makensis", exe,
+               exe=exe, compiled=True, expect=expect)
+        if kwargs.get("partial"):
+            check((fakes / "partial.log").is_file(), "  the fake makensis did write part of setup.exe")
+
+    # A file named as the .zip appears in --out-dir during the compile: it is kept, and what package had
+    # copied (setup.exe and its record) is removed again and named; no sum is written.
+    names = assets("2026.11.0")
+    exe = fake_makensis(fakes, "v3.10", plant=names[2])
+    fill(out)
+    before = snapshot(out)
+    result = run("--tag", "v2026.11.0", "--stage", stage, "--out-dir", out, "--makensis", exe)
+    message = last_line(result)
+    planted = b"planted by a fake makensis: another process's file\n"
+    check(result.returncode == 1 and "appeared while packaging" in message
+          and f"wrote and then removed {names[0]}, {names[1]}" in message and not result.stdout
+          and snapshot(out) == {**before, names[2]: planted} and compiled_once(exe, out),
+          f"refused: package whose .zip name appears meanwhile ({message!r}); the other file kept, its own removed")
+
+    if shutil.which("makensis"):
+        out = root / "real"
+        result = run("--tag", "v2026.11.0", "--stage", stage, "--out-dir", out, path=os.environ.get("PATH", ""))
+        message = last_line(result)
+        check(result.returncode == 0 or "older than 3.10" in message,
+              f"package with the real makensis on PATH ({message or 'made'})")
+    else:
+        print("LIMITATION  makensis not on PATH: package ran only with fake makensis executables; "
+              "no real setup.exe was compiled")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--ver", choices=("us", "jp"), default="us",
@@ -580,6 +805,7 @@ def main() -> int:
         release(public, work, stage, tag, version, nsis)
     refusals(public, work, stage)
     compiler(public, work, stage)
+    package_checks(public, work, stage)
     if failures:
         print(f"check_windows_release: {len(failures)} check(s) failed")
         return 1

@@ -6,6 +6,7 @@
     python packaging/windows_release.py setup  --tag <tag> --script <dir>/xenogears-pc.nsi [--makensis <exe>]
     python packaging/windows_release.py zip    --tag <tag> --stage <installed dir> --out-dir <dir>
     python packaging/windows_release.py sha256 --tag <tag> <asset> [<asset> ...]
+    python packaging/windows_release.py package --tag <tag> --stage <installed dir> --out-dir <dir> [--makensis <exe>]
 
 The version is the release tag without its v (CalVer vYYYY.MM.N, N from 0),
 spelled as the tag spells it; the assets are
@@ -32,6 +33,24 @@ leaves the uninstaller's temporary copy open to other users (CVE-2023-37378;
 NVD's CPE range includes 3.09). The same makensis that answered compiles the
 script, and the version it gave is written beside setup.exe. The portable .zip
 needs no makensis. Exit status 1, with nothing written, on any bad input.
+
+package runs those four steps in one go, for a stage that is final (already
+signed, if it is to be): it renders the script in a temporary folder inside
+--out-dir, builds setup.exe there through setup's own makensis checks, zips the
+same stage, writes both .sha256 and only then copies setup.exe, its build
+record, the .zip and the two .sha256 into --out-dir, each as a new file. It
+refuses, before running anything, if --out-dir already holds any of those five
+names: nothing there is ever overwritten or deleted. If a step fails it exits 1,
+removes the files it had copied (a later sum never names a missing asset) and
+says which ones it wrote and removed, or could not remove. The temporary folder
+and its script are always removed. No signing step fits inside package; a
+signed setup.exe is made with the separate steps.
+
+package is the packaging phase only. It does not compile the port, fetch its
+dependencies, sign anything, make the Linux assets, write the SBOM or upload;
+the stage checks here (names, required files, a few headers of the game's data)
+are not the release's payload audit, and passing them does not make the assets
+safe to upload. Nothing here installs setup.exe or starts the game on Windows.
 """
 from __future__ import annotations
 
@@ -336,6 +355,95 @@ def write_sha256(tag: str, assets: list[Path]) -> list[Path]:
     return written
 
 
+PACKAGE_SCOPE = ("the packaging phase only: render, setup, zip and sha256 on a final installed stage; not the "
+                 "port's compilation, dependency fetching, the payload audit (the stage checks here are not it), "
+                 "signing, the Linux assets, the SBOM, an upload, or a Windows install and start")
+
+
+def package_names(names: dict[str, str]) -> list[str]:
+    """What package writes into --out-dir, in the order it copies them (the sums last)."""
+    setup, archive = names["setup"], names["zip"]
+    return [setup, f"{setup}.build.json", archive, f"{setup}.sha256", f"{archive}.sha256"]
+
+
+def copy_new(src: Path, dest: Path, written: list[Path]) -> None:
+    """src's bytes as a new file dest: never one already there, even one that appeared meanwhile."""
+    data = src.read_bytes()
+    try:
+        f = dest.open("xb")
+    except FileExistsError as error:
+        raise ReleaseError(f"{dest} appeared while packaging; it is not overwritten") from error
+    written.append(dest)
+    with f:
+        f.write(data)
+    if hashlib.sha256(dest.read_bytes()).digest() != hashlib.sha256(data).digest():
+        raise ReleaseError(f"{dest}: its bytes differ from the ones packaged")
+
+
+def undo(written: list[Path], made: list[Path], out_dir: Path, work: Path) -> str:
+    """Remove what this package run wrote and the folders it made; say what it did and what is left."""
+    shutil.rmtree(work, ignore_errors=True)
+    removed, gone, left = [], [], []
+    for path in reversed(written):
+        try:
+            path.unlink()
+            removed.append(path.name)
+        except OSError as error:
+            left.append(f"{path} ({error})")
+    if os.path.lexists(work):
+        left.append(f"the temporary folder {work}")
+    for folder in made:  # deepest first
+        try:
+            folder.rmdir()
+            gone.append(str(folder))
+        except OSError as error:
+            left.append(f"the folder {folder} ({error})")
+    notes = [f"wrote and then removed {', '.join(reversed(removed))}"] if removed else []
+    notes += [f"made and then removed the folder {', '.join(gone)}"] if gone else []
+    notes += [f"left behind {', '.join(left)}"] if left else []
+    return "; ".join(notes) or f"no asset written in {out_dir}"
+
+
+def package(tag: str, stage: Path, out_dir: Path, makensis: str | None = None) -> dict[str, str]:
+    """render, setup, zip and sha256 of one stage; the five assets copied into out_dir as new files."""
+    names = release_names(tag)
+    files = read_stage(stage)
+    if out_dir.resolve().is_relative_to(stage.resolve()):
+        raise ReleaseError(f"--out-dir {out_dir} is inside the stage")
+    if os.path.lexists(out_dir) and not out_dir.is_dir():
+        raise ReleaseError(f"--out-dir {out_dir}: not a folder")
+    final = package_names(names)
+    taken = [name for name in final if os.path.lexists(out_dir / name)]
+    if taken:
+        raise ReleaseError(f"--out-dir {out_dir} already holds {', '.join(taken)}; nothing is overwritten "
+                           "(move them, or choose another folder); nothing written")
+    exe = find_makensis(makensis)
+    made, here = [], out_dir.absolute()
+    while not os.path.lexists(here):
+        made.append(here)
+        here = here.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(dir=out_dir, prefix=".package-"))
+    written: list[Path] = []
+    try:
+        script = render(tag, stage, work / "xenogears-pc.nsi")
+        setup, record, version = build_setup(tag, script, exe)
+        archive = zip_stage(tag, stage, work)
+        unchanged(stage, files)
+        sums = write_sha256(tag, [setup, archive])
+        built = [setup, record, archive, *sums]
+        if [p.name for p in built] != final:
+            raise ReleaseError(f"package made {[p.name for p in built]}, not {final}")
+        for path in built:
+            copy_new(path, out_dir / path.name, written)
+    except (ReleaseError, OSError) as error:
+        raise ReleaseError(f"{error}; {undo(written, made, out_dir, work)}") from error
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    keys = ("setup", "build_info", "zip", "setup_sha256", "zip_sha256")
+    return {**{key: str(path) for key, path in zip(keys, written)}, "makensis_version": version}
+
+
 def write_atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
@@ -368,6 +476,13 @@ def main() -> int:
     p = sub.add_parser("sha256", help="a .sha256 beside each asset")
     p.add_argument("--tag", required=True)
     p.add_argument("assets", type=Path, nargs="+")
+    p = sub.add_parser("package", help="render, setup, zip and sha256 in one step (" + PACKAGE_SCOPE + ")",
+                       description="package: " + PACKAGE_SCOPE + ". The five assets are copied into --out-dir "
+                       "as new files; it refuses a folder already holding any of them.")
+    p.add_argument("--tag", required=True)
+    p.add_argument("--stage", type=Path, required=True, help="the folder cmake --install filled, final")
+    p.add_argument("--out-dir", type=Path, required=True, help="where the assets go (made if missing)")
+    p.add_argument("--makensis", help="the makensis to run (default: the one on PATH)")
     args = ap.parse_args()
     try:
         if args.command == "names":
@@ -380,6 +495,10 @@ def main() -> int:
             print(f"setup={setup}\nbuild_info={record}\nmakensis_version={version}")
         elif args.command == "zip":
             print(zip_stage(args.tag, args.stage, args.out_dir))
+        elif args.command == "package":
+            for key, value in package(args.tag, args.stage, args.out_dir, args.makensis).items():
+                print(f"{key}={value}")
+            print(f"scope={PACKAGE_SCOPE}")
         else:
             for path in write_sha256(args.tag, args.assets):
                 print(path)
