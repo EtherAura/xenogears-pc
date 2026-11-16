@@ -21,6 +21,17 @@
    missing, truncated or non-package file, a package of another name or
    architecture (small labelled fixtures made with dpkg-deb --build), a build
    folder of another version, and no dpkg-deb on PATH.
+5. --require-deps: the real package's own Depends gets the strict verdict (on a
+   host without dpkg-shlibdeps records it lacks libsdl3-0 and libc6, so it is
+   refused, nothing written, the missing entries named: not a release package).
+   Labelled Depends fixtures (dpkg-deb --build, --nocheck where dpkg-deb would
+   reject the field; metadata tests, not game packages, not release evidence):
+   missing or empty Depends, each required entry missing, unversioned, upper-
+   bound-only or pinned SDL/libc, malformed entries and versions, look-alike
+   names, architecture qualifiers and alternatives are refused with exit 1 and
+   an existing output folder left as it was; valid sets (with unrelated
+   entries) pass and give the normal mode's companions byte for byte. Without
+   dpkg (version validation) or dpkg-deb the strict mode refuses.
 
 Nothing is installed, launched or uploaded; all output stays in build/.
 """
@@ -81,22 +92,54 @@ def refused(public: Path, what: str, out: Path, *args, expect: str | tuple, env:
           f"refused: {what} ({message or result.stdout.strip()!r})")
 
 
-def fixture(work: Path, name: str, package: str, arch: str) -> Path:
-    """A labelled test fixture (not a release package): one text file, the given control fields."""
-    tree = work / f"fixture-{package}-{arch}"
+def fixture(work: Path, name: str, package: str, arch: str, depends: str | None = None, label: str = "",
+            nocheck: bool = False) -> Path:
+    """A labelled test fixture (not a release package): one text file, the given control fields.
+
+    nocheck builds Depends that dpkg-deb --build itself would reject (dpkg-deb --nocheck), so the
+    helper's own parsing is what refuses them."""
+    stem = f"fixture-{package}-{arch}" + (f"-{label}" if label else "")
+    tree = work / stem
     shutil.rmtree(tree, ignore_errors=True)
     (tree / "DEBIAN").mkdir(parents=True)
     (tree / "usr/share/doc" / package).mkdir(parents=True)
-    (tree / "usr/share/doc" / package / "FIXTURE").write_text("test fixture for check_deb_release_assets.py\n")
+    (tree / "usr/share/doc" / package / "FIXTURE").write_text(
+        "test fixture for check_deb_release_assets.py" + (" (Depends metadata test, not a working game package)"
+                                                          if depends is not None or label else "") + "\n")
     (tree / "DEBIAN/control").write_text(
         f"Package: {package}\nVersion: {VERSION}\nArchitecture: {arch}\nMaintainer: fixture\n"
-        f"Description: test fixture, not a release package\n")
-    target = work / f"fixture-{package}-{arch}-deb" / name
+        + (f"Depends: {depends}\n" if depends is not None else "")
+        + "Description: test fixture, not a release package\n")
+    target = work / f"{stem}-deb" / name
     target.parent.mkdir(exist_ok=True)
     target.unlink(missing_ok=True)
-    run(["dpkg-deb", "--root-owner-group", "--build", tree, target])
+    built = run(["dpkg-deb", "--root-owner-group", *(["--nocheck"] if nocheck else []), "--build", tree, target])
     shutil.rmtree(tree, ignore_errors=True)
+    if label:
+        check(built.returncode == 0 and target.is_file(), f"fixture {label} built with dpkg-deb")
     return target
+
+
+def snapshot(folder: Path) -> dict:
+    """Every entry under a folder: its kind, bytes and modification time."""
+    return {p.relative_to(folder).as_posix(): (p.is_dir(), b"" if p.is_dir() else p.read_bytes(), p.stat().st_mtime_ns)
+            for p in sorted(folder.rglob("*"))}
+
+
+def refused_keeps(public: Path, what: str, out: Path, *args, expect: str | tuple, env: dict | None = None) -> str:
+    """A refusal with an existing --out-dir: exit 1, the expected message, and that folder untouched."""
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    (out / "KEEP").write_text("existing content: a refusal must leave this folder alone\n")
+    (out / f"{DEB}.sha256").write_text("stale companion: must not be replaced on refusal\n")
+    before = snapshot(out)
+    result = helper(public, *args, "--out-dir", out, env=env)
+    message = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
+    expect = (expect,) if isinstance(expect, str) else expect
+    check(result.returncode == 1 and message.startswith("deb_assets: ") and all(e in message for e in expect)
+          and not result.stdout.strip() and snapshot(out) == before,
+          f"refused, existing output folder untouched: {what} ({message or result.stdout.strip()!r})")
+    return message
 
 
 def stage_public(work: Path) -> Path:
@@ -277,7 +320,122 @@ def main() -> int:
     empty_path.mkdir(exist_ok=True)
     refused(public, "no dpkg-deb on PATH", out, "--deb", f"dist/{DEB}", "--tag", TAG,
             expect="dpkg-deb not found", env={"PATH": str(empty_path)})
+    check_strict(public, work, real, build)
     return report()
+
+
+# --require-deps fixtures: Depends metadata tests made with dpkg-deb --build, not working game packages
+# and not release-build evidence. The versions are arbitrary fixture values, not any distribution's.
+FV = "1.0~fixture"
+GOOD = f"libc6 (>= {FV}), libsdl3-0 (>= {FV}), libvulkan1"
+STRICT_REFUSED = [  # label, Depends (None: no field), built with --nocheck, what the refusal must name
+    ("no-depends", None, False, ("Depends is missing or empty",)),
+    ("empty-depends", "", True, ("Depends is missing or empty",)),
+    ("blank-entry", f"{GOOD}, , libzstd1", True, ("an empty entry",)),
+    ("no-sdl", f"libc6 (>= {FV}), libvulkan1", False, ("no mandatory libsdl3-0",)),
+    ("no-libc", f"libsdl3-0 (>= {FV}), libvulkan1", False, ("no mandatory libc6",)),
+    ("no-vulkan", f"libc6 (>= {FV}), libsdl3-0 (>= {FV})", False, ("no mandatory libvulkan1",)),
+    ("only-vulkan", "libvulkan1", False, ("no mandatory libsdl3-0", "no mandatory libc6")),
+    ("unversioned-sdl", f"libc6 (>= {FV}), libsdl3-0, libvulkan1", False,
+     ("libsdl3-0 has no minimum version", "unversioned")),
+    ("unversioned-libc", f"libc6, libsdl3-0 (>= {FV}), libvulkan1", False,
+     ("libc6 has no minimum version", "unversioned")),
+    ("upper-bound-only", f"libc6 (<< 9.0~fixture), libsdl3-0 (<= 9.0~fixture), libvulkan1", False,
+     ("libc6 has no minimum version (>= or >>), only '<<'", "libsdl3-0 has no minimum version (>= or >>), only '<='")),
+    ("exact-pin", f"libc6 (= {FV}), libsdl3-0 (>= {FV}), libvulkan1", False,
+     ("libc6 has no minimum version (>= or >>), only '='",)),
+    ("empty-version", f"libc6 (>= ), libsdl3-0 (>= {FV}), libvulkan1", True, ("'libc6 (>= )' is not a Debian dependency",)),
+    ("old-operator", f"libc6 (> {FV}), libsdl3-0 (>= {FV}), libvulkan1", True, ("is not a Debian dependency",)),
+    ("open-parenthesis", f"libc6 (>= {FV}, libsdl3-0 (>= {FV}), libvulkan1", True, ("is not a Debian dependency",)),
+    ("spaced-version", f"libc6 (>= 1.0 2), libsdl3-0 (>= {FV}), libvulkan1", True, ("is not a Debian dependency",)),
+    ("non-digit-version", f"libc6 (>= fixture), libsdl3-0 (>= {FV}), libvulkan1", True,
+     ("'libc6 (>= fixture)'", "does not start with digit", "no mandatory libc6")),
+    ("look-alike-names", f"libc6-dev (>= {FV}), libsdl3-0-extra (>= {FV}), xlibvulkan1", False,
+     ("no mandatory libsdl3-0", "no mandatory libc6", "no mandatory libvulkan1")),
+    ("arch-qualified", f"libc6:amd64 (>= {FV}), libsdl3-0 (>= {FV}), libvulkan1", False, ("no mandatory libc6",)),
+    ("alternatives", f"libc6 (>= {FV}) | libc6-fixture, libsdl3-0 (>= {FV}) | libsdl2-2.0-0, "
+                     f"libvulkan1 | vulkan-fixture", False,
+     ("no mandatory libsdl3-0", "no mandatory libc6", "no mandatory libvulkan1")),
+]
+STRICT_ACCEPTED = [  # label, Depends
+    ("valid-with-unrelated", f"{GOOD}, libzstd1 (>= {FV}), libfixture-a | libfixture-b, libc6 (<< 9.0~fixture)"),
+    ("valid-strictly-later", f"libc6 (>> {FV}), libsdl3-0 (>> 1:{FV}-1), libvulkan1 (>= {FV})"),
+]
+
+
+def check_strict(public: Path, work: Path, real: Path, build: Path) -> None:
+    """--require-deps: the real package's verdict, the fixtures, missing tools, unchanged companions."""
+    out = work / "strict-out"
+    depends = run(["dpkg-deb", "-f", real, "Depends"]).stdout.strip()
+    declared = {d.split("(")[0].split(":")[0].strip() for g in depends.split(",") for d in g.split("|") if d.strip()}
+    absent = [name for name in ("libsdl3-0", "libc6") if name not in declared]
+    print(f"real package Depends: {depends!r}")
+    beside = work / "strict-real"
+    shutil.rmtree(beside, ignore_errors=True)
+    beside.mkdir()
+    shutil.copy2(real, beside / DEB)
+    result = helper(public, "--deb", beside / DEB, "--tag", TAG, "--build-dir", build, "--require-deps")
+    if result.returncode == 0:
+        print("NOTE  the real package meets the strict Depends contract on this host")
+        check(not absent, "a real package passing --require-deps declares libsdl3-0 and libc6")
+    else:
+        message = result.stderr.strip().splitlines()[-1] if result.stderr.strip() else ""
+        check(result.returncode == 1 and sorted(p.name for p in beside.iterdir()) == [DEB]
+              and all(f"no mandatory {name}" in message for name in absent),
+              f"real package refused by --require-deps, nothing written beside it, the missing constraints named "
+              f"({message!r})")
+        print("NOT PUBLISHABLE  the real package of this host lacks the strict Depends: it is not a release package")
+        refused_keeps(public, "the real package (--require-deps)", out, "--deb", beside / DEB, "--tag", TAG,
+                      "--require-deps", expect=tuple(f"no mandatory {name}" for name in absent) or "--require-deps")
+    check(not absent or result.returncode != 0, "a real package without libsdl3-0 or libc6 in Depends is never accepted")
+
+    for label, deps, nocheck, expect in STRICT_REFUSED:
+        deb = fixture(work, DEB, "xenogears-pc", "amd64", deps, label, nocheck)
+        refused_keeps(public, f"{label} (fixture {deps!r})", out, "--deb", deb, "--tag", TAG, "--require-deps",
+                      expect=expect)
+
+    for label, deps in STRICT_ACCEPTED:
+        deb = fixture(work, DEB, "xenogears-pc", "amd64", deps, label)
+        normal, strict = work / f"strict-{label}-normal", work / f"strict-{label}-strict"
+        shutil.rmtree(normal, ignore_errors=True)
+        shutil.rmtree(strict, ignore_errors=True)
+        before = (sha256(deb), deb.stat().st_mtime_ns)
+        a = helper(public, "--deb", deb, "--tag", TAG, "--out-dir", normal)
+        b = helper(public, "--deb", deb, "--tag", TAG, "--out-dir", strict, "--require-deps")
+        names = [f"{DEB}.sha256", f"{DEB}.cdx.json"]
+        same = (a.returncode == 0 == b.returncode
+                and sorted(p.name for p in strict.iterdir()) == sorted(names)
+                and all((normal / n).read_bytes() == (strict / n).read_bytes() for n in names))
+        check(same, f"accepted: {label} (fixture {deps!r}); companions identical to the normal mode's"
+                    f"{'' if same else ' ' + (a.stderr + b.stderr).strip()!r}")
+        if same:
+            check((strict / names[0]).read_text() == f"{sha256(deb)}  {DEB}\n", f"{label}: sidecar holds the fixture's hash")
+            bom = json.loads((strict / names[1]).read_text())
+            libs = [c["name"] for c in bom.get("components", []) if c["type"] == "library"]
+            check(bom.get("compositions", [{}])[0].get("aggregate") == "incomplete" and "libsdl3-0" in libs,
+                  f"{label}: SBOM still incomplete, Depends entries {libs}")
+            again = helper(public, "--deb", deb, "--tag", TAG, "--out-dir", strict, "--require-deps")
+            check(again.returncode == 0 and all((normal / n).read_bytes() == (strict / n).read_bytes() for n in names),
+                  f"{label}: a second strict run writes the same bytes")
+        check((sha256(deb), deb.stat().st_mtime_ns) == before, f"{label}: the fixture package is unchanged")
+
+    valid = work / f"fixture-xenogears-pc-amd64-{STRICT_ACCEPTED[0][0]}-deb" / DEB
+    only_deb = work / "path-dpkg-deb-only"  # dpkg-deb and the tools it runs, without dpkg: no version validation
+    shutil.rmtree(only_deb, ignore_errors=True)
+    only_deb.mkdir()
+    for tool in ("dpkg-deb", "tar", "gtar", "xz", "zstd", "gzip"):
+        if shutil.which(tool):
+            (only_deb / tool).symlink_to(shutil.which(tool))
+    refused_keeps(public, "no dpkg on PATH (--require-deps, valid fixture)", out, "--deb", valid, "--tag", TAG,
+                  "--require-deps", expect="dpkg not found", env={"PATH": str(only_deb)})
+    nothing = work / "empty-path"
+    refused_keeps(public, "no dpkg or dpkg-deb on PATH (--require-deps)", out, "--deb", valid, "--tag", TAG,
+                  "--require-deps", expect="not found", env={"PATH": str(nothing)})
+    plain = work / "strict-plain-dpkg-deb-only"
+    shutil.rmtree(plain, ignore_errors=True)
+    result = helper(public, "--deb", valid, "--tag", TAG, "--out-dir", plain, env={"PATH": str(only_deb)})
+    check(result.returncode == 0 and (plain / f"{DEB}.sha256").is_file(),
+          f"the normal mode still runs without dpkg ({result.stderr.strip()!r})")
 
 
 def report() -> int:

@@ -23,6 +23,18 @@ versions; the libraries linked into the executable are not inventoried; no
 licence is named beyond the licence files the package holds. It has no
 timestamp, so the same package and build give the same bytes.
 
+--require-deps (opt-in) also refuses, before writing anything, a package
+whose Depends (as dpkg-deb reads it) lacks a mandatory libsdl3-0 and libc6
+each with a minimum version (>= or >>; = pins, << and <= only cap), or a
+mandatory libvulkan1. Mandatory means alone in its group: an alternative
+(a | b) can be installed without the package, so it does not count, and the
+name must be exact (no architecture qualifier, no look-alike). Every entry
+must parse, and every version must pass dpkg --validate-version (so this
+mode also needs dpkg). It checks only what the package declares: not where
+those constraints came from (dpkg-shlibdeps), that they are complete, that
+the libraries are ABI-compatible, or that the package installs anywhere.
+The companions it writes are those of the normal mode, byte for byte.
+
 The package is only read: nothing is installed, launched or uploaded. Needs
 dpkg-deb; exit status 1 (and nothing written) on any bad input or missing tool.
 """
@@ -45,6 +57,11 @@ ARCH = "amd64"
 TAG = re.compile(r"v(20\d\d)\.(0[1-9]|1[0-2])\.(0|[1-9]\d*)")
 DOC_PREFIX = f"usr/share/doc/{PACKAGE}/"
 BUILD_KEYS = ("CMAKE_BUILD_TYPE", "XG_VERSION", "XG_ENGINE", "XG_EXTRAS", "XG_PACKAGE_VERSION")
+NEED_MINIMUM = ("libsdl3-0", "libc6")  # --require-deps: mandatory, with a minimum version
+NEED_PRESENT = ("libvulkan1",)         # --require-deps: mandatory (dlopened, so no shlibdeps version)
+MINIMUM_OPS = (">=", ">>")
+# One alternative of a binary package's Depends: name[:arch] [(op version)], nothing else.
+STRICT_ALTERNATIVE = re.compile(r"([a-z0-9][a-z0-9+.-]+)(:[a-z0-9-]+)?(?: ?\( ?(<<|<=|=|>=|>>) ?([^\s()]+) ?\))?")
 
 
 class AssetError(Exception):
@@ -109,6 +126,48 @@ def depends_entries(depends: str) -> list[dict]:
                 raise AssetError(f"Depends entry {alternative.strip()!r} is not a Debian dependency")
             entries.append({"name": m[1], "constraint": (m[2] or "").strip(), "group": group, "text": text})
     return entries
+
+
+def version_error(dpkg: str, version: str) -> str | None:
+    """Why dpkg rejects a Debian version, or None if it accepts it."""
+    result = subprocess.run([dpkg, "--validate-version", "--", version], capture_output=True, text=True)
+    if result.returncode == 0:
+        return None
+    return " ".join(result.stderr.split()) or f"dpkg --validate-version exit status {result.returncode}"
+
+
+def dependency_problems(depends: str) -> list[str]:
+    """--require-deps: what the declared Depends lacks (empty when it meets the strict contract)."""
+    dpkg = shutil.which("dpkg")
+    if dpkg is None:
+        raise AssetError("--require-deps: dpkg not found: the Depends versions cannot be validated")
+    if not depends.strip():
+        return ["Depends is missing or empty"]
+    problems = []
+    mandatory: dict[str, list[str]] = {}  # name -> operators of its valid single-alternative entries
+    for group in depends.split(","):
+        alternatives = [" ".join(a.split()) for a in group.split("|")]
+        parsed = []
+        for text in alternatives:
+            m = STRICT_ALTERNATIVE.fullmatch(text)
+            if not m:
+                problems.append(f"entry {text!r} is not a Debian dependency" if text else
+                                f"group {' '.join(group.split())!r} has an empty entry")
+                continue
+            if m[4] is not None and (error := version_error(dpkg, m[4])):
+                problems.append(f"entry {text!r}: {error}")
+                continue
+            parsed.append(m)
+        if len(alternatives) == 1 and len(parsed) == 1 and parsed[0][2] is None:
+            mandatory.setdefault(parsed[0][1], []).append(parsed[0][3] or "")
+    for name in NEED_MINIMUM + NEED_PRESENT:
+        ops = mandatory.get(name)
+        if ops is None:
+            problems.append(f"no mandatory {name} (an entry of its own, exact name, no alternative or qualifier)")
+        elif name in NEED_MINIMUM and not any(op in MINIMUM_OPS for op in ops):
+            problems.append(f"{name} has no minimum version (>= or >>), only "
+                            + ", ".join(repr(op) if op else "unversioned" for op in ops))
+    return problems
 
 
 def build_metadata(build: Path, version: str) -> list[tuple[str, str]]:
@@ -195,8 +254,11 @@ def sbom(deb: Path, digest: str, control: dict[str, str], files: list[dict],
     }
 
 
-def make_assets(deb: Path, tag: str, out_dir: Path | None = None, build_dir: Path | None = None) -> tuple[Path, Path]:
+def make_assets(deb: Path, tag: str, out_dir: Path | None = None, build_dir: Path | None = None,
+                require_deps: bool = False) -> tuple[Path, Path]:
     version = version_from_tag(tag)
+    if require_deps and shutil.which("dpkg") is None:
+        raise AssetError("--require-deps: dpkg not found: the Depends versions cannot be validated")
     expected = f"{PACKAGE}_{version}_{ARCH}.deb"
     if not deb.is_file():
         raise AssetError(f"{deb}: no such package")
@@ -208,6 +270,9 @@ def make_assets(deb: Path, tag: str, out_dir: Path | None = None, build_dir: Pat
     for field, want in (("Package", PACKAGE), ("Version", version), ("Architecture", ARCH)):
         if control.get(field) != want:
             raise AssetError(f"{deb.name}: {field} is {control.get(field)!r}, not {want!r}")
+    if require_deps and (problems := dependency_problems(control.get("Depends", ""))):
+        raise AssetError(f"--require-deps: {deb.name}: Depends {control.get('Depends', '')!r} refused: "
+                         + "; ".join(problems))
     files = package_files(deb)
     build = build_metadata(build_dir, version) if build_dir is not None else None
     bom = sbom(deb, digest, control, files, build)
@@ -228,9 +293,11 @@ def main() -> int:
     ap.add_argument("--tag", required=True, help="the release tag, vYYYY.MM.N")
     ap.add_argument("--out-dir", type=Path, help="where the companions go (default: beside the package)")
     ap.add_argument("--build-dir", type=Path, help="the CMake build the package came from (its records go in the SBOM)")
+    ap.add_argument("--require-deps", action="store_true",
+                    help="refuse a package without mandatory libsdl3-0 and libc6 minimum versions and libvulkan1")
     args = ap.parse_args()
     try:
-        for path in make_assets(args.deb, args.tag, args.out_dir, args.build_dir):
+        for path in make_assets(args.deb, args.tag, args.out_dir, args.build_dir, args.require_deps):
             print(path)
     except AssetError as error:
         print(f"deb_assets: {error}", file=sys.stderr)
