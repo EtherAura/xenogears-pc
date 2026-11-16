@@ -25,9 +25,21 @@
    short digests, a checksum of another tarball, a tarball whose name or bytes
    are not the checksum's, malformed or shell-unsafe tags, and templates with
    a missing, repeated or unknown placeholder.
+5. Release flags: the rendered PKGBUILD's prepare() and build() run under bash
+   with makepkg-like CFLAGS/CXXFLAGS/CPPFLAGS/LDFLAGS (-O0 -UNDEBUG and marked
+   defines) and CMAKE_BUILD_TYPE=None in their environment, over a labelled
+   minimal fixture in place of port/ (a C and a C++ file that refuse to compile
+   without NDEBUG and optimisation; tools/pc_sources.py a stand-in). Real CMake
+   configures and Ninja compiles it: the cache has CMAKE_BUILD_TYPE=Release
+   with CMake's -O3 -DNDEBUG, both compile commands end on -O3 with -DNDEBUG,
+   and no inherited flag reaches the build. Negative controls (the template
+   with None, no build type, the flags left set, or C++ at -O2) are caught.
+   The port's own CMake is checked to add no -O, NDEBUG or build type. This is
+   proof about the template, not a build of the port or on Arch.
 
-No network, GPU or game data; nothing is built, installed or uploaded. Output
-stays in a scratch folder under build/. Exit status 1 on any failure.
+No network, GPU or game data; nothing is installed or uploaded, and only the
+fixture project is built. Output stays in a scratch folder under build/. Exit
+status 1 on any failure.
 """
 from __future__ import annotations
 
@@ -36,8 +48,10 @@ import gzip
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -245,6 +259,155 @@ def port_rules(text: str) -> None:
           "the template names no disc image")
 
 
+# Release flags: makepkg exports the distribution's CFLAGS/CXXFLAGS/LDFLAGS to build(); these stand-ins
+# (and a None build type in the environment) are what the rendered build() must not let through.
+INHERITED = {"CFLAGS": "-O0 -UNDEBUG -DXG_FIXTURE_INHERITED_CFLAGS",
+             "CXXFLAGS": "-O0 -UNDEBUG -DXG_FIXTURE_INHERITED_CXXFLAGS",
+             "CPPFLAGS": "-DXG_FIXTURE_INHERITED_CPPFLAGS",
+             "LDFLAGS": "-Wl,--defsym=xg_fixture_inherited_ldflags=0",
+             "CMAKE_BUILD_TYPE": "None"}
+INHERITED_TOKENS = ("XG_FIXTURE_INHERITED", "xg_fixture_inherited")
+# A labelled minimal stand-in for port/: it proves what the template's build() hands CMake, not
+# how the real port builds (that needs the player's disc). Each source refuses to compile
+# without NDEBUG and optimisation, or with an inherited flag.
+FIXTURE_CMAKE = """\
+# test fixture for tools/test_arch_package.py: not the port
+cmake_minimum_required(VERSION 3.20)
+project(xg_arch_flags_fixture C CXX)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+add_executable(probe_c probe.c)
+add_executable(probe_cxx probe.cpp)
+"""
+FIXTURE_SOURCE = """\
+/* test fixture for tools/test_arch_package.py: not the port */
+#ifndef NDEBUG
+#error "fixture: NDEBUG is not defined"
+#endif
+#ifndef __OPTIMIZE__
+#error "fixture: not optimised"
+#endif
+#if defined(XG_FIXTURE_INHERITED_CFLAGS) || defined(XG_FIXTURE_INHERITED_CXXFLAGS) || defined(XG_FIXTURE_INHERITED_CPPFLAGS)
+#error "fixture: an inherited flag reached the compiler"
+#endif
+int main(void) { return 0; }
+"""
+
+
+def run_build(text: str, tree: Path) -> tuple[subprocess.CompletedProcess, Path]:
+    """prepare() then build() of a rendered PKGBUILD, as makepkg orders them, over the fixture tree."""
+    version = re.search(r"^pkgver=(.*)$", text, re.M)[1]
+    srcdir = tree / "src"
+    source = srcdir / f"xenogears-pc-{version}"
+    (source / "asm/us").mkdir(parents=True)
+    (source / "tools").mkdir()
+    (source / "tools/pc_sources.py").write_text(
+        "# test fixture: stands in for the PC source list writer\n"
+        "open('pc_sources.ran', 'w').write('fixture\\n')\n")
+    (source / "port").mkdir()
+    (source / "port/CMakeLists.txt").write_text(FIXTURE_CMAKE)
+    (source / "port/probe.c").write_text(FIXTURE_SOURCE)
+    (source / "port/probe.cpp").write_text(FIXTURE_SOURCE)
+    pkgbuild = tree / "PKGBUILD"
+    pkgbuild.write_text(text)
+    bindir = tree / "bin"
+    bindir.mkdir()
+    (bindir / "python").symlink_to(sys.executable)
+    env = dict(os.environ, **INHERITED, HOME=str(tree), LC_ALL="C")
+    env["PATH"] = f"{bindir}{os.pathsep}{env.get('PATH', '/usr/bin:/bin')}"
+    script = ('set -eo pipefail; error() { echo "error: $*" >&2; }; plain() { echo "$*" >&2; }; '
+              'source "$1"; srcdir="$2"; cd "$srcdir"; prepare; cd "$srcdir"; build')
+    result = subprocess.run(["bash", "--noprofile", "--norc", "-c", script, "_", str(pkgbuild), str(srcdir)],
+                            env=env, capture_output=True, text=True, timeout=300)
+    return result, source
+
+
+def flag_problems(result: subprocess.CompletedProcess, source: Path) -> tuple[list[str], dict]:
+    """What the build shows about its effective build type and flags; an empty list is a release build."""
+    build = source / "build/pc/arch"
+    problems, seen = [], {}
+    if result.returncode != 0:
+        lines = (result.stdout + result.stderr).splitlines()
+        tail = ([line.strip() for line in lines if "error" in line] or [line.strip() for line in lines] or ["?"])[-1]
+        problems.append(f"prepare/build exit {result.returncode} ({tail})")
+    if not (source / "pc_sources.ran").is_file():
+        problems.append("tools/pc_sources.py did not run")
+    cache = (build / "CMakeCache.txt").read_text() if (build / "CMakeCache.txt").is_file() else ""
+    for key in ("CMAKE_BUILD_TYPE", "CMAKE_C_FLAGS", "CMAKE_CXX_FLAGS", "CMAKE_C_FLAGS_RELEASE",
+                "CMAKE_CXX_FLAGS_RELEASE", "CMAKE_EXE_LINKER_FLAGS", "CMAKE_INSTALL_PREFIX", "XG_VERSION", "XG_EXTRAS"):
+        found = re.search(rf"^{key}:[A-Z]+=(.*)$", cache, re.M)
+        seen[key] = found[1] if found else None
+    if seen["CMAKE_BUILD_TYPE"] != "Release":
+        problems.append(f"CMAKE_BUILD_TYPE is {seen['CMAKE_BUILD_TYPE']!r}")
+    commands = build / "compile_commands.json"
+    entries = json.loads(commands.read_text()) if commands.is_file() else []
+    for suffix in (".c", ".cpp"):
+        entry = [e for e in entries if e["file"].endswith("probe" + suffix)]
+        words = shlex.split(entry[0]["command"]) if entry else []
+        levels = [w for w in words if re.fullmatch(r"-O\S*", w)]
+        seen["probe" + suffix] = " ".join(w for w in words if re.fullmatch(r"-O\S*|-[DU]\S*", w))
+        if not entry:
+            problems.append(f"no compile command for probe{suffix}")
+            continue
+        if not levels or levels[-1] != "-O3":
+            problems.append(f"probe{suffix}: last optimisation flag is {levels[-1] if levels else None}")
+        if "-DNDEBUG" not in words or any(w == "-UNDEBUG" for w in words[words.index("-DNDEBUG"):]):
+            problems.append(f"probe{suffix}: NDEBUG not defined last")
+    for kind in ("probe_c", "probe_cxx"):
+        if not (build / kind).is_file():
+            problems.append(f"{kind} not built (the fixture refuses to compile without -O and NDEBUG)")
+    leaked = sorted({p.name for p in build.rglob("*") if p.is_file() and p.suffix in ("", ".txt", ".json", ".ninja")
+                     and p.stat().st_size < 4 << 20
+                     and any(t in p.read_text(errors="replace") for t in INHERITED_TOKENS)}) if build.is_dir() else []
+    if leaked:
+        problems.append(f"inherited CFLAGS/CXXFLAGS/LDFLAGS reach the build ({', '.join(leaked)})")
+    return problems, seen
+
+
+def release_flags(helper: Path, scratch: Path) -> None:
+    """The rendered build() configures and compiles Release with -O3 -DNDEBUG despite makepkg's flags."""
+    module = load(helper)
+    template = (helper.parent / TEMPLATE).read_text()
+    tag, version = RELEASES[0]
+    digest = hashlib.sha256((scratch / f"fixtures/xenogears-pc-{version}.tar.gz").read_bytes()).hexdigest()
+    if not (shutil.which("cmake") and shutil.which("ninja") and shutil.which("cc") and shutil.which("c++")):
+        check(False, "cmake, ninja, cc and c++ on PATH for the release flags check")
+        return
+    result, source = run_build(module.render(template, version, digest), scratch / "flags-template")
+    problems, seen = flag_problems(result, source)
+    print(f"note {tag}: fixture build of the rendered PKGBUILD saw {seen}")
+    check(not problems, f"{tag}: rendered build() configures Release and compiles C and C++ with -O3 -DNDEBUG last, "
+                        f"no inherited CFLAGS/CXXFLAGS/LDFLAGS or None build type (minimal fixture project, "
+                        f"not the port) ({problems or 'ok'})")
+    check(seen["CMAKE_C_FLAGS_RELEASE"] == "-O3 -DNDEBUG" and seen["CMAKE_CXX_FLAGS_RELEASE"] == "-O3 -DNDEBUG",
+          f"{tag}: the release flags are CMake's own Release defaults ({seen['CMAKE_C_FLAGS_RELEASE']!r}, "
+          f"{seen['CMAKE_CXX_FLAGS_RELEASE']!r})")
+    # Negative controls: the same check over templates that lose the release settings.
+    controls = (("Arch's None build type", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_BUILD_TYPE=None"),
+                ("no build type, so the inherited None", "        -DCMAKE_BUILD_TYPE=Release \\\n", ""),
+                ("makepkg's flags kept", "    unset CFLAGS CXXFLAGS LDFLAGS\n", ""),
+                ("C++ release flags without -O3 -DNDEBUG", "-DCMAKE_BUILD_TYPE=Release",
+                 '-DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O2"'))
+    for i, (what, old, new) in enumerate(controls):
+        if template.count(old) != 1:
+            check(False, f"negative control '{what}': the template has {old.strip()!r} once")
+            continue
+        result, source = run_build(module.render(template.replace(old, new), version, digest),
+                                   scratch / f"flags-control{i}")
+        problems, _ = flag_problems(result, source)
+        check(bool(problems), f"negative control caught: {what} ({problems or 'NOT caught'})")
+
+
+def port_flag_sources() -> None:
+    """The port's CMake leaves the optimisation and NDEBUG to the build type (the fixture stands in for it)."""
+    files = [ROOT / "port/CMakeLists.txt", *sorted((ROOT / "port").rglob("*.cmake"))]
+    found = [f"{p.relative_to(ROOT)}:{n}" for p in files
+             for n, line in enumerate(p.read_text().splitlines(), 1)
+             if not line.lstrip().startswith("#") and "glslc" not in line  # glslc -O optimises shaders, not C
+             and re.search(r"CMAKE_(C|CXX)_FLAGS|set\(\s*CMAKE_BUILD_TYPE|(?<![\w-])-O[0-3sgz]?\b|NDEBUG",
+                           line)]
+    check(not found, f"port CMake sets no optimisation, NDEBUG or build type of its own ({found or 'none'})")
+
+
 def field_line(text: str, name: str) -> str:
     found = re.findall(rf"^{name}=(.*)$", text, re.M)
     return found[0] if len(found) == 1 else ""
@@ -341,8 +504,10 @@ def main() -> int:
         helper = public_layout(scratch)
         texts = renders(helper, scratch)
         port_rules((OVERLAY / TEMPLATE).read_text())
+        port_flag_sources()
         if texts:
             refusals(helper, scratch)
+            release_flags(helper, scratch)
     print(f"{len(failures)} failure(s)" if failures else "all checks passed")
     return 1 if failures else 0
 
