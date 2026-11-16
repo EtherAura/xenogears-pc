@@ -154,6 +154,33 @@ class ExtrasDeviceLossTests(unittest.TestCase):
         self.disc.touch()  # an empty placeholder: the fake never reads it
         for name, text in OK_TEXT.items():
             self.assertIsNotNone(re.search(P.EXTRAS[name][1], text), name)
+        # Recovery pauses (xg-au4), recorded instead of slept: (seconds, this run's GPU lock users,
+        # whether another process could take the temporary GPU lock then, the game's runs so far).
+        self.settled = []
+        patch.object(P, "settle", self.pause).start()
+
+    def pause(self, secs):
+        fd = os.open(self.lock, os.O_RDONLY)
+        try:
+            P.fcntl.flock(fd, P.fcntl.LOCK_EX | P.fcntl.LOCK_NB)
+            P.fcntl.flock(fd, P.fcntl.LOCK_UN)
+            free = True
+        except BlockingIOError:
+            free = False
+        finally:
+            os.close(fd)
+        self.settled.append((secs, P.gpu_lock.users, free, len(self.calls(GALLERY))))
+
+    def assert_paused(self, after: list[int]):
+        """One pause before each recovery rerun, the game's earlier runs each over, no GPU lock held."""
+        self.assertEqual(self.settled, [(P.DEVICE_SETTLE, 0, True, n) for n in after])
+
+    def recovers(self, r) -> list[str]:
+        return [n for e, n, _ in r.trace if e == "recover"]
+
+    def lost(self, suffix: str = ".log") -> str:
+        """A lost run's detail, its log (now) at GALLERY + suffix."""
+        return f"{P.DEVICE_LOST_MARK} ({LOST[:90]}): exit -6: xenogears: aborting (log {self.shown(GALLERY, suffix)})"
 
     def suite(self, pattern: str, jobs: int, runs: dict[str, list[str]]):
         """Plan and run the real suite over `pattern`; its runner (results, trace)."""
@@ -223,28 +250,63 @@ class ExtrasDeviceLossTests(unittest.TestCase):
                 self.assert_launched(GALLERY, 1)
 
     def test_device_loss_fails_marked_with_its_log(self):
+        # Lost on every run: the first and exactly two recovery reruns, each run's log kept.
         for jobs in (1, 2):
             with self.subTest(jobs=jobs):
+                self.settled.clear()
                 (self.state / f"{GALLERY}.calls").unlink(missing_ok=True)
                 r = self.suite(GALLERY, jobs, {GALLERY: ["lost"]})
                 status, detail = self.result(r, GALLERY)
                 self.assertEqual(status, "FAIL")
-                self.assertEqual(detail, f"{P.DEVICE_LOST_MARK} ({LOST[:90]}): exit -6: xenogears: aborting "
-                                         f"(log {self.shown(GALLERY)})")
-                self.assertEqual(r.tests[0].job.device_lost, [LOST])
-                text = self.log(GALLERY)
-                self.assertIn(f"{LOST}\nxenogears: aborting\n", text)
-                self.assertIn(f"extras: {GALLERY} run 1", text)
-                self.assertEqual([e for e, _, _ in r.trace], [] if jobs == 1 else ["start"])  # no rerun alone
-                self.assert_launched(GALLERY, 1)
+                self.assertEqual(detail, f"{self.lost()}; lost again on every recovery rerun alone (2 of 2): "
+                                         f"lost {self.lost('.lost1.log')}; lost {self.lost('.lost2.log')}")
+                self.assertEqual(r.tests[0].job.device_lost, [LOST] * 3)
+                for suffix, run in ((".lost1.log", 1), (".lost2.log", 2), (".log", 3)):
+                    text = self.log(GALLERY, suffix)
+                    self.assertIn(f"{LOST}\nxenogears: aborting\n", text)
+                    self.assertIn(f"extras: {GALLERY} run {run}", text)
+                self.assertEqual([e for e, _, _ in r.trace],
+                                 ["recover", "recover"] if jobs == 1 else ["start", "recover", "recover"])
+                self.assert_paused([1, 2])
+                self.assert_launched(GALLERY, 3)
                 self.assert_not_kept_alone()
+
+    def test_lost_then_passing_recovers_ok_marked(self):
+        for runs, n in ((["lost", "ok"], 1), (["lost", "lost", "ok"], 2)):
+            with self.subTest(runs=runs):
+                self.settled.clear()
+                (self.state / f"{GALLERY}.calls").unlink(missing_ok=True)
+                r = self.suite(GALLERY, 1, {GALLERY: runs})
+                status, detail = self.result(r, GALLERY)
+                self.assertEqual(status, "ok", detail)
+                lost = "; ".join(f"lost {self.lost(f'.lost{k}.log')}" for k in range(1, n + 1))
+                prefix = (f"{P.DEVICE_LOST_MARK}, passed on recovery rerun {n} of 2 alone; not kept alone "
+                          f"(a host GPU reset is not a sharing failure): {lost}; then {OK_TEXT[GALLERY]} (")
+                self.assertTrue(detail.startswith(prefix), f"{detail}\n!=\n{prefix}")
+                self.assertNotIn("vulkan:", self.log(GALLERY))
+                self.assertIn(f"extras: {GALLERY} run {n + 1}", self.log(GALLERY))
+                self.assert_paused(list(range(1, n + 1)))
+                self.assert_launched(GALLERY, n + 1)
+                self.assert_not_kept_alone()
+
+    def test_lost_then_an_ordinary_failure_stays_failed(self):
+        r = self.suite(GALLERY, 1, {GALLERY: ["lost", "fail"]})
+        self.assertEqual(self.result(r, GALLERY), (
+            "FAIL", f"exit 1: extras: section gallery did not open (log {self.shown(GALLERY)}); after "
+                    f"{P.DEVICE_LOST_MARK} (not a sharing failure; recovery reruns alone: 1 of 2): "
+                    f"lost {self.lost('.lost1.log')}"))
+        self.assert_paused([1])
+        self.assert_launched(GALLERY, 2)
+        self.assert_not_kept_alone()
 
     def test_matching_output_does_not_excuse_a_failed_exit(self):
         r = self.suite(GALLERY, 1, {GALLERY: ["lost-matching"]})
         status, detail = self.result(r, GALLERY)
         self.assertEqual(status, "FAIL")
         self.assertTrue(detail.startswith(f"{P.DEVICE_LOST_MARK} ({LOST[:90]}): exit -6: "), detail)
+        self.assertIn("; lost again on every recovery rerun alone (2 of 2): ", detail)
         self.assertIn(OK_TEXT[GALLERY], self.log(GALLERY))
+        self.assert_launched(GALLERY, 3)
         (self.state / f"{GALLERY}.calls").unlink()
         r = self.suite(GALLERY, 1, {GALLERY: ["matching-fail"]})
         self.assertEqual(self.result(r, GALLERY),
@@ -254,14 +316,20 @@ class ExtrasDeviceLossTests(unittest.TestCase):
         r = self.suite(GALLERY, 1, {GALLERY: ["lost"]})
         self.assertEqual(self.result(r, GALLERY)[0], "FAIL")
         self.assertIn(LOST, self.log(GALLERY))
-        r = self.suite(GALLERY, 1, {GALLERY: ["lost", "ok"]})  # the second run of the fake passes
+        self.assertIn(LOST, self.log(GALLERY, ".lost1.log"))
+        self.settled.clear()
+        r = self.suite(GALLERY, 1, {GALLERY: ["lost", "lost", "lost", "ok"]})  # the fake's fourth run passes
         status, detail = self.result(r, GALLERY)
         self.assertEqual(status, "ok", detail)
         self.assertNotIn(P.DEVICE_LOST_MARK, detail)
-        self.assertEqual(r.tests[0].job.device_lost, [])
+        self.assertNotIn(".lost1.log", detail)  # the earlier invocation's kept logs are not this one's...
+        self.assertEqual(list(self.out.glob("*.lost*.log")), [])  # ...and are gone with its own log
+        self.assertEqual((r.tests[0].job.device_lost, r.tests[0].job.recoveries), ([], 0))
+        self.assertEqual(self.recovers(r), [])
+        self.assert_paused([])
         self.assertNotIn("vulkan:", self.log(GALLERY))
-        self.assertIn(f"extras: {GALLERY} run 2", self.log(GALLERY))
-        self.assert_launched(GALLERY, 2)
+        self.assertIn(f"extras: {GALLERY} run 4", self.log(GALLERY))
+        self.assert_launched(GALLERY, 4)
         self.assert_not_kept_alone()
 
     def test_other_failures_are_not_device_loss(self):
@@ -276,9 +344,13 @@ class ExtrasDeviceLossTests(unittest.TestCase):
                 r = self.suite(GALLERY, 1, {GALLERY: [action]})
                 self.assertEqual(self.result(r, GALLERY), ("FAIL", f"exit -6: {last} (log {self.shown(GALLERY)})"))
                 self.assertEqual(r.tests[0].job.device_lost, [])
+                self.assertEqual(self.recovers(r), [])  # no recovery rerun
+                self.assert_launched(GALLERY, 1)
         r = self.suite(GALLERY, 1, {GALLERY: ["fail"]})
         self.assertEqual(self.result(r, GALLERY),
                          ("FAIL", f"exit 1: extras: section gallery did not open (log {self.shown(GALLERY)})"))
+        self.assertEqual(self.recovers(r), [])
+        self.assert_paused([])
         self.assert_not_kept_alone()
 
     def test_missing_expected_output_still_fails(self):
@@ -291,7 +363,7 @@ class ExtrasDeviceLossTests(unittest.TestCase):
     # starts with nothing running, the three CPU tests beside it; the fake only
     # goes on once one of them has started, and they once it has.
 
-    def shared(self, runs: list[str]):
+    def shared(self, runs: list[str], launches: int = 2):
         config = {GALLERY: runs, GAMEPAD: ["ok"], **{p: ["partner"] for p in PARTNERS}}
         r = self.suite("gallery", 4, config)
         self.assertEqual([t.name for t in r.tests], [*PARTNERS, GALLERY, GAMEPAD])
@@ -301,7 +373,7 @@ class ExtrasDeviceLossTests(unittest.TestCase):
         for p in PARTNERS:
             self.assertEqual(self.result(r, p)[0], "ok", self.result(r, p))
         self.assertEqual(self.result(r, GAMEPAD)[0], "ok", self.result(r, GAMEPAD))
-        self.assert_launched(GALLERY, 2)
+        self.assert_launched(GALLERY, launches)
         self.assert_launched(GAMEPAD, 1)
         self.assertNotEqual(self.calls(GALLERY)[0]["script"], self.calls(GAMEPAD)[0]["script"])
         self.assertIn(LOST if "lost" in runs[0] else "did not open", self.log(GALLERY, ".shared.log"))
@@ -311,22 +383,25 @@ class ExtrasDeviceLossTests(unittest.TestCase):
         r = self.shared(["shared-lost", "ok"])
         status, detail = self.result(r, GALLERY)
         self.assertEqual(status, "ok", detail)
-        self.assertTrue(detail.startswith(f"{P.DEVICE_LOST_MARK} WHEN SHARED, passed alone; not kept alone"), detail)
-        self.assertIn(f"shared {P.DEVICE_LOST_MARK} ({LOST[:90]}): exit -6", detail)
-        self.assertIn(f"(log {self.shown(GALLERY, '.shared.log')})", detail)
-        self.assertIn(f"alone {OK_TEXT[GALLERY]} (", detail)
+        prefix = (f"{P.DEVICE_LOST_MARK}, passed on recovery rerun 1 of 2 alone; not kept alone (a host GPU "
+                  f"reset is not a sharing failure): shared {self.lost('.shared.log')}; then {OK_TEXT[GALLERY]} (")
+        self.assertTrue(detail.startswith(prefix), f"{detail}\n!=\n{prefix}")
         self.assertNotIn("vulkan:", self.log(GALLERY))
+        self.assertEqual(self.recovers(r), [GALLERY])
+        self.assert_paused([1])
         self.assert_not_kept_alone()
         self.assertNotIn(GALLERY, r.alone_only)
 
     def test_lost_on_every_run_fails_marked(self):
-        r = self.shared(["shared-lost", "lost"])
+        r = self.shared(["shared-lost", "lost"], launches=3)
         status, detail = self.result(r, GALLERY)
         self.assertEqual(status, "FAIL")
-        self.assertTrue(detail.startswith(f"{P.DEVICE_LOST_MARK} ({LOST[:90]}): exit -6: "), detail)
-        self.assertIn(f"; shared too: {P.DEVICE_LOST_MARK} ({LOST[:90]})", detail)
+        self.assertEqual(detail, f"{self.lost()}; lost again on every recovery rerun alone (2 of 2): "
+                                 f"shared {self.lost('.shared.log')}; lost {self.lost('.lost2.log')}")
         self.assertIn(LOST, self.log(GALLERY))
-        self.assertEqual(r.tests[3].job.device_lost, [LOST, LOST])
+        self.assertEqual(r.tests[3].job.device_lost, [LOST] * 3)
+        self.assertEqual(self.recovers(r), [GALLERY, GALLERY])
+        self.assert_paused([1, 2])
         self.assert_not_kept_alone()
 
     def test_ordinary_failure_only_when_shared_is_still_kept_alone(self):
@@ -335,6 +410,8 @@ class ExtrasDeviceLossTests(unittest.TestCase):
         self.assertEqual(status, "ok", detail)
         self.assertTrue(detail.startswith("FAILED ONLY WHEN SHARED, alone from now on"), detail)
         self.assertNotIn(P.DEVICE_LOST_MARK, detail)
+        self.assertEqual(self.recovers(r), [])
+        self.assert_paused([])
         self.assertEqual((self.out / P.ALONE_FILE).read_text(), GALLERY + "\n")
 
 

@@ -292,6 +292,9 @@ class SchedulerTests(unittest.TestCase):
         patch.object(P, "OUT", self.out).start()
         # Never the host's shared GPU lock: these runs use no GPU.
         patch.dict(os.environ, XG_GPU_LOCK=str(self.root / "gpu.lock")).start()
+        # A device-loss recovery's pause, recorded instead of slept (none of these runs loses it).
+        self.settled = []
+        patch.object(P, "settle", self.settled.append).start()
 
     def exe(self, name):
         path = self.build / name
@@ -606,6 +609,7 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(children.started, ["atest", "btest"])
         self.assertFalse((self.out / "atest.shared.log").exists())
         self.assertFalse((self.out / P.ALONE_FILE).exists())
+        self.assertEqual(self.settled, [])  # an ordinary failure gets no recovery rerun
 
     def full_plan(self, jobs):
         for reg in ("USA", "Japan"):
@@ -695,11 +699,36 @@ LOST = "vulkan: vkQueueSubmit(vk.queue, 1, &si, vk.fence) failed (-4) at port/sr
 
 class DeviceLossTests(unittest.TestCase):
     """A host GPU reset (xg-au4): a failure reporting a lost Vulkan device is marked so,
-    and teaches alone-only.txt nothing; every pass, failure and rerun is as before."""
+    is rerun alone after a pause at most P.DEVICE_RECOVERIES times over its whole
+    outcome, and teaches alone-only.txt nothing; every other pass, failure and rerun
+    is as before."""
     exe = SchedulerTests.exe
 
     def setUp(self):
         SchedulerTests.setUp(self)
+        # Each recovery pause (mocked: no waiting): (seconds, the children running, this run's
+        # GPU lock users, whether another holder could take the GPU lock file then).
+        self.children = None
+        patch.object(P, "settle", self.pause).start()
+
+    def pause(self, secs):
+        free, path = None, os.environ["XG_GPU_LOCK"]
+        if os.path.exists(path):
+            fd = os.open(path, os.O_RDONLY)
+            try:
+                P.fcntl.flock(fd, P.fcntl.LOCK_EX | P.fcntl.LOCK_NB)
+                P.fcntl.flock(fd, P.fcntl.LOCK_UN)
+                free = True
+            except BlockingIOError:
+                free = False
+            finally:
+                os.close(fd)
+        active = frozenset(self.children.active) if self.children else None
+        self.settled.append((secs, active, P.gpu_lock.users, free))
+
+    def assert_paused(self, times, free=None):
+        """times pauses, each of DEVICE_SETTLE with no child running and no GPU lock held."""
+        self.assertEqual(self.settled, [(P.DEVICE_SETTLE, frozenset(), 0, free)] * times)
 
     def shared(self, codes, texts):
         """lossy and other run together (a barrier only both pass); lossy's rerun alone returns at once."""
@@ -709,23 +738,42 @@ class DeviceLossTests(unittest.TestCase):
         children = Children(hooks, codes={"lossy": codes}, texts={"lossy": texts})
         return children
 
-    def suite(self, jobs, children):
-        """run_tests() over lossy and other: its exit status, its output and its runner."""
+    def suite(self, jobs, children, plan=None):
+        """run_tests() over lossy and other (or plan's): its exit status, its output and its runner."""
         runners = []
+        self.children = children
 
-        def plan(runner):
+        def planned(runner):
             runners.append(runner)
+            if plan is not None:
+                return plan(runner)
             runner.run("lossy", self.exe("lossytest"))
             runner.run("other", self.exe("othertest"))
         args = argparse.Namespace(no_build=True, list=False, no_gpu=False, pattern=None, jobs=jobs)
         stdout = io.StringIO()
-        with patch.object(P.Runner, "plan", plan), patch.object(P.subprocess, "run", side_effect=children), \
+        with patch.object(P.Runner, "plan", planned), patch.object(P.subprocess, "run", side_effect=children), \
              redirect_stdout(stdout):
             code = P.run_tests(self.build, args)
         return code, stdout.getvalue(), runners[0]
 
     def retries(self, runner):
         return [n for e, n, _ in runner.trace if e == "retry"]
+
+    def recovers(self, runner):
+        return [n for e, n, _ in runner.trace if e == "recover"]
+
+    def lost(self, log):
+        """A lost run's detail, its log (now) at OUT/log."""
+        return f"DEVICE LOST ({LOST}): exit -6: {LOST} (log {P.display_path(self.out / log)})"
+
+    def passed(self, detail, prefix, run):
+        """detail is prefix then the passing run's own ok detail."""
+        self.assertTrue(detail.startswith(prefix), f"{detail}\n!=\n{prefix}")
+        self.assertRegex(detail[len(prefix):], rf"^lossy says hello \(run {run}\) \(\d+\.\ds\)$")
+
+    def recovered(self, n, *runs):
+        return (f"DEVICE LOST, passed on recovery rerun {n} of 2 alone; not kept alone (a host GPU reset is "
+                f"not a sharing failure): {'; '.join(runs)}; then ")
 
     def test_only_the_vulkan_device_lost_line_is_recognised(self):
         for text in (LOST, "vulkan: vkCreateDevice failed (-4)", f"before\n{LOST}\nAborted (core dumped)\n"):
@@ -746,10 +794,17 @@ class DeviceLossTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("port-tests: 1 ok, 1 failed, 0 known, 0 skipped", out)
         self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "FAIL"), ("other", "ok")])
-        self.assertEqual(children.started, ["lossy", "other"])       # --jobs 1: never rerun
+        # --jobs 1: no ordinary rerun, but exactly the two recovery reruns, before other starts.
+        self.assertEqual(children.started, ["lossy", "lossy", "lossy", "other"])
         self.assertEqual(self.retries(runner), [])
-        detail = runner.results[0][2]
-        self.assertTrue(detail.startswith(f"DEVICE LOST ({LOST}): exit -6: {LOST}"), detail)
+        self.assertEqual(self.recovers(runner), ["lossy", "lossy"])
+        self.assert_paused(2)
+        self.assertEqual(runner.tests[0].job.recoveries, P.DEVICE_RECOVERIES)
+        self.assertEqual(runner.results[0][2],
+                         f"{self.lost('lossy.log')}; lost again on every recovery rerun alone (2 of 2): "
+                         f"lost {self.lost('lossy.lost1.log')}; lost {self.lost('lossy.lost2.log')}")
+        for log, run in (("lossy.lost1.log", 0), ("lossy.lost2.log", 1), ("lossy.log", 2)):
+            self.assertEqual((self.out / log).read_text(), f"lossy says hello (run {run})\n{LOST}\n", log)
         self.assertFalse((self.out / P.ALONE_FILE).exists())
 
     def test_lost_when_shared_then_passing_alone_is_ok_disclosed_and_not_kept_alone(self):
@@ -758,15 +813,15 @@ class DeviceLossTests(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertIn("port-tests: 2 ok, 0 failed, 0 known, 0 skipped", out)
         self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "ok"), ("other", "ok")])
-        self.assertEqual(children.started.count("lossy"), 2)          # the one ordinary rerun, alone
+        self.assertEqual(children.started.count("lossy"), 2)          # the rerun alone: recovery rerun 1
         self.assertEqual(children.runs["lossy"][1], set())
         self.assertEqual(self.retries(runner), ["lossy"])
+        self.assertEqual(self.recovers(runner), ["lossy"])
+        self.assert_paused(1)
         detail = runner.results[0][2]
-        self.assertTrue(detail.startswith("DEVICE LOST WHEN SHARED, passed alone; not kept alone"), detail)
-        self.assertIn(f"shared DEVICE LOST ({LOST}): exit -6:", detail)
-        self.assertIn("lossy.shared.log", detail)
-        self.assertIn("alone lossy says hello (run 1)", detail)
+        self.passed(detail, self.recovered(1, "shared " + self.lost("lossy.shared.log")), 1)
         self.assertNotIn("ONLY WHEN SHARED", detail)
+        self.assertFalse((self.out / "lossy.lost1.log").exists())
         self.assertFalse((self.out / P.ALONE_FILE).exists())
         self.assertEqual(runner.alone_only, set())
         # The next run in this output directory still shares it.
@@ -780,12 +835,17 @@ class DeviceLossTests(unittest.TestCase):
         self.assertEqual(code, 1, out)
         self.assertIn("port-tests: 1 ok, 1 failed, 0 known, 0 skipped", out)
         self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "FAIL"), ("other", "ok")])
-        self.assertEqual(children.started.count("lossy"), 2)
+        # The shared run, then the two recovery reruns (the rerun alone the first), each alone.
+        self.assertEqual(children.started.count("lossy"), 3)
+        self.assertEqual(children.runs["lossy"][1:], [set(), set()])
         self.assertEqual(self.retries(runner), ["lossy"])
-        detail = runner.results[0][2]
-        self.assertTrue(detail.startswith(f"DEVICE LOST ({LOST}): exit -6:"), detail)
-        self.assertIn(f"; shared too: DEVICE LOST ({LOST}): exit -6:", detail)
-        self.assertEqual(runner.tests[0].job.device_lost, [LOST, LOST])
+        self.assertEqual(self.recovers(runner), ["lossy", "lossy"])
+        self.assert_paused(2)
+        self.assertEqual(runner.results[0][2],
+                         f"{self.lost('lossy.log')}; lost again on every recovery rerun alone (2 of 2): "
+                         f"shared {self.lost('lossy.shared.log')}; lost {self.lost('lossy.lost2.log')}")
+        self.assertEqual(runner.tests[0].job.device_lost, [LOST, LOST, LOST])
+        self.assertFalse((self.out / "lossy.lost1.log").exists())
         self.assertFalse((self.out / P.ALONE_FILE).exists())
 
     def test_lost_when_shared_then_failing_alone_stays_an_ordinary_failure(self):
@@ -793,10 +853,13 @@ class DeviceLossTests(unittest.TestCase):
         code, out, runner = self.suite(2, children)
         self.assertEqual(code, 1, out)
         self.assertEqual(runner.results[0][1], "FAIL")
-        self.assertEqual(children.started.count("lossy"), 2)
-        detail = runner.results[0][2]
-        self.assertTrue(detail.startswith("exit 4: lossy says hello (run 1)"), detail)
-        self.assertIn(f"shared too: DEVICE LOST ({LOST}): exit -6:", detail)
+        self.assertEqual(children.started.count("lossy"), 2)          # an ordinary failure: no more reruns
+        self.assertEqual(self.recovers(runner), ["lossy"])
+        self.assert_paused(1)
+        log = P.display_path(self.out / "lossy.log")
+        self.assertEqual(runner.results[0][2],
+                         f"exit 4: lossy says hello (run 1) (log {log}); after DEVICE LOST (not a sharing failure; "
+                         f"recovery reruns alone: 1 of 2): shared {self.lost('lossy.shared.log')}")
         self.assertFalse((self.out / P.ALONE_FILE).exists())
 
     def test_generic_abort_failing_only_when_shared_is_still_kept_alone(self):
@@ -815,13 +878,22 @@ class DeviceLossTests(unittest.TestCase):
         self.assertNotIn("DEVICE LOST", detail)
         self.assertEqual(runner.tests[0].job.device_lost, [])
         self.assertEqual((self.out / P.ALONE_FILE).read_text(), "lossy\n")
+        self.assertEqual(self.recovers(runner), [])
+        self.assert_paused(0)
 
     def test_generic_serial_failure_report_is_unchanged(self):
-        children = Children(codes={"lossy": -6}, texts={"lossy": lambda run: "error -4\nAborted (core dumped)\n"})
-        code, out, runner = self.suite(1, children)
-        self.assertEqual(code, 1, out)
-        log = P.display_path(self.out / "lossy.log")
-        self.assertEqual(runner.results[0][1:], ("FAIL", f"exit -6: Aborted (core dumped) (log {log})"))
+        for text in ("error -4\nAborted (core dumped)\n",
+                     "vulkan: vkQueueSubmit failed (-3) at port/src/gpu/vk.c:1\nAborted (core dumped)\n"):
+            with self.subTest(text=text):
+                self.settled.clear()
+                children = Children(codes={"lossy": -6}, texts={"lossy": lambda run: text})
+                code, out, runner = self.suite(1, children)
+                self.assertEqual(code, 1, out)
+                log = P.display_path(self.out / "lossy.log")
+                self.assertEqual(runner.results[0][1:], ("FAIL", f"exit -6: Aborted (core dumped) (log {log})"))
+                self.assertEqual(children.started, ["lossy", "other"])  # no recovery rerun
+                self.assertEqual(self.recovers(runner), [])
+                self.assert_paused(0)
 
     def test_device_lost_line_in_a_passing_run_changes_nothing(self):
         children = Children(texts={"lossy": lambda run: LOST + "\n"})
@@ -830,6 +902,330 @@ class DeviceLossTests(unittest.TestCase):
         self.assertEqual(runner.results[0][1], "ok")
         self.assertTrue(runner.results[0][2].startswith(LOST), runner.results[0][2])
         self.assertEqual(runner.tests[0].job.device_lost, [])
+        self.assert_paused(0)
+
+    # Recovery reruns (xg-au4 points 2 and 3).
+
+    def losing(self, losses, then=0):
+        """lossy loses the device on its first `losses` runs, then exits `then`."""
+        return (lambda run: -6 if run < losses else then), (lambda run: LOST + "\n" if run < losses else "")
+
+    def test_serial_loss_then_pass_recovers_ok_marked_and_not_kept_alone(self):
+        codes, texts = self.losing(1)
+        children = Children(codes={"lossy": codes}, texts={"lossy": texts})
+        code, out, runner = self.suite(1, children)
+        self.assertEqual(code, 0, out)
+        self.assertIn("port-tests: 2 ok, 0 failed, 0 known, 0 skipped", out)
+        self.assertEqual(children.started, ["lossy", "lossy", "other"])
+        self.assertTrue(all(t is threading.main_thread() for t in children.threads.values()))
+        self.assert_paused(1)
+        self.passed(runner.results[0][2], self.recovered(1, "lost " + self.lost("lossy.lost1.log")), 1)
+        self.assertEqual((self.out / "lossy.lost1.log").read_text(), f"lossy says hello (run 0)\n{LOST}\n")
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_passing_on_the_last_allowed_recovery_rerun(self):
+        for jobs in (1, 2):
+            with self.subTest(jobs=jobs):
+                self.settled.clear()
+                codes, texts = self.losing(2)
+                children = self.shared(codes, texts) if jobs == 2 else Children(codes={"lossy": codes},
+                                                                                texts={"lossy": texts})
+                code, out, runner = self.suite(jobs, children)
+                self.assertEqual(code, 0, out)
+                self.assertEqual(children.started.count("lossy"), 3)
+                self.assertEqual(self.recovers(runner), ["lossy", "lossy"])
+                self.assert_paused(2)
+                first = ("shared " + self.lost("lossy.shared.log") if jobs == 2 else
+                         "lost " + self.lost("lossy.lost1.log"))
+                self.passed(runner.results[0][2], self.recovered(2, first, "lost " + self.lost("lossy.lost2.log")), 2)
+                self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_unshared_worker_loss_and_alone_tests_recover_with_nothing_running(self):
+        codes, texts = self.losing(1)
+        cases = {  # plan, the test that loses the device, the scheduler's first events
+            "worker": (lambda r: r.run("lossy", self.exe("lossytest")), "lossy", ["start", "recover"]),
+            "clock": (lambda r: (r.run("netplaytest", self.exe("netplaytest")), r.run("other", self.exe("othertest"))),
+                      "netplaytest", ["alone", "recover"]),
+            "alone-only": (lambda r: (r.run("lossy", self.exe("lossytest")), r.run("other", self.exe("othertest"))),
+                           "lossy", ["alone", "recover"]),
+        }
+        for case, (plan, name, events) in cases.items():
+            with self.subTest(case=case):
+                self.settled.clear()
+                (self.out / P.ALONE_FILE).unlink(missing_ok=True)
+                if case == "alone-only":
+                    self.out.mkdir(parents=True, exist_ok=True)
+                    (self.out / P.ALONE_FILE).write_text("lossy\n")
+                children = Children(codes={name: codes}, texts={name: texts})
+                code, out, runner = self.suite(2, children, plan)
+                self.assertEqual(code, 0, out)
+                self.assertEqual([e for e, n, _ in runner.trace if n == name], events)
+                self.assertEqual(children.runs[name], [set(), set()])
+                self.assertIs(children.threads[name], threading.main_thread())
+                self.assert_paused(1)
+                self.passed(runner.results[0][2].replace(name, "lossy"),
+                            self.recovered(1, "lost " + self.lost("lossy.lost1.log")), 1)
+                if case == "alone-only":  # kept as it was: neither removed nor added to
+                    self.assertEqual((self.out / P.ALONE_FILE).read_text(), "lossy\n")
+                else:
+                    self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_recovery_is_bounded_over_the_whole_outcome(self):
+        # An ordinary shared failure, then a lost device on the rerun alone and on both recovery
+        # reruns: four runs in all, one ordinary rerun, two recoveries; failed, marked, not kept alone.
+        children = self.shared(lambda run: 4 if run == 0 else -6, lambda run: "" if run == 0 else LOST + "\n")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(children.started.count("lossy"), 4)
+        self.assertEqual(self.retries(runner), ["lossy"])
+        self.assertEqual(self.recovers(runner), ["lossy", "lossy"])
+        self.assert_paused(2)
+        shared = f"exit 4: lossy says hello (run 0) (log {P.display_path(self.out / 'lossy.shared.log')})"
+        self.assertEqual(runner.results[0][2],
+                         f"{self.lost('lossy.log')}; lost again on every recovery rerun alone (2 of 2): "
+                         f"shared {shared}; lost {self.lost('lossy.lost1.log')}; lost {self.lost('lossy.lost2.log')}")
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+        # The same with a recovery passing: ok, the loss told, and not kept alone (a run lost the device).
+        self.settled.clear()
+        children = self.shared(lambda run: {0: 4, 1: -6}.get(run, 0), lambda run: LOST + "\n" if run == 1 else "")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(children.started.count("lossy"), 3)
+        self.assert_paused(1)
+        self.passed(runner.results[0][2], self.recovered(1, f"shared {shared}", "lost " + self.lost("lossy.lost1.log")), 2)
+        self.assertNotIn("ONLY WHEN SHARED", runner.results[0][2])
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_serial_loss_then_ordinary_failure_stays_that_failure(self):
+        codes, texts = self.losing(1, then=4)
+        children = Children(codes={"lossy": codes}, texts={"lossy": texts})
+        code, out, runner = self.suite(1, children)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(children.started, ["lossy", "lossy", "other"])
+        self.assert_paused(1)
+        log = P.display_path(self.out / "lossy.log")
+        self.assertEqual(runner.results[0][1:], (
+            "FAIL", f"exit 4: lossy says hello (run 1) (log {log}); after DEVICE LOST (not a sharing failure; "
+                    f"recovery reruns alone: 1 of 2): lost {self.lost('lossy.lost1.log')}"))
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_a_recovery_rerun_must_match_its_expected_output(self):
+        # The rerun exits 0 but misses the pattern: it fails as any run does, the loss told.
+        def plan(r):
+            r.run("lossy", self.exe("lossytest"), expect=r"never printed")
+        codes, texts = self.losing(1)
+        children = Children(codes={"lossy": codes}, texts={"lossy": texts})
+        code, out, runner = self.suite(1, children, plan)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(runner.results[0][1], "FAIL")
+        self.assertTrue(runner.results[0][2].startswith("exit no match: lossy says hello (run 1)"),
+                        runner.results[0][2])
+        self.assertIn("; after DEVICE LOST (not a sharing failure; recovery reruns alone: 1 of 2)",
+                      runner.results[0][2])
+
+    def coordination(self, first):
+        """--jobs 2: lossy (a GPU test) loses the device beside slow, then on its first
+        recovery rerun, and passes the second. slow-next follows slow in its chain and
+        spare is ready all along, at first without a free worker.
+
+        Every order is fixed by events, none by timing (each wait bounded): lossy and slow
+        overlap (a barrier). first="lossy": slow ends only once the scheduler has taken
+        lossy's lost run and come back for the next result, so a scheduler that still
+        started tests then would have started spare in the freed worker. first="slow":
+        slow's result arrives while lossy still runs, the loss not known yet, so slow-next
+        starts beside lossy; lossy ends once it has, and slow-next only once the scheduler
+        has taken the lost run and come back: the recovery has to wait for it.
+        The runner's result queue is the stand-in below only to see those moments.
+        """
+        reported = {name: threading.Event() for name in ("lossy", "slow")}
+        took_loss, draining, next_running = [], threading.Event(), threading.Event()
+
+        def ours(item):  # (the pool's own queue of work is a SimpleQueue too)
+            return isinstance(item, tuple) and item and isinstance(item[0], P.Test)
+
+        class Reports(queue.SimpleQueue):
+            def put(self, item, block=True, timeout=None):
+                super().put(item, block, timeout)
+                if ours(item) and item[0].name in reported:
+                    reported[item[0].name].set()
+
+            def get(self, block=True, timeout=None):
+                scheduler = threading.current_thread() is threading.main_thread()
+                if scheduler and took_loss:
+                    draining.set()  # back for the next result: it has decided what to start
+                item = super().get(block, timeout)
+                if scheduler and ours(item) and item[0].name == "lossy":
+                    took_loss.append(item)
+                return item
+
+        def wait(event, what):
+            if not event.wait(10):
+                raise RuntimeError(f"timed out waiting for {what}")
+
+        both = threading.Barrier(2, timeout=10)
+        held = []
+
+        def lossy(_):
+            held.append(P.gpu_lock.users)
+            if children.started.count("lossy") == 1:  # the shared run; the reruns return at once
+                both.wait()
+                if first == "slow":
+                    wait(reported["slow"], "slow's result")
+                    wait(next_running, "slow-next beside lossy")
+
+        def slow(_):
+            both.wait()
+            if first == "lossy":
+                wait(reported["lossy"], "lossy's result")
+                wait(draining, "the scheduler draining")
+
+        def slow_next(_):
+            next_running.set()
+            if first == "slow":
+                wait(reported["lossy"], "lossy's result")
+                wait(draining, "the scheduler draining")
+
+        codes, texts = self.losing(2)
+        children = Children({"lossy": lossy, "slow": slow, "slow-next": slow_next},
+                            codes={"lossy": codes}, texts={"lossy": texts}, gpu={"lossy"})
+
+        def plan(r):
+            r.run("lossy", self.exe("lossytest"), target="gputest")
+            r.run("slow", self.exe("slowtest"), "1", target="slowtest")
+            r.run("slow-next", self.exe("slowtest"), "2", target="slowtest")  # one chain: slow, then slow-next
+            r.run("spare", self.exe("sparetest"))
+        self.settled.clear()
+        with patch.object(P.queue, "SimpleQueue", Reports):
+            code, out, runner = self.suite(2, children, plan)
+        self.assertEqual(code, 0, out)
+        self.assertIn("port-tests: 4 ok, 0 failed, 0 known, 0 skipped", out)
+        self.assertTrue(runner.tests[0].job.gpu)
+        self.assertEqual(held, [1, 1, 1])           # each lossy run held the (temporary) GPU lock...
+        self.assert_paused(2, free=True)            # ...and each pause had no child and no hold of it
+        self.assertEqual(P.gpu_lock.users, 0)
+        self.assertEqual(children.active, set())
+        # The reruns: nothing running when they started, nothing started during them, on the scheduler's thread.
+        self.assertEqual(children.runs["lossy"][1:], [set(), set()])
+        self.assertIs(children.threads["lossy"], threading.main_thread())
+        self.assertEqual(set(children.started[:2]), {"lossy", "slow"})
+        self.assertEqual(children.overlaps["spare"] - {"slow-next"}, set())
+        none, beside = frozenset(), frozenset({"lossy"})
+        recovery = [("retry", "lossy", none), ("recover", "lossy", none), ("recover", "lossy", none)]
+        if first == "lossy":
+            self.assertEqual(children.runs["lossy"][0], {"slow"})
+            self.assertEqual(children.started[2:4], ["lossy", "lossy"])
+            self.assertEqual(set(children.started[4:]), {"slow-next", "spare"})
+            self.assertEqual(runner.trace, [("start", "lossy", none), ("start", "slow", beside), *recovery,
+                                            ("start", "slow-next", none),
+                                            ("start", "spare", frozenset({"slow-next"}))])
+        else:
+            self.assertEqual(children.runs["lossy"][0], {"slow", "slow-next"})
+            self.assertEqual(children.started[2:], ["slow-next", "lossy", "lossy", "spare"])
+            self.assertEqual(children.finished[:3], ["slow", "lossy", "slow-next"])
+            self.assertEqual(runner.trace, [("start", "lossy", none), ("start", "slow", beside),
+                                            ("start", "slow-next", beside), *recovery, ("start", "spare", none)])
+        self.passed(runner.results[0][2],
+                    self.recovered(2, "shared " + self.lost("lossy.shared.log"), "lost " + self.lost("lossy.lost2.log")), 2)
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    @unittest.skipIf(P.fcntl is None, "the GPU lock is flock's (not on Windows)")
+    def test_recovery_waits_for_every_other_child_and_nothing_starts_meanwhile(self):
+        for first in ("lossy", "slow"):
+            for round_ in range(20):
+                with self.subTest(first=first, round=round_):
+                    self.coordination(first)
+
+    def test_timeout_and_other_failures_without_the_line_get_no_recovery(self):
+        def slow(argv):
+            raise subprocess.TimeoutExpired(argv, 1)
+        for jobs in (1, 2):
+            with self.subTest(jobs=jobs):
+                children = Children({"lossy": slow})
+                code, out, runner = self.suite(jobs, children)
+                self.assertEqual(code, 1, out)
+                self.assertIn("exit timeout", runner.results[0][2])
+                self.assertNotIn("DEVICE LOST", runner.results[0][2])
+                # --jobs 2: the one ordinary rerun alone of a failure when shared, as ever.
+                self.assertEqual(children.started.count("lossy"), jobs)
+                self.assertEqual(self.retries(runner), ["lossy"] * (jobs - 1))
+                self.assertEqual((self.recovers(runner), runner.tests[0].job.recoveries), ([], 0))
+                self.assert_paused(0)
+                self.assertEqual(list(self.out.glob("lossy.lost*.log")), [])
+
+    @unittest.skipIf(P.fcntl is None, "SIGABRT, RLIMIT_CORE and waitpid's ECHILD are POSIX's")
+    def test_recovery_reruns_are_real_children_reaped_before_the_next(self):
+        # No stand-in for subprocess.run: a real child that loses the "device" (the port's line, then
+        # SIGABRT with core dumps off) until its third run, told apart by a counter file in its scratch.
+        script = ("import os, resource, sys\n"
+                  "from pathlib import Path\n"
+                  "runs = Path(sys.argv[1])\n"
+                  "n = int(runs.read_text()) + 1 if runs.exists() else 1\n"
+                  "runs.write_text(str(n))\n"
+                  "print(f'pid {os.getpid()} run {n}', flush=True)\n"
+                  "if n < 3:\n"
+                  "    print(sys.argv[2], flush=True)\n"
+                  "    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+                  "    os.abort()\n")
+        counter = self.root / "runs.txt"
+        runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
+        runner.run("lossy", Path(sys.executable), "-c", script, counter, LOST, timeout=60)
+        with redirect_stdout(io.StringIO()):
+            runner.execute()
+        self.assertEqual(runner.results[0][1], "ok", runner.results)
+        self.assertTrue(runner.results[0][2].startswith(
+            self.recovered(2, "lost " + self.lost("lossy.lost1.log"), "lost " + self.lost("lossy.lost2.log"))),
+            runner.results[0][2])
+        self.assertEqual(counter.read_text(), "3")
+        self.assertEqual([e for e, _, _ in runner.trace], ["start", "recover", "recover"])
+        self.assertEqual(self.settled, [(P.DEVICE_SETTLE, None, 0, None)] * 2)  # (no stand-in children; a CPU test)
+        pids = []
+        for log, run in (("lossy.lost1.log", 1), ("lossy.lost2.log", 2), ("lossy.log", 3)):
+            words = (self.out / log).read_text().split()
+            self.assertEqual(words[2:4], ["run", str(run)], log)
+            self.assertEqual(LOST in (self.out / log).read_text(), run < 3, log)
+            pids.append(int(words[1]))
+        for pid in pids:  # each child was waited for: none is left, running or a zombie
+            with self.assertRaises(ChildProcessError, msg=pid):
+                os.waitpid(pid, os.WNOHANG)
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_logs_and_losses_belong_to_their_own_run_and_invocation(self):
+        tags = {}
+
+        def invocation(tag, losses):
+            self.settled.clear()
+            tags["tag"] = tag
+            children = Children(codes={"lossy": lambda run: -6 if run < losses else 0},
+                                texts={"lossy": lambda run: f"{tags['tag']}\n" + (LOST + "\n" if run < losses else "")})
+            return self.suite(1, children)
+        code, out, runner = invocation("first", 1)
+        self.assertEqual((code, runner.tests[0].job.device_lost), (0, [LOST]))
+        self.assertEqual((self.out / "lossy.lost1.log").read_text(), f"lossy says hello (run 0)\nfirst\n{LOST}\n")
+        # A later invocation passing at once: no mark, no rerun, its own log; the earlier
+        # invocation's lost run is neither cited nor left to be taken for this one's.
+        (self.out / "lossy.lost2.log").write_text("stale\n")
+        (self.out / "other.lost1.log").write_text("stale\n")
+        code, out, runner = invocation("second", 0)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("lost", runner.results[0][2])
+        self.assertEqual(list(self.out.glob("*.lost*.log")), [])
+        self.assertEqual(runner.results[0][2][:len("second (")], "second (")
+        self.assertEqual((runner.tests[0].job.device_lost, runner.tests[0].job.recoveries), ([], 0))
+        self.assert_paused(0)
+        self.assertEqual((self.out / "lossy.log").read_text(), "lossy says hello (run 0)\nsecond\n")
+        # A third losing once: its lost run's log replaces the first invocation's.
+        code, out, runner = invocation("third", 1)
+        self.assertEqual(code, 0, out)
+        self.assertEqual((self.out / "lossy.lost1.log").read_text(), f"lossy says hello (run 0)\nthird\n{LOST}\n")
+        self.assertFalse((self.out / P.ALONE_FILE).exists())
+
+    def test_known_failure_reporting_the_loss_is_not_rerun(self):
+        children = Children(codes={"lossy": -6}, texts={"lossy": lambda run: LOST + "\n"})
+        with patch.dict(P.KNOWN, {"lossytest": "xg-test"}):
+            code, out, runner = self.suite(2, children)
+        self.assertEqual(runner.results[0][1], "known")
+        self.assertEqual(children.started.count("lossy"), 1)
+        self.assert_paused(0)
 
 
 @unittest.skipIf(P.fcntl is None, "the GPU lock is flock's (not on Windows)")

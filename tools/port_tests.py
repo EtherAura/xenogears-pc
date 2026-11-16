@@ -31,9 +31,14 @@ at most GPU_SLOTS (2) GPU tests share the Vulkan device; CLOCK tests (the wall
 clock) and ALONE ones run with nothing else running. A test that fails while
 sharing the host is rerun alone; if it then passes, its line says it failed
 only when shared and later runs keep it alone (OUT/alone-only.txt; move it to
-ALONE). A failure whose output reports a lost Vulkan device ('vulkan: ...
-failed (-4)') says DEVICE LOST; one that lost it when shared and then passes
-alone is not kept alone.
+ALONE). A failed run whose output reports a lost Vulkan device ('vulkan: ...
+failed (-4)', a host GPU reset) is rerun alone, with any --jobs, after a pause
+of DEVICE_SETTLE seconds for the device to settle: at most DEVICE_RECOVERIES
+(2) such reruns per test, the rerun alone of a run that lost it when shared
+being the first. Passing one, the test is ok and its line says DEVICE LOST;
+losing the device every time, it fails marked DEVICE LOST; failing some other
+way, it fails as that failure, the loss told. No test that lost the device is
+kept alone. Each rerun leaves the run before it in NAME.lostN.log.
 
 GPU tests run holding the Intel GPU lock (/tmp/xg-intel-gpu.lock, or
 XG_GPU_LOCK; flock, as tools/gpu_lock.sh and the art chapters' run.sh take
@@ -232,17 +237,29 @@ ALONE_FILE = "alone-only.txt"
 # The port's report of a lost Vulkan device before it aborts (port/src/gpu/vk.c's
 # check: "vulkan: CALL failed (-4) at FILE:LINE"; -4 is VK_ERROR_DEVICE_LOST), on a
 # line of its own. A host GPU reset makes every process on the device report it
-# (xg-au4): a failing test's line is marked with DEVICE_LOST_MARK, and a test that
-# lost the device when shared and then passed alone is not written to ALONE_FILE.
-# Only the marking and that file change: the test still fails or passes as before.
+# (xg-au4): a failed run with that line is marked with DEVICE_LOST_MARK and rerun
+# with nothing else running, after settle(DEVICE_SETTLE), at most DEVICE_RECOVERIES
+# times over the test's whole outcome (Runner.recover). Every rerun is judged as
+# any run is (exit status, expected output); the line passes nothing, and in a
+# passing run it changes nothing. No test that lost the device is written to
+# ALONE_FILE.
 DEVICE_LOST = re.compile(r"^vulkan: \S.* failed \(-4\)(?: at \S+)?$", re.M)
 DEVICE_LOST_MARK = "DEVICE LOST"
+DEVICE_RECOVERIES = 2
+# Seconds before each recovery rerun: a guess at what the driver's reset takes (not
+# measured). A test that keeps losing the device adds at most twice this.
+DEVICE_SETTLE = 5.0
 
 
 def device_lost(text: str) -> str | None:
     """The first line of a test's output reporting a lost Vulkan device, if any."""
     m = DEVICE_LOST.search(text)
     return m.group(0) if m else None
+
+
+def settle(secs: float) -> None:
+    """Wait for a reset device to settle: called with no test running and no GPU lock held."""
+    time.sleep(secs)
 
 # With --jobs > 1: CLOCK and ALONE tests run with nothing else running; at
 # most GPU_SLOTS GPU tests share the Vulkan device at a time.
@@ -342,6 +359,7 @@ class Job:
         # Each failed run's device-lost line (run_job appends, on the thread running
         # it; one run at a time, read by the scheduler only once that run's result is in).
         self.device_lost: list[str] = []
+        self.recoveries = 0         # recovery reruns so far, of DEVICE_RECOVERIES (the scheduler's thread)
 
 
 class Test:
@@ -436,8 +454,8 @@ class Runner:
         self.printed = 0               # tests[:printed] are in results and printed
         self.scratches: list[Path] = []
         self.alone_only = read_alone()  # ALONE_FILE's tests, run alone like ALONE's
-        # The scheduler's decisions, in order (main thread): ("start" | "alone" | "retry",
-        # test, the tests running then).
+        # The scheduler's decisions, in order (main thread): ("start" | "alone" | "retry" |
+        # "recover", test, the tests running then).
         self.trace: list[tuple[str, str, frozenset]] = []
         self.env = dict(os.environ, XG_SETTINGS="none", XG_HEADLESS="1",
                         SDL_VIDEO_DRIVER="offscreen", SDL_AUDIO_DRIVER="dummy")
@@ -514,9 +532,12 @@ class Runner:
         --jobs 1: one after another on this thread. Otherwise run_parallel().
         """
         pending = [t for t in self.tests if t.result is None]
+        for t in pending:  # an earlier invocation's lost runs are not this one's
+            for n in range(1, DEVICE_RECOVERIES + 1):
+                (OUT / f"{t.name}.lost{n}.log").unlink(missing_ok=True)
         if self.jobs == 1:
             for t in pending:
-                t.result = run_job(t.job)
+                t.result = self.run_alone(t)
                 self.flush()
         elif pending:
             self.run_parallel(chains(pending))
@@ -539,7 +560,12 @@ class Runner:
         that fails having shared the host (another test running at some point
         during it) is rerun alone: still failing, it fails; passing, the report
         says it failed only when shared and ALONE_FILE keeps it alone from then
-        on. A worker's exception stops new tests from starting and is raised
+        on. A worker's run that lost the Vulkan device waits the same way,
+        shared or not, for its recovery reruns (recover): from the moment its
+        result arrives no test starts, the running ones run to their end, and
+        only then, every worker's result in and so no child, open log or GPU
+        lock hold of this run left, does this thread pause and rerun it.
+        A worker's exception stops new tests from starting and is raised
         here once every running test (each ended by its timeout at worst) has
         finished.
         """
@@ -547,7 +573,7 @@ class Runner:
         heads = [0] * len(groups)          # groups[i][heads[i]] is the group's next test
         running: dict[Test, int] = {}      # test -> its group
         shared: set[Test] = set()          # ran while another test ran
-        retries: list[tuple[Test, int, tuple[str, str]]] = []  # failed shared, to rerun alone
+        retries: list[tuple[Test, int, tuple[str, str]]] = []  # failed shared or lost the device, to rerun alone
         error: BaseException | None = None
 
         def work(t: Test) -> None:
@@ -572,13 +598,16 @@ class Runner:
                 alone = [i for i in idle if groups[i][heads[i]].job.alone]
                 if error is None and not running and retries:
                     t, i, first = retries.pop(0)
-                    self.trace.append(("retry", t.name, frozenset()))
-                    finished(i, t, self.rerun_alone(t, first))
+                    if t in shared:
+                        self.trace.append(("retry", t.name, frozenset()))
+                        finished(i, t, self.rerun_alone(t, first))
+                    else:  # it ran with nothing else running, and lost the device
+                        finished(i, t, self.recover(t, first, []))
                     continue
                 if error is None and not running and alone:
                     t = groups[alone[0]][heads[alone[0]]]
                     self.trace.append(("alone", t.name, frozenset()))
-                    finished(alone[0], t, run_job(t.job))
+                    finished(alone[0], t, self.run_alone(t))
                     continue
                 if error is None and not retries and not alone:
                     gpu = sum(t.job.gpu for t in running)
@@ -608,30 +637,85 @@ class Runner:
                 i = running.pop(t)
                 if e is not None or error is not None:
                     error = error or e
-                elif result[0] == "FAIL" and t in shared:
+                elif result[0] == "FAIL" and (t in shared or t.job.device_lost):
+                    # (A worker's run is the job's first: any device_lost entry is this run's.)
                     retries.append((t, i, result))
                 else:
                     finished(i, t, result)
 
+    # The four below run on the scheduler's thread only, with no other test running
+    # and none starting until they return (--jobs 1: between two tests; run_parallel:
+    # once running is empty).
+
+    @staticmethod
+    def run_once(job: Job) -> tuple[tuple[str, str], bool]:
+        """Run the job; its result, and whether this run lost the Vulkan device."""
+        before = len(job.device_lost)
+        result = run_job(job)
+        return result, len(job.device_lost) > before
+
+    def run_alone(self, t: Test) -> tuple[str, str]:
+        """Run a test's first run here; its result, after its recovery reruns if it lost the device."""
+        result, lost = self.run_once(t.job)
+        return self.recover(t, result, []) if lost else result
+
+    @staticmethod
+    def keep_log(name: str, suffix: str, detail: str) -> str:
+        """Move the last run's log to NAME.SUFFIX.log; its detail, naming the log there."""
+        log, kept = OUT / f"{name}.log", OUT / f"{name}.{suffix}.log"
+        if log.exists():
+            os.replace(log, kept)
+        return detail.replace(str(display_path(log)), str(display_path(kept)))
+
+    def recovery_rerun(self, t: Test) -> tuple[tuple[str, str], bool]:
+        """One of the test's DEVICE_RECOVERIES reruns: the pause, then run_once()."""
+        t.job.recoveries += 1
+        self.trace.append(("recover", t.name, frozenset()))
+        settle(DEVICE_SETTLE)  # outside run_job: this run holds no GPU lock now
+        return self.run_once(t.job)
+
+    def recover(self, t: Test, result: tuple[str, str], earlier: list[str],
+                lost: bool = True) -> tuple[str, str]:
+        """The result of a test one of whose runs lost the Vulkan device.
+
+        result is its last run's and lost whether that one lost the device;
+        earlier describes the runs before it. While the last run lost the
+        device and the test has recovery reruns left, it is rerun after a
+        pause (recovery_rerun), the run before kept as NAME.lostN.log. Every
+        rerun is a whole run_job(): its own log, GPU lock hold, timeout and
+        judgment. The test is never written to ALONE_FILE.
+        """
+        job = t.job
+        while lost and job.recoveries < DEVICE_RECOVERIES:
+            earlier.append("lost " + self.keep_log(t.name, f"lost{job.recoveries + 1}", result[1]))
+            result, lost = self.recovery_rerun(t)
+        status, detail = result
+        count, runs = f"{job.recoveries} of {DEVICE_RECOVERIES}", "; ".join(earlier)
+        if status == "ok":
+            return status, (f"{DEVICE_LOST_MARK}, passed on recovery rerun {count} alone; not kept alone (a host "
+                            f"GPU reset is not a sharing failure): {runs}; then {detail}")
+        if lost:
+            return status, f"{detail}; lost again on every recovery rerun alone ({count}): {runs}"
+        return status, (f"{detail}; after {DEVICE_LOST_MARK} (not a sharing failure; recovery reruns alone: "
+                        f"{count}): {runs}")
+
     def rerun_alone(self, t: Test, first: tuple[str, str]) -> tuple[str, str]:
         """Rerun a test that failed while shared, nothing else running; its result.
 
-        The shared run's log is kept beside the new one as NAME.shared.log. A
-        shared run that lost the Vulkan device (DEVICE_LOST) and passes alone
-        is ok as before, saying so, but is not written to ALONE_FILE: a host
-        GPU reset is no sign of a test failing only when shared.
+        The shared run's log is kept beside the new one as NAME.shared.log. If
+        the shared run lost the Vulkan device (DEVICE_LOST) this rerun is the
+        first of its recovery reruns, after the pause; if this rerun loses it,
+        the recovery reruns follow. Either way the result is recover()'s and
+        the test is not written to ALONE_FILE: a host GPU reset is no sign of
+        a test failing only when shared.
         """
-        log, kept = OUT / f"{t.name}.log", OUT / f"{t.name}.shared.log"
-        if log.exists():
-            os.replace(log, kept)
-        when_shared = first[1].replace(str(display_path(log)), str(display_path(kept)))
+        when_shared = self.keep_log(t.name, "shared", first[1])
         lost_shared = bool(t.job.device_lost)  # the shared run's: no run of it is going on now
-        status, detail = run_job(t.job)
+        (status, detail), lost = self.recovery_rerun(t) if lost_shared else self.run_once(t.job)
+        if lost_shared or lost:
+            return self.recover(t, (status, detail), ["shared " + when_shared], lost)
         if status != "ok":
             return status, f"{detail}; shared too: {when_shared}"
-        if lost_shared:
-            return status, (f"{DEVICE_LOST_MARK} WHEN SHARED, passed alone; not kept alone (a host GPU reset "
-                            f"is not a sharing failure): shared {when_shared}; alone {detail}")
         if t.name not in self.alone_only:
             self.alone_only.add(t.name)
             with (OUT / ALONE_FILE).open("a") as f:
