@@ -51,6 +51,7 @@ extern "C" {
 #include "system/hw.h"
 #include "system/speedup.h"
 #include "system/battlespeed.h"
+#include "system/fieldspeed.h"
 #include "system/mouse.h"
 #include "system/rumble.h"
 #include "system/android.h"
@@ -2247,6 +2248,18 @@ void gameplaySection() {
              "1x. In a battle, Tab (or Select + R2 together on a gamepad) steps 1x, 2x, 4x. Off: the original "
              "speed, and the control does nothing.");
         overrideNote("battle_speed");
+    }
+    if (row("Field speed", "field_speed")) {
+        static const char* const fieldSpeedNames[] = {N_("Off"), "1x", "2x", "4x"};
+        static const int fieldSpeeds[] = {0, 1, 2, 4};
+        int chosen = fieldSpeedChosen(), index = 0;
+        for (int i = 1; i < 4; i++) if (chosen == fieldSpeeds[i]) index = i;
+        int picked = listChoice("##field_speed", fieldSpeedNames, 4, index);
+        if (picked != index && picked >= 0) fieldSpeedSetChosen(fieldSpeeds[picked]);
+        hint("The field and the world map at 2x or 4x, their scenes and dialogue included: the game runs that many "
+             "of its own frames per picture. Menus, movies and battles keep their own speed (Battle speed above "
+             "is the battles'). Off and 1x: the original speed.");
+        overrideNote("field_speed");
     }
     if (row("Original-game bug fixes", "original_bug_fixes")) {
         bool originalFixes = pcGameplayOriginalBugFixes() != 0;
