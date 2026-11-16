@@ -3,8 +3,9 @@ name: Release source
 # Attaches the source of each release to it: xenogears-pc-<version>.tar.gz, the
 # tree at the release's tag as git archive writes it (tracked files only, so
 # nothing untracked and no game data), its .sha256, a CycloneDX SBOM of the
-# tarball's files (xenogears-pc-<version>.cdx.json), and a build-provenance
-# attestation for the tarball (verify it with `gh attestation verify`).
+# tarball's files (xenogears-pc-<version>.cdx.json), a build-provenance
+# attestation for the tarball (verify it with `gh attestation verify`), and the
+# Arch Linux PKGBUILD of that tarball (packaging/arch_assets.py).
 # Tags are CalVer, vYYYY.MM.N; anything else is refused before checkout.
 on:
   release:
@@ -110,6 +111,23 @@ jobs:
           fi
           python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); sys.exit(not (isinstance(d, dict) and d.get("bomFormat") == "CycloneDX" and d.get("specVersion")))' "$SBOM"
 
+      # The tagged tree's own renderer stamps the PKGBUILD from this job's tarball
+      # and .sha256, checking the tarball's bytes against the checksum, into a
+      # fresh folder outside the checkout. It runs before any upload: a bad tag,
+      # tarball or checksum stops the job with nothing attached.
+      - name: Render the Arch PKGBUILD
+        id: arch
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          TARBALL: ${{ steps.archive.outputs.tarball }}
+          CHECKSUM: ${{ steps.archive.outputs.checksum }}
+        run: |
+          dir="$RUNNER_TEMP/arch-package"
+          mkdir "$dir"
+          python3 -I packaging/arch_assets.py --tag="$TAG" --sha256="$CHECKSUM" --tarball="$TARBALL" --out-dir="$dir"
+          test -f "$dir/PKGBUILD"
+          echo "pkgbuild=$dir/PKGBUILD" >> "$GITHUB_OUTPUT"
+
       - name: Attach the tarball, its checksum and its SBOM to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,3 +137,11 @@ jobs:
           SBOM: ${{ steps.sbom-source.outputs.sbom }}
         run: |
           gh release upload "$TAG" "$TARBALL" "$CHECKSUM" "$SBOM" --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Attach the Arch PKGBUILD to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          PKGBUILD: ${{ steps.arch.outputs.pkgbuild }}
+        run: |
+          gh release upload "$TAG" "$PKGBUILD" --repo "$GITHUB_REPOSITORY" --clobber
