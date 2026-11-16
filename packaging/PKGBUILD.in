@@ -1,0 +1,70 @@
+# The Arch Linux package of the Xenogears PC port. packaging/arch_assets.py
+# renders it for one release, and nothing here is changed by hand for a
+# release: pkgver is the release tag without its v (vYYYY.MM.N), the source is
+# that release's xenogears-pc-<version>.tar.gz asset (git archive of the tag,
+# everything under xenogears-pc-<version>/), and sha256sums is stamped from the
+# asset's .sha256.
+#
+# The package has no game data: the port reads the player's own disc. Like
+# the Ubuntu package (port/cmake/deb.cmake) it holds the US executable, built
+# Release with the extras, in /usr/bin and its licences in /usr/share/doc.
+#
+# The source cannot build the port by itself yet: the PC link step reads the
+# split PS1 assembly and link facts that only come from the player's own
+# extracted disc, and the release tarball holds neither. prepare() says so and
+# stops, rather than failing part way through the link.
+
+pkgname=xenogears-pc
+pkgver=@PKGVER@
+pkgrel=1
+pkgdesc="Xenogears PC port (reads the player's own disc)"
+arch=('x86_64')
+url='https://github.com/EtherAura/xenogears-pc'
+license=('GPL-3.0-or-later' 'MIT' 'OFL-1.1')
+# SDL3 opens the Vulkan loader at run time, so the loader is a dependency no
+# library link shows; glslang (shader presets) and dav1d (movie pack videos)
+# are linked when found, and the package is built with both.
+depends=('glibc' 'gcc-libs' 'sdl3' 'vulkan-icd-loader' 'glslang' 'dav1d')
+# python-yaml: the PC source list is read from the splat configurations.
+# shaderc: glslc, which compiles the renderer's shaders at build time.
+makedepends=('cmake' 'ninja' 'python' 'python-yaml' 'vulkan-headers' 'shaderc')
+# The game C must stay ordinary objects (the per-module partial link reads and
+# localises their symbols); the platform layer has its own link-time
+# optimisation (XG_LTO), so makepkg's is off.
+options=('!lto' '!debug')
+source=("$pkgname-$pkgver.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
+sha256sums=('@SHA256@')
+
+prepare() {
+    cd "$pkgname-$pkgver"
+    if [[ ! -d asm/us ]]; then
+        error "This source cannot build the port by itself yet."
+        plain "The PC link reads the split PS1 assembly (asm/us), which is made from the"
+        plain "player's own extracted disc; the release tarball carries no game data."
+        return 1
+    fi
+}
+
+build() {
+    cd "$pkgname-$pkgver"
+    # CMake's own Release flags, as the Ubuntu and Windows release builds use:
+    # the port's frames and saves are checked against builds made with them,
+    # not with a distribution's added flags.
+    unset CFLAGS CXXFLAGS LDFLAGS
+    python tools/pc_sources.py
+    cmake -S port -B build/pc/arch -G Ninja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/usr \
+        -DXG_VERSION=US \
+        -DXG_EXTRAS=ON \
+        -DXG_PACKAGE_VERSION="$pkgver"
+    cmake --build build/pc/arch
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    DESTDIR="$pkgdir" cmake --install build/pc/arch
+    # The licences installed in /usr/share/doc/xenogears-pc, where Arch looks for them too.
+    install -d "$pkgdir/usr/share/licenses"
+    ln -s "../doc/$pkgname" "$pkgdir/usr/share/licenses/$pkgname"
+}
