@@ -436,9 +436,33 @@ s32 currentlyPlayingMusic;
 s32 fieldMapNumber;
 static int scriptVariableReads, musicPitchCalls, musicTempoCalls;
 static s32 scriptVariableValue, scriptVariableIndex; /* what getVariable returns, the index it was given */
-s32 getVariable(s32 varIndex) { scriptVariableIndex = varIndex; ++scriptVariableReads; return scriptVariableValue; }
-void setMusicInstancePitch(SoundInstance* inst, s32 val, s32 dur) { (void)inst; (void)val; (void)dur; ++musicPitchCalls; }
-void setMusicInstanceTempo(SoundInstance* inst, s32 tempo, s32 dur) { (void)inst; (void)tempo; (void)dur; ++musicTempoCalls; }
+/* pcFieldMusicStarted's reads: while scriptVariablesSplit is set, variable
+ * 0x102 and variable 0 answer apart (anything else a marker); the first reads'
+ * indices are kept in order. The pitch and tempo calls keep their arguments. */
+static int scriptVariablesSplit;
+static s32 scriptVariable102, scriptVariable0;
+static s32 scriptVariableIndices[4];
+typedef struct {
+    SoundInstance* inst;
+    s32 value, dur;
+    int order; /* 1: the first of the pitch and tempo calls */
+} MusicCall;
+static MusicCall musicPitch, musicTempo;
+static int musicCallOrder;
+s32 getVariable(s32 varIndex) {
+    if (scriptVariableReads < 4) scriptVariableIndices[scriptVariableReads] = varIndex;
+    scriptVariableIndex = varIndex; ++scriptVariableReads;
+    if (!scriptVariablesSplit) return scriptVariableValue;
+    return varIndex == 0x102 ? scriptVariable102 : varIndex == 0 ? scriptVariable0 : 0x5A5A5A5A;
+}
+void setMusicInstancePitch(SoundInstance* inst, s32 val, s32 dur) {
+    musicPitch = (MusicCall){inst, val, dur, ++musicCallOrder};
+    ++musicPitchCalls;
+}
+void setMusicInstanceTempo(SoundInstance* inst, s32 tempo, s32 dur) {
+    musicTempo = (MusicCall){inst, tempo, dur, ++musicCallOrder};
+    ++musicTempoCalls;
+}
 
 /* Field 87's inn routine as scriptfix.c documents it: OP_PLAY_MUSIC 0D, OPX_A2,
  * OP_WAIT 0A, OP_START_FADE_TO_BLACK 3C, OP_WAIT 46, OP_RESTORE_HP,
@@ -942,6 +966,144 @@ static int testEmeraldaTheme(void) {
     }
     return 0;
 }
+
+/* Nisan late in the story as scriptfix.c's pcFieldMusicStarted reads it: Elly's
+ * theme (0x1E) started in fields 85-100, 474 or 493 (the field number's low 12
+ * bits) with variable 0x102 at 0x42 or more and progress (variable 0) above 207
+ * gets pitch 1 and tempo 0x1C0, both at once (duration 0). */
+#define ELLY_THEME 0x1E
+#define ELLY_PITCH 1
+#define ELLY_TEMPO 0x1C0
+static SoundInstance ellyInstance, otherInstance;
+
+/* Runs the hook in field with the two variables: reads is how many variables
+ * it reads (0x102, then 0), applies whether pitch and tempo go to instance.
+ * Nothing else changes: the current music, the field, the instances' bytes. */
+static int ellyRun(s32 field, s32 music, void* instance, s32 var102, s32 progress, int reads, int applies) {
+    static const MusicCall none = {NULL, -1, -1, 0};
+    SoundInstance ellyBefore = ellyInstance, otherBefore = otherInstance;
+    fieldMapNumber = field;
+    currentlyPlayingMusic = 0x33;
+    scriptVariablesSplit = 1;
+    scriptVariable102 = var102;
+    scriptVariable0 = progress;
+    scriptVariableValue = 0x77;
+    scriptVariableIndex = -1;
+    for (int i = 0; i < 4; ++i) scriptVariableIndices[i] = -1;
+    scriptVariableReads = musicPitchCalls = musicTempoCalls = musicCallOrder = 0;
+    musicPitch = musicTempo = none;
+    pcFieldMusicStarted(music, instance);
+    CHECK(scriptVariableReads == reads);
+    CHECK(scriptVariableIndices[0] == (reads >= 1 ? 0x102 : -1));
+    CHECK(scriptVariableIndices[1] == (reads >= 2 ? 0 : -1));
+    CHECK(scriptVariableIndices[2] == -1);
+    CHECK(musicPitchCalls == applies && musicTempoCalls == applies);
+    if (applies) {
+        CHECK(musicPitch.inst == instance && musicPitch.value == ELLY_PITCH && musicPitch.dur == 0);
+        CHECK(musicTempo.inst == instance && musicTempo.value == ELLY_TEMPO && musicTempo.dur == 0);
+        CHECK(musicPitch.order == 1 && musicTempo.order == 2);
+    } else {
+        CHECK(musicPitch.inst == NULL && musicPitch.value == -1 && musicPitch.dur == -1 && musicPitch.order == 0);
+        CHECK(musicTempo.inst == NULL && musicTempo.value == -1 && musicTempo.dur == -1 && musicTempo.order == 0);
+    }
+    CHECK(fieldMapNumber == field && currentlyPlayingMusic == 0x33 && scriptVariableValue == 0x77);
+    CHECK(!memcmp(&ellyInstance, &ellyBefore, sizeof(ellyBefore)));
+    CHECK(!memcmp(&otherInstance, &otherBefore, sizeof(otherBefore)));
+    scriptVariablesSplit = 0;
+    return 0;
+}
+#define ELLY_RUN(...) do { if (ellyRun(__VA_ARGS__)) return 1; } while (0)
+
+/* The checks run in the hook's order: the option and the instance, the music,
+ * the field (no read before these), variable 0x102, then the progress. */
+static int ellyThemeRuns(void) {
+    static const s32 nisan[] = {85, 86, 87, 90, 93, 94, 99, 100, 474, 493, 0x1000 + 93, 0xF000 + 474, 0x7000 + 85};
+    static const s32 fields[] = {0, 84, 101, 473, 475, 492, 494, 282, 213, 50, 326, 505, 0xFFF, 0x100 + 93,
+                                 0x1000 + 84, 0x1000 + 101, 0x2000 + 494, -1};
+    static const s32 musics[] = {0, 0x1D, 0x1F, 0x0D, 0x19, 0x26, 0xF0, 0xFF, -1, 0x11E, 0x1001E, -ELLY_THEME};
+    static const s32 lates[] = {0x42, 0x43, 0xFF, 0x7FFFFFFF};
+    static const s32 earlies[] = {0x41, 0x40, 0, -1, -0x42, -0x7FFFFFFF - 1};
+    static const s32 afters[] = {208, 209, 0x10000, 0x7FFFFFFF};
+    static const s32 befores[] = {207, 206, 0, -1, -208, -0x7FFFFFFF - 1};
+#define COUNT(a) ((int)(sizeof(a) / sizeof((a)[0])))
+    SoundInstance* instances[] = {&ellyInstance, &otherInstance};
+    for (int enabled = 0; enabled < 2; ++enabled) {
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        int one = enabled, two = enabled ? 2 : 0; /* off: no read at all */
+        for (int i = 0; i < 2; ++i) {
+            void* inst = instances[i];
+            /* Every Nisan field in the state: the pitch and tempo, when on. */
+            for (int f = 0; f < COUNT(nisan); ++f) ELLY_RUN(nisan[f], ELLY_THEME, inst, 0x42, 208, two, enabled);
+            /* Variable 0x102 at 0x42 or more and progress above 207: the same. */
+            for (int v = 0; v < COUNT(lates); ++v)
+                for (int g = 0; g < COUNT(afters); ++g)
+                    ELLY_RUN(93, ELLY_THEME, inst, lates[v], afters[g], two, enabled);
+            /* Another field: nothing, no read. */
+            for (int f = 0; f < COUNT(fields); ++f) ELLY_RUN(fields[f], ELLY_THEME, inst, 0x42, 208, 0, 0);
+            /* Another music (out of range too), in Nisan: nothing, no read. */
+            for (int m = 0; m < COUNT(musics); ++m) {
+                ELLY_RUN(93, musics[m], inst, 0x42, 208, 0, 0);
+                ELLY_RUN(474, musics[m], inst, 0x42, 208, 0, 0);
+            }
+            /* Variable 0x102 below 0x42: nothing, after its read only. */
+            for (int v = 0; v < COUNT(earlies); ++v)
+                for (int g = 0; g < COUNT(afters); ++g)
+                    ELLY_RUN(94, ELLY_THEME, inst, earlies[v], afters[g], one, 0);
+            /* Progress 207 or less: nothing, after both reads. */
+            for (int v = 0; v < COUNT(lates); ++v)
+                for (int g = 0; g < COUNT(befores); ++g)
+                    ELLY_RUN(474, ELLY_THEME, inst, lates[v], befores[g], two, 0);
+            /* Neither: nothing, after the first read. */
+            ELLY_RUN(493, ELLY_THEME, inst, 0x41, 207, one, 0);
+        }
+        /* No instance: nothing, no read, whatever the state. */
+        for (int f = 0; f < COUNT(nisan); ++f) ELLY_RUN(nisan[f], ELLY_THEME, NULL, 0x42, 208, 0, 0);
+        ELLY_RUN(93, 0x1D, NULL, 0x42, 208, 0, 0);
+        ELLY_RUN(84, ELLY_THEME, NULL, 0x42, 208, 0, 0);
+        ELLY_RUN(93, ELLY_THEME, NULL, 0x41, 207, 0, 0);
+        /* The field scripts' hook in the same state, over a script without
+         * field 87's inn routine: no pitch or tempo, the script kept. */
+        fieldMapNumber = 93;
+        scriptVariablesSplit = 1;
+        scriptVariable102 = 0x42;
+        scriptVariable0 = 208;
+        scriptVariableReads = musicPitchCalls = musicTempoCalls = 0;
+        u8 code[INN_SCRIPT + 8], before[INN_SCRIPT + 8];
+        memset(code, 0xEE, sizeof(code));
+        innScript(code, -1);
+        memcpy(before, code, sizeof(before));
+        currentlyPlayingMusic = ELLY_THEME;
+        for (int f = 0; f < COUNT(nisan); ++f) pcFieldScriptFixes(nisan[f], code, INN_SCRIPT);
+        CHECK(!memcmp(code, before, sizeof(before)) && currentlyPlayingMusic == ELLY_THEME);
+        CHECK(scriptVariableReads == 0 && musicPitchCalls == 0 && musicTempoCalls == 0);
+        scriptVariablesSplit = 0;
+    }
+#undef COUNT
+    return 0;
+}
+
+/* The option, field, music, variables and stubs as they were before, pass or
+ * fail, so the order of the tests cannot hide a failure. */
+static int testEllyTheme(void) {
+    int was = pcGameplayOriginalBugFixes();
+    s32 music = currentlyPlayingMusic, field = fieldMapNumber;
+    s32 value = scriptVariableValue, index = scriptVariableIndex;
+    memset(&ellyInstance, 0xA5, sizeof(ellyInstance));
+    memset(&otherInstance, 0x5A, sizeof(otherInstance));
+    int failed = ellyThemeRuns();
+    testSetEnv("XG_ORIGINAL_BUG_FIXES", was ? "on" : "off");
+    currentlyPlayingMusic = music;
+    fieldMapNumber = field;
+    scriptVariableValue = value;
+    scriptVariableIndex = index;
+    scriptVariablesSplit = 0;
+    scriptVariable102 = scriptVariable0 = 0;
+    memset(scriptVariableIndices, 0, sizeof(scriptVariableIndices));
+    scriptVariableReads = musicPitchCalls = musicTempoCalls = musicCallOrder = 0;
+    memset(&musicPitch, 0, sizeof(musicPitch));
+    memset(&musicTempo, 0, sizeof(musicTempo));
+    return failed;
+}
 #endif
 
 int main(int argc, char** argv) {
@@ -1052,6 +1214,7 @@ int main(int argc, char** argv) {
         CHECK(testSoldierFade() == 0);
         CHECK(testOrphanageFacing() == 0);
         CHECK(testEmeraldaTheme() == 0);
+        CHECK(testEllyTheme() == 0);
 #endif
     }
     printf("original bug fixes %s: %d checks passed\n", argv[2], checks);
