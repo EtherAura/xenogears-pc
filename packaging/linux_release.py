@@ -2,7 +2,8 @@
 """The Linux release tarball of xenogears-pc and its .sha256, from an installed stage.
 
     python packaging/linux_release.py names   --tag v<YYYY>.<MM>.<N>
-    python packaging/linux_release.py package --tag <tag> --stage <installed prefix> --out-dir <dir>
+    python packaging/linux_release.py package --tag <tag> --stage <installed prefix> --out-dir <dir> \
+        --ver <us|jp> --build <original engine's build> [--enhanced-build <enhanced engine's build>]
 
 The version is the release tag without its v (CalVer vYYYY.MM.N, month 01-12,
 N a whole number from 0 without leading zeros), spelled as the tag spells it;
@@ -46,22 +47,69 @@ with no owner names, every time is 0, the entries are in a fixed order, and
 the gzip header has no name and no time, so the same stage content gives the
 same bytes (with the same Python zlib), whatever its files' times or owners.
 
-package refuses, before writing anything: a bad tag, a bad stage, an --out-dir
-inside the stage or holding it, an --out-dir that is not a folder, and an
---out-dir already holding either asset's name (a dangling link too): nothing
-there is ever overwritten or deleted. It writes the tarball to a temporary
+The payload audit. package runs this checkout's tools/payloadcheck.py (the
+file next to packaging/ in the checkout this helper is in: never one found
+through the working folder, PATH or the environment) on every executable it is
+about to archive, and writes nothing, not even --out-dir, unless each one
+passes. There is no way to skip it. Per executable it runs, without a shell,
+
+    <this python> -E -s -B <checkout>/tools/payloadcheck.py --exe <copy> --build <build> --ver <ver>
+
+in the checkout, with no standard input and a time limit. <copy> is the bytes
+read from the stage, written read-only into a private temporary folder; the
+same bytes in memory go into the tarball, and the copy must still be those
+bytes after its audit. --build is the configured CMake build folder the
+original engine was linked in and --enhanced-build the enhanced engine's
+(required when the stage holds it, refused when it does not): the auditor
+reads their objects to say where a run of the game's bytes comes from. Their
+CMakeCache.txt must name --ver and the engine. An executable passes only when
+the auditor exits 0 and prints exactly its two lines: the heading, naming this
+copy, the version and the number of module images it read, and one
+"payload ok" line with no run in a failing category. Every staged executable
+is audited before the verdict; any other exit, output, a time-out or a launch
+error is a refusal. The auditor's own lines are relayed without the bytes it
+found.
+
+The module images are the player's own, extracted by tools/extract.py into the
+checkout's disc folder for <ver>; only the auditor reads them. The auditor
+reads a module's image when its file is there and passes over it silently when
+it is not, so a partial extraction would pass an executable against fewer
+modules. Therefore this helper reads config/<ver>/disc.yaml the way the
+auditor does (its one-line {name: ...} entries; main is the .exe, the others
+.bin), requires each of those files before the audit, and requires the
+auditor's heading to report that same number: a missing image, an empty list,
+a list with entries of another form (which the auditor would not read), or a
+count that differs is a refusal. The list is thus read twice, here and in the
+auditor, and the two must agree on every run. The auditor, its module, its
+allowance file, the list and the images must be the same bytes after the
+audits as before them.
+
+What the audit is not. It finds runs of 16 bytes or more of the module images
+(as the game loads them) in the executables: not shorter or transformed
+copies, not the disc's other files, not the licences. The auditor counts bytes
+outside every ELF section as names, not payload. It does not prove that
+--build is the build an executable came from, nor that a build of another
+version was not staged under --ver. Passing is the auditor's verdict on those
+bytes, not a clearance of every kind, and nothing here checks that the game
+is correct.
+
+package refuses, before writing anything: a bad tag, a bad stage, a missing
+build, auditor, list or image, an --out-dir inside the stage or holding it, an
+--out-dir that is not a folder, an --out-dir already holding either asset's
+name (a dangling link too), and a failed audit: nothing there is ever
+overwritten or deleted. After the audits it checks the stage did not change,
+writes the tarball to a temporary
 file in --out-dir, checks the stage did not change meanwhile, links it in
 under its asset name as a new file, hashes the bytes of that file and writes
 the .sha256 the same way. The two are not written as one atomic step. If a
 step fails it exits 1, removes the temporary file and every asset and folder
 this run made (a sum never names a missing tarball), and says which it removed
-or could not remove. The stage's files are only read.
+or could not remove. The stage's files are only read. A writer that changes a
+stage file and puts it back between the reads is not noticed.
 
 This is the packaging step only. It does not compile the port, fetch its
 dependencies, sign anything, make the .deb or the Windows assets, write the
-SBOM or upload. The stage checks here (names, file types, a few headers of the
-game's data) are not the release's payload audit: passing them does not clear
-the assets for upload. Nothing here installs or starts the game.
+SBOM or upload. Nothing here installs or starts the game.
 Standard library only.
 """
 from __future__ import annotations
@@ -72,8 +120,11 @@ import hashlib
 import io
 import os
 import re
+import shutil
+import signal
 import stat
 import struct
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -100,6 +151,21 @@ CD_SYNC = b"\x00" + b"\xff" * 10 + b"\x00"
 ISO_MARKS = (0x8001, 16 * 2352 + 24 + 1, 16 * 2352 + 16 + 1)  # "CD001": cooked, raw mode 2, raw mode 1
 
 ELF_X86_64, ET_EXEC, ET_DYN, PT_INTERP = 62, 2, 3, 3
+
+# The payload audit: this checkout's auditor and what it reads.
+CHECKOUT = Path(__file__).resolve().parent.parent  # packaging/ is in the checkout's root
+AUDITOR = CHECKOUT / "tools" / "payloadcheck.py"
+AUDITOR_FILES = (AUDITOR, CHECKOUT / "tools" / "payload_pe.py", CHECKOUT / "tools" / "payload_allow.txt")
+VERSIONS = ("us", "jp")
+ENGINES = {"bin/xenogears": "original", "bin/xenogears-enhanced": "enhanced"}  # the build's XG_ENGINE
+AUDIT_TIMEOUT = 3600  # seconds, each executable
+AUDIT_MIN_RUN = 16    # the auditor's shortest run (its default; no other is asked for)
+IMAGE_ENTRY = re.compile(r"\{name:\s*(\w+),([^}]*)\}")  # a module of disc.yaml, as the auditor reads it
+NAME_KEY = re.compile(r"\bname\s*:")                    # a module entry of any form
+AUDIT_HEADING = re.compile(r"retail module data in (.+) \((US|JP)\): ([0-9]+) module images, runs of >= ([0-9]+) bytes")
+AUDIT_OK = re.compile(r"payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; library 0/0; "
+                      r"allowed [0-9]+/[0-9]+, symbol names [0-9]+/[0-9]+, src \(game C's own data\) 0/0")
+HEX_RUN = re.compile(r"[0-9A-Fa-f]{16,}")
 
 
 class ReleaseError(Exception):
@@ -197,6 +263,157 @@ def unchanged(stage: Path, files: list[dict]) -> None:
         raise ReleaseError(f"--stage {stage} changed while it was packaged")
 
 
+def module_images(ver: str) -> list[Path]:
+    """The module images the auditor reads for ver, every one of them required.
+
+    The auditor takes the modules from config/<ver>/disc.yaml by its one-line
+    {name: ...} entries (an entry with iso: is <name>.exe, the others <name>.bin)
+    and leaves out, silently, an image whose file is missing. This reads the
+    list the same way and refuses what would make the two differ: no entry, an
+    entry of another form, a name twice, a missing or empty image. The auditor's
+    heading must then report this many images (audit_executable), so the two
+    readings of the list are compared on every run."""
+    listing = CHECKOUT / "config" / ver / "disc.yaml"
+    try:
+        text = listing.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as error:
+        raise ReleaseError(f"payload audit: no module list {listing} ({error}); nothing written") from error
+    entries = IMAGE_ENTRY.findall(text)
+    if not entries:
+        raise ReleaseError(f"payload audit: {listing} lists no module; nothing written")
+    if len(NAME_KEY.findall(text)) != len(entries):
+        raise ReleaseError(f"payload audit: {listing} has {len(NAME_KEY.findall(text))} name: keys but "
+                           f"{len(entries)} entries of the form the auditor reads; nothing written")
+    names = [name for name, _ in entries]
+    if len(set(names)) != len(names):
+        raise ReleaseError(f"payload audit: {listing} lists a module twice; nothing written")
+    folder = CHECKOUT / "disc" / ver
+    images = [folder / (f"{name}.exe" if "iso:" in rest else f"{name}.bin") for name, rest in entries]
+    gone = [p.name for p in images if not p.is_file() or p.stat().st_size == 0]
+    if gone:
+        raise ReleaseError(f"payload audit: {len(gone)} of the {len(images)} module images of {listing} are not "
+                           f"in {folder} ({', '.join(gone)}): extract the player's disc first "
+                           "(tools/extract.py); nothing written")
+    return images
+
+
+def fingerprint(paths: list[Path]) -> list[tuple[str, str]]:
+    out = []
+    for path in paths:
+        try:
+            out.append((str(path), hashlib.sha256(path.read_bytes()).hexdigest()))
+        except OSError as error:
+            raise ReleaseError(f"payload audit: cannot read {path} ({error}); nothing written") from error
+    return out
+
+
+def audit_build(build: Path, ver: str, rel: str) -> Path:
+    """The configured CMake build folder of one staged executable, absolute; its cache names ver and the engine."""
+    build = Path(os.path.abspath(build))
+    cache = build / "CMakeCache.txt"
+    if not cache.is_file() or not (build / "CMakeFiles").is_dir():
+        raise ReleaseError(f"the build of {rel}, {build}: not a configured CMake build folder "
+                           "(no CMakeCache.txt and CMakeFiles); nothing written")
+    text = cache.read_text(encoding="utf-8", errors="replace")
+    for key, want in (("XG_VERSION", ver), ("XG_ENGINE", ENGINES[rel])):
+        found = re.search(rf"^{key}:\w+=(\w+)\s*$", text, re.M)
+        if found is None or found.group(1).lower() != want:
+            raise ReleaseError(f"the build of {rel}, {build}: its CMakeCache.txt has {key} "
+                               f"{found.group(1) if found else 'unset'}, not {want}; nothing written")
+    return build
+
+
+def redact(text: str, copy: Path, rel: str) -> str:
+    """One line of the auditor's output, without the bytes it found."""
+    text = HEX_RUN.sub("[bytes withheld]", text.replace(str(copy), rel))
+    return "".join(c if c.isprintable() else "?" for c in text)
+
+
+def stop(proc: subprocess.Popen) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        proc.kill()
+    try:
+        proc.communicate(timeout=10)
+    except (subprocess.TimeoutExpired, OSError, ValueError):
+        pass
+
+
+def audit_executable(f: dict, build: Path, ver: str, images: int, scratch: Path) -> str:
+    """The auditor's verdict on one executable's bytes: its "payload ok" line, or ReleaseError."""
+    rel = f["rel"]
+    copy = scratch / PurePosixPath(rel).name
+    copy.write_bytes(f["data"])
+    os.chmod(copy, 0o500)
+    if not sys.executable:
+        raise ReleaseError(f"payload audit of {rel}: this Python does not know its own path")
+    argv = [sys.executable, "-E", "-s", "-B", str(AUDITOR), "--exe", str(copy), "--build", str(build), "--ver", ver]
+    try:
+        proc = subprocess.Popen(argv, cwd=CHECKOUT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, start_new_session=True)
+    except OSError as error:
+        raise ReleaseError(f"payload audit of {rel}: the auditor could not be started ({error})") from error
+    try:
+        out, err = proc.communicate(timeout=AUDIT_TIMEOUT)
+    except subprocess.TimeoutExpired as error:
+        stop(proc)
+        raise ReleaseError(f"payload audit of {rel}: no verdict in {AUDIT_TIMEOUT} s; stopped") from error
+    except BaseException:
+        stop(proc)
+        raise
+    lines = out.decode("utf-8", "replace").splitlines()
+    heading = AUDIT_HEADING.fullmatch(lines[0]) if lines else None
+    if hashlib.sha256(copy.read_bytes()).hexdigest() != f["sha256"]:
+        why = "the audited copy changed during its audit"
+    elif proc.returncode != 0:
+        why = f"the auditor exited {proc.returncode}"
+    elif heading is None:
+        why = "the auditor's output has no heading"
+    elif heading.group(1) != str(copy) or heading.group(2) != ver.upper():
+        why = "the auditor's heading names another executable or version"
+    elif int(heading.group(3)) != images:
+        why = f"the auditor read {int(heading.group(3))} module images, not all {images}"
+    elif int(heading.group(4)) != AUDIT_MIN_RUN:
+        why = f"the auditor looked for runs of {int(heading.group(4))} bytes, not {AUDIT_MIN_RUN}"
+    elif len(lines) != 2 or not AUDIT_OK.fullmatch(lines[1]):
+        why = "the auditor's output is not its heading and one clean \"payload ok\" line"
+    else:
+        return f"{rel} ({ver.upper()}, sha256 {f['sha256']}): all {images} module images read; {lines[1]}"
+    said = [redact(line, copy, rel) for line in lines[-30:] + err.decode("utf-8", "replace").splitlines()[-5:]]
+    raise ReleaseError(f"payload audit of {rel} FAILED: {why}" + "".join(f"\n    | {line}" for line in said))
+
+
+def audit(files: list[dict], builds: dict[str, Path], ver: str) -> list[str]:
+    """Every staged executable through this checkout's auditor; the verdicts, or ReleaseError if any failed."""
+    absent = [str(p) for p in AUDITOR_FILES if not p.is_file()]
+    if absent:
+        raise ReleaseError(f"payload audit: no {', '.join(absent)}: run packaging/linux_release.py from a checkout "
+                           "of the port; nothing written")
+    images = module_images(ver)
+    inputs = [*AUDITOR_FILES, CHECKOUT / "config" / ver / "disc.yaml", *images]
+    before = fingerprint(inputs)
+    passed, failed = [], []
+    scratch = Path(tempfile.mkdtemp(prefix="xenogears-pc-audit-"))
+    try:
+        for f in files:
+            if f["rel"] in EXECUTABLES:
+                try:
+                    passed.append(audit_executable(f, builds[f["rel"]], ver, len(images), scratch))
+                except (ReleaseError, OSError) as error:
+                    failed.append(str(error))
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    if os.path.lexists(scratch):
+        failed.append(f"payload audit: the temporary folder {scratch} could not be removed")
+    if not failed and fingerprint(inputs) != before:
+        failed.append("payload audit: the auditor, the module list or an image changed during the audit")
+    if failed or not passed:
+        raise ReleaseError("\n".join(failed + [f"passed: {line}" for line in passed]
+                                     + ["the payload audit did not pass every executable; nothing written"]))
+    return passed
+
+
 def entry(name: str, kind: bytes, mode: int, size: int = 0) -> tarfile.TarInfo:
     info = tarfile.TarInfo(name)
     info.type, info.mode, info.size = kind, mode, size
@@ -272,10 +489,20 @@ def undo(written: list[Path], temps: list[Path], made: list[Path], out_dir: Path
     return "; ".join(notes) or f"no asset written in {out_dir}"
 
 
-def package(tag: str, stage: Path, out_dir: Path) -> dict[str, str]:
-    """The tarball of one stage and its .sha256, written into out_dir as new files."""
+def package(tag: str, stage: Path, out_dir: Path, ver: str, build: Path,
+            enhanced_build: Path | None = None) -> dict:
+    """The tarball of one stage and its .sha256, written into out_dir as new files once every executable passed."""
     names = release_names(tag)
     files = read_stage(stage)
+    if ver not in VERSIONS:
+        raise ReleaseError(f"--ver {ver!r} is not one of {', '.join(VERSIONS)}; nothing written")
+    staged = [f["rel"] for f in files if f["rel"] in EXECUTABLES]
+    given = {"bin/xenogears": build, "bin/xenogears-enhanced": enhanced_build}
+    if "bin/xenogears-enhanced" in staged and enhanced_build is None:
+        raise ReleaseError("the stage holds bin/xenogears-enhanced: its audit needs --enhanced-build; nothing written")
+    if "bin/xenogears-enhanced" not in staged and enhanced_build is not None:
+        raise ReleaseError("--enhanced-build given, but the stage holds no bin/xenogears-enhanced; nothing written")
+    builds = {rel: audit_build(given[rel], ver, rel) for rel in staged}
     stage_real, out_real = stage.resolve(), out_dir.resolve()
     if out_real.is_relative_to(stage_real):
         raise ReleaseError(f"--out-dir {out_dir} is inside the stage; nothing written")
@@ -288,6 +515,11 @@ def package(tag: str, stage: Path, out_dir: Path) -> dict[str, str]:
     if taken:
         raise ReleaseError(f"--out-dir {out_dir} already holds {', '.join(taken)}; nothing is overwritten "
                            "(move them, or choose another folder); nothing written")
+    audits = audit(files, builds, ver)
+    try:
+        unchanged(stage, files)
+    except ReleaseError as error:
+        raise ReleaseError(f"{error} (after its payload audit); nothing written") from error
     made, here = [], out_dir.absolute()
     while not os.path.lexists(here):
         made.append(here)
@@ -317,13 +549,15 @@ def package(tag: str, stage: Path, out_dir: Path) -> dict[str, str]:
             raise ReleaseError(f"{final[0].name}: its bytes or its sum changed after they were written")
     except (ReleaseError, OSError) as error:
         raise ReleaseError(f"{error}; {undo(written, temps, made, out_dir)}") from error
-    return {"tarball": str(final[0]), "sha256": str(final[1]), "digest": digest}
+    return {"audit": audits, "tarball": str(final[0]), "sha256": str(final[1]), "digest": digest}
 
 
-PACKAGE_SCOPE = ("the packaging step only: the Linux tarball and its .sha256 from a final installed stage; not the "
-                 "port's compilation, dependency fetching, the payload audit (the stage checks here are not it and "
-                 "do not clear the assets for upload), signing, the .deb or Windows assets, the SBOM, an upload, or "
-                 "an install and start")
+PACKAGE_SCOPE = ("the packaging step only: the Linux tarball and its .sha256 from a final installed stage, written "
+                 "only after this checkout's tools/payloadcheck.py passed every executable in it; not the port's "
+                 "compilation, dependency fetching, signing, the .deb or Windows assets, the SBOM, an upload, or an "
+                 "install and start. The stage checks and the payload audit have limits (runs of the module images "
+                 "in the executables, as that auditor finds them) and do not clear the assets for upload by "
+                 "themselves")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -339,14 +573,22 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--tag", required=True, help="the release tag, vYYYY.MM.N (N from 0)")
     p.add_argument("--stage", type=Path, required=True, help="the installed prefix, final (only read)")
     p.add_argument("--out-dir", type=Path, required=True, help="where the two assets go (made if missing)")
+    p.add_argument("--ver", choices=VERSIONS, required=True,
+                   help="the game version the engines were built for; its extracted module images are audited against")
+    p.add_argument("--build", type=Path, required=True,
+                   help="the configured CMake build folder bin/xenogears was linked in (only read)")
+    p.add_argument("--enhanced-build", type=Path,
+                   help="the same for bin/xenogears-enhanced: required when the stage holds it")
     args = ap.parse_args(argv)
     try:
         if args.command == "names":
             for key, value in release_names(args.tag).items():
                 print(f"{key}={value}")
         else:
-            for key, value in package(args.tag, args.stage, args.out_dir).items():
-                print(f"{key}={value}")
+            result = package(args.tag, args.stage, args.out_dir, args.ver, args.build, args.enhanced_build)
+            for key, value in result.items():
+                for item in value if isinstance(value, list) else [value]:
+                    print(f"{key}={item}")
             print(f"scope={PACKAGE_SCOPE}")
     except (ReleaseError, OSError) as error:
         print(f"linux_release: {error}", file=sys.stderr)
