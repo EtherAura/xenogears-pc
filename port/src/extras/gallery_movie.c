@@ -69,6 +69,8 @@ struct XgMovie {
     int width, height;
     int sinceFrame; /* vertical blanks since the last frame came */
     const char* caption[2]; /* at `frame`: the US dialogue's, the Japanese translation's */
+    int identity[5];        /* the movie they were looked up for (regionalMovieIdentity) */
+    int identified;
     int audible;
     int recording;
     int16_t* rec;
@@ -224,6 +226,7 @@ int xgMovieStart(XgMovie* m, int streamNo, int offset, int first, int last, int 
     m->playing = 0;
     m->sinceFrame = 0;
     m->caption[0] = m->caption[1] = NULL;
+    m->identified = 0;
     m->width = width > 0 && width <= FRAME_W ? width : FRAME_W;
     m->height = height > 0 && height <= FRAME_H ? height : 224;
     /* As the movie mode sets it up (moviePlaybackLoop): whole slices (the
@@ -252,6 +255,7 @@ void xgMovieStop(XgMovie* m) {
     }
     m->playing = 0;
     m->caption[0] = m->caption[1] = NULL;
+    m->identified = 0;
 }
 
 int xgMoviePlaying(const XgMovie* m) {
@@ -297,6 +301,7 @@ void xgMovieRun(XgMovie* m, int vsyncs, int audible) {
      * (regionalMovieBegin, regionalMovieFrame), as it tells the game's. */
     m->caption[0] = regionalCaption(1);
     m->caption[1] = regionalCaption(2);
+    m->identified = regionalMovieIdentity(m->identity);
     hwWorldSetSink(NULL, NULL);
     leave(m);
 }
@@ -322,6 +327,14 @@ int xgMovieFrame(XgMovie* m, uint32_t* rgba, int* w, int* h) {
 
 const char* xgMovieCaption(const XgMovie* m, int track) {
     return m != NULL && track >= 1 && track <= 2 ? m->caption[track - 1] : NULL;
+}
+
+int xgMovieIdentity(const XgMovie* m, int out[5]) {
+    int known = m != NULL && m->identified;
+    for (int i = 0; i < 5; i++) {
+        out[i] = known ? m->identity[i] : 0;
+    }
+    return known;
 }
 
 void xgMovieRecord(XgMovie* m, int on) {

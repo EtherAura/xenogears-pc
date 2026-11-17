@@ -20,6 +20,11 @@ void regionalMovieBegin(int lba);
 void regionalMovieSector(int lba, unsigned char raw[2352]);
 void regionalMovieEnd(void);
 void regionalMovieFrame(int frame);
+/* The movie the captions go by, as regionalMovieBegin found it and
+ * regionalMovieFrame last told: out = {Japanese disc, disc number, clip (the
+ * movie's number in the movie directory), the clip's first sector, frame}.
+ * 0 (and out all 0) when no movie plays. */
+int regionalMovieIdentity(int out[5]);
 /* Field movies (src/field/f_800A55B8.c startFieldTransition): for a US Disc 2
  * scene the JP game plays without XA, its sound sequence (0xFF: none), with
  * Japanese cutscene audio; -1 otherwise. */

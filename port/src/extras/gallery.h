@@ -69,6 +69,10 @@ int xgMovieFrame(XgMovie* m, uint32_t* rgba, int* w, int* h);
  * track 1 (US dialogue) or 2 (Japanese translation); NULL: none, or a build
  * without the captions. */
 const char* xgMovieCaption(const XgMovie* m, int track);
+/* The movie those captions were looked up for, as the player told its world
+ * (cd/regional.h regionalMovieIdentity, the same five values); 0: none, as
+ * before the first frame's time has passed and after a stop. */
+int xgMovieIdentity(const XgMovie* m, int out[5]);
 
 /* The audio of the last xgMovieRun calls is also kept (for WAV export) when
  * recording: on starts empty, off stops; the frames kept (44.1 kHz stereo). */

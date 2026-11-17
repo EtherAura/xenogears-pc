@@ -856,6 +856,15 @@ class Runner:
             self.run("mdectest-retail", b / "mdectest", *discs, target="mdectest")
         else:
             self.skip("mdectest-retail", "needs all four US and JP disc images in bin/")
+        # The gallery's movie captions (xg-5r34, port/src/extras/test/gallery_subtitles.py): scripted
+        # runs of the extras on both releases' discs; each caption, its movie and frame against the images.
+        if not build_extras(b):
+            self.skip("gallery-subtitles", "a build without the extras (XG_EXTRAS=OFF)")
+        elif all(x.exists() for x in discs) or self.listing:
+            self.run("gallery-subtitles", Path(sys.executable), ROOT / "port/src/extras/test/gallery_subtitles.py",
+                     game_executable(b), self.scratch("gallery-subtitles"), *discs, target="xenogears", timeout=3 * TIMEOUT)
+        else:
+            self.skip("gallery-subtitles", "needs all four US and JP disc images in bin/")
 
         # Save states (xg-htn.34.10, tools/statecheck.py): saving changes nothing, and a load goes on exactly
         # (the frames, the sound and the whole state after it), in a field and a movie.

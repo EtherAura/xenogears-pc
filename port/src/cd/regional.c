@@ -323,6 +323,12 @@ int pcRegionalFieldMovieMusic(int field, int stream) {
 }
 void regionalMovieEnd(void) { memset(&movie,0,sizeof movie); }
 void regionalMovieFrame(int frame) { if (movie.active) movie.frame=frame; }
+int regionalMovieIdentity(int out[5]) {
+    memset(out,0,5*sizeof out[0]);
+    if (!movie.active) return 0;
+    out[0]=movie.japanese; out[1]=movie.disc; out[2]=movie.clip; out[3]=movie.baseLba; out[4]=movie.frame;
+    return 1;
+}
 int regionalSubtitlesEnabled(void) { int n=settingsInt("cutscene_subtitles",0); return n>=0 && n<=2 ? n : 0; }
 void regionalSetSubtitles(int mode) { describe(); settingsSetInt("cutscene_subtitles",mode>=0 && mode<=2 ? mode : 0); settingsSave(); }
 

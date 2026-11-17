@@ -19,6 +19,7 @@
 //   movie <n>              select movie n of the list (and play it)
 //   pause, stop, seek <frame>
 //   subtitles <0|1|2>      the movies' captions: off, US dialogue, Japanese translation
+//   caption                the caption drawn, its frame and the player's movie on stderr
 //   frame                  export the frame shown (PNG)
 //   wav                    export the movie's audio so far (WAV)
 //   picture <n>            select picture n of the list
@@ -1756,6 +1757,21 @@ bool command(const char* cmd, const char* arg) {
     if (!strcmp(cmd, "subtitles")) {
         if (strcmp(arg, "0") && strcmp(arg, "1") && strcmp(arg, "2")) return false;
         setSubtitleTrack(atoi(arg));
+        return true;
+    }
+    if (!strcmp(cmd, "caption")) {
+        // What the movie pane draws now and what it goes by: the list's movie, the
+        // frame shown, the player's movie as its world knows it, both tracks' captions.
+        const XgMovieEntry* m = xgScanMovie(S->scan, S->playing);
+        int id[5];
+        int known = xgMovieIdentity(S->player, id);
+        auto quoted = [](const char* text) { return text ? "\"" + std::string(text) + "\"" : std::string("none"); };
+        fprintf(stderr, "gallery: caption movie %d disc %d stream %d lba %d frame %d playing %d paused %d track %d "
+                        "player %d japanese %d disc %d clip %d lba %d frame %d us %s jp %s drawn %s\n",
+                S->playing, m ? m->disc : 0, m ? m->stream : -1, m ? m->lba : -1, S->frame,
+                S->player != nullptr && xgMoviePlaying(S->player), S->paused, subtitleTrack(),
+                known, id[0], id[1], id[2], id[3], id[4], quoted(xgMovieCaption(S->player, 1)).c_str(),
+                quoted(xgMovieCaption(S->player, 2)).c_str(), quoted(movieCaption()).c_str());
         return true;
     }
     if (strcmp(cmd, "seek") == 0 && S->movieSel >= 0) {
