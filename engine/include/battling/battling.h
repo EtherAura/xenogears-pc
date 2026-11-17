@@ -763,10 +763,10 @@ typedef struct BattlingAiState {
     /* 0x0C */ s16 mC_speed;
     /* 0x0E */ u8 mE_boost;
     /* 0x0F */ u8 mF_comLevel;
-    /* 0x10 */ s32 m10;
-    /* 0x14 */ s32 m14;
-    /* 0x18 */ s32 m18;
-    /* 0x1C */ s32 m1C;
+    /* 0x10 */ s32 m10_aiParam0;
+    /* 0x14 */ s32 m14_aiParam1;
+    /* 0x18 */ s32 m18_aiParam2;
+    /* 0x1C */ s32 m1C_aiParam3;
     /* 0x20 */ s32 m20_waitStep;
     /* 0x24 */ s32 m24_gaugeLimit;
     /* 0x28 */ s32 m28_retreatDistance;

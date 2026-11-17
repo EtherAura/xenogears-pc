@@ -126,18 +126,18 @@ void batteLoaderPhase1_1(void) {
             isBattleSlotFilled.m0_isBattleSlotFilled[i] = 0;
         }
         if (battleVisualEntities[i].m4_isGear == 0) {
-            battleVisualEntities[i].m0_positionSlot = currentBattleConfig.m4[i] & 0x7F;
+            battleVisualEntities[i].m0_positionSlot = currentBattleConfig.m4_entityIds[i] & 0x7F;
         } else {
             battleVisualEntities[i].m0_positionSlot = i;
         }
     }
     battlePartyLayoutType += 0xFF;
     for (i = 0; i < 8; i++) {
-        u8 id = currentBattleConfig.m4[i + 4] & 0x7F;
+        u8 id = currentBattleConfig.m4_entityIds[i + 4] & 0x7F;
         if (id != 0x7F) {
             battleVisualEntities[i + 3].m2_characterId = id;
             battleVisualEntities[i + 3].m3_hidden = currentBattleConfig.m10_monsterFlags[i] & 0x80;
-            battleVisualEntities[i + 3].m4_isGear = currentBattleConfig.m4[i + 4] & 0x80;
+            battleVisualEntities[i + 3].m4_isGear = currentBattleConfig.m4_entityIds[i + 4] & 0x80;
             battleVisualEntities[i + 3].m5 = currentBattleConfig.m10_monsterFlags[i] & 1;
             isBattleSlotFilled.m0_isBattleSlotFilled[i + 3] = 1;
             battleVisualEntities[i + 3].m0_positionSlot = currentBattleConfig.m18_monsterPositions[i] & 0x7F;
@@ -392,11 +392,11 @@ void batteLoaderPhase2_2(void) {
         }
         for (j = 0; j < 4; j++) {
             if (battleCharacters[i] != 7) {
-                battleVar2->m0_entityMenus[i].m8[j] = battleCommandsSetups[16][j];
+                battleVar2->m0_entityMenus[i].m8_extraCommandsMapping[j] = battleCommandsSetups[16][j];
             } else {
-                battleVar2->m0_entityMenus[i].m8[j] = battleCommandsSetups[18][j];
+                battleVar2->m0_entityMenus[i].m8_extraCommandsMapping[j] = battleCommandsSetups[18][j];
             }
-            battleVar2->m0_entityMenus[i].mC[j] = battleCommandsSetups[17][j];
+            battleVar2->m0_entityMenus[i].mC_extraCommandsMapping2[j] = battleCommandsSetups[17][j];
         }
         battleVar2->m0_entityMenus[i].m3C_currentTarget = getEntityToFace(i);
         battleVisualEntities[i].m6_direction = getDirectionBetween2BattleEntities(i, battleVar2->m0_entityMenus[i].m3C_currentTarget);

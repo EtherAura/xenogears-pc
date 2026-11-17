@@ -725,7 +725,7 @@ void initSoundInstance(SoundInstance* inst) {
     inst->m12_seqId = seq->m10_id;
     inst->m14_trackCount = seq->u14.s.m14_trackCount;
     inst->m16_sampleBank = seq->m16_sampleBank;
-    inst->m18 = seq->m18;
+    inst->m18 = seq->m18_volumeTableOffset;
     inst->m41_reverbMode = seq->m1A_reverbMode;
     inst->m44_reverbDepth = seq->m1B_reverbDepth << 8;
     inst->m42_reverbDelay = seq->u1C.s.m1C;
@@ -895,7 +895,7 @@ void playSoundEffectSub(u32 ch, s32 id, u32 vol, u16 pan) {
     if (wds == NULL) {
         wds = pLoadedWdsLinkedList;
     }
-    bp = (u8*)seq + seq->m18;
+    bp = (u8*)seq + seq->m18_volumeTableOffset;
     tmp = (s16)vol * bp[id & 0xFFFF];
     tmp >>= 7;
     vol = tmp;

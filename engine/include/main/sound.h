@@ -103,7 +103,7 @@ typedef struct SeqFile {
         } s;
     } u14;
     /* 0x16 */ u16 m16_sampleBank;
-    /* 0x18 */ u16 m18;
+    /* 0x18 */ u16 m18_volumeTableOffset;
     /* 0x1A */ u8 m1A_reverbMode;
     /* 0x1B */ u8 m1B_reverbDepth;
     /* 0x1C */ union {

@@ -19,7 +19,7 @@ typedef struct {
     /* 0x01 */ u8 m1_flags;
     /* 0x02 */ s8 m2_arenaId;
     /* 0x03 */ s8 m3_eventDataIndex;
-    /* 0x04 */ u8 m4[12];               /* Noah: s8; party slot / monster ids, 0x80: gear */
+    /* 0x04 */ u8 m4_entityIds[12];               /* Noah: s8; party slot / monster ids, 0x80: gear */
     /* 0x10 */ u8 m10_monsterFlags[8];               /* Noah: s8 */
     /* 0x18 */ u8 m18_monsterPositions[8];               /* Noah: s8 */
 } sBattleConfig;

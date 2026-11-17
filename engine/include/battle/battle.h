@@ -222,8 +222,8 @@ typedef struct {
 /* Noah: sBattleVar2Sub (size 0x40) */
 typedef struct {
     /* 0x00 */ u8 m0_circleMenuBattleCommandsMapping[8];
-    /* 0x08 */ u8 m8[4];
-    /* 0x0C */ u8 mC[4];
+    /* 0x08 */ u8 m8_extraCommandsMapping[4];
+    /* 0x0C */ u8 mC_extraCommandsMapping2[4];
     /* 0x10 */ u8 m10[0xC];
     /* 0x1C */ u16 m1C_isCommandEnabled[16]; /* Noah: s16; retail reads lhu */
     /* 0x3C */ u8 m3C_currentTarget;         /* Noah: s8 */

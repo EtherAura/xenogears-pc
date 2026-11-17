@@ -1508,16 +1508,16 @@ s32 shouldBattlingAiFireEther(BattlingGear* gear, s32 arg1) {
     BattlingAiState* ai;
 
     ai = gear->m15FC_ai;
-    if ((rand() & 0xFF) < (ai->m10 * 320) >> 4) {
+    if ((rand() & 0xFF) < (ai->m10_aiParam0 * 320) >> 4) {
         if (!(canBattlingGearUseEther(gear, 0) != 0 || isBattlingGearHpAbove(gear, 0xC0) != 0 ||
-              (rand() & 0xFF) < (ai->m1C * 192) >> 4 ||
+              (rand() & 0xFF) < (ai->m1C_aiParam3 * 192) >> 4 ||
               (isBattlingGearHpAbove(gear, 0x80) != 0 && gear->mD8_opponent->mB4_hp < gear->mB4_hp))) {
             return 0;
         }
-    } else if ((rand() & 0xFF) >= (ai->m1C * 320) >> 4) {
+    } else if ((rand() & 0xFF) >= (ai->m1C_aiParam3 * 320) >> 4) {
         return 0;
     }
-    if ((rand() & 0xFF) < ai->m18) {
+    if ((rand() & 0xFF) < ai->m18_aiParam2) {
         if (gear->mD8_opponent->mC4_moveState == 4) {
             return 0;
         }
@@ -1535,25 +1535,25 @@ s32 shouldBattlingAiBoost(BattlingGear* gear, s32 flag) {
     BattlingAiState* ai;
 
     ai = gear->m15FC_ai;
-    if (flag != 0 && (rand() & 0xFF) < ai->m10 && battlingGearDistance < 0x600) {
+    if (flag != 0 && (rand() & 0xFF) < ai->m10_aiParam0 && battlingGearDistance < 0x600) {
         return 0;
     }
     if (getBattlingAiGaugeRoom(gear) != 0) {
         return 1;
     }
-    return (rand() & 0xFF) < ai->m1C;
+    return (rand() & 0xFF) < ai->m1C_aiParam3;
 }
 
 void rollBattlingAiDecisions(BattlingAiState* ai) {
     s32 b;
     s32 r;
 
-    ai->m2C_b9 = (rand() & 0xFF) < ai->m10;
+    ai->m2C_b9 = (rand() & 0xFF) < ai->m10_aiParam0;
     b = 0;
-    ai->m2C_b10 = (rand() & 0xFF) < ai->m14;
+    ai->m2C_b10 = (rand() & 0xFF) < ai->m14_aiParam1;
     ai->m2C_b12 = rand();
-    ai->m2C_b11 = (rand() & 0xFF) < ai->m18;
-    if ((rand() & 0xFF) < ai->m10) {
+    ai->m2C_b11 = (rand() & 0xFF) < ai->m18_aiParam2;
+    if ((rand() & 0xFF) < ai->m10_aiParam0) {
         r = rand();
         r %= 10;
         b = r < 3;
@@ -1821,7 +1821,7 @@ void updateBattlingAiMelee(BattlingGear* gear, BattlingAiState* st) {
     if (battlingGearDistance > 0x300) {
         switch (rand() % 10) {
         case 0:
-            if ((rand() & 0xFF) >= st->m14) {
+            if ((rand() & 0xFF) >= st->m14_aiParam1) {
                 enterBattlingAiRetreat(gear, 0);
             }
             break;
@@ -1879,7 +1879,7 @@ void updateBattlingAiApproach(BattlingGear* gear, BattlingAiState* st) {
     if (BL_NEAREST_SHOT_MOVE(gear->mD8_opponent) == 1 && gear->mD8_opponent->m8F4_nearestProjectileDist < 0x500 && st->mF_comLevel != 0) {
         st->mE_boost = 1;
         st->mA_turn = st->m2C_b12 ? 0x400 : -0x400;
-        if (st->mF_comLevel >= 2 && (rand() & 0xFF) < st->m14 && shouldBattlingAiFireEther(gear, 0) != 0 && st->m2C_b12) {
+        if (st->mF_comLevel >= 2 && (rand() & 0xFF) < st->m14_aiParam1 && shouldBattlingAiFireEther(gear, 0) != 0 && st->m2C_b12) {
             if ((rand() & 3) == 0) {
                 pushBattlingGearInput(gear, 4);
             }
@@ -1985,10 +1985,10 @@ void loadBattlingAiPersonality(BattlingGear* gear) {
 
     stats = gear->m1600_def;
     ai = gear->m15FC_ai;
-    ai->m10 = stats->m6_ai[0];
-    ai->m14 = stats->m6_ai[1];
-    ai->m18 = stats->m6_ai[2];
-    ai->m1C = stats->m6_ai[3];
+    ai->m10_aiParam0 = stats->m6_ai[0];
+    ai->m14_aiParam1 = stats->m6_ai[1];
+    ai->m18_aiParam2 = stats->m6_ai[2];
+    ai->m1C_aiParam3 = stats->m6_ai[3];
 }
 
 void initBattlingAi(BattlingGear* gear) {
