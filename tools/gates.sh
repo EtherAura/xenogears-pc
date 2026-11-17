@@ -55,7 +55,9 @@
 #   deb-build-us the build-to-staged-set helper, fixtures and its own real build
 #               (tools/check_deb_build.py)
 #   deb-ubuntu-us the Ubuntu builder's refusals, on fixtures (tools/check_deb_ubuntu.py)
-#               None of the four is an Ubuntu build or installation; they run
+#   deb-container-us the Ubuntu builder image recipe's text and its argv on this
+#               host (tools/check_deb_container.py; no image built or run)
+#               None of the five is an Ubuntu build or installation; they run
 #               with the tests (not under --no-tests).
 #
 # Full outputs go to build/gates/<gate>.txt ($XG_GATES_OUT overrides the
@@ -175,12 +177,13 @@ if [ "$TESTS" = 1 ]; then
         record port-tests 0 "skipped: no configured build in $TEST_BUILD"
     fi
     # The Debian package, US: each check keeps its own folder under build/pc/
-    # (deb-us, deb-assets-us, deb-build-us, deb-ubuntu-us) and needs none of the
-    # others to have run; the order is the pipeline's.
+    # (deb-us, deb-assets-us, deb-build-us, deb-ubuntu-us, deb-container-us) and
+    # needs none of the others to have run; the order is the pipeline's.
     gate deb-package-us "$PY" tools/check_deb_package.py --ver us
     gate deb-assets-us "$PY" tools/check_deb_release_assets.py --ver us
     gate deb-build-us "$PY" tools/check_deb_build.py --ver us
     gate deb-ubuntu-us "$PY" tools/check_deb_ubuntu.py --ver us
+    gate deb-container-us "$PY" tools/check_deb_container.py --ver us
 fi
 
 if [ -f "$TEST_BUILD/CMakeCache.txt" ]; then
