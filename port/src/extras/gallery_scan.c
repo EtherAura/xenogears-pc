@@ -356,8 +356,16 @@ static void addUse(XgGalleryScan* sc, XgMovieUse u, int realOn2) {
     if (on1 < 0 && on2 < 0) {
         return;
     }
-    /* Both: a field disc 2 holds plays disc 2's. */
-    int use2 = on2 >= 0 && (on1 < 0 || realOn2);
+    /* Both discs have it (both hold every field): an op that plays one of the
+     * two movies to within a second of its end is that movie's (field 22's
+     * frames 1-300 are disc 1's 303-frame Elly scene, not disc 2's 2652-frame
+     * compilation, xg-uhht); else a field disc 2 holds plays disc 2's (field
+     * 654's frames 1-270 of stream 6). */
+    int use2 = on2 >= 0;
+    if (on1 >= 0 && on2 >= 0) {
+        int whole1 = sc->movies[on1].frames - u.last <= 15, whole2 = sc->movies[on2].frames - u.last <= 15;
+        use2 = whole1 != whole2 ? whole2 : realOn2;
+    }
     u.disc = use2 ? 2 : 1;
     u.movie = use2 ? on2 : on1;
     for (int i = 0; i < sc->useCount; i++) {

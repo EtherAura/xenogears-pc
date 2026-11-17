@@ -42,6 +42,9 @@ int pcRegionalFieldMovieMusic(int field, int stream);
  *                               (the Japanese track)
  * The extras' movie viewer chooses its own track and sounds; lyrics and the
  * invented language follow these settings. */
+/* The build carries the caption text (the local subtitles.inc: it
+ * transcribes the game's dialogue, so public builds leave it out). */
+int regionalCaptionsAvailable(void);
 int regionalSubtitlesEnabled(void); /* the track, 0-2 */
 void regionalSetSubtitles(int track);
 int regionalSoundCaptions(void);

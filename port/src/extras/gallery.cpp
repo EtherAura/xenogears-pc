@@ -643,8 +643,10 @@ bool labelledCombo(bool bar, const char* id, const char* label, const char* cons
     return changed;
 }
 
-// The choices: the track, then the sound captions.
+// The choices: the track, then the sound captions (none in a build without
+// the caption text: cd/regional.h regionalCaptionsAvailable).
 void subtitleCombo(bool bar) {
+    if (!regionalCaptionsAvailable()) return;
     int track = subtitleTrack(), level = soundLevel();
     if (labelledCombo(bar, bar ? "##subtitlesbar" : "##subtitles", N_("Subtitles"), subtitleNames, 3, &track)) {
         setSubtitleTrack(track);

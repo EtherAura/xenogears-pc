@@ -11,6 +11,17 @@
 cmake_minimum_required(VERSION 3.25)
 project(xenogears_pc C)
 
+# The port's own C is GNU C17, required, on every compiler, not the
+# compiler's default (GNU C23 from GCC 15, GNU C17 in Clang and the NDK): it
+# uses C11 (_Static_assert, _Alignas, _Atomic and <stdatomic.h>), and C17 is
+# C11 with its defects fixed. GNU extensions stay on. Set before any target,
+# so every C target has it; the game C's own -std=gnu89 (XG_GAME_OPTIONS)
+# comes after it on the command line and still wins. #embed (gpu/wide.c) is
+# taken before C23 by GCC and Clang alike. C++ (the menu) keeps cxx_std_17.
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS ON)
+
 # Floating point rounds as written, on every target and CPU: no FMA
 # contraction, also where the baseline has FMA (aarch64) or XG_MARCH enables
 # it. The enhanced rasteriser's CPU tests compare its batched evaluation

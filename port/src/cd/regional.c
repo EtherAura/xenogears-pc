@@ -381,6 +381,7 @@ static const char* cueAt(int which, int disc, int clip, int frame) {
         if (t.cues[i].disc==disc && t.cues[i].clip==clip && frame>=t.cues[i].start && frame<t.cues[i].end) return t.cues[i].text;
     return NULL;
 }
+int regionalCaptionsAvailable(void) { return table(T_US).count>0; }
 const char* regionalSubtitle(void) { return regionalCaptionWith(regionalSubtitlesEnabled(),regionalSoundCaptions()); }
 const char* regionalCaption(int track) { return regionalCaptionWith(track,0); }
 const char* regionalCaptionWith(int track, int sounds) {

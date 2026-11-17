@@ -2030,6 +2030,12 @@ msgid "Independent of audio language. Uses the in-game dialogue font."
 msgstr "音声の言語とは別に選べます。ゲーム内の会話フォントを使います。"
 
 #: port/src/ui/sections.cpp
+msgid ""
+"This build has no caption text: the captions transcribe the game's dialogue, "
+"so public builds leave them out."
+msgstr "このビルドには字幕の文がありません。字幕はゲームのせりふを書き起こしたものなので、配られているビルドには入っていません。"
+
+#: port/src/ui/sections.cpp
 msgid "Japanese Disc 1"
 msgstr "日本語版 1"
 

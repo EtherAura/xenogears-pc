@@ -54,6 +54,20 @@
    in deb.cmake, deb_ubuntu.py configuring with -DXG_MARCH=native,
    x86-64-v3 or -DCMAKE_C_FLAGS=-mtune=...) are each caught for their own
    reason; an explicit empty -DXG_MARCH= is not.
+6. C standard: port/CMakeLists.txt requires GNU C17 for the port's own C
+   (CMAKE_C_STANDARD 17, CMAKE_C_STANDARD_REQUIRED ON, CMAKE_C_EXTENSIONS
+   ON), each set once, before the first target or include, and no port CMake
+   file sets another C standard or -std= (the game C's -std=gnu89 and the
+   targets' c_std_11 minimums aside).
+   REAL configure on this host (not a build, not the Ubuntu compiler): cmake
+   with the configure options deb_ubuntu.py passed in 5, compile commands
+   exported, on the real port/: every C compile command has -std=gnu17, the
+   game C's followed by its own -std=gnu89, hw.c's (C11 atomics) gnu17 alone.
+   Labelled mutations of copies (the pin missing, C11, C23, not required,
+   extensions off, set again, set after the first targets, a target's own
+   C_STANDARD, a c_std_23 minimum, -std=c2x in gpu.cmake) are each caught for their own reason,
+   and those that change the compile commands also by a real configure of a
+   tree with the mutated CMakeLists.txt.
 
 Nothing is installed, launched or uploaded; all output stays in build/.
 """
@@ -186,6 +200,15 @@ MARCH_DEFAULT = re.compile(r'set\(XG_MARCH "([^"]*)" CACHE STRING ')
 MARCH_GUARD = re.compile(r"^if\(XG_MARCH\)\n(?:[ \t]*target_compile_options\(\w+ PRIVATE -march=\$\{XG_MARCH\}\)\n)+"
                          r"[ \t]*endif\(\)\n", re.M)
 NOT_ON_DEB_PATH = ("aarch64-linux-gnu.cmake", "mingw-w64-x86_64.cmake")  # cross toolchain files; no toolchain is passed
+# The port's C dialect: required GNU C17, set before any target (port/CMakeLists.txt).
+C_PIN = ("set(CMAKE_C_STANDARD 17)", "set(CMAKE_C_STANDARD_REQUIRED ON)", "set(CMAKE_C_EXTENSIONS ON)")
+C_PIN_LINE = re.compile(r"set\(CMAKE_C_(STANDARD|STANDARD_REQUIRED|EXTENSIONS)\b")
+C_DIALECT, GAME_DIALECT = "-std=gnu17", "-std=gnu89"
+GAME_OPTIONS = "set(XG_GAME_OPTIONS -std=gnu89 "  # the game C's own dialect, after the port's on its command lines
+C_SETTING = re.compile(r"CMAKE_C_STANDARD|CMAKE_C_EXTENSIONS|\bC_STANDARD\b|\bC_EXTENSIONS\b|\bc_std_\w+|-std=")
+# A target's minimum C standard at or below C17 (the platform layer and GPU tests ask for C11): compatible with the pin.
+C_MINIMUM = re.compile(r"target_compile_features\([\w${}]+ PRIVATE c_std_(90|99|11|17)\)$")
+FIRST_TARGET = re.compile(r"^[ \t]*(add_executable|add_library|add_custom_target|include|function|macro)\(", re.M)
 
 
 def sha256(path: Path) -> str:
@@ -791,9 +814,11 @@ def baseline_problems(args: list[str]) -> dict[str, str]:
     return found
 
 
-def check_baseline(work: Path) -> None:
-    """Baseline amd64 on the .deb path: the real CMake files and deb_ubuntu.py's own configure argv (FIXTURES)."""
+def check_baseline(work: Path) -> list[str] | None:
+    """Baseline amd64 on the .deb path: the real CMake files and deb_ubuntu.py's own configure argv (FIXTURES).
+    Returns the pristine run's configure arguments (None if it was not accepted)."""
     r = Runner(work)
+    pristine = None
     good = cdb.fixture_deb(work, "baseline", cdb.good_files())
     full = make_bin(work, "baseline", good)
     cmake_files = [ROOT / "port/CMakeLists.txt", *sorted((ROOT / "port").rglob("*.cmake"))]
@@ -814,7 +839,7 @@ def check_baseline(work: Path) -> None:
     src, script = source("pristine")
     if r.accepted("baseline: this repository's CMake files, the unchanged deb_ubuntu.py", script, src,
                   fresh(work / "builds/baseline-pristine"), out_folder(work, "baseline-pristine"), bin_dir=full, deb=good):
-        args = logged(full)[1][1]
+        args = pristine = logged(full)[1][1]
         found = baseline_problems(args)
         check(not found and Path(args[args.index("-S") + 1]) == src.resolve() / "port",
               f"baseline amd64: deb_ubuntu.py configures the copied real port/ with no XG_MARCH but empty, no flag, "
@@ -848,14 +873,150 @@ def check_baseline(work: Path) -> None:
         check(set(found) == ({kind} if kind else set()),
               f"FIXTURE baseline mutation {label}: {'caught as ' + kind if kind else 'not flagged'} "
               f"({'; '.join(found.values())[:300] or 'clean'})")
+    return pristine
+
+
+def c_standard_problems(port: Path) -> dict[str, str]:
+    """Faults of a port/ tree's CMake files against the required GNU C17 pin, by kind (empty: none)."""
+    found: dict[str, str] = {}
+    main = cmake_code((port / "CMakeLists.txt").read_text())
+    lines = [line.strip() for line in main.splitlines()]
+    pins = [line for line in lines if C_PIN_LINE.match(line)]
+    if sorted(pins) != sorted(C_PIN):
+        found["pin"] = f"CMakeLists.txt does not set {' '.join(C_PIN)} once each ({pins})"
+    first = FIRST_TARGET.search(main)
+    late = [p for p in C_PIN if p in lines and (first is None or main.index(p) > first.start())]
+    if late:
+        found["order"] = f"set after the first target or include ({first[0].strip() if first else 'none'}): {late}"
+    stray = []
+    for path in [port / "CMakeLists.txt"] + sorted(p for p in port.rglob("*.cmake") if p.name not in NOT_ON_DEB_PATH):
+        for line in cmake_code(path.read_text()).splitlines():
+            line = line.strip()
+            if C_SETTING.search(line) and not line.startswith(GAME_OPTIONS) and not C_MINIMUM.match(line) \
+                    and not (path == port / "CMakeLists.txt" and C_PIN_LINE.match(line)):
+                stray.append(f"{path.relative_to(port)}: {line}")
+    if stray:
+        found["override"] = f"another C standard or -std= setting: {stray}"
+    return found
+
+
+def dialect_problems(build: Path) -> tuple[dict[str, str], str]:
+    """Faults of a real configure's C compile commands against GNU C17 (game C: then gnu89), and a summary."""
+    path = build / "compile_commands.json"
+    if not path.is_file():
+        return {"dialect": f"no {path.name}"}, "none"
+    pairs = [(e["file"], [t for t in (e.get("command") or " ".join(e.get("arguments", []))).split()
+                          if t.startswith("-std=")]) for e in json.loads(path.read_text()) if e["file"].endswith(".c")]
+    port_only = sum(stds == [C_DIALECT] for _, stds in pairs)
+    game = sum(stds == [C_DIALECT, GAME_DIALECT] for _, stds in pairs)
+    bad = sorted({f"{Path(f).name}: {' '.join(s) or 'no -std'}" for f, s in pairs
+                  if s not in ([C_DIALECT], [C_DIALECT, GAME_DIALECT])})
+    hw = [s for f, s in pairs if f.endswith("port/src/system/hw.c")]
+    found = {}
+    if bad or not port_only or not game or not hw or any(s != [C_DIALECT] for s in hw):
+        found["dialect"] = (f"{len(bad)} C compile command(s) not {C_DIALECT} (then {GAME_DIALECT} for game C): "
+                            f"{bad[:4]}; hw.c {hw}; {port_only} port, {game} game")
+    return found, f"{len(pairs)} C compile commands: {port_only} {C_DIALECT}, {game} {C_DIALECT} then {GAME_DIALECT}"
+
+
+def check_c_standard(work: Path, deb_args: list[str] | None) -> None:
+    """The port's C dialect: the pin in the real CMake files, and a real configure's compile commands (REAL)."""
+    cmake_files = [ROOT / "port/CMakeLists.txt", *sorted((ROOT / "port").rglob("*.cmake"))]
+    base = work / "cstd"
+
+    def copied(label: str, edits: tuple) -> Path:
+        """Labelled copies of the real CMake files (static check)."""
+        root = fresh(base / "static" / slug(label))
+        for path in cmake_files:
+            (root / path.relative_to(ROOT)).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, root / path.relative_to(ROOT))
+        for target, old, new in edits:
+            text = (root / target).read_text()
+            check(old is None or text.count(old) == 1, f"FIXTURE C standard mutation {label}: a labelled test change "
+                                                       f"of a copy of {target}")
+            (root / target).write_text(text + new if old is None else text.replace(old, new))
+        return root / "port"
+
+    def shadow(label: str, edits: tuple) -> Path:
+        """A tree for a real configure: this repository by symbolic links, port/CMakeLists.txt a (changed) copy."""
+        root = fresh(base / "real" / slug(label) / "root")
+        (root / "port").mkdir(parents=True)
+        (root / "build/pc").mkdir(parents=True)
+        for path in ROOT.iterdir():
+            if path.name not in ("port", "build"):
+                (root / path.name).symlink_to(path)
+        for path in (ROOT / "port").iterdir():
+            if path.name != "CMakeLists.txt":
+                (root / "port" / path.name).symlink_to(path)
+        (root / "build/pc/sources.cmake").symlink_to(ROOT / "build/pc/sources.cmake")
+        text = (ROOT / "port/CMakeLists.txt").read_text()
+        for _, old, new in edits:
+            text = text + new if old is None else text.replace(old, new)
+        (root / "port/CMakeLists.txt").write_text(text)
+        return root / "port"
+
+    def configure(label: str, port: Path) -> dict[str, str] | None:
+        """Configure port/ for real with deb_ubuntu.py's own options (no -S/-B), compile commands exported."""
+        build = fresh(base / "real" / slug(label) / "build")
+        env = {k: v for k, v in os.environ.items() if k not in REFUSED}
+        result = run(["cmake", "-S", port, "-B", build, *options, "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"], env=env)
+        if not check(result.returncode == 0, f"REAL C standard: {label}: cmake configures "
+                                             f"({(result.stderr.strip().splitlines() or [''])[-1][:200]!r})"):
+            return None
+        found, summary = dialect_problems(build)
+        print(f"      {label}: {summary}")
+        return found
+
+    pristine = c_standard_problems(ROOT / "port")
+    check(not pristine, f"C standard: port/CMakeLists.txt requires GNU C17 before its first target, and no port CMake "
+                        f"file sets another ({pristine or 'clean'})")
+    real = bool(deb_args) and (ROOT / "build/pc/sources.cmake").is_file() and shutil.which("cmake") is not None
+    options = []
+    check(bool(deb_args), "C standard: deb_ubuntu.py's configure options from the baseline run")
+    if deb_args and not real:
+        print("NOTE  no build/pc/sources.cmake or cmake here: the C standard is checked in the CMake files only")
+    elif real:
+        options = [a for i, a in enumerate(deb_args) if a not in ("-S", "-B") and not (i and deb_args[i - 1] in ("-S", "-B"))]
+        found = configure("this repository's port/", ROOT / "port")
+        check(found == {}, f"REAL C standard: configuring this repository's port/ with {options}, every C compile "
+                           f"command is {C_DIALECT}, the game C's then {GAME_DIALECT} ({found or 'clean'}; this host's "
+                           f"compiler, not Ubuntu's)")
+
+    cmake = "port/CMakeLists.txt"
+    block = "".join(p + "\n" for p in C_PIN)
+    standard, required, extensions = C_PIN
+    for label, edits, kind, live in (
+            ("C standard pin missing", ((cmake, standard + "\n", ""),), "pin", True),
+            ("C11 pinned", ((cmake, standard, standard.replace("17", "11")),), "pin", True),
+            ("C23 pinned", ((cmake, standard, standard.replace("17", "23")),), "pin", False),
+            ("C17 not required", ((cmake, required, required.replace(" ON)", " OFF)")),), "pin", False),
+            ("GNU extensions off", ((cmake, extensions, extensions.replace(" ON)", " OFF)")),), "pin", True),
+            ("C standard set again at the end", ((cmake, None, "set(CMAKE_C_STANDARD 23)\n"),), "pin", False),
+            ("pin after the first targets", ((cmake, block, ""), (cmake, "add_library(platform OBJECT",
+                                                                  block + "add_library(platform OBJECT")), "order", True),
+            ("platform's own C_STANDARD 23", ((cmake, None, "set_target_properties(platform PROPERTIES C_STANDARD 23)\n"),),
+             "override", True),
+            ("platform's minimum raised to c_std_23", ((cmake, "target_compile_features(platform PRIVATE c_std_11)",
+                                                        "target_compile_features(platform PRIVATE c_std_23)"),),
+             "override", True),
+            ("-std=c2x in gpu.cmake", (("port/src/gpu/gpu.cmake", None, "add_compile_options(-std=c2x)\n"),),
+             "override", False)):
+        found = c_standard_problems(copied(label, edits))
+        check(set(found) == {kind}, f"FIXTURE C standard mutation {label}: caught as {kind} "
+                                    f"({'; '.join(found.values())[:300] or 'clean'})")
+        if live and options:
+            found = configure(label, shadow(label, edits))
+            check(found is not None and set(found) == {"dialect"},
+                  f"REAL C standard mutation {label}: a real configure's compile commands show it "
+                  f"({'; '.join((found or {}).values())[:300] or 'clean'})")
 
 
 def report() -> int:
     if cdb.failures:
         print(f"check_deb_ubuntu: {len(cdb.failures)} check(s) failed")
         return 1
-    print("check_deb_ubuntu: all checks pass (the real CLI's refusal of this host and FIXTURE runs only: "
-          "no Ubuntu build, Depends, installation or start checked)")
+    print("check_deb_ubuntu: all checks pass (the real CLI's refusal of this host, FIXTURE runs and this host's "
+          "real CMake configure of the C dialect only: no Ubuntu build, Depends, installation or start checked)")
     return 0
 
 
@@ -872,7 +1033,7 @@ def main() -> int:
     check_bytecode_control(work)
     check_real_host(work)
     check_fixtures(work)
-    check_baseline(work)
+    check_c_standard(work, check_baseline(work))
     return report()
 
 

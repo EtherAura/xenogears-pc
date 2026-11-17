@@ -1463,15 +1463,20 @@ void audioSection() {
         hint("Applies to the next cutscene. Keeps this version's video and text.");
         overrideNote("japanese_cutscene_audio");
     }
+    bool captionText = regionalCaptionsAvailable() != 0;
     if (row("Subtitles", "cutscene_subtitles")) {
         const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation"};
         int captions = regionalSubtitlesEnabled();
+        ImGui::BeginDisabled(!captionText);
         int captionChoice = choice("subtitles", subtitleTracks, 3, captions);
-        if (captionChoice != captions) regionalSetSubtitles(captionChoice);
-        hint("Independent of audio language. Uses the in-game dialogue font.");
+        ImGui::EndDisabled();
+        if (captionText && captionChoice != captions) regionalSetSubtitles(captionChoice);
+        if (captionText) hint("Independent of audio language. Uses the in-game dialogue font.");
+        else hint("This build has no caption text: the captions transcribe the game's dialogue, so public builds "
+                  "leave them out.");
         overrideNote("cutscene_subtitles");
     }
-    if (row("Sound captions", "cutscene_sound_captions")) {
+    if (captionText && row("Sound captions", "cutscene_sound_captions")) {
         const char* levels[] = {"Off", "Voices", "All sounds"};
         int level = regionalSoundCaptions();
         int levelChoice = choice("soundcaptions", levels, 3, level);
@@ -1480,7 +1485,7 @@ void audioSection() {
              "all sounds such as [explosion] too.");
         overrideNote("cutscene_sound_captions");
     }
-    if (row("Song lyrics", "cutscene_lyrics")) {
+    if (captionText && row("Song lyrics", "cutscene_lyrics")) {
         const char* offOn[] = {"Off", "On"};
         int lyrics = regionalLyrics();
         int lyricsChoice = choice("lyrics", offOn, 2, lyrics);
@@ -1488,7 +1493,7 @@ void audioSection() {
         hint("With subtitles on, shows the words of the songs in the movies.");
         overrideNote("cutscene_lyrics");
     }
-    if (row("Invented language", "cutscene_invented_language")) {
+    if (captionText && row("Invented language", "cutscene_invented_language")) {
         const char* spellings[] = {"Script spelling", "As spoken"};
         int spoken = regionalInventedSpoken();
         int spokenChoice = choice("invented", spellings, 2, spoken);
