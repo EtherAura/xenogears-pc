@@ -454,30 +454,150 @@ static const u16* pcDialogGlyph(u16 type, u16 id) {
     return (u16*)(dialogFontVarPtr2 + id * 22 + dialogFontVar4 + (type - dialogFontVar0) * 0x1600);
 }
 
-/* A button symbol the text prints as a plain character (the tutorials' "x30", "press O")
- * shows the button the player presses for it, as the 0x0F escape's does (pcPadDialogSlot,
- * through the game's own button configuration dpadButtonMapping): the characters of the
- * game's button strings (bank 0xC4, slots 0-7: circle, cross, triangle, square, L1, L2, R1,
- * R2) are recognised and replaced by the string of the button that stands for it. */
+/* A button symbol a text types as a plain character (the tutorials' "the X button", the Gear
+ * battle's fuel line "triangle 10 square 20 cross 30") names a button of the text's own
+ * release: the US text names the US buttons (its translators swapped the JP symbols as
+ * initPadSystem swaps the buttons: JP field 221 "circle is ATTACK", US "cross is ATTACK"). It
+ * shows the button the player presses for that one (pcPadDialogSlot: the JP/US scheme, the
+ * bindings, the controller's own symbols), not through dpadButtonMapping, which the 0x0F 0x0F
+ * escape's logical buttons go through. The symbols are the first characters of the game's
+ * face-button strings (bank 0xC4, slots 0-3: circle, cross, triangle, square, each "<symbol>
+ * Button"; the texts type the shoulders as letters, "R1 button", and JP's L1/R1 strings start
+ * with the letters L and R). A symbol is a button in a text that says button (the word after
+ * the symbol in that string, or the US text's spelled "button") and not beside the same
+ * symbol: on the four retail discs every other one is a mark (the Lambs list's square bullets,
+ * a stats list's circles, rows of circles, JP's "Num O" and a times sign). Sub-strings (the
+ * escapes' names; the 0x0F 0x0F string, already the player's button) print as they come. */
+#define PC_BUTTON_TEXTS 8
+static struct {
+    const DialogWindow18* window;
+    const u8* text;
+} pcButtonText[PC_BUTTON_TEXTS]; /* the text each window prints (pcDialogButtonsBegin) */
+static u32 pcButtonTextNext;
+
 static void pcDialogDecode(const u8* s, u16* c, s32* id) {
     if (s[0] < dialogFontVar0) { *c = 0; *id = s[0]; } else { *c = s[0]; *id = s[1]; }
 }
-static void pcDialogButtonChar(u16* c, s32* id) {
+
+/* A window starts printing `text` (the queue's next text, renderString's). */
+static void pcDialogButtonsBegin(const DialogWindow18* w, const u8* text) {
+    s32 i;
+
+    for (i = 0; i < PC_BUTTON_TEXTS && pcButtonText[i].window != w; i++) {
+    }
+    if (i == PC_BUTTON_TEXTS) i = pcButtonTextNext++ % PC_BUTTON_TEXTS;
+    pcButtonText[i].window = w;
+    pcButtonText[i].text = text;
+}
+
+/* The bytes updateDialogTextImage takes for the code at s, 0 at the end: a control code, an
+ * escape (its sub-string resumes after the argument) or, *printed, a character. */
+static s32 pcDialogStep(const u8* s, s32* printed) {
+    u16 units;
+
+    *printed = 0;
+    if (s[0] == 0) return 0;
+    if (s[0] == 0xF) return s[1] == 3 ? 4 : s[1] == 4 || s[1] == 0xB ? 2 : 3;
+    if (s[0] <= 3) return 1;
+    *printed = 1;
+    if (s[0] < dialogFontVar0) return 1;
+    return s[0] == 0xFF && pcGameTextGlyph(s, &units) != NULL ? 3 : 2;
+}
+
+/* The `n` bytes at w start the text at s. */
+static s32 pcDialogStarts(const u8* s, const u8* w, s32 n) {
+    s32 i;
+
+    for (i = 0; i < n && s[i] == w[i]; i++) {
+    }
+    return n > 0 && i == n;
+}
+
+/* The word for button starts the text at s: the face-button strings' after their symbol
+ * (US: the font's pieces of "Button"; JP: "botan"), the US text's spelled "button". */
+static s32 pcDialogButtonWord(const u8* s, u8* bank) {
+#if !VERSION_JP
+    static const u8 spelled[2][6] = {{0x3E, 0x51, 0x50, 0x50, 0x4B, 0x4A}, {0x21, 0x51, 0x50, 0x50, 0x4B, 0x4A}};
+#endif
+    const u8* w = getDialogParamPointer(bank, 0);
+    s32 n, k, printed;
+
+#if !VERSION_JP
+    if (pcDialogStarts(s, spelled[0], 6) || pcDialogStarts(s, spelled[1], 6)) return 1;
+#endif
+    w += pcDialogStep(w, &printed);
+    for (n = 0; n < 32 && (k = pcDialogStep(w + n, &printed)) != 0 && printed; n += k) {
+    }
+    return pcDialogStarts(s, w, n);
+}
+
+/* Read the text from `from`: 1 when it reaches the symbol (c, id) at `at`, with *named (the
+ * text says button) and *beside (the same symbol is next to it). */
+static s32 pcDialogScanButtons(const u8* from, const u8* at, u16 c, s32 id, u8* bank, s32* named,
+                               s32* beside) {
+    const u8* s = from;
+    s32 n, k, printed, after, steps, reached = 0, same = 0;
+    u16 sc;
+    s32 sid;
+
+    *named = *beside = 0;
+    for (steps = 0; steps < 0x4000 && (n = pcDialogStep(s, &printed)) != 0; steps++, s += n) {
+        if (s == at) {
+            reached = 1;
+            *beside |= same;
+            k = pcDialogStep(s + n, &after);
+            if (k != 0 && after) {
+                pcDialogDecode(s + n, &sc, &sid);
+                *beside |= sc == c && sid == id;
+            }
+        }
+        if (!printed) {
+            same = 0;
+            continue;
+        }
+        pcDialogDecode(s, &sc, &sid);
+        same = sc == c && sid == id;
+        *named |= pcDialogButtonWord(s, bank);
+        if (*named && reached) break;
+    }
+    return reached;
+}
+
+/* The symbol (c, id) at `at` in the window's text names a button (see above). */
+static s32 pcDialogNamesButton(const DialogWindow18* p, const u8* at, u16 c, s32 id, u8* bank) {
+    const u8* text = NULL;
+    s32 i, named, beside;
+
+    for (i = 0; i < PC_BUTTON_TEXTS; i++) {
+        if (pcButtonText[i].window == p) text = pcButtonText[i].text;
+    }
+    /* No record that reaches it (another text; a state saved before this build): the rest of the text. */
+    if (text == NULL || text > at || !pcDialogScanButtons(text, at, c, id, bank, &named, &beside)) {
+        pcDialogScanButtons(at, at, c, id, bank, &named, &beside);
+    }
+    return named && !beside;
+}
+
+static void pcDialogButtonChar(DialogWindow18* p, const u8* at, u16* c, s32* id) {
     u8* bank;
     u16 sc;
     s32 sid, slot, to;
 
-    if (printDialogTextVar == NULL || (bank = printDialogTextVar[0xC4 / 4]) == NULL || *c == 0xFF) return;
-    for (slot = 0; slot < 8; slot++) {
+    if ((p->m10_flags & 0x80) || printDialogTextVar == NULL || (bank = printDialogTextVar[0xC4 / 4]) == NULL ||
+        *c == 0xFF) {
+        return;
+    }
+    for (slot = 0; slot < 4; slot++) {
         pcDialogDecode(getDialogParamPointer(bank, slot), &sc, &sid);
         if (sc != *c || sid != *id) continue;
-        to = pcPadDialogSlot(dpadButtonMapping[slot]);
-        if (to == slot) return;
-        if (to < 0) {
-            const unsigned char* t = pcPadDialogText(dpadButtonMapping[slot]);
-            *c = t[0]; *id = t[1];
-        } else {
+        to = pcPadDialogSlot(slot);
+        if (to == slot || !pcDialogNamesButton(p, at, *c, *id, bank)) return;
+        if (to >= 0 && to < 4) {
             pcDialogDecode(getDialogParamPointer(bank, to), c, id);
+        } else {
+            const unsigned char* t = pcPadDialogText(slot);
+            *c = t[0];
+            *id = t[1];
         }
         return;
     }
@@ -705,7 +825,7 @@ void updateDialogTextImage(DialogWindow18* p) {
                     len = 3;
                 }
             }
-            pcDialogButtonChar(&c, &id);
+            pcDialogButtonChar(p, s, &c, &id);
             if (pcGameTextWrapOn && pcGameTextWrap(p, &p->m1C_currentStringToPrint, &p->m0_cursorX, p->mA_width1)) {
                 return;
             }
@@ -881,6 +1001,7 @@ void updateAndRenderTextForDialogWindow(DialogWindow18* w, void* ot, s32 buf) {
         if (pcObserveText) pcObserveText(w);
         pcGameplayDialogueText(w, w->m1C_currentStringToPrint, dialogFontVar0); /* timed or not */
         pcGameTextBegin(w, w->m1C_currentStringToPrint);
+        pcDialogButtonsBegin(w, w->m1C_currentStringToPrint);
         w->m8C_queue = w->m8C_queue->m0_pNext;
         freeHeap(q);
         w->m82_queueCount--;
@@ -1018,6 +1139,7 @@ s32 renderString(u8* text, u16* image, s16 width, s32 odd) {
     w->m2C_inRamDialogTextImage = image;
     pcGlyphClearRAM(image, w->m12_widthPadded * 13 * sizeof(u16), 1u << (odd & 1));
     pcGameTextBegin(w, text);
+    pcDialogButtonsBegin(w, text);
     w->m10_flags = 0;
     w->m2_cursorLine = 0;
     w->m0_cursorX = 0;
