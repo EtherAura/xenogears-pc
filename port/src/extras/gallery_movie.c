@@ -21,6 +21,7 @@
 #include "gallery.h"
 
 #include "cd/cd.h"
+#include "cd/regional.h"
 #include "common.h"
 #include "main/filesystem.h"
 #include "main/sound.h"
@@ -67,6 +68,7 @@ struct XgMovie {
     int frameX, frameY;
     int width, height;
     int sinceFrame; /* vertical blanks since the last frame came */
+    const char* caption[2]; /* at `frame`: the US dialogue's, the Japanese translation's */
     int audible;
     int recording;
     int16_t* rec;
@@ -221,6 +223,7 @@ int xgMovieStart(XgMovie* m, int streamNo, int offset, int first, int last, int 
     m->frame = 0;
     m->playing = 0;
     m->sinceFrame = 0;
+    m->caption[0] = m->caption[1] = NULL;
     m->width = width > 0 && width <= FRAME_W ? width : FRAME_W;
     m->height = height > 0 && height <= FRAME_H ? height : 224;
     /* As the movie mode sets it up (moviePlaybackLoop): whole slices (the
@@ -248,6 +251,7 @@ void xgMovieStop(XgMovie* m) {
         leave(m);
     }
     m->playing = 0;
+    m->caption[0] = m->caption[1] = NULL;
 }
 
 int xgMoviePlaying(const XgMovie* m) {
@@ -289,6 +293,10 @@ void xgMovieRun(XgMovie* m, int vsyncs, int audible) {
             m->playing = 0;
         }
     }
+    /* The player told this world's regional state of its movie and frame
+     * (regionalMovieBegin, regionalMovieFrame), as it tells the game's. */
+    m->caption[0] = regionalCaption(1);
+    m->caption[1] = regionalCaption(2);
     hwWorldSetSink(NULL, NULL);
     leave(m);
 }
@@ -310,6 +318,10 @@ int xgMovieFrame(XgMovie* m, uint32_t* rgba, int* w, int* h) {
     *w = m->width;
     *h = m->height;
     return m->frame;
+}
+
+const char* xgMovieCaption(const XgMovie* m, int track) {
+    return m != NULL && track >= 1 && track <= 2 ? m->caption[track - 1] : NULL;
 }
 
 void xgMovieRecord(XgMovie* m, int on) {

@@ -74,6 +74,7 @@ struct State {
     unsigned frames;
     uint32_t textBody[2], textOutline[2];
     ImFont* optionFont = nullptr;
+    ImFont* dialogueFont = nullptr; // the game's font in its own colours (caption)
 };
 
 State st;
@@ -289,6 +290,7 @@ bool init() {
             snprintf(cfg.Name, sizeof(cfg.Name), "Xenogears dialogue%s", palette ? " selected" : "");
             ImFont* font = io.Fonts->AddFont(&cfg);
             if (palette) st.optionFont = font;
+            else st.dialogueFont = font;
             // What the game's font lacks (characters in file paths) from ImGui's own.
             ImFontConfig merge;
             merge.MergeMode = true;
@@ -313,6 +315,29 @@ bool init() {
 
 bool native() {
     return st.native;
+}
+
+bool caption(ImDrawList* dl, const char* text, ImVec2 min, ImVec2 max) {
+    float w = max.x - min.x, h = max.y - min.y;
+    if (!st.native || st.dialogueFont == nullptr || text == nullptr || text[0] == '\0' || w < 16 || h < 24) {
+        return false;
+    }
+    // A whole multiple of the game's 14-pixel line, from the picture's size
+    // (320 x 224 game pixels), smaller while the wrapped text would not fit.
+    float u = std::max(1.0f, floorf(std::min(w / 320, h / 224)));
+    float width;
+    ImVec2 size;
+    while (true) {
+        width = std::min(288 * u, w - 8 * u);
+        size = st.dialogueFont->CalcTextSizeA(14 * u, FLT_MAX, width, text);
+        if (size.y + 16 * u <= h || u <= 1) break;
+        --u;
+    }
+    ImVec2 at(floorf(min.x + (w - size.x) * 0.5f), floorf(max.y - size.y - 8 * u));
+    dl->PushClipRect(min, max, true);
+    dl->AddText(st.dialogueFont, 14 * u, at, IM_COL32_WHITE, text, nullptr, width);
+    dl->PopClipRect();
+    return true;
 }
 
 const char* buttonGlyph(int glyph) {

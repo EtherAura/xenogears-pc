@@ -2166,23 +2166,7 @@ extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture
         io.DisplayFramebufferScale = ImVec2(1, 1);
         ImGui::NewFrame();
         ImDrawList* overlay=ImGui::GetForegroundDrawList();
-        if (text) {
-            float u = std::max(1.0f, floorf(std::min(visibleWidth/320, visibleHeight/224)));
-            ImFont* font = io.FontDefault != nullptr ? io.FontDefault : io.Fonts->Fonts[0];
-            float width;
-            ImVec2 size;
-            do {
-                width=std::min(288*u, visibleWidth-8*u);
-                size=font->CalcTextSizeA(14*u, FLT_MAX, width, text);
-                if (size.y+16*u<=visibleHeight || u<=1) break;
-                --u;
-            } while (true);
-            ImVec2 at(floorf(visibleMin.x+(visibleWidth-size.x)*0.5f),
-                      floorf(visibleMax.y-size.y-8*u));
-            overlay->PushClipRect(visibleMin,visibleMax,true);
-            overlay->AddText(font,14*u,at,IM_COL32_WHITE,text,nullptr,width);
-            overlay->PopClipRect();
-        }
+        if (text) skin::caption(overlay, text, visibleMin, visibleMax);
         if (pad) touchpadDraw(overlay, float(w), float(h));
         ImGui::Render();
     } else if (!st.rendered || !st.vkReady) return;

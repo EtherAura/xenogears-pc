@@ -59,6 +59,9 @@
 #               host (tools/check_deb_container.py; no image built or run)
 #               None of the five is an Ubuntu build or installation; they run
 #               with the tests (not under --no-tests).
+#   deb-container-run-us the builder image's launcher, its refusals and argv
+#               against a fixture runtime (tools/check_deb_container_run.py;
+#               no docker, image or container), with the tests
 #
 # Full outputs go to build/gates/<gate>.txt ($XG_GATES_OUT overrides the
 # directory, so parallel agents keep their own). The exit status is the number of
@@ -184,6 +187,7 @@ if [ "$TESTS" = 1 ]; then
     gate deb-build-us "$PY" tools/check_deb_build.py --ver us
     gate deb-ubuntu-us "$PY" tools/check_deb_ubuntu.py --ver us
     gate deb-container-us "$PY" tools/check_deb_container.py --ver us
+    gate deb-container-run-us "$PY" tools/check_deb_container_run.py --ver us
 fi
 
 if [ -f "$TEST_BUILD/CMakeCache.txt" ]; then

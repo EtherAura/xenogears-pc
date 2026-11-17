@@ -27,7 +27,13 @@ int pcRegionalFieldMovieSound(int field, int stream);
 /* Before the movie op: the JP scene's silent score loads its WDS samples
  * and reverb through the normal field music loader; -1 preserves the cue. */
 int pcRegionalFieldMovieMusic(int field, int stream);
+/* The caption of the setting's track (regionalSubtitlesEnabled) at the
+ * current movie's frame; NULL when there is none. */
 const char* regionalSubtitle(void);
+/* The same for a track chosen by the caller (1: US dialogue, 2: Japanese
+ * translation; other values: none), e.g. the extras' movie viewer, whose
+ * movie is its CD world's (cd.h cdWorldSwap carries this file's state). */
+const char* regionalCaption(int track);
 int regionalSubtitlesEnabled(void);
 /* 0: off, 1: US dialogue, 2: English translation of Japanese dialogue. */
 void regionalSetSubtitles(int mode);

@@ -18,6 +18,7 @@
 //   wait                   finish the scan now (blocks)
 //   movie <n>              select movie n of the list (and play it)
 //   pause, stop, seek <frame>
+//   subtitles <0|1|2>      the movies' captions: off, US dialogue, Japanese translation
 //   frame                  export the frame shown (PNG)
 //   wav                    export the movie's audio so far (WAV)
 //   picture <n>            select picture n of the list
@@ -54,6 +55,7 @@
 
 extern "C" {
 #include "cd/cd.h"
+#include "cd/regional.h"
 #include "disc.h"
 #include "files.h"
 #include "gallery.h"
@@ -109,6 +111,9 @@ struct State {
     int frame = 0, frameW = 0, frameH = 0;
     int seekTo = 0;
     std::vector<uint32_t> rgba;
+    // The movies' captions (cd/regional.h): 0 off, 1 US dialogue, 2 Japanese
+    // translation; -1: not chosen here yet (the settings' cutscene_subtitles).
+    int subtitles = -1;
     // pictures
     std::vector<Pic> pics;
     int picSel = -1, picCursor = -1;
@@ -579,6 +584,51 @@ std::string clock(int frames) {
     return buf;
 }
 
+// The movies' subtitles, as the game's cutscenes show them (F1, Audio,
+// Subtitles): the settings' track until one is chosen here, then that one for
+// this session (as a viewer's Stock / Enhanced), never written to settings.ini.
+const char* const subtitleNames[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation")};
+
+int subtitleTrack() {
+    if (S->subtitles < 0) S->subtitles = regionalSubtitlesEnabled();
+    return S->subtitles;
+}
+
+void setSubtitleTrack(int track) {
+    S->subtitles = track;
+    logEvent("gallery: subtitles %s", subtitleNames[track]);
+}
+
+// The choice: a combo (its label before it), `bar`: in the focused view's bar.
+void subtitleCombo(bool bar) {
+    const char* label = tr("Subtitles");
+    const char* names[3] = {tr(subtitleNames[0]), tr(subtitleNames[1]), tr(subtitleNames[2])};
+    float widest = 0;
+    for (const char* n : names) widest = fmaxf(widest, ImGui::CalcTextSize(n).x);
+    float comboW = widest + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2;
+    float need = ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x + comboW;
+    if (bar) {
+        focusSpace(need);
+    } else if (ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x + need <=
+               ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x) {
+        ImGui::SameLine(); // after the buttons when it fits, else on a line of its own
+    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    ImGui::SameLine();
+    int track = subtitleTrack();
+    ImGui::SetNextItemWidth(comboW);
+    if (ImGui::Combo(bar ? "##subtitlesbar" : "##subtitles", &track, names, 3) && track != S->subtitles) {
+        setSubtitleTrack(track);
+    }
+}
+
+// The caption at the frame shown (none when the picture is not the player's).
+const char* movieCaption() {
+    if (S->player == nullptr || S->playing < 0 || S->playing != S->movieSel || S->frame <= 0) return nullptr;
+    return xgMovieCaption(S->player, subtitleTrack());
+}
+
 void moviePane(ImVec2 min, ImVec2 max) {
     char title[96];
     snprintf(title, sizeof(title), "%s", tr("Movies"));
@@ -637,6 +687,7 @@ void moviePane(ImVec2 min, ImVec2 max) {
         }
         // The seek bar: a drag (or a click) plays from the frame let go at.
         if (ImGui::Button(tr("Bookmark"))) bookmarkSelection();
+        subtitleCombo(false);
         ImGui::SetNextItemWidth(-1);
         int f = frame;
         char shown[48];
@@ -664,6 +715,7 @@ void moviePane(ImVec2 min, ImVec2 max) {
         if (here && S->frame > 0 && S->shown == 0) {
             ImVec2 at = ImGui::GetCursorScreenPos();
             drawPicture(S->frameW, S->frameH, area);
+            skin::caption(ImGui::GetWindowDrawList(), movieCaption(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
             ImGui::SetCursorScreenPos(ImVec2(at.x, at.y + area.y));
         } else {
             ImGui::Dummy(area);
@@ -1197,8 +1249,10 @@ void setFocused(bool on) {
 
 // A picture in `size` (the cursor's place) at the focused view's zoom: fitted
 // (whole multiples when it can) until zoomed; the wheel and the triggers zoom,
-// a drag pans, a double click fits again.
-void zoomedImage(ImTextureRef tex, ImVec2 uv1, float w, float h, ImVec2 size) {
+// a drag pans, a double click fits again. shown: the part of the picture seen
+// (screen pixels; empty when none).
+void zoomedImage(ImTextureRef tex, ImVec2 uv1, float w, float h, ImVec2 size, ImRect* shown = nullptr) {
+    if (shown != nullptr) *shown = ImRect();
     if (w <= 0 || h <= 0 || size.x < 1 || size.y < 1) return;
     ImVec2 at = ImGui::GetCursorScreenPos();
     ImGui::InvisibleButton("##picture", size);
@@ -1223,6 +1277,10 @@ void zoomedImage(ImTextureRef tex, ImVec2 uv1, float w, float h, ImVec2 size) {
     dl->PushClipRect(at, ImVec2(at.x + size.x, at.y + size.y), true);
     dl->AddImage(tex, p0, ImVec2(p0.x + dim.x, p0.y + dim.y), ImVec2(0, 0), uv1);
     dl->PopClipRect();
+    if (shown != nullptr) {
+        *shown = ImRect(p0, ImVec2(p0.x + dim.x, p0.y + dim.y));
+        shown->ClipWithFull(ImRect(at, ImVec2(at.x + size.x, at.y + size.y)));
+    }
 }
 
 // The bar's zoom buttons for a picture (1:1: one of its pixels per window pixel).
@@ -1261,8 +1319,10 @@ void focusedMovie(const FocusLayout& f) {
                 S->shown = 0;
             }
             resolveZoom((float)S->frameW, (float)S->frameH, avail);
+            ImRect shown;
             zoomedImage(texture()->GetTexRef(), ImVec2((float)S->frameW / TEX_W, (float)S->frameH / TEX_H),
-                        (float)S->frameW, (float)S->frameH, avail);
+                        (float)S->frameW, (float)S->frameH, avail, &shown);
+            skin::caption(ImGui::GetWindowDrawList(), movieCaption(), shown.Min, shown.Max);
         } else ImGui::InvisibleButton("##picture", avail);
         char title[96];
         snprintf(title, sizeof(title), tr("Movie %s, disc %d"), movieName(i).c_str(), m->disc);
@@ -1283,6 +1343,7 @@ void focusedMovie(const FocusLayout& f) {
     if (focusButton("-10s")) playMovie(i, frame - 150 > first ? frame - 150 : first);
     if (focusButton("+10s")) playMovie(i, frame + 150 < last ? frame + 150 : last);
     focusText("%s / %s", clock(frame).c_str(), clock(m->frames).c_str());
+    subtitleCombo(true);
     pictureZoom();
     if (focusButton("PNG")) exportFrame();
     if (focusButton("WAV")) exportAudio();
@@ -1690,6 +1751,11 @@ bool command(const char* cmd, const char* arg) {
     }
     if (strcmp(cmd, "stop") == 0) {
         stopMovie();
+        return true;
+    }
+    if (!strcmp(cmd, "subtitles")) {
+        if (strcmp(arg, "0") && strcmp(arg, "1") && strcmp(arg, "2")) return false;
+        setSubtitleTrack(atoi(arg));
         return true;
     }
     if (strcmp(cmd, "seek") == 0 && S->movieSel >= 0) {

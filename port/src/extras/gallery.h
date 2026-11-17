@@ -65,6 +65,10 @@ void xgMovieAudioStop(void);
 /* The newest whole frame: its number (0: none yet), and its pixels as RGBA
  * (rgba: room for 320 x 240) with its size. */
 int xgMovieFrame(XgMovie* m, uint32_t* rgba, int* w, int* h);
+/* The cutscene caption at that frame (cd/regional.h regionalCaption), for
+ * track 1 (US dialogue) or 2 (Japanese translation); NULL: none, or a build
+ * without the captions. */
+const char* xgMovieCaption(const XgMovie* m, int track);
 
 /* The audio of the last xgMovieRun calls is also kept (for WAV export) when
  * recording: on starts empty, off stops; the frames kept (44.1 kHz stereo). */

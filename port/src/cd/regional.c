@@ -338,9 +338,9 @@ static const Caption* captionTrack(int japanese, size_t* count) {
 #else
 static const Caption* captionTrack(int japanese, size_t* count) { (void)japanese; *count=0; return NULL; }
 #endif
-const char* regionalSubtitle(void) {
-    int mode=regionalSubtitlesEnabled();
-    if (!movie.active || !mode) return NULL;
+const char* regionalSubtitle(void) { return regionalCaption(regionalSubtitlesEnabled()); }
+const char* regionalCaption(int mode) {
+    if (!movie.active || mode<1 || mode>2) return NULL;
     size_t count;
     const Caption* track=captionTrack(mode==2,&count);
     int clip=movie.clip, frame=movie.frame;
