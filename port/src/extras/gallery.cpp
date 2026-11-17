@@ -18,7 +18,8 @@
 //   wait                   finish the scan now (blocks)
 //   movie <n>              select movie n of the list (and play it)
 //   pause, stop, seek <frame>
-//   subtitles <0-4>        the movies' captions: off, US dialogue, Japanese translation, the two with sounds
+//   subtitles <0|1|2>      the movies' captions: off, US dialogue, Japanese translation
+//   sounds <0|1|2>         their sound captions: off, voices, all sounds
 //   caption                the caption drawn, its frame and the player's movie on stderr
 //   frame                  export the frame shown (PNG)
 //   wav                    export the movie's audio so far (WAV)
@@ -115,6 +116,7 @@ struct State {
     // The movies' captions (cd/regional.h): 0 off, 1 US dialogue, 2 Japanese
     // translation; -1: not chosen here yet (the settings' cutscene_subtitles).
     int subtitles = -1;
+    int sounds = -1; // the sound captions (0 off, 1 voices, 2 all); -1: the settings' (cutscene_sound_captions)
     // pictures
     std::vector<Pic> pics;
     int picSel = -1, picCursor = -1;
@@ -586,14 +588,21 @@ std::string clock(int frames) {
 }
 
 // The movies' subtitles, as the game's cutscenes show them (F1, Audio,
-// Subtitles): the settings' track until one is chosen here, then that one for
-// this session (as a viewer's Stock / Enhanced), never written to settings.ini.
-const char* const subtitleNames[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation"),
-                                     N_("US dialogue + sounds"), N_("Japanese translation + sounds")};
+// Subtitles and Sound captions): the settings' track and sound level until
+// one is chosen here, then that one for this session (as a viewer's Stock /
+// Enhanced), never written to settings.ini. Song lyrics and the invented
+// language follow the settings.
+const char* const subtitleNames[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation")};
+const char* const soundNames[] = {N_("Off"), N_("Voices"), N_("All sounds")};
 
 int subtitleTrack() {
     if (S->subtitles < 0) S->subtitles = regionalSubtitlesEnabled();
     return S->subtitles;
+}
+
+int soundLevel() {
+    if (S->sounds < 0) S->sounds = regionalSoundCaptions();
+    return S->sounds;
 }
 
 void setSubtitleTrack(int track) {
@@ -601,13 +610,21 @@ void setSubtitleTrack(int track) {
     logEvent("gallery: subtitles %s", subtitleNames[track]);
 }
 
-// The choice: a combo (its label before it), `bar`: in the focused view's bar.
-void subtitleCombo(bool bar) {
-    const char* label = tr("Subtitles");
-    const char* names[5];
-    for (int i = 0; i < 5; i++) names[i] = tr(subtitleNames[i]);
+void setSoundLevel(int level) {
+    S->sounds = level;
+    logEvent("gallery: sound captions %s", soundNames[level]);
+}
+
+// One labelled combo after the previous item when it fits (`bar`: in the
+// focused view's bar, which flows its items itself). True when changed.
+bool labelledCombo(bool bar, const char* id, const char* label, const char* const* english, int count, int* value) {
+    label = tr(label);
+    const char* names[3];
     float widest = 0;
-    for (const char* n : names) widest = fmaxf(widest, ImGui::CalcTextSize(n).x);
+    for (int i = 0; i < count; i++) {
+        names[i] = tr(english[i]);
+        widest = fmaxf(widest, ImGui::CalcTextSize(names[i]).x);
+    }
     float comboW = widest + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2;
     float need = ImGui::CalcTextSize(label).x + ImGui::GetStyle().ItemSpacing.x + comboW;
     if (bar) {
@@ -619,17 +636,28 @@ void subtitleCombo(bool bar) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(label);
     ImGui::SameLine();
-    int track = subtitleTrack();
+    int chosen = *value;
     ImGui::SetNextItemWidth(comboW);
-    if (ImGui::Combo(bar ? "##subtitlesbar" : "##subtitles", &track, names, 5) && track != S->subtitles) {
+    bool changed = ImGui::Combo(id, &chosen, names, count) && chosen != *value;
+    if (changed) *value = chosen;
+    return changed;
+}
+
+// The choices: the track, then the sound captions.
+void subtitleCombo(bool bar) {
+    int track = subtitleTrack(), level = soundLevel();
+    if (labelledCombo(bar, bar ? "##subtitlesbar" : "##subtitles", N_("Subtitles"), subtitleNames, 3, &track)) {
         setSubtitleTrack(track);
+    }
+    if (labelledCombo(bar, bar ? "##soundsbar" : "##sounds", N_("Sound captions"), soundNames, 3, &level)) {
+        setSoundLevel(level);
     }
 }
 
 // The caption at the frame shown (none when the picture is not the player's).
 const char* movieCaption() {
     if (S->player == nullptr || S->playing < 0 || S->playing != S->movieSel || S->frame <= 0) return nullptr;
-    return xgMovieCaption(S->player, subtitleTrack());
+    return xgMovieCaptionWith(S->player, subtitleTrack(), soundLevel());
 }
 
 void moviePane(ImVec2 min, ImVec2 max) {
@@ -1757,8 +1785,13 @@ bool command(const char* cmd, const char* arg) {
         return true;
     }
     if (!strcmp(cmd, "subtitles")) {
-        if (strlen(arg) != 1 || arg[0] < '0' || arg[0] > '4') return false;
+        if (strlen(arg) != 1 || arg[0] < '0' || arg[0] > '2') return false;
         setSubtitleTrack(atoi(arg));
+        return true;
+    }
+    if (!strcmp(cmd, "sounds")) {
+        if (strlen(arg) != 1 || arg[0] < '0' || arg[0] > '2') return false;
+        setSoundLevel(atoi(arg));
         return true;
     }
     if (!strcmp(cmd, "caption")) {

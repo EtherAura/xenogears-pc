@@ -1464,14 +1464,38 @@ void audioSection() {
         overrideNote("japanese_cutscene_audio");
     }
     if (row("Subtitles", "cutscene_subtitles")) {
-        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation", "US dialogue + sounds",
-                                        "Japanese translation + sounds"};
+        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation"};
         int captions = regionalSubtitlesEnabled();
-        int captionChoice = choice("subtitles", subtitleTracks, 5, captions);
+        int captionChoice = choice("subtitles", subtitleTracks, 3, captions);
         if (captionChoice != captions) regionalSetSubtitles(captionChoice);
-        hint("Independent of audio language. Uses the in-game dialogue font. \"+ sounds\" also captions sounds such as "
-             "[screams], for players who can't hear them.");
+        hint("Independent of audio language. Uses the in-game dialogue font.");
         overrideNote("cutscene_subtitles");
+    }
+    if (row("Sound captions", "cutscene_sound_captions")) {
+        const char* levels[] = {"Off", "Voices", "All sounds"};
+        int level = regionalSoundCaptions();
+        int levelChoice = choice("soundcaptions", levels, 3, level);
+        if (levelChoice != level) regionalSetSoundCaptions(levelChoice);
+        hint("With subtitles on, also captions sounds, for players who can't hear them: Voices such as [screams], or "
+             "all sounds such as [explosion] too.");
+        overrideNote("cutscene_sound_captions");
+    }
+    if (row("Song lyrics", "cutscene_lyrics")) {
+        const char* offOn[] = {"Off", "On"};
+        int lyrics = regionalLyrics();
+        int lyricsChoice = choice("lyrics", offOn, 2, lyrics);
+        if (lyricsChoice != lyrics) regionalSetLyrics(lyricsChoice);
+        hint("With subtitles on, shows the words of the songs in the movies.");
+        overrideNote("cutscene_lyrics");
+    }
+    if (row("Invented language", "cutscene_invented_language")) {
+        const char* spellings[] = {"Script spelling", "As spoken"};
+        int spoken = regionalInventedSpoken();
+        int spokenChoice = choice("invented", spellings, 2, spoken);
+        if (spokenChoice != spoken) regionalSetInventedSpoken(spokenChoice);
+        hint("Lines in the game's invented language: as the English script spells them, or as the Japanese voice "
+             "says them (Japanese translation track).");
+        overrideNote("cutscene_invented_language");
     }
     for (int disc = 1; disc <= 2; ++disc) {
         if (!row(disc == 1 ? "Japanese Disc 1" : "Japanese Disc 2", disc == 1 ? "japanese_disc1" : "japanese_disc2")) {

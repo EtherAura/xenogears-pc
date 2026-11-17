@@ -6,8 +6,8 @@
 #
 #   tools/build_dav1d_mingw.sh [dav1d-x.y.z.tar.xz]
 #
-# Default tarball: $DAV1D_TARBALL, else tools/toolchain-src/dav1d-1.5.4.tar.xz
-# (a copy kept with the project), else /var/cache/distfiles/dav1d-1.5.4.tar.xz
+# Default tarball: $DAV1D_TARBALL, else tools/toolchain-src/dav1d-1.5.5.tar.xz
+# (a copy kept with the project), else /var/cache/distfiles/dav1d-1.5.5.tar.xz
 # (no download). Exits 0 with a note when there is none: the Windows build then
 # has no AV1 videos (PNG frames still work). Needs meson, ninja and nasm (its
 # x86 assembly; without nasm it is built without, slower). Installs into
@@ -18,8 +18,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_TARBALL="$ROOT/tools/toolchain-src/dav1d-1.5.4.tar.xz"
-[ -f "$DEFAULT_TARBALL" ] || DEFAULT_TARBALL=/var/cache/distfiles/dav1d-1.5.4.tar.xz
+DEFAULT_TARBALL="$ROOT/tools/toolchain-src/dav1d-1.5.5.tar.xz"
+[ -f "$DEFAULT_TARBALL" ] || DEFAULT_TARBALL=/var/cache/distfiles/dav1d-1.5.5.tar.xz
 TARBALL="${1:-${DAV1D_TARBALL:-$DEFAULT_TARBALL}}"
 PREFIX="$ROOT/tools/toolchain/mingw64"
 WORK="$ROOT/tools/toolchain-src/dav1d-mingw"

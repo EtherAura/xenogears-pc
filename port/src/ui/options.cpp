@@ -321,10 +321,18 @@ std::vector<Spec>& table() {
         [](int, int v) { regionalSetBattle(v); }, 0);
     add("japanese_cutscene_audio", N_("Cutscene audio"), [](int) { return regionalMovieEnabled(); },
         [](int, int v) { regionalSetMovie(v); }, 0);
-    static const char* const subtitles[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation"),
-                                            N_("US dialogue + sounds"), N_("Japanese translation + sounds")};
+    static const char* const subtitles[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation")};
     add("cutscene_subtitles", N_("Subtitles"), [](int) { return regionalSubtitlesEnabled(); },
-        [](int, int v) { regionalSetSubtitles(v); }, 0, subtitles, 5);
+        [](int, int v) { regionalSetSubtitles(v); }, 0, subtitles, 3);
+    static const char* const soundCaptions[] = {N_("Off"), N_("Voices"), N_("All sounds")};
+    add("cutscene_sound_captions", N_("Sound captions"), [](int) { return regionalSoundCaptions(); },
+        [](int, int v) { regionalSetSoundCaptions(v); }, 0, soundCaptions, 3);
+    static const char* const offOn[] = {N_("Off"), N_("On")};
+    add("cutscene_lyrics", N_("Song lyrics"), [](int) { return regionalLyrics(); },
+        [](int, int v) { regionalSetLyrics(v); }, 0, offOn, 2);
+    static const char* const invented[] = {N_("Script spelling"), N_("As spoken")};
+    add("cutscene_invented_language", N_("Invented language"), [](int) { return regionalInventedSpoken(); },
+        [](int, int v) { regionalSetInventedSpoken(v); }, 0, invented, 2);
     // Controls
     add("jp_controls_us", N_("Japanese controls in the US version"), [](int) { return padRegionalControls(0); },
         [](int, int v) { padSetRegionalControls(0, v); }, 0);

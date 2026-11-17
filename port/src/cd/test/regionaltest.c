@@ -130,6 +130,10 @@ int main(int argc, char** argv) {
 #ifdef XG_CAPTIONS
  CHECK(captionTrackCheck(captionsUS,sizeof captionsUS/sizeof captionsUS[0])==0);
  CHECK(captionTrackCheck(captionsJapanese,sizeof captionsJapanese/sizeof captionsJapanese[0])==0);
+#define TABLE_CHECK(t) CHECK(captionTrackCheck(t,sizeof t/sizeof t[0])==0)
+ TABLE_CHECK(captionsJapaneseSpoken);TABLE_CHECK(captionsVoices);TABLE_CHECK(captionsSounds);
+ TABLE_CHECK(captionsLyrics);TABLE_CHECK(captionsLyricsReel);
+#undef TABLE_CHECK
 #endif
  CHECK(regionalBattleEnabled()==battleOn && regionalMovieEnabled()==movieOn);
  regionalSetMovie(!movieOn); CHECK(regionalMovieEnabled()!=movieOn && regionalBattleEnabled()==battleOn); regionalSetMovie(movieOn);

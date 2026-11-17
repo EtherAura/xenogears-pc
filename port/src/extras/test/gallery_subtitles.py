@@ -87,9 +87,9 @@ class Image:
         return None
 
 
-def caption_tables() -> dict[int | str, list[tuple[int, int, int, int, str]]] | None:
-    """Track 1 (US dialogue), 2 (Japanese translation) and the sound captions ("sounds", for
-    tracks 3 and 4) of the build's caption tables, None without them."""
+def caption_tables() -> dict[int, list[tuple[int, int, int, int, str]]] | None:
+    """Track 1 (US dialogue) and 2 (Japanese translation) of the build's caption tables, None
+    without them (the other tables, sounds and lyrics, are off in this test's settings)."""
     path = ROOT / "port/src/cd/subtitles.inc"
     if not path.exists():
         return None
@@ -99,7 +99,7 @@ def caption_tables() -> dict[int | str, list[tuple[int, int, int, int, str]]] | 
         start = text.index(f"static const Caption {name}[]")
         return text[start:text.index("};", start)]
     tracks = {}
-    for track, part in ((1, table("captionsUS")), (2, table("captionsJapanese")), ("sounds", table("captionsSounds"))):
+    for track, part in ((1, table("captionsUS")), (2, table("captionsJapanese"))):
         tracks[track] = [(int(d), int(c), int(s), int(e), codecs.decode(t, "unicode_escape"))
                          for d, c, s, e, t in cue.findall(part)]
         if len(tracks[track]) != len(re.findall(r"^\s*\{\s*\d", part, re.M)) or not tracks[track]:
@@ -108,17 +108,14 @@ def caption_tables() -> dict[int | str, list[tuple[int, int, int, int, str]]] | 
 
 
 def lookup(tables, track: int, japanese: bool, disc: int, clip: int, frame: int) -> str | None:
-    if tables is None or track not in (1, 2, 3, 4):
+    if tables is None or track not in (1, 2):
         return None
     if japanese and disc == 2 and clip == 6:
         clip, frame = (8, frame - 3600) if frame >= 3601 else (0, frame)
-    def at(rows):
-        return next((text for d, c, start, end, text in rows if d == disc and c == clip and start <= frame < end), None)
-    line = at(tables[2 if track in (2, 4) else 1])
-    if track < 3:
-        return line
-    sound = at(tables["sounds"])  # tracks 3 and 4: the sound on a line above the dialogue
-    return f"{sound}\\n{line}" if sound and line else sound or line  # as the 'caption' command prints it
+    for d, c, start, end, text in tables[track]:
+        if d == disc and c == clip and start <= frame < end:
+            return text
+    return None
 
 
 def run(exe: Path, cue: Path, script: Path, settings: Path) -> str:

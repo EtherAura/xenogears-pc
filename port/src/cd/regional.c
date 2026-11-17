@@ -65,7 +65,10 @@ static const char* sourceKey(int disc) { return disc==1 ? "japanese_disc1" : "ja
 static void describe(void) {
     settingsDescribe("japanese_battle_voices","japanese_battle_voices: Japanese battle voices from your JP discs; applies after restart");
     settingsDescribe("japanese_cutscene_audio","japanese_cutscene_audio: Japanese XA audio with the current version's movie video");
-    settingsDescribe("cutscene_subtitles","cutscene_subtitles: 0 off, 1 US dialogue, 2 Japanese translation, 3 and 4 the same with sound captions ([screams]); dialogue font");
+    settingsDescribe("cutscene_subtitles","cutscene_subtitles: 0 off, 1 US dialogue, 2 Japanese translation; dialogue font");
+    settingsDescribe("cutscene_sound_captions","cutscene_sound_captions: with subtitles, 0 no sounds, 1 voices ([screams]), 2 all sounds ([explosion] too)");
+    settingsDescribe("cutscene_lyrics","cutscene_lyrics: with subtitles, 1 shows the songs' lyrics");
+    settingsDescribe("cutscene_invented_language","cutscene_invented_language: lines in the game's invented language, 0 as the English script spells them, 1 as spoken (Japanese track)");
     settingsDescribe("japanese_disc1","japanese_disc1: your Japanese Disc 1 .cue or raw .bin (read-only)");
     settingsDescribe("japanese_disc2","japanese_disc2: your Japanese Disc 2 .cue or raw .bin (read-only)");
 }
@@ -329,54 +332,92 @@ int regionalMovieIdentity(int out[5]) {
     out[0]=movie.japanese; out[1]=movie.disc; out[2]=movie.clip; out[3]=movie.baseLba; out[4]=movie.frame;
     return 1;
 }
-int regionalSubtitlesEnabled(void) { int n=settingsInt("cutscene_subtitles",0); return n>=0 && n<=4 ? n : 0; }
-void regionalSetSubtitles(int mode) { describe(); settingsSetInt("cutscene_subtitles",mode>=0 && mode<=4 ? mode : 0); settingsSave(); }
+/* The subtitles' settings (regional.h). A cutscene_subtitles of 3 or 4 (the
+ * "+ sounds" entries of) is track 1 or 2 with every sound. */
+static int settingIn(const char* key, int fallback, int max) { int n=settingsInt(key,fallback); return n>=0 && n<=max ? n : 0; }
+int regionalSubtitlesEnabled(void) { int n=settingIn("cutscene_subtitles",0,4); return n>2 ? n-2 : n; }
+void regionalSetSubtitles(int track) { describe(); settingsSetInt("cutscene_subtitles",track>=0 && track<=2 ? track : 0); settingsSave(); }
+int regionalSoundCaptions(void) {
+    int legacy=settingIn("cutscene_subtitles",0,4)>2;
+    return settingIn("cutscene_sound_captions",legacy ? 2 : 0,2);
+}
+void regionalSetSoundCaptions(int level) {
+    describe(); settingsSetInt("cutscene_sound_captions",level>=0 && level<=2 ? level : 0);
+    settingsSetInt("cutscene_subtitles",regionalSubtitlesEnabled()); /* no 3/4 left to read as "all sounds" */
+    settingsSave();
+}
+int regionalLyrics(void) { return settingIn("cutscene_lyrics",0,1); }
+void regionalSetLyrics(int on) { describe(); settingsSetInt("cutscene_lyrics",!!on); settingsSave(); }
+int regionalInventedSpoken(void) { return settingIn("cutscene_invented_language",0,1); }
+void regionalSetInventedSpoken(int on) { describe(); settingsSetInt("cutscene_invented_language",!!on); settingsSave(); }
 
 typedef struct { unsigned char disc, clip; unsigned short start, end; const char* text; } Caption;
+typedef struct { const Caption* cues; size_t count; } Track;
+#define TRACK(t) ((Track){t,sizeof t/sizeof t[0]})
 #if __has_include("subtitles.inc")
 /* The captions are a transcription of the game's movie dialogue, so they
  * stay out of the public repository; a build without them has none. */
 #include "subtitles.inc"
-static const Caption* captionTrack(int japanese, size_t* count) {
-    *count=japanese ? sizeof captionsJapanese/sizeof captionsJapanese[0] : sizeof captionsUS/sizeof captionsUS[0];
-    return japanese ? captionsJapanese : captionsUS;
-}
-static const Caption* soundTrack(size_t* count) { *count=sizeof captionsSounds/sizeof captionsSounds[0]; return captionsSounds; }
+#define TABLE(t) TRACK(t)
 #else
-static const Caption* captionTrack(int japanese, size_t* count) { (void)japanese; *count=0; return NULL; }
-static const Caption* soundTrack(size_t* count) { *count=0; return NULL; }
+#define TABLE(t) ((Track){NULL,0})
 #endif
-static const char* cueAt(const Caption* track, size_t count, int disc, int clip, int frame) {
-    for (size_t i=0;i<count;i++)
-        if (track[i].disc==disc && track[i].clip==clip && frame>=track[i].start && frame<track[i].end) return track[i].text;
+enum { T_US, T_JP, T_JP_SPOKEN, T_VOICES, T_SOUNDS, T_LYRICS, T_LYRICS_REEL, T_COUNT };
+static Track table(int which) {
+    switch (which) {
+    case T_US: return TABLE(captionsUS);
+    case T_JP: return TABLE(captionsJapanese);
+    case T_JP_SPOKEN: return TABLE(captionsJapaneseSpoken);
+    case T_VOICES: return TABLE(captionsVoices);
+    case T_SOUNDS: return TABLE(captionsSounds);
+    case T_LYRICS: return TABLE(captionsLyrics);
+    case T_LYRICS_REEL: return TABLE(captionsLyricsReel);
+    default: return (Track){NULL,0};
+    }
+}
+static const char* cueAt(int which, int disc, int clip, int frame) {
+    Track t=table(which);
+    for (size_t i=0;i<t.count;i++)
+        if (t.cues[i].disc==disc && t.cues[i].clip==clip && frame>=t.cues[i].start && frame<t.cues[i].end) return t.cues[i].text;
     return NULL;
 }
-const char* regionalSubtitle(void) { return regionalCaption(regionalSubtitlesEnabled()); }
-const char* regionalCaption(int mode) {
-    if (!movie.active || mode<1 || mode>4) return NULL;
-    size_t count;
-    const Caption* track=captionTrack(mode==2 || mode==4,&count);
+const char* regionalSubtitle(void) { return regionalCaptionWith(regionalSubtitlesEnabled(),regionalSoundCaptions()); }
+const char* regionalCaption(int track) { return regionalCaptionWith(track,0); }
+const char* regionalCaptionWith(int track, int sounds) {
+    if (!movie.active || track<1 || track>2) return NULL;
     int clip=movie.clip, frame=movie.frame;
+    /* The songs: JP movie 6 (its long reel) has a song of its own timing;
+     * every other movie is looked up as the US numbering has it. */
+    int reel=movie.japanese && movie.disc==2 && clip==6;
+    const char* lyric=regionalLyrics() ? reel ? cueAt(T_LYRICS_REEL,2,6,frame) : cueAt(T_LYRICS,movie.disc,clip,frame) : NULL;
     /* JP movie 6 is the long story-footage reel: its opening exchange
      * uses clip 0's captions, later story speech is the scene split into
      * US clip 8. The actual credits (movie 0) have a different video
      * timeline despite sharing XA; never put later story captions there. */
-    if (movie.japanese && movie.disc==2 && clip==6) {
+    if (reel) {
         if (frame>=3601) { clip=8; frame-=3600; }
         else clip=0;
     }
-    const char* line=cueAt(track,count,movie.disc,clip,frame);
-    if (mode<3) return line;
-    /* With sound captions: the sound ([screams]) on a line of its own above
-     * the dialogue when both are on. One table for both tracks: the sounds
-     * are the movie's, in its frames. */
-    size_t n;
-    const Caption* sounds=soundTrack(&n);
-    const char* sound=cueAt(sounds,n,movie.disc,clip,frame);
-    if (!sound || !line) return sound ? sound : line;
-    static char both[2][384];
-    snprintf(both[mode-3],sizeof both[0],"%s\n%s",sound,line);
-    return both[mode-3];
+    const char* line=NULL;
+    if (track==2 && regionalInventedSpoken()) line=cueAt(T_JP_SPOKEN,movie.disc,clip,frame);
+    if (!line) line=cueAt(track==2 ? T_JP : T_US,movie.disc,clip,frame);
+    /* Sound captions (one table each for both tracks, in video frames):
+     * voices ([screams]) from level 1, other sounds from level 2. */
+    const char* voice=sounds>=1 ? cueAt(T_VOICES,movie.disc,clip,frame) : NULL;
+    const char* sound=sounds>=2 ? cueAt(T_SOUNDS,movie.disc,clip,frame) : NULL;
+    const char* parts[4]={voice,sound,lyric,line};
+    const char* only=NULL; int n=0;
+    for (int i=0;i<4;i++) if (parts[i]) { only=parts[i]; n++; }
+    if (n<=1) return only;
+    /* Several at once: one line each, the sounds above. The buffer is this
+     * track's and level's, reused by its next call (regional.h). */
+    static char both[2][3][512];
+    char* out=both[track-1][sounds>=0 && sounds<=2 ? sounds : 0];
+    size_t used=0; out[0]='\0';
+    for (int i=0;i<4;i++)
+        if (parts[i] && used<sizeof both[0][0])
+            used+=(size_t)snprintf(out+used,sizeof both[0][0]-used,"%s%s",used ? "\n" : "",parts[i]);
+    return out;
 }
 
 size_t regionalPartSize(void) { return sizeof movie; }

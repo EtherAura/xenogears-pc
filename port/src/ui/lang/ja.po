@@ -1982,18 +1982,52 @@ msgid "Japanese translation"
 msgstr "日本語の訳"
 
 #: port/src/ui/sections.cpp
-msgid "US dialogue + sounds"
-msgstr "US 版のせりふ + 音"
+msgid "Sound captions"
+msgstr "音の字幕"
 
 #: port/src/ui/sections.cpp
-msgid "Japanese translation + sounds"
-msgstr "日本語の訳 + 音"
+msgid "Voices"
+msgstr "声"
+
+#: port/src/ui/sections.cpp
+msgid "All sounds"
+msgstr "すべての音"
+
+#: port/src/ui/sections.cpp
+msgid "Song lyrics"
+msgstr "うたのことば"
+
+#: port/src/ui/sections.cpp
+msgid "Invented language"
+msgstr "作られた言葉"
+
+#: port/src/ui/sections.cpp
+msgid "Script spelling"
+msgstr "台本のつづり"
+
+#: port/src/ui/sections.cpp
+msgid "As spoken"
+msgstr "聞こえたとおり"
 
 #: port/src/ui/sections.cpp
 msgid ""
-"Independent of audio language. Uses the in-game dialogue font. \"+ sounds\" "
-"also captions sounds such as [screams], for players who can't hear them."
-msgstr "音声の言語とは別に選べます。ゲーム内の会話フォントを使います。「+ 音」は [screams] のような音も字幕にします(音が聞こえないプレイヤー向け)。"
+"With subtitles on, also captions sounds, for players who can't hear them: "
+"Voices such as [screams], or all sounds such as [explosion] too."
+msgstr "字幕がオンのとき、音が聞こえないプレイヤーのために音も字幕にします。「声」は [screams] など、「すべての音」は [explosion] なども。"
+
+#: port/src/ui/sections.cpp
+msgid "With subtitles on, shows the words of the songs in the movies."
+msgstr "字幕がオンのとき、ムービーのうたのことばを表示します。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Lines in the game's invented language: as the English script spells them, or "
+"as the Japanese voice says them (Japanese translation track)."
+msgstr "ゲームの作られた言葉のせりふ:英語の台本のつづりか、日本語の声で聞こえたとおりか(日本語の訳の字幕)。"
+
+#: port/src/ui/sections.cpp
+msgid "Independent of audio language. Uses the in-game dialogue font."
+msgstr "音声の言語とは別に選べます。ゲーム内の会話フォントを使います。"
 
 #: port/src/ui/sections.cpp
 msgid "Japanese Disc 1"

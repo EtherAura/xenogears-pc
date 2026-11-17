@@ -32,18 +32,32 @@ int pcRegionalFieldMovieSound(int field, int stream);
 /* Before the movie op: the JP scene's silent score loads its WDS samples
  * and reverb through the normal field music loader; -1 preserves the cue. */
 int pcRegionalFieldMovieMusic(int field, int stream);
-/* The caption of the setting's track (regionalSubtitlesEnabled) at the
- * current movie's frame; NULL when there is none. */
+/* Subtitles (F1 > Audio; settings.ini). Each applies only with a track on:
+ *   cutscene_subtitles          0 off, 1 US dialogue, 2 Japanese translation
+ *                               (a 3 or 4: 1 or 2 with all sounds)
+ *   cutscene_sound_captions     0 none, 1 voices ([screams]), 2 all sounds
+ *   cutscene_lyrics             1: the songs' lyrics
+ *   cutscene_invented_language  lines in the game's invented language:
+ *                               0 the English script's spelling, 1 as spoken
+ *                               (the Japanese track)
+ * The extras' movie viewer chooses its own track and sounds; lyrics and the
+ * invented language follow these settings. */
+int regionalSubtitlesEnabled(void); /* the track, 0-2 */
+void regionalSetSubtitles(int track);
+int regionalSoundCaptions(void);
+void regionalSetSoundCaptions(int level);
+int regionalLyrics(void);
+void regionalSetLyrics(int on);
+int regionalInventedSpoken(void);
+void regionalSetInventedSpoken(int on);
+/* The caption at the current movie's frame for the settings; NULL: none. */
 const char* regionalSubtitle(void);
-/* The same for a track chosen by the caller (1: US dialogue, 2: Japanese
- * translation, 3 and 4: the same with sound captions such as [screams], on a
- * line above; other values: none), e.g. the extras' movie viewer, whose
- * movie is its CD world's (cd.h cdWorldSwap carries this file's state). With
- * sound captions the text may sit in a buffer the next call for that track
- * reuses: copy it to keep it. */
+/* The same for a track (1 US dialogue, 2 Japanese translation; else none)
+ * and sound level (0-2) chosen by the caller, e.g. the extras' movie viewer,
+ * whose movie is its CD world's (cd.h cdWorldSwap carries this file's
+ * state). regionalCaption: no sounds. Several captions at once come as one
+ * line each (sounds first, then the lyric, then the dialogue) in a buffer
+ * the next call for that track and level reuses: copy it to keep it. */
 const char* regionalCaption(int track);
-int regionalSubtitlesEnabled(void);
-/* 0: off, 1: US dialogue, 2: English translation of Japanese dialogue,
- * 3 and 4: 1 and 2 with sound captions (accessibility). */
-void regionalSetSubtitles(int mode);
+const char* regionalCaptionWith(int track, int sounds);
 #endif
