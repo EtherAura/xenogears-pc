@@ -24,8 +24,12 @@
    or a licence, with a wrong mode, an extra file or another version, strict
    Depends refusal (Depends libvulkan1 alone) and companion failures. Paths
    with spaces and shell metacharacters run inertly.
-3. The real build: build/pc/deb-<ver> as tools/check_deb_package.py left it,
-   with the tag of its XG_PACKAGE_VERSION. Its own Depends decides the
+3. The real build: this check's own build/pc/deb-build-<ver>/real-build,
+   configured here as tools/check_deb_package.py configures its build, with
+   XG_PACKAGE_VERSION of the test tag (so it needs no other check to have run,
+   and never reads build/pc/deb-<ver>, whose version is whatever that folder
+   was last configured with: 0~dev when new, which is no release tag). The
+   first run builds the port there. Its own Depends decides the
    expected outcome: without libsdl3-0 and libc6 (a host whose dpkg knows none
    of its libraries) it must be refused at the companions step with nothing
    staged; it is never forced through. Not Ubuntu evidence either way.
@@ -426,14 +430,28 @@ def check_fixtures(work: Path) -> None:
         refused(broken, work, label, build, "companions", (expect,), bin_dir=full, commands=["cmake", "cpack"])
 
 
+def configure_real(build: Path, ver: str) -> bool:
+    """This check's own real build folder, configured as tools/check_deb_package.py does, for TAG's version."""
+    spec = importlib.util.spec_from_file_location("check_deb_package", ROOT / "tools/check_deb_package.py")
+    package = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(package)
+    if not check(run([sys.executable, ROOT / "tools/pc_sources.py"]).returncode == 0, "tools/pc_sources.py"):
+        return False
+    configured = package.configure(build, ver, VERSION)
+    return check(configured.returncode == 0 and (build / "CMakeCache.txt").is_file(),
+                 f"real build {build.relative_to(ROOT)}: Release configure with XG_PACKAGE_VERSION={VERSION}")
+
+
 def check_real(work: Path, ver: str) -> None:
-    """The real build tools/check_deb_package.py configured: never forced through strict mode."""
-    build = ROOT / f"build/pc/deb-{ver}"
-    if not check((build / "CMakeCache.txt").is_file(), f"real build {build.relative_to(ROOT)} (run tools/check_deb_package.py)"):
+    """A real build of this check's own, of TAG's version: never forced through strict mode."""
+    build = work / "real-build"
+    if not configure_real(build, ver):
         return
     version = dict(re.findall(r"^([\w-]+):\w+=(.*)$", (build / "CMakeCache.txt").read_text(), re.M)).get("XG_PACKAGE_VERSION", "")
-    tag = f"v{version}"
+    tag = TAG
     print(f"real build: XG_PACKAGE_VERSION {version!r}, tag {tag!r}")
+    if not check(version == VERSION, f"the real build's XG_PACKAGE_VERSION is the tag's ({version!r})"):
+        return
     public = stage_public(work, "public-real")
     out = out_folder(work, "real")
     before = snapshot(out)

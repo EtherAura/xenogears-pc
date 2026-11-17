@@ -49,6 +49,14 @@
 #   payload-tests synthetic PE/ELF payload attribution and rejection regressions
 #   port-runner filtered fixtures and concurrent output ownership regressions
 #   state-runner reject crashes even when state/pixel/audio captures were written
+#   deb-package-us the Debian package's CPack settings, install plan and .deb
+#               (tools/check_deb_package.py; builds the port in build/pc/deb-us)
+#   deb-assets-us the package's .sha256 and SBOM (tools/check_deb_release_assets.py)
+#   deb-build-us the build-to-staged-set helper, fixtures and its own real build
+#               (tools/check_deb_build.py)
+#   deb-ubuntu-us the Ubuntu builder's refusals, on fixtures (tools/check_deb_ubuntu.py)
+#               None of the four is an Ubuntu build or installation; they run
+#               with the tests (not under --no-tests).
 #
 # Full outputs go to build/gates/<gate>.txt ($XG_GATES_OUT overrides the
 # directory, so parallel agents keep their own). The exit status is the number of
@@ -166,6 +174,13 @@ if [ "$TESTS" = 1 ]; then
     else
         record port-tests 0 "skipped: no configured build in $TEST_BUILD"
     fi
+    # The Debian package, US: each check keeps its own folder under build/pc/
+    # (deb-us, deb-assets-us, deb-build-us, deb-ubuntu-us) and needs none of the
+    # others to have run; the order is the pipeline's.
+    gate deb-package-us "$PY" tools/check_deb_package.py --ver us
+    gate deb-assets-us "$PY" tools/check_deb_release_assets.py --ver us
+    gate deb-build-us "$PY" tools/check_deb_build.py --ver us
+    gate deb-ubuntu-us "$PY" tools/check_deb_ubuntu.py --ver us
 fi
 
 if [ -f "$TEST_BUILD/CMakeCache.txt" ]; then
