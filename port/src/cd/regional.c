@@ -65,7 +65,7 @@ static const char* sourceKey(int disc) { return disc==1 ? "japanese_disc1" : "ja
 static void describe(void) {
     settingsDescribe("japanese_battle_voices","japanese_battle_voices: Japanese battle voices from your JP discs; applies after restart");
     settingsDescribe("japanese_cutscene_audio","japanese_cutscene_audio: Japanese XA audio with the current version's movie video");
-    settingsDescribe("cutscene_subtitles","cutscene_subtitles: 0 off, 1 US dialogue, 2 Japanese translation; dialogue font");
+    settingsDescribe("cutscene_subtitles","cutscene_subtitles: 0 off, 1 US dialogue, 2 Japanese translation, 3 and 4 the same with sound captions ([screams]); dialogue font");
     settingsDescribe("japanese_disc1","japanese_disc1: your Japanese Disc 1 .cue or raw .bin (read-only)");
     settingsDescribe("japanese_disc2","japanese_disc2: your Japanese Disc 2 .cue or raw .bin (read-only)");
 }
@@ -329,8 +329,8 @@ int regionalMovieIdentity(int out[5]) {
     out[0]=movie.japanese; out[1]=movie.disc; out[2]=movie.clip; out[3]=movie.baseLba; out[4]=movie.frame;
     return 1;
 }
-int regionalSubtitlesEnabled(void) { int n=settingsInt("cutscene_subtitles",0); return n>=0 && n<=2 ? n : 0; }
-void regionalSetSubtitles(int mode) { describe(); settingsSetInt("cutscene_subtitles",mode>=0 && mode<=2 ? mode : 0); settingsSave(); }
+int regionalSubtitlesEnabled(void) { int n=settingsInt("cutscene_subtitles",0); return n>=0 && n<=4 ? n : 0; }
+void regionalSetSubtitles(int mode) { describe(); settingsSetInt("cutscene_subtitles",mode>=0 && mode<=4 ? mode : 0); settingsSave(); }
 
 typedef struct { unsigned char disc, clip; unsigned short start, end; const char* text; } Caption;
 #if __has_include("subtitles.inc")
@@ -341,14 +341,21 @@ static const Caption* captionTrack(int japanese, size_t* count) {
     *count=japanese ? sizeof captionsJapanese/sizeof captionsJapanese[0] : sizeof captionsUS/sizeof captionsUS[0];
     return japanese ? captionsJapanese : captionsUS;
 }
+static const Caption* soundTrack(size_t* count) { *count=sizeof captionsSounds/sizeof captionsSounds[0]; return captionsSounds; }
 #else
 static const Caption* captionTrack(int japanese, size_t* count) { (void)japanese; *count=0; return NULL; }
+static const Caption* soundTrack(size_t* count) { *count=0; return NULL; }
 #endif
+static const char* cueAt(const Caption* track, size_t count, int disc, int clip, int frame) {
+    for (size_t i=0;i<count;i++)
+        if (track[i].disc==disc && track[i].clip==clip && frame>=track[i].start && frame<track[i].end) return track[i].text;
+    return NULL;
+}
 const char* regionalSubtitle(void) { return regionalCaption(regionalSubtitlesEnabled()); }
 const char* regionalCaption(int mode) {
-    if (!movie.active || mode<1 || mode>2) return NULL;
+    if (!movie.active || mode<1 || mode>4) return NULL;
     size_t count;
-    const Caption* track=captionTrack(mode==2,&count);
+    const Caption* track=captionTrack(mode==2 || mode==4,&count);
     int clip=movie.clip, frame=movie.frame;
     /* JP movie 6 is the long story-footage reel: its opening exchange
      * uses clip 0's captions, later story speech is the scene split into
@@ -358,10 +365,18 @@ const char* regionalCaption(int mode) {
         if (frame>=3601) { clip=8; frame-=3600; }
         else clip=0;
     }
-    for (size_t i=0;i<count;i++)
-        if (track[i].disc==movie.disc && track[i].clip==clip &&
-            frame>=track[i].start && frame<track[i].end) return track[i].text;
-    return NULL;
+    const char* line=cueAt(track,count,movie.disc,clip,frame);
+    if (mode<3) return line;
+    /* With sound captions: the sound ([screams]) on a line of its own above
+     * the dialogue when both are on. One table for both tracks: the sounds
+     * are the movie's, in its frames. */
+    size_t n;
+    const Caption* sounds=soundTrack(&n);
+    const char* sound=cueAt(sounds,n,movie.disc,clip,frame);
+    if (!sound || !line) return sound ? sound : line;
+    static char both[2][384];
+    snprintf(both[mode-3],sizeof both[0],"%s\n%s",sound,line);
+    return both[mode-3];
 }
 
 size_t regionalPartSize(void) { return sizeof movie; }

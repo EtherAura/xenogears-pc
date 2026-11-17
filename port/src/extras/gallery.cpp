@@ -18,7 +18,7 @@
 //   wait                   finish the scan now (blocks)
 //   movie <n>              select movie n of the list (and play it)
 //   pause, stop, seek <frame>
-//   subtitles <0|1|2>      the movies' captions: off, US dialogue, Japanese translation
+//   subtitles <0-4>        the movies' captions: off, US dialogue, Japanese translation, the two with sounds
 //   caption                the caption drawn, its frame and the player's movie on stderr
 //   frame                  export the frame shown (PNG)
 //   wav                    export the movie's audio so far (WAV)
@@ -588,7 +588,8 @@ std::string clock(int frames) {
 // The movies' subtitles, as the game's cutscenes show them (F1, Audio,
 // Subtitles): the settings' track until one is chosen here, then that one for
 // this session (as a viewer's Stock / Enhanced), never written to settings.ini.
-const char* const subtitleNames[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation")};
+const char* const subtitleNames[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation"),
+                                     N_("US dialogue + sounds"), N_("Japanese translation + sounds")};
 
 int subtitleTrack() {
     if (S->subtitles < 0) S->subtitles = regionalSubtitlesEnabled();
@@ -603,7 +604,8 @@ void setSubtitleTrack(int track) {
 // The choice: a combo (its label before it), `bar`: in the focused view's bar.
 void subtitleCombo(bool bar) {
     const char* label = tr("Subtitles");
-    const char* names[3] = {tr(subtitleNames[0]), tr(subtitleNames[1]), tr(subtitleNames[2])};
+    const char* names[5];
+    for (int i = 0; i < 5; i++) names[i] = tr(subtitleNames[i]);
     float widest = 0;
     for (const char* n : names) widest = fmaxf(widest, ImGui::CalcTextSize(n).x);
     float comboW = widest + ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.x * 2;
@@ -619,7 +621,7 @@ void subtitleCombo(bool bar) {
     ImGui::SameLine();
     int track = subtitleTrack();
     ImGui::SetNextItemWidth(comboW);
-    if (ImGui::Combo(bar ? "##subtitlesbar" : "##subtitles", &track, names, 3) && track != S->subtitles) {
+    if (ImGui::Combo(bar ? "##subtitlesbar" : "##subtitles", &track, names, 5) && track != S->subtitles) {
         setSubtitleTrack(track);
     }
 }
@@ -1755,7 +1757,7 @@ bool command(const char* cmd, const char* arg) {
         return true;
     }
     if (!strcmp(cmd, "subtitles")) {
-        if (strcmp(arg, "0") && strcmp(arg, "1") && strcmp(arg, "2")) return false;
+        if (strlen(arg) != 1 || arg[0] < '0' || arg[0] > '4') return false;
         setSubtitleTrack(atoi(arg));
         return true;
     }
@@ -1765,7 +1767,12 @@ bool command(const char* cmd, const char* arg) {
         const XgMovieEntry* m = xgScanMovie(S->scan, S->playing);
         int id[5];
         int known = xgMovieIdentity(S->player, id);
-        auto quoted = [](const char* text) { return text ? "\"" + std::string(text) + "\"" : std::string("none"); };
+        auto quoted = [](const char* text) {
+            if (!text) return std::string("none");
+            std::string q = "\"";
+            for (const char* c = text; *c; c++) q += *c == '\n' ? std::string("\\n") : std::string(1, *c); // one line
+            return q + "\"";
+        };
         fprintf(stderr, "gallery: caption movie %d disc %d stream %d lba %d frame %d playing %d paused %d track %d "
                         "player %d japanese %d disc %d clip %d lba %d frame %d us %s jp %s drawn %s\n",
                 S->playing, m ? m->disc : 0, m ? m->stream : -1, m ? m->lba : -1, S->frame,

@@ -42,6 +42,18 @@
    staging (its exit status changed; one staged file taken away): exit 1, no
    success line, the message names what the output folder holds, and nothing
    is deleted.
+5. Baseline amd64 (FIXTURES, the contract only: not compiler output, not the
+   Ubuntu compiler's default): with copies of this repository's real CMake
+   files in a fixture tree, the configure argv the unchanged deb_ubuntu.py
+   logs passes no XG_MARCH but an empty one, no *_FLAGS, toolchain, compiler
+   or CPU option, and the CMake files it points -S at keep XG_MARCH's cache
+   default empty and hold no CPU-specific option (-march, -mtune, -mcpu,
+   -mavx..., x86-64-v2..v4, native) outside the guarded
+   -march=${XG_MARCH}. Labelled mutations of copies (a native or x86-64-v3
+   default, XG_MARCH set again, an unguarded -march, a global -mtune, -mavx2
+   in deb.cmake, deb_ubuntu.py configuring with -DXG_MARCH=native,
+   x86-64-v3 or -DCMAKE_C_FLAGS=-mtune=...) are each caught for their own
+   reason; an explicit empty -DXG_MARCH= is not.
 
 Nothing is installed, launched or uploaded; all output stays in build/.
 """
@@ -167,6 +179,13 @@ NESTED = ("# FIXTURE (tools/check_deb_ubuntu.py): stands for a build tool that i
           "with open(sys.argv[1], 'a') as log:\n"
           "    log.write(f'{sys.argv[2]} {sys.flags.dont_write_bytecode} {fixture_nested_mod.VALUE}\\n')\n")
 NESTED_MOD = "# FIXTURE module (tools/check_deb_ubuntu.py)\nVALUE = 'imported'\n"
+# Options that pick a CPU above baseline x86-64 (or name one: native, x86-64-v2..v4).
+CPU_OPTION = re.compile(r"-m(arch|tune|cpu)\b|-m(avx|sse|fma|bmi|f16c|popcnt|lzcnt|movbe|pclmul|aes)\w*|"
+                        r"x86-64-v[234]|\bnative\b", re.I)
+MARCH_DEFAULT = re.compile(r'set\(XG_MARCH "([^"]*)" CACHE STRING ')
+MARCH_GUARD = re.compile(r"^if\(XG_MARCH\)\n(?:[ \t]*target_compile_options\(\w+ PRIVATE -march=\$\{XG_MARCH\}\)\n)+"
+                         r"[ \t]*endif\(\)\n", re.M)
+NOT_ON_DEB_PATH = ("aarch64-linux-gnu.cmake", "mingw-w64-x86_64.cmake")  # cross toolchain files; no toolchain is passed
 
 
 def sha256(path: Path) -> str:
@@ -730,6 +749,107 @@ def check_fixtures(work: Path) -> None:
     check(not left, f"no fixture source tree holds a __pycache__ after all runs ({left or 'none'})")
 
 
+def cmake_code(text: str) -> str:
+    """CMake text without its comments (a # outside double quotes ends the line)."""
+    lines = []
+    for line in text.splitlines():
+        quoted = False
+        for i, ch in enumerate(line):
+            if ch == '"' and (i == 0 or line[i - 1] != "\\"):
+                quoted = not quoted
+            elif ch == "#" and not quoted:
+                line = line[:i]
+                break
+        lines.append(line.rstrip())
+    return "\n".join(lines) + "\n"
+
+
+def baseline_problems(args: list[str]) -> dict[str, str]:
+    """Faults of a logged configure (cmake's arguments) against baseline amd64, by kind (empty: none)."""
+    if "-S" not in args:
+        return {"configure": f"no -S in the configure arguments ({args})"}
+    found: dict[str, str] = {}
+    options = [a for i, a in enumerate(args) if not (i and args[i - 1] in ("-S", "-B"))]
+    bad = [a for a in options if CPU_OPTION.search(a) or re.match(r"-DXG_MARCH(:\w+)?=.", a)
+           or re.match(r"-D\w*(FLAGS|TOOLCHAIN_FILE|COMPILER|COMPILER_TARGET|SYSTEM_PROCESSOR)(:\w+)?=", a)]
+    if bad:
+        found["configure"] = f"the configure passes a CPU, flag, compiler or non-empty XG_MARCH option: {bad}"
+    port = Path(args[args.index("-S") + 1])
+    files = [port / "CMakeLists.txt"] + sorted(p for p in port.rglob("*.cmake") if p.name not in NOT_ON_DEB_PATH)
+    defaults, stray = [], []
+    for path in files:
+        code = cmake_code(path.read_text())
+        defaults += MARCH_DEFAULT.findall(code)
+        if path == port / "CMakeLists.txt":
+            code = MARCH_GUARD.sub("", code, count=1)
+        stray += [f"{path.relative_to(port)}: {line.strip()}" for line in code.splitlines()
+                  if not MARCH_DEFAULT.search(line) and (CPU_OPTION.search(line) or "XG_MARCH" in line)]
+    if defaults != [""]:
+        found["default"] = f"XG_MARCH's cache default is not one empty value ({defaults})"
+    if stray:
+        found["cmake"] = f"a CPU option or an XG_MARCH use outside the guarded -march=${{XG_MARCH}}: {stray}"
+    return found
+
+
+def check_baseline(work: Path) -> None:
+    """Baseline amd64 on the .deb path: the real CMake files and deb_ubuntu.py's own configure argv (FIXTURES)."""
+    r = Runner(work)
+    good = cdb.fixture_deb(work, "baseline", cdb.good_files())
+    full = make_bin(work, "baseline", good)
+    cmake_files = [ROOT / "port/CMakeLists.txt", *sorted((ROOT / "port").rglob("*.cmake"))]
+
+    def source(label: str, edits: tuple = ()) -> tuple[Path, Path]:
+        src, script = make_source(work, "baseline-" + slug(label))
+        for path in cmake_files:
+            (src / path.relative_to(ROOT)).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, src / path.relative_to(ROOT))
+        for target, old, new in edits:
+            path = script if target == "deb_ubuntu.py" else src / target
+            text = path.read_text()
+            check(old is None or text.count(old) == 1, f"FIXTURE baseline mutation {label}: a labelled test change "
+                                                       f"of a copy of {target}")
+            path.write_text(text + new if old is None else text.replace(old, new))
+        return src, script
+
+    src, script = source("pristine")
+    if r.accepted("baseline: this repository's CMake files, the unchanged deb_ubuntu.py", script, src,
+                  fresh(work / "builds/baseline-pristine"), out_folder(work, "baseline-pristine"), bin_dir=full, deb=good):
+        args = logged(full)[1][1]
+        found = baseline_problems(args)
+        check(not found and Path(args[args.index("-S") + 1]) == src.resolve() / "port",
+              f"baseline amd64: deb_ubuntu.py configures the copied real port/ with no XG_MARCH but empty, no flag, "
+              f"compiler or CPU option, and its CMake keeps XG_MARCH empty and every -march guarded "
+              f"({found or 'clean'}; not the Ubuntu compiler's default)")
+
+    cmake, setter, configure = "port/CMakeLists.txt", 'set(XG_MARCH "" CACHE STRING', '"-DXG_EXTRAS=ON",'
+    ui = "target_compile_options(ui PRIVATE -march=${XG_MARCH})"
+    for label, edits, kind in (
+            ("XG_MARCH default native", ((cmake, setter, setter.replace('""', '"native"')),), "default"),
+            ("XG_MARCH default x86-64-v3", ((cmake, setter, setter.replace('""', '"x86-64-v3"')),), "default"),
+            ("XG_MARCH set again after its cache entry", ((cmake, "if(XG_MARCH)\n",
+                                                           "set(XG_MARCH x86-64-v3)\nif(XG_MARCH)\n"),), "cmake"),
+            ("an unguarded -march for the menu", ((cmake, ui, ui.replace("${XG_MARCH}", "x86-64-v3")),), "cmake"),
+            ("-mtune for every target", ((cmake, setter, "add_compile_options(-mtune=znver4)\n" + setter),), "cmake"),
+            ("-mavx2 in deb.cmake", (("port/cmake/deb.cmake", None, "target_compile_options(xenogears PRIVATE -mavx2)\n"),),
+             "cmake"),
+            ("configure with -DXG_MARCH=native", (("deb_ubuntu.py", configure, configure + ' "-DXG_MARCH=native",'),),
+             "configure"),
+            ("configure with -DXG_MARCH=x86-64-v3", (("deb_ubuntu.py", configure, configure + ' "-DXG_MARCH=x86-64-v3",'),),
+             "configure"),
+            ("configure with -DCMAKE_C_FLAGS=-mtune=skylake",
+             (("deb_ubuntu.py", configure, configure + ' "-DCMAKE_C_FLAGS=-mtune=skylake",'),), "configure"),
+            ("configure with an explicit empty -DXG_MARCH=", (("deb_ubuntu.py", configure, configure + ' "-DXG_MARCH=",'),),
+             None)):
+        src, script = source(label, edits)
+        r.invoke(script, src, fresh(work / "builds" / ("baseline-" + slug(label))),
+                 out_folder(work, "baseline-" + slug(label)), TAG, full, GOOD_OS, work, None, label)
+        args = next((e[1] for e in logged(full) if e[0] == "cmake" and "-S" in e[1]), [])
+        found = baseline_problems(args)
+        check(set(found) == ({kind} if kind else set()),
+              f"FIXTURE baseline mutation {label}: {'caught as ' + kind if kind else 'not flagged'} "
+              f"({'; '.join(found.values())[:300] or 'clean'})")
+
+
 def report() -> int:
     if cdb.failures:
         print(f"check_deb_ubuntu: {len(cdb.failures)} check(s) failed")
@@ -752,6 +872,7 @@ def main() -> int:
     check_bytecode_control(work)
     check_real_host(work)
     check_fixtures(work)
+    check_baseline(work)
     return report()
 
 

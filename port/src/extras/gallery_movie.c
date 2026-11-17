@@ -68,7 +68,7 @@ struct XgMovie {
     int frameX, frameY;
     int width, height;
     int sinceFrame; /* vertical blanks since the last frame came */
-    const char* caption[2]; /* at `frame`: the US dialogue's, the Japanese translation's */
+    char caption[4][384];   /* at `frame`, tracks 1-4 (regionalCaption: a copy, "" for none) */
     int identity[5];        /* the movie they were looked up for (regionalMovieIdentity) */
     int identified;
     int audible;
@@ -225,7 +225,7 @@ int xgMovieStart(XgMovie* m, int streamNo, int offset, int first, int last, int 
     m->frame = 0;
     m->playing = 0;
     m->sinceFrame = 0;
-    m->caption[0] = m->caption[1] = NULL;
+    memset(m->caption, 0, sizeof m->caption);
     m->identified = 0;
     m->width = width > 0 && width <= FRAME_W ? width : FRAME_W;
     m->height = height > 0 && height <= FRAME_H ? height : 224;
@@ -254,7 +254,7 @@ void xgMovieStop(XgMovie* m) {
         leave(m);
     }
     m->playing = 0;
-    m->caption[0] = m->caption[1] = NULL;
+    memset(m->caption, 0, sizeof m->caption);
     m->identified = 0;
 }
 
@@ -299,8 +299,10 @@ void xgMovieRun(XgMovie* m, int vsyncs, int audible) {
     }
     /* The player told this world's regional state of its movie and frame
      * (regionalMovieBegin, regionalMovieFrame), as it tells the game's. */
-    m->caption[0] = regionalCaption(1);
-    m->caption[1] = regionalCaption(2);
+    for (int track = 1; track <= 4; track++) {
+        const char* text = regionalCaption(track);
+        snprintf(m->caption[track - 1], sizeof m->caption[0], "%s", text != NULL ? text : "");
+    }
     m->identified = regionalMovieIdentity(m->identity);
     hwWorldSetSink(NULL, NULL);
     leave(m);
@@ -326,7 +328,7 @@ int xgMovieFrame(XgMovie* m, uint32_t* rgba, int* w, int* h) {
 }
 
 const char* xgMovieCaption(const XgMovie* m, int track) {
-    return m != NULL && track >= 1 && track <= 2 ? m->caption[track - 1] : NULL;
+    return m != NULL && track >= 1 && track <= 4 && m->caption[track - 1][0] ? m->caption[track - 1] : NULL;
 }
 
 int xgMovieIdentity(const XgMovie* m, int out[5]) {

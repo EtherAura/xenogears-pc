@@ -1982,10 +1982,18 @@ msgid "Japanese translation"
 msgstr "日本語の訳"
 
 #: port/src/ui/sections.cpp
+msgid "US dialogue + sounds"
+msgstr "US 版のせりふ + 音"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese translation + sounds"
+msgstr "日本語の訳 + 音"
+
+#: port/src/ui/sections.cpp
 msgid ""
-"Independent of audio language. Uses the in-game dialogue font. Text tracks "
-"are drafts under review."
-msgstr "音声の言語とは別に選べます。ゲーム内の会話フォントを使います。字幕はまだ見直し中の下書きです。"
+"Independent of audio language. Uses the in-game dialogue font. \"+ sounds\" "
+"also captions sounds such as [screams], for players who can't hear them."
+msgstr "音声の言語とは別に選べます。ゲーム内の会話フォントを使います。「+ 音」は [screams] のような音も字幕にします(音が聞こえないプレイヤー向け)。"
 
 #: port/src/ui/sections.cpp
 msgid "Japanese Disc 1"

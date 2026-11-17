@@ -321,9 +321,10 @@ std::vector<Spec>& table() {
         [](int, int v) { regionalSetBattle(v); }, 0);
     add("japanese_cutscene_audio", N_("Cutscene audio"), [](int) { return regionalMovieEnabled(); },
         [](int, int v) { regionalSetMovie(v); }, 0);
-    static const char* const subtitles[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation")};
+    static const char* const subtitles[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation"),
+                                            N_("US dialogue + sounds"), N_("Japanese translation + sounds")};
     add("cutscene_subtitles", N_("Subtitles"), [](int) { return regionalSubtitlesEnabled(); },
-        [](int, int v) { regionalSetSubtitles(v); }, 0, subtitles, 3);
+        [](int, int v) { regionalSetSubtitles(v); }, 0, subtitles, 5);
     // Controls
     add("jp_controls_us", N_("Japanese controls in the US version"), [](int) { return padRegionalControls(0); },
         [](int, int v) { padSetRegionalControls(0, v); }, 0);

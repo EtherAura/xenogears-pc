@@ -36,10 +36,14 @@ int pcRegionalFieldMovieMusic(int field, int stream);
  * current movie's frame; NULL when there is none. */
 const char* regionalSubtitle(void);
 /* The same for a track chosen by the caller (1: US dialogue, 2: Japanese
- * translation; other values: none), e.g. the extras' movie viewer, whose
- * movie is its CD world's (cd.h cdWorldSwap carries this file's state). */
+ * translation, 3 and 4: the same with sound captions such as [screams], on a
+ * line above; other values: none), e.g. the extras' movie viewer, whose
+ * movie is its CD world's (cd.h cdWorldSwap carries this file's state). With
+ * sound captions the text may sit in a buffer the next call for that track
+ * reuses: copy it to keep it. */
 const char* regionalCaption(int track);
 int regionalSubtitlesEnabled(void);
-/* 0: off, 1: US dialogue, 2: English translation of Japanese dialogue. */
+/* 0: off, 1: US dialogue, 2: English translation of Japanese dialogue,
+ * 3 and 4: 1 and 2 with sound captions (accessibility). */
 void regionalSetSubtitles(int mode);
 #endif

@@ -1464,11 +1464,13 @@ void audioSection() {
         overrideNote("japanese_cutscene_audio");
     }
     if (row("Subtitles", "cutscene_subtitles")) {
-        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation"};
+        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation", "US dialogue + sounds",
+                                        "Japanese translation + sounds"};
         int captions = regionalSubtitlesEnabled();
-        int captionChoice = choice("subtitles", subtitleTracks, 3, captions);
+        int captionChoice = choice("subtitles", subtitleTracks, 5, captions);
         if (captionChoice != captions) regionalSetSubtitles(captionChoice);
-        hint("Independent of audio language. Uses the in-game dialogue font. Text tracks are drafts under review.");
+        hint("Independent of audio language. Uses the in-game dialogue font. \"+ sounds\" also captions sounds such as "
+             "[screams], for players who can't hear them.");
         overrideNote("cutscene_subtitles");
     }
     for (int disc = 1; disc <= 2; ++disc) {

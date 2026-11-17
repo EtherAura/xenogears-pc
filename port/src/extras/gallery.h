@@ -66,8 +66,8 @@ void xgMovieAudioStop(void);
  * (rgba: room for 320 x 240) with its size. */
 int xgMovieFrame(XgMovie* m, uint32_t* rgba, int* w, int* h);
 /* The cutscene caption at that frame (cd/regional.h regionalCaption), for
- * track 1 (US dialogue) or 2 (Japanese translation); NULL: none, or a build
- * without the captions. */
+ * track 1 (US dialogue), 2 (Japanese translation), or 3 and 4 (the same with
+ * sound captions); NULL: none, or a build without the captions. */
 const char* xgMovieCaption(const XgMovie* m, int track);
 /* The movie those captions were looked up for, as the player told its world
  * (cd/regional.h regionalMovieIdentity, the same five values); 0: none, as
