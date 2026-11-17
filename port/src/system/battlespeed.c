@@ -33,6 +33,13 @@
  * Its decisions are part of save states (battleSpeedStateIo): a state taken
  * at 4x loads at 4x with the audio clock where it was (hw.c saves the clock).
  *
+ * Story battles (xg-mrj.7): only a battle the encounter roll started runs at
+ * the saved speed. A scripted one (gameplay.c's class: bosses, story fights,
+ * battles a script starts, chains) starts at 1x with a note, and the control
+ * steps a speed of its own that ends with it and is never saved (`story`,
+ * below). XG_BATTLE_SPEED, the environment's choice for one run, holds every
+ * battle at its speed as before (tools/test_battle_speed.py, statecheck.py).
+ *
  * XG_BATTLE_SPEED_LOG=<file>: a line per vblank in a battle and at each
  * change of the factor, "<vblank>
  * <factor> <hidden> <wait> <text> <textHold> <game time> <audio time>"
@@ -45,6 +52,7 @@
 #include <string.h>
 
 #include "battlespeed.h"
+#include "gameplay.h"
 #include "netplay.h"
 #include "settings.h"
 #include "spu/spu.h"
@@ -56,6 +64,9 @@ void presentShowNote(const char* text) __attribute__((weak)); /* gpu/present.c *
 extern int fieldSpeedChosen(void) __attribute__((weak));
 extern int fieldSpeedWanted(void) __attribute__((weak));
 extern void fieldSpeedStateIo(XgState* s) __attribute__((weak));
+/* gameplay.c: the class of the battle that started last (weak: fieldspeedtest
+ * links this file without it, and every battle is then the saved speed's). */
+extern int pcGameplayBattleClass(void) __attribute__((weak));
 
 /* Battle frames at most this many vblanks apart are one battle: battleRender
  * waits 1 vblank a frame; its loads (battleLoadFileFrom0xC) take a few more. */
@@ -69,6 +80,17 @@ extern void fieldSpeedStateIo(XgState* s) __attribute__((weak));
 
 static int cachedChosen, cachedValid;
 static unsigned cachedRevision;
+
+/* A scripted battle's own speed (host: a choice of the player's like the
+ * setting, never in a state and never saved). It lives from one battle start
+ * to the next (battleSpeedBattleStart, a retry's too) and a state's load ends
+ * it (battleSpeedStateIo): the battle loaded may be another one. Read and
+ * written on the game's thread only, as the rest of this file. */
+static struct {
+    int speed;  /* 2 or 4 once the control stepped it there; else 1x */
+    int noted;  /* the battle's corner note was asked for */
+    int exempt; /* XG_BATTLE_SPEED holds every battle at its speed (read with cachedChosen) */
+} story;
 
 static int clampChosen(int v) {
     return v <= 0 ? 0 : v == 1 ? 1 : v <= 3 ? 2 : 4;
@@ -89,8 +111,30 @@ int battleSpeedChosen(void) {
         cachedChosen = clampChosen(settingsInt("battle_speed", 0));
         cachedRevision = settingsRevision(); /* after the read: the first one loads the file */
         cachedValid = 1;
+        const char* env = settingsOverride("battle_speed"); /* (until the key is set in the run) */
+        story.exempt = env != NULL && env[0] != '\0';
     }
     return cachedChosen;
+}
+
+/* The battle that started last runs at a speed of its own: the option is on,
+ * the encounter roll did not start it, and the environment does not choose. */
+static int storyBattle(void) {
+    return battleSpeedChosen() > 0 && !story.exempt && pcGameplayBattleClass != NULL &&
+           pcGameplayBattleClass() != GAMEPLAY_BATTLE_RANDOM;
+}
+
+static void storyNote(void) {
+    if (presentShowNote) {
+        char text[48];
+        snprintf(text, sizeof text, "Battle speed %dx (story battle)", story.speed > 1 ? story.speed : 1);
+        presentShowNote(text);
+    }
+}
+
+void battleSpeedBattleStart(void) {
+    story.speed = 1;
+    story.noted = 0;
 }
 
 void battleSpeedSetChosen(int speed) {
@@ -130,6 +174,10 @@ void battleSpeedBattleFrame(int wait, unsigned text) {
     seenBattle = 1;
     battleWait = wait != 0;
     battleText = text;
+    if (!story.noted && storyBattle() && !netplayActive()) {
+        story.noted = 1; /* a scripted battle's first frame: 1x, whatever the saved speed */
+        storyNote();
+    }
 }
 
 int battleSpeedInBattle(void) {
@@ -152,6 +200,9 @@ int battleSpeedHidden(void) {
 static int wanted(void) {
     int chosen = battleSpeedChosen();
     int fieldOn = fieldSpeedChosen != NULL && fieldSpeedChosen() > 1;
+    if (chosen > 0 && battleSpeedInBattle() && storyBattle()) {
+        chosen = story.speed > 1 ? story.speed : 1; /* a scripted battle: its own speed, not the saved one */
+    }
     if (chosen <= 1 && !fieldOn) {
         return 1;
     }
@@ -215,8 +266,18 @@ int battleSpeedStep(void) {
         if (presentShowNote) presentShowNote("Battle speed: 1x online");
         return 1;
     }
+    if (storyBattle()) {
+        /* A scripted battle: this battle's speed alone; the setting and its file are not touched. */
+        int now = story.speed > 1 ? story.speed : 1;
+        story.speed = now == 1 ? 2 : now == 2 ? 4 : 1;
+        story.noted = 1;
+        storyNote();
+        return 1;
+    }
     int next = chosen == 1 ? 2 : chosen == 2 ? 4 : 1;
     battleSpeedSetChosen(next);
+    story.speed = next; /* (XG_BATTLE_SPEED's hold ends with this write: a scripted battle goes on from here) */
+    story.noted = 1;
     if (presentShowNote) {
         char text[48];
         snprintf(text, sizeof text, "Battle speed %dx", next);
@@ -333,6 +394,12 @@ void battleSpeedStateIo(XgState* s) {
     XG_STATE_VAR(s, seenCdAudio);
     XG_STATE_VAR(s, sinceShown);
     XG_STATE_VAR(s, hidden);
+    if (xgStateLoading != NULL && xgStateLoading(s)) {
+        /* A scripted battle's own speed is not in a state: the battle loaded
+         * may be another one, so it is at 1x again (a note when that slows it). */
+        if (story.speed > 1) story.noted = 0;
+        story.speed = 1;
+    }
     if (fieldSpeedStateIo != NULL) {
         fieldSpeedStateIo(s); /* the field's movie flag (fieldspeed.c) */
     }

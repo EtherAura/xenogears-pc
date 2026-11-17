@@ -109,9 +109,13 @@ void pcGameplayBattleRetryClass(void) {
 }
 
 static void enemyScriptForget(void);
+/* battlespeed.c: a scripted battle's own speed starts over (weak: the
+ * gameplay tests link this file without it). */
+extern void battleSpeedBattleStart(void) __attribute__((weak));
 
 void pcGameplayBattleStart(int config, int chained) {
     enemyScriptForget();
+    if (battleSpeedBattleStart != NULL) battleSpeedBattleStart();
     if (retryKeepsClass) {
         retryKeepsClass = 0;
         pendingRandomConfig = -1;

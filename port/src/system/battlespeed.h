@@ -16,6 +16,10 @@
  * battle waits for the player (the command menus, target selection, a page
  * waiting for the confirm button, event dialogue), for the first moments of
  * each new name it puts up, and while CD audio streams, it runs at 1x.
+ *
+ * The saved speed is for random battles (the ones the encounter roll starts,
+ * gameplay.h's class). A scripted battle (a boss, a story fight) starts at 1x
+ * with a note; the control steps that battle alone and saves nothing.
  */
 
 #include "savestate.h"
@@ -39,6 +43,9 @@ void battleSpeedPad(unsigned buttons);
  * nonzero while the battle waits for the player; text has a bit per name it
  * shows (a bit that comes on holds 1x for a moment). */
 void battleSpeedBattleFrame(int wait, unsigned text);
+/* gameplay.c, as a battle starts (pcGameplayBattleStart: every start, a
+ * chain's and a retry's too): a scripted battle's own speed begins at 1x. */
+void battleSpeedBattleStart(void);
 
 /* hw.c's vblank, before the GPU's: the factor of the frame this vblank
  * starts (hwSetGameSpeed) and whether its picture is shown. */

@@ -357,6 +357,7 @@ system/battlespeed.c loggedFactor host XG_BATTLE_SPEED_LOG
 system/battlespeed.c seenBattle state
 system/battlespeed.c seenCdAudio state
 system/battlespeed.c sinceShown state
+system/battlespeed.c story host a scripted battle's own speed and note (the control's; over at the next battle start or load)
 system/battlespeed.c textHold state
 system/fieldspeed.c fieldChosen host the field_speed setting
 system/fieldspeed.c fieldChosenRevision host the field_speed setting

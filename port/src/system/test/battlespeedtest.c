@@ -98,6 +98,9 @@ int main(void) {
     setEnv("XG_BATTLE_SPEED", "");
     CHECK(SDL_Init(0));
     CHECK(hwInit() && stepClock);
+    /* The battle of these checks is a random one, the saved speed's (xg-mrj.7:
+     * a scripted one keeps a speed of its own, storyspeedtest.c). */
+    pcGameplaySetBattleClass(GAMEPLAY_BATTLE_RANDOM);
 
     /* The audio clock is the game's time until the factor changes. */
     for (double t = 0; t < 100; t += 0.37) {
