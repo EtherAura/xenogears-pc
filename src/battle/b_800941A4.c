@@ -1475,15 +1475,15 @@ u8 battleGetSlotStatusSub(u8 entity, s32 unused) {
     if (entity < 3) {
         if (!(battleGetSlotStatusSub_currentBattleEntity->m15A_flags & 0x80)) {
             currentEntityBattleStats = &pBattleEntities->m1058_partyBattleStats[entity][pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
-            if (battleGetSlotStatusSub_currentBattleEntity->m0_base.m5A_agility > (s8)currentEntityBattleStats->m26[1]) {
-                speed = (battleGetSlotStatusSub_currentBattleEntity->m0_base.m5A_agility - (s8)currentEntityBattleStats->m26[1]) * 9;
+            if (battleGetSlotStatusSub_currentBattleEntity->m0_base.m5A_agility > (s8)currentEntityBattleStats->m27_agilityPenalty) {
+                speed = (battleGetSlotStatusSub_currentBattleEntity->m0_base.m5A_agility - (s8)currentEntityBattleStats->m27_agilityPenalty) * 9;
             } else {
                 speed = 9;
             }
         } else {
             currentEntityBattleStats = &pBattleEntities->m2228_mechaBattleStats[entity][pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
-            if (battleGetSlotStatusSub_currentBattleEntity->mA4_gear.m98_agility > (s8)currentEntityBattleStats->m26[1]) {
-                speed = (battleGetSlotStatusSub_currentBattleEntity->mA4_gear.m98_agility - (s8)currentEntityBattleStats->m26[1]) * 9;
+            if (battleGetSlotStatusSub_currentBattleEntity->mA4_gear.m98_agility > (s8)currentEntityBattleStats->m27_agilityPenalty) {
+                speed = (battleGetSlotStatusSub_currentBattleEntity->mA4_gear.m98_agility - (s8)currentEntityBattleStats->m27_agilityPenalty) * 9;
             } else {
                 speed = 9;
             }

@@ -531,7 +531,8 @@ typedef struct {
     /* 0x22 */ u8 m22_elementFlags;
     /* 0x23 */ u8 m23;
     /* 0x24 */ u16 m24_fuelCost;
-    /* 0x26 */ u8 m26[2];
+    /* 0x26 */ u8 m26;
+    /* 0x27 */ u8 m27_agilityPenalty;
 } sBattle800CDD40Sub;
 
 /* Noah: sBattle800cdd40 (size 0x5F0); partyBattleStats[3] = partyBattleStats */
