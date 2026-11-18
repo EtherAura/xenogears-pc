@@ -175,6 +175,9 @@ target_compile_definitions(mdectest PRIVATE PLATFORM_PC)
 # Save states (port/src/system/savestate.h): the codec on memory-like data and damaged input.
 add_executable(state_codectest EXCLUDE_FROM_ALL src/system/test/statecodectest.c src/system/statecodec.c)
 add_executable(rewindpacktest EXCLUDE_FROM_ALL src/system/test/rewindpacktest.c src/system/statecodec.c)
+# The state file's header (the engine id, region, disc, app version), thumbnail and body round trip.
+add_executable(statefiletest EXCLUDE_FROM_ALL src/system/test/statefiletest.c src/system/statefile.c
+    src/system/statecodec.c src/system/settings.c)
 add_executable(seamreusetest EXCLUDE_FROM_ALL src/gpu/test/seamreusetest.c)
 add_executable(spansteptest EXCLUDE_FROM_ALL src/gpu/test/spansteptest.c)
 add_executable(battlepacingtest EXCLUDE_FROM_ALL src/system/test/battlepacingtest.c
@@ -190,7 +193,7 @@ add_executable(backuptest EXCLUDE_FROM_ALL src/system/test/backuptest.c src/syst
 # Select rule beside its chord.
 add_executable(battlespeedtest EXCLUDE_FROM_ALL src/system/test/battlespeedtest.c src/system/settings.c
     src/system/gameplay.c)
-foreach(tool rewindpacktest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest)
+foreach(tool rewindpacktest statefiletest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest)
     target_include_directories(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
     target_compile_definitions(${tool} PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
     target_compile_options(${tool} PRIVATE -fno-strict-aliasing)

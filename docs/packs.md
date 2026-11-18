@@ -27,7 +27,9 @@ All start at Original. F1 > Display > Textures and art.
 
 ![Sprites Original, Linear, Edge and Cel 8x](img/packs-sprites.png)
 
-Sprites: Original, Linear, Edge and Cel 8x (the field sprite library).
+Sprites: Original, Linear, Edge and Cel 8x (the field sprite library). The
+Cel 8x figure is the Enhanced engine's, which draws each pose from the
+library as one whole figure.
 
 ![Battle HUD Original, Edge, Upscaled 4x and Cel 4x](img/packs-hud.png)
 
