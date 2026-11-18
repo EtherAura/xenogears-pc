@@ -46,16 +46,13 @@ void cardFormatImage(uint8_t* data) {
     data[0] = 'M';
     data[1] = 'C';
     cardSetFrameChecksum(data);
-    for (int i = 1; i < 16; i++) {
+    for (int i = 1; i < 36; i++) { /* directory frames 1-15, then broken-sector frames 16-35 */
         uint8_t* f = data + i * CARD_FRAME;
-        f[0] = DIR_FREE;
-        f[8] = 0xFF;
-        f[9] = 0xFF;
-        cardSetFrameChecksum(f);
-    }
-    for (int i = 16; i < 36; i++) {
-        uint8_t* f = data + i * CARD_FRAME;
-        memset(f, 0xFF, 4);
+        if (i < 16) {
+            f[0] = DIR_FREE;
+        } else {
+            memset(f, 0xFF, 4);
+        }
         f[8] = 0xFF;
         f[9] = 0xFF;
         cardSetFrameChecksum(f);
