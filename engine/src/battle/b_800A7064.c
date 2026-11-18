@@ -388,7 +388,7 @@ void updateAndRenderMechaCloth_battle(sLoadedMechas_114* arg0, SVECTOR* arg1, MA
     }
 }
 
-/* Noah: sLoadedMechas_114 cleanup (field_mecha func_801E3438) */
+/* Noah: sLoadedMechas_114 cleanup (field_mecha freeMechaCloth) */
 void freeMechaCloth_battle(sLoadedMechas_114* arg0) {
     if (arg0->m14_vertices != NULL) {
         freeHeap(arg0->m14_vertices);

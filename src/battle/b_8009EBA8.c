@@ -2020,7 +2020,7 @@ s32 releaseMechaTrailSegment_battle(sMechaInitVar3* arg0, sMechaInitVar3Sub* arg
     return idx;
 }
 
-/* = field_mecha func_801E0398 (Noah drawMechaWheelTrail_battle) */
+/* = field_mecha drawMechaWheelTrail (Noah drawMechaWheelTrail_battle) */
 void drawMechaWheelTrail_battle(sMechaInitVar3* arg0, MATRIX* m, s32 speed, OTag* ot, s32 oddOrEven) {
     sMechaInitVar3Sub* p;
     s32 i;
@@ -2075,7 +2075,7 @@ void drawMechaWheelTrail_battle(sMechaInitVar3* arg0, MATRIX* m, s32 speed, OTag
     }
 }
 
-/* = func_801E0698 (init sLoadedMechas_110; bare return) */
+/* = initMechaTrailEmitter (init sLoadedMechas_110; bare return) */
 s32 initMechaTrailEmitter_battle(sLoadedMechas_110* p, void* arg1, s16 arg2, s32 arg3, s16 arg4, s16 arg5, u8 arg6, u8 arg7, u8 arg8, u8 arg9, u8 argA, u8 argB, s16 argC, s16 argD, s16 argE, s16 argF, s16 arg10, s16 arg11, s16 arg12) {
     s32 dx;
     s32 dy;
@@ -2112,17 +2112,17 @@ s32 initMechaTrailEmitter_battle(sLoadedMechas_110* p, void* arg1, s16 arg2, s32
     return 0;
 }
 
-/* = func_801E0844 (CLUT step fn: end) */
+/* = stopMechaTrailEmitter (CLUT step fn: end) */
 void stopMechaTrailEmitter_battle(sLoadedMechas_110* p, s32 oddOrEven) {
     p->m0_boneIndex = -1;
 }
 
-/* = func_801E0850 (CLUT step fn: sine) */
+/* = envTileStepSine (CLUT step fn: sine) */
 s16 envTileStepSine_battle(s16 arg0, s16 arg1, s16 arg2) {
     return arg2 + (getAngleSin(arg0) + 0x1000) / arg1;
 }
 
-/* = func_801E08D4 (CLUT step fn: ramp up, -1 past 32) */
+/* = envTileStepRampUp (CLUT step fn: ramp up, -1 past 32) */
 s16 envTileStepRampUp_battle(s16 arg0, s16 arg1, s16 arg2) {
     arg2 += arg0 / arg1;
     if (arg2 >= 0x21) {
@@ -2131,12 +2131,12 @@ s16 envTileStepRampUp_battle(s16 arg0, s16 arg1, s16 arg2) {
     return arg2;
 }
 
-/* = func_801E0938 (CLUT step fn: ramp down) */
+/* = envTileStepRampDown (CLUT step fn: ramp down) */
 s16 envTileStepRampDown_battle(s16 arg0, s16 arg1, s16 arg2) {
     return arg2 - arg0 / arg1;
 }
 
-/* = func_801E0988 (CLUT step fn: ramp down, clamped) */
+/* = envTileStepRampDownClamped (CLUT step fn: ramp down, clamped) */
 s16 envTileStepRampDownClamped_battle(s16 arg0, s16 arg1, s16 arg2) {
     s16 ret;
 
@@ -2147,7 +2147,7 @@ s16 envTileStepRampDownClamped_battle(s16 arg0, s16 arg1, s16 arg2) {
     return ret;
 }
 
-/* = func_801E0A00 (init sLoadedMechas_118 CLUT anim) */
+/* = initAnimatedEnvTextureTile (init sLoadedMechas_118 CLUT anim) */
 sLoadedMechas_118* initAnimatedEnvTextureTile_battle(sLoadedMechas_118* p, sLoadedMechas_118* parent, u16 mode, u16 flags,
     sLoadedMechas_118_1C* src, s16 a5, s16 a6, s16 a7, s16 a8, s16 a9, s16 a10, s16 x, s16 y, s16 w, s16 h,
     s16 speed, s16 arg16, s16 arg17, s16 (*fn)()) {
@@ -2312,7 +2312,7 @@ sLoadedMechas_118* initAnimatedEnvTextureTile_battle(sLoadedMechas_118* p, sLoad
     return p;
 }
 
-/* = func_801E1258 (Noah updateAnimatedEnvTextureTile_battle;) */
+/* = updateAnimatedEnvTextureTile (Noah updateAnimatedEnvTextureTile_battle;) */
 s16 updateAnimatedEnvTextureTile_battle(sLoadedMechas_118* arg0, s32 arg1) {
     sLoadedMechas_118* parent;
     RECT src;
@@ -2398,7 +2398,7 @@ s16 updateAnimatedEnvTextureTile_battle(sLoadedMechas_118* arg0, s32 arg1) {
     return v;
 }
 
-/* = func_801E165C (free sLoadedMechas_118) */
+/* = freeAnimatedEnvTextureTile (free sLoadedMechas_118) */
 void freeAnimatedEnvTextureTile_battle(sLoadedMechas_118* arg0) {
     if (arg0->m1A_isActive != 0) {
         if (arg0->m4_baseColors != NULL) {
@@ -2420,7 +2420,7 @@ void freeAnimatedEnvTextureTile_battle(sLoadedMechas_118* arg0) {
     }
 }
 
-/* = func_801E1708 (scale CLUT) */
+/* = fadeEnvTileColorMatrix (scale CLUT) */
 void fadeEnvTileColorMatrix_battle(sLoadedMechas_118* arg0, s16 arg1) {
     u16* src;
     s32 x;
@@ -2435,7 +2435,7 @@ void fadeEnvTileColorMatrix_battle(sLoadedMechas_118* arg0, s16 arg1) {
     }
 }
 
-/* = func_801E17B8 (blend CLUT; "Handwritten" flag bogus) */
+/* = lerpEnvTileColorMatrix (blend CLUT; "Handwritten" flag bogus) */
 void lerpEnvTileColorMatrix_battle(sLoadedMechas_118* arg0, s16 arg1) {
     u16* src;
     u16* src2;

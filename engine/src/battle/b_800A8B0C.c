@@ -310,7 +310,7 @@ void mechaInitForBattle(void) {
 }
 
 /* Noah: mechaInitEnvironmentMechaMesh (battle copy of field_mecha
- * func_801E742C): builds battle mecha entryId (< 32) from its data tables,
+ * mechaInitNewMecha): builds battle mecha entryId (< 32) from its data tables,
  * with the battle config's shadow colour and scale and terrain snapping. */
 void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pData2, sMechaDataTable1* pData1, s16 tpageX,
                    s16 tpageY, s16 clutX, s16 clutY, SVECTOR* pPosition) {
@@ -1125,7 +1125,7 @@ void signalEffectMechaEvent(void);
  * position (ANIM_WORD_AT) and advance the cursor after the call. */
 #define ANIM_WORD_AT(cursor, i) ((s32)(s16)(cursor)[i])
 
-/* Noah: processMechaAnimData_battle (battle copy of field_mecha func_801E39F0): the
+/* Noah: processMechaAnimData_battle (battle copy of field_mecha processMechaAnimData): the
  * mecha animation bytecode interpreter. Integrates the mecha's velocities
  * (arg4 + 1 steps), picks the program (m4C/m54/m50 triggers), then runs
  * opcodes until one stops (pNext = pCur; cont = 0). */
@@ -1734,7 +1734,7 @@ skip:
                 if ((op >> tmp) & 1) {
                     if (battleMechas[tmp] != NULL) {
                         /* Nested do/while (0): register-allocation weight only (flow counts refs by loop
-                         * depth), no code change; as in field_mecha func_801E39F0 (6+6 levels on opHi). */
+                         * depth), no code change; as in field_mecha processMechaAnimData (6+6 levels on opHi). */
                         do { do { do { do { do { do { battleMechas[tmp]->m5E_attachBone = opHi; } while (0); } while (0); } while (0); } while (0); } while (0); } while (0);
                         battleMechas[tmp]->m5C_attachMecha = pMecha->m20_mechaEntryId;
                         battleMechas[tmp]->m5D_attachRotation = hi & 2;
@@ -2704,7 +2704,7 @@ s32 getMechaSoundEffectIdBase_battle(sLoadedMechas* pMecha, s32 which) {
     FALLOFF_RETURN(3); /* any other bank: the last compare's 3 */
 }
 
-/* Noah: mechaAnimEventStream (battle copy of field_mecha func_801E5D44):
+/* Noah: mechaAnimEventStream (battle copy of field_mecha updateMechAnimSub4):
  * runs the current keyframe's events for this frame: 1 sprite effect on a
  * bone, 2 light setup, 3/4 bone trails, 5 sound, 6 createAllDamageDisplaysIfAnimating, 7 bone
  * visibility, 8 animations on the targets, 9 CLUT/colour animations. */
