@@ -15,8 +15,8 @@ a tag of any other form is refused as given, never corrected. The assets are
 (the source tarball of the release is xenogears-pc-<version>.tar.gz, made by
 the release-source workflow; this is the built port, a different asset).
 
-The stage is the prefix a Linux Release build installs into, by the install
-rules of port/cmake/deb.cmake:
+The stage is the prefix a Linux Release build configured to hand out
+(-DXG_DIST=ON) installs into, by the install rules of port/cmake/deb.cmake:
 
     cmake --install <build> --prefix <stage> --strip
 
@@ -53,9 +53,13 @@ through the working folder, PATH or the environment) on every executable it is
 about to archive, and writes nothing, not even --out-dir, unless each one
 passes. There is no way to skip it. Per executable it runs, without a shell,
 
-    <this python> -E -s -B <checkout>/tools/payloadcheck.py --exe <copy> --build <build> --ver <ver>
+    <this python> -E -s -B <checkout>/tools/payloadcheck.py --exe <copy> --build <build> --ver <ver> --dist
 
-in the checkout, with no standard input and a time limit. <copy> is the bytes
+in the checkout, with no standard input and a time limit. --dist is the
+auditor's rule for a build to hand out: it fails a build not configured with
+-DXG_DIST=ON (port/CMakeLists.txt) and an executable that still names a
+folder of the machine that built it (its build folder, its repository, the
+builder's home); the auditor decides both, this helper only asks for them. <copy> is the bytes
 read from the stage, written read-only into a private temporary folder; the
 same bytes in memory go into the tarball, and the copy must still be those
 bytes after its audit. --build is the configured CMake build folder the
@@ -65,10 +69,11 @@ reads their objects to say where a run of the game's bytes comes from. Their
 CMakeCache.txt must name --ver and the engine. An executable passes only when
 the auditor exits 0 and prints exactly its two lines: the heading, naming this
 copy, the version and the number of module images it read, and one
-"payload ok" line with no run in a failing category. Every staged executable
-is audited before the verdict; any other exit, output, a time-out or a launch
-error is a refusal. The auditor's own lines are relayed without the bytes it
-found.
+"payload ok" line with no run in a failing category, no path of the build
+machine and no "not a build to hand out". Every staged executable is audited
+before the verdict; any other exit, output, a time-out or a launch error is a
+refusal. The auditor's own lines are relayed without the bytes it found, the
+build machine's paths it found, the build folder or the checkout's folder.
 
 The module images are the player's own, extracted by tools/extract.py into the
 checkout's disc folder for <ver>; only the auditor reads them. The auditor
@@ -166,6 +171,7 @@ AUDIT_HEADING = re.compile(r"retail module data in (.+) \((US|JP)\): ([0-9]+) mo
 AUDIT_OK = re.compile(r"payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; library 0/0; "
                       r"allowed [0-9]+/[0-9]+, symbol names [0-9]+/[0-9]+, src \(game C's own data\) 0/0")
 HEX_RUN = re.compile(r"[0-9A-Fa-f]{16,}")
+BUILD_PATH_LINE = re.compile(r"(\s*build path\s+[0-9]+ places)\s.*")  # the auditor's line for a build machine's path
 
 
 class ReleaseError(Exception):
@@ -323,9 +329,12 @@ def audit_build(build: Path, ver: str, rel: str) -> Path:
     return build
 
 
-def redact(text: str, copy: Path, rel: str) -> str:
-    """One line of the auditor's output, without the bytes it found."""
-    text = HEX_RUN.sub("[bytes withheld]", text.replace(str(copy), rel))
+def redact(text: str, copy: Path, rel: str, build: Path) -> str:
+    """One line of the auditor's output, without the bytes or the build machine's paths it found."""
+    text = BUILD_PATH_LINE.sub(r"\1  [path withheld]", text)
+    for folder, name in ((str(copy), rel), (str(build), f"<the build of {rel}>"), (str(CHECKOUT), "<checkout>")):
+        text = text.replace(folder, name)
+    text = HEX_RUN.sub("[bytes withheld]", text)
     return "".join(c if c.isprintable() else "?" for c in text)
 
 
@@ -348,7 +357,8 @@ def audit_executable(f: dict, build: Path, ver: str, images: int, scratch: Path)
     os.chmod(copy, 0o500)
     if not sys.executable:
         raise ReleaseError(f"payload audit of {rel}: this Python does not know its own path")
-    argv = [sys.executable, "-E", "-s", "-B", str(AUDITOR), "--exe", str(copy), "--build", str(build), "--ver", ver]
+    argv = [sys.executable, "-E", "-s", "-B", str(AUDITOR), "--exe", str(copy), "--build", str(build), "--ver", ver,
+            "--dist"]
     try:
         proc = subprocess.Popen(argv, cwd=CHECKOUT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, start_new_session=True)
@@ -380,7 +390,7 @@ def audit_executable(f: dict, build: Path, ver: str, images: int, scratch: Path)
         why = "the auditor's output is not its heading and one clean \"payload ok\" line"
     else:
         return f"{rel} ({ver.upper()}, sha256 {f['sha256']}): all {images} module images read; {lines[1]}"
-    said = [redact(line, copy, rel) for line in lines[-30:] + err.decode("utf-8", "replace").splitlines()[-5:]]
+    said = [redact(line, copy, rel, build) for line in lines[-30:] + err.decode("utf-8", "replace").splitlines()[-5:]]
     raise ReleaseError(f"payload audit of {rel} FAILED: {why}" + "".join(f"\n    | {line}" for line in said))
 
 
@@ -576,7 +586,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--ver", choices=VERSIONS, required=True,
                    help="the game version the engines were built for; its extracted module images are audited against")
     p.add_argument("--build", type=Path, required=True,
-                   help="the configured CMake build folder bin/xenogears was linked in (only read)")
+                   help="the configured CMake build folder bin/xenogears was linked in, configured with "
+                        "-DXG_DIST=ON (only read)")
     p.add_argument("--enhanced-build", type=Path,
                    help="the same for bin/xenogears-enhanced: required when the stage holds it")
     args = ap.parse_args(argv)

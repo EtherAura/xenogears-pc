@@ -168,10 +168,14 @@ def stream(seed: str, size: int = 4096) -> bytes:
     return out[:size]
 
 
-def make_build(path: Path, ver: str = "US", engine: str = "original") -> Path:
-    """SYNTHETIC FIXTURE: what the helper needs of a configured CMake build folder (no objects)."""
+def make_build(path: Path, ver: str = "US", engine: str = "original", dist: str | None = "ON",
+               home: str | None = None) -> Path:
+    """SYNTHETIC FIXTURE: what the helper needs of a configured CMake build folder (no objects); a build to
+    hand out (XG_DIST) unless dist is None (unset) or another value."""
     (path / "CMakeFiles").mkdir(parents=True)
-    (path / "CMakeCache.txt").write_text(f"# SYNTHETIC FIXTURE\nXG_ENGINE:STRING={engine}\nXG_VERSION:STRING={ver}\n")
+    (path / "CMakeCache.txt").write_text(f"# SYNTHETIC FIXTURE\nXG_ENGINE:STRING={engine}\nXG_VERSION:STRING={ver}\n"
+                                         + (f"XG_DIST:BOOL={dist}\n" if dist is not None else "")
+                                         + (f"CMAKE_HOME_DIRECTORY:INTERNAL={home}/port\n" if home else ""))
     return path
 
 
@@ -423,6 +427,7 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
     check("payload audit" in flat and "do not clear the assets for upload" in flat,
           "package --help does not say the payload audit does not clear the assets for upload")
     check("tools/payloadcheck.py" in flat, "package --help does not name the auditor")
+    check("-DXG_DIST=ON" in flat, "package --help does not say the builds are configured with -DXG_DIST=ON")
     check(stub.log() == [], "--help ran the auditor")
 
     # Names: the tag's spelling kept, counter zero and later counters accepted.
@@ -473,7 +478,7 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
               f"both engines: audited {[e['argv'][2] for e in log]}")
         for e, exe, build in zip(log, ("xenogears", "xenogears-enhanced"), (b1, b2)):
             copy = Path(e["argv"][2])
-            check(e["argv"] == [str(auditor), "--exe", str(copy), "--build", str(build), "--ver", "us"],
+            check(e["argv"] == [str(auditor), "--exe", str(copy), "--build", str(build), "--ver", "us", "--dist"],
                   f"{exe}: auditor argv {e['argv']}")
             check(copy.parent.parent == Path(ENV["TMPDIR"]) and not copy.exists(),
                   f"{exe}: the audited copy {copy} is not in a private temporary folder, or is left")
@@ -797,12 +802,16 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
     check(snapshot(stage) == stage_before, "the stage changed")
 
 
-def compile_exe(cc: str, folder: Path, name: str, payload: bytes | None) -> bytes:
-    """SYNTHETIC FIXTURE: a small real x86-64 program; with payload, it holds those bytes in its data."""
+def compile_exe(cc: str, folder: Path, name: str, payload: bytes | None, text: str | None = None) -> bytes:
+    """SYNTHETIC FIXTURE: a small real x86-64 program; with payload, it holds those bytes in its data; with
+    text, that string (a synthetic path of a build machine)."""
     folder.mkdir(parents=True, exist_ok=True)
     table = "" if payload is None else ("static const unsigned char table[] = {" + ",".join(map(str, payload))
                                         + "};\n")
-    body = "int main(int c, char **v) { (void)v; return " + ("c" if payload is None else "table[c]") + "; }\n"
+    if text is not None:
+        table += "static const char path[] = " + json.dumps(text) + ";\n"
+    value = "c" if payload is None and text is None else "table[c]" if text is None else "path[c]"
+    body = "int main(int c, char **v) { (void)v; return " + value + "; }\n"
     (folder / f"{name}.c").write_text("/* SYNTHETIC FIXTURE, not the port */\n" + table + body)
     r = subprocess.run([cc, "-O1", "-o", str(folder / name), str(folder / f"{name}.c")], capture_output=True,
                        text=True)
@@ -865,6 +874,54 @@ def real_auditor_tests(base: Path, cc: str) -> None:
             ["package", "--tag", "v2026.11.0", "--stage", st, "--out-dir", base / "real out dirty solo", "--ver", "us",
              "--build", b1], [st], "payload FAIL")
     check(not os.path.lexists(base / "real out dirty solo"), "real auditor, dirty original only: --out-dir made")
+
+    # A build to hand out: the auditor's --dist refuses an engine whose build is not XG_DIST=ON (unset or OFF),
+    # and a dist executable that names a folder of the build machine (SYNTHETIC paths: a repository that is
+    # nowhere, and the fixture build folder itself). The relayed lines name neither.
+    unset = make_build(base / "real build original not dist", dist=None)
+    off = make_build(base / "real build enhanced dist off", engine="enhanced", dist="OFF")
+    for label, args, passed in (
+            ("original build without XG_DIST", ["--ver", "us", "--build", unset, "--enhanced-build", b2],
+             "passed: bin/xenogears-enhanced"),
+            ("enhanced build with XG_DIST=OFF", ["--ver", "us", "--build", b1, "--enhanced-build", off],
+             "passed: bin/xenogears "),
+            ("original only, without XG_DIST", ["--ver", "us", "--build", unset], None)):
+        st = solo if passed is None else stage
+        o = base / f"real out {label}"
+        err = refused(cli, f"real auditor, {label}", ["package", "--tag", "v2026.11.0", "--stage", st, "--out-dir", o,
+                                                      *args], [st], "not a build to hand out")
+        check(not os.path.lexists(o), f"real auditor, {label}: --out-dir made")
+        check("exited 1" in err and (passed is None or passed in err), f"real auditor, {label}: {err!r}")
+        check(str(base) not in err and "<the build of bin/xenogears" in err,
+              f"real auditor, {label}: a private folder is relayed: {err!r}")
+    repo = "/synthetic-builder/fixture-repo"
+    leak_build = make_build(base / "real build leaky", home=repo)
+    leak_enh = make_build(base / "real build leaky enhanced", engine="enhanced")
+    in_repo = compile_exe(cc, base / "real-c", "in-repo", None, text=f"{repo}/port/src/fixture.c")
+    in_build = compile_exe(cc, base / "real-c", "in-build", None, text=f"{leak_enh}/generated/fixture.h")
+    if not in_repo or not in_build:
+        return
+    for label, original, enhanced, leaked in (("original", in_repo, clean, repo),
+                                              ("enhanced", clean, in_build, str(leak_enh))):
+        st = real_stage(base / f"real stage path {label}", original, enhanced)
+        o = base / f"real out path {label}"
+        err = refused(cli, f"real auditor, the {label} engine names a build machine's folder",
+                      ["package", "--tag", "v2026.11.0", "--stage", st, "--out-dir", o, "--ver", "us",
+                       "--build", leak_build, "--enhanced-build", leak_enh], [st], "paths of the build machine")
+        check(not os.path.lexists(o), f"real auditor, path in {label}: --out-dir made")
+        check("exited 1" in err and "[path withheld]" in err and "passed: bin/xenogears" in err,
+              f"real auditor, path in {label}: {err!r}")
+        check(leaked not in err and "synthetic-builder" not in err and str(base) not in err,
+              f"real auditor, path in {label}: the build machine's path is relayed: {err!r}")
+    # The checks above catch the --dist request or the path redaction removed (copies of the helper).
+    m = mutant(base, layout, "real-no-dist", '"--ver", ver,\n            "--dist"]', '"--ver", ver]')
+    r = m("package", "--tag", "v2026.11.0", "--stage", stage, "--out-dir", base / "real out mutant dist",
+          "--ver", "us", "--build", unset, "--enhanced-build", off)
+    check(r.returncode == 0, f"--dist not asked for: the not-dist tests would not notice ({r.stderr!r})")
+    m = mutant(base, layout, "real-unredacted", '    text = BUILD_PATH_LINE.sub(r"\\1  [path withheld]", text)\n', "")
+    r = m("package", "--tag", "v2026.11.0", "--stage", real_stage(base / "real stage mutant path", in_repo, clean),
+          "--out-dir", base / "real out mutant path", "--ver", "us", "--build", leak_build, "--enhanced-build", leak_enh)
+    check(r.returncode == 1 and repo in r.stderr, "the path redaction removed: the build-path tests would not notice")
 
     # With the helper's own image check disabled, the real auditor's count still refuses a partial extraction.
     v = variant(base, layout, "real-partial", lambda copy: (copy / "disc/us/beta.bin").unlink())
