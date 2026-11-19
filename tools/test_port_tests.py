@@ -1158,6 +1158,9 @@ class DeviceLossTests(unittest.TestCase):
     def test_recovery_reruns_are_real_children_reaped_before_the_next(self):
         # No stand-in for subprocess.run: a real child that loses the "device" (the port's line, then
         # SIGABRT with core dumps off) until its third run, told apart by a counter file in its scratch.
+        # RLIMIT_CORE 0 doesn't stop a dump when core_pattern is a pipe (systemd-coredump), so on Linux
+        # the child also makes itself undumpable (PR_SET_DUMPABLE 0) and reads the flag back just
+        # before aborting; if that fails it exits without the line, an ordinary failure, not a loss.
         script = ("import os, resource, sys\n"
                   "from pathlib import Path\n"
                   "runs = Path(sys.argv[1])\n"
@@ -1165,8 +1168,16 @@ class DeviceLossTests(unittest.TestCase):
                   "runs.write_text(str(n))\n"
                   "print(f'pid {os.getpid()} run {n}', flush=True)\n"
                   "if n < 3:\n"
-                  "    print(sys.argv[2], flush=True)\n"
                   "    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))\n"
+                  "    if sys.platform.startswith('linux'):\n"
+                  "        import ctypes\n"
+                  "        libc = ctypes.CDLL(None, use_errno=True)\n"
+                  "        if libc.prctl(4, 0, 0, 0, 0) != 0:  # PR_SET_DUMPABLE\n"
+                  "            sys.exit(f'PR_SET_DUMPABLE failed: errno {ctypes.get_errno()}')\n"
+                  "        dumpable = libc.prctl(3, 0, 0, 0, 0)  # PR_GET_DUMPABLE\n"
+                  "        if dumpable != 0:\n"
+                  "            sys.exit(f'still dumpable: PR_GET_DUMPABLE returned {dumpable}')\n"
+                  "    print(sys.argv[2], flush=True)\n"
                   "    os.abort()\n")
         counter = self.root / "runs.txt"
         runner = P.Runner(self.build, gpu=True, pattern=None, listing=False, jobs=2)
