@@ -194,4 +194,90 @@ class AuditTests(unittest.TestCase):
         self.assertEqual(code,1); self.assertIn('port/src/injected.c',log)
 
 
+class DistTests(unittest.TestCase):
+    """A build to hand out (-DXG_DIST=ON) names no folder of the machine that built it (xg-4oq.9)."""
+
+    def setUp(self):
+        scratch = ROOT / 'work/payload-tests'
+        scratch.mkdir(parents=True, exist_ok=True)
+        self.tmp = tempfile.TemporaryDirectory(prefix='dist-', dir=scratch)
+        self.build = Path(self.tmp.name)
+        self.allow = self.build / 'allow.txt'
+        self.allow.write_text('')
+
+    def tearDown(self): self.tmp.cleanup()
+
+    def cache(self, dist, source='/srv/builder/checkout/port'):
+        (self.build / 'CMakeCache.txt').write_text(
+            f'XG_VERSION:STRING=US\nXG_DIST:BOOL={dist}\nCMAKE_HOME_DIRECTORY:INTERNAL={source}\n')
+
+    def link(self, text=''):
+        """A small ELF program; text, when given, is a string constant inside it."""
+        source = self.build / 'entry.c'
+        source.write_text(f'const char where[] = "{text}"; void entry(void) {{ volatile char c = where[0]; (void)c; }}')
+        obj, exe = self.build / 'entry.o', self.build / 'program'
+        subprocess.run(['cc', '-c', '-O0', source.name, '-o', obj.name], check=True, capture_output=True, cwd=self.build)
+        subprocess.run(['cc', '-nostdlib', '-no-pie', '-Wl,-e,entry', '-Wl,--build-id=none', obj.name, '-o', exe.name],
+                       check=True, capture_output=True, cwd=self.build)
+        return exe
+
+    def run_audit(self, exe, *more):
+        log = io.StringIO()
+        with patch.object(P, 'ALLOW', self.allow), patch.object(P, 'retail_images', return_value={'synthetic': PAYLOAD}), \
+             patch('sys.argv', ['payloadcheck', '--build', str(self.build), '--exe', str(exe), '--ver', 'us', *more]), \
+             redirect_stdout(log):
+            code = P.main()
+        return code, log.getvalue()
+
+    def test_dist_is_read_from_the_cache(self):
+        self.assertFalse(P.dist_build(self.build))
+        self.cache('OFF'); self.assertFalse(P.dist_build(self.build))
+        self.cache('ON'); self.assertTrue(P.dist_build(self.build))
+
+    def test_machine_paths(self):
+        self.cache('ON')
+        paths = P.machine_paths(self.build, home=Path('/home/builder'))
+        for folder in (str(self.build), '/srv/builder/checkout', '/home/builder', str(ROOT)):
+            self.assertIn(folder, paths)
+        self.assertNotIn('/srv/builder/checkout/port', paths)
+        for short in ('/root', '/'):
+            self.assertNotIn(short, P.machine_paths(self.build, home=Path(short)))
+
+    def test_leaks_found_as_bytes_and_utf16(self):
+        paths = ['/home/builder', '/home/builder/checkout']
+        clean = b'\x7fELF' + b'port/src/gpu/vk.c\0' + b'/home/build\0' + bytes(64)
+        self.assertEqual(P.path_leaks(clean, paths), [])
+        one = b'/home/builder/checkout/port/src/gpu/vk.c'
+        wide = '/home/builder/Documents/disc.cue'.encode('utf-16-le')
+        leaks = P.path_leaks(clean + one + b'\0' + bytes(8) + wide + b'\0\0' + one + b'\0', paths)
+        self.assertEqual(sorted(leaks), [('/home/builder/Documents/disc.cue', 1, '/home/builder'),
+                                         ('/home/builder/checkout/port/src/gpu/vk.c', 2, '/home/builder')])
+
+    def test_clean_dist_build_passes_and_says_nothing_more(self):
+        self.cache('ON')
+        code, log = self.run_audit(self.link('port/src/gpu/vk.c'), '--dist')
+        self.assertEqual(code, 0, log)
+        self.assertEqual(len(log.splitlines()), 2, log)   # the heading and the "payload ok" line, as before
+        self.assertTrue(log.splitlines()[1].startswith('payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; '), log)
+
+    def test_dist_build_with_a_build_machine_path_fails(self):
+        for folder in (self.build, '/srv/builder/checkout'):
+            with self.subTest(folder=str(folder)):
+                self.cache('ON')
+                code, log = self.run_audit(self.link(f'{folder}/port/src/gpu/vk.c'))   # without --dist too
+                self.assertEqual(code, 1, log)
+                self.assertIn('build path', log); self.assertIn(f'{folder}/port/src/gpu/vk.c', log)
+                self.assertIn('payload FAIL', log); self.assertIn('1 paths of the build machine', log)
+
+    def test_dist_refuses_a_development_build(self):
+        self.cache('OFF')
+        code, log = self.run_audit(self.link('port/src/gpu/vk.c'), '--dist')
+        self.assertEqual(code, 1, log); self.assertIn('not a build to hand out', log)
+
+    def test_development_build_keeps_its_paths(self):
+        self.cache('OFF')
+        code, log = self.run_audit(self.link(f'{self.build}/bin/disc.cue'))
+        self.assertEqual(code, 0, log); self.assertNotIn('build path', log)
+
+
 if __name__ == '__main__': unittest.main()

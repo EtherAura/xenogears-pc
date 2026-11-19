@@ -134,14 +134,17 @@ for abi in "${ABIS[@]}"; do
         cmake -S port -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$API" \
             -DANDROID_STL=c++_shared -DXG_VERSION="${region^^}" -DXG_EXTRAS=ON -DXG_SHARED=ON -DXG_LTO=OFF \
+            -DXG_DIST=ON \
             -DSDL3_DIR="$sdl/lib/cmake/SDL3" -DVulkan_GLSLC_EXECUTABLE="$GLSLC" \
             -DXG_LD="$gnu_ld" -DXG_OBJCOPY="$gnu_objcopy" -DXG_PROBE_CC="$(command -v gcc)" \
             -DPython3_EXECUTABLE="$PY"
         cmake --build "$b" --target xenogears_game xgloader
         cp -f "$b/libxenogears-$region.so" "$b/libxgloader.so" "$jni/"
         # No retail module data in what the APK carries (the library as built: the same bytes as
-        # the packed, stripped one, with the symbols that attribute them).
-        "$PY" tools/payloadcheck.py --build "$b" --exe "$b/libxenogears-$region.so"
+        # the packed, stripped one, with the symbols that attribute them), and no folder of this
+        # machine (--dist, xg-4oq.9: an app never runs from the repository, so every Android
+        # build is one to hand out).
+        "$PY" tools/payloadcheck.py --dist --build "$b" --exe "$b/libxenogears-$region.so"
     done
 done
 [ "$NATIVE_ONLY" = 1 ] && exit 0

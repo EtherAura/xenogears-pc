@@ -47,6 +47,10 @@
 #   retail-heap retail heap address-model and read-only inspection regressions
 #   interpolation-coverage sampled motion evidence and honest coverage reports
 #   payload-tests synthetic PE/ELF payload attribution and rejection regressions
+#   deps-tests  the pinned source tarballs (tools/deps.json): fetch and sum checks
+#               on fixtures, no network (tools/test_deps.py)
+#   dav1d-helper which tarball tools/build_dav1d_mingw.sh takes, with stub tools
+#               (tools/check_dav1d_mingw.py)
 #   port-runner filtered fixtures and concurrent output ownership regressions
 #   state-runner reject crashes even when state/pixel/audio captures were written
 #   deb-package-us the Debian package's CPack settings, install plan and .deb
@@ -169,6 +173,8 @@ if [ "$TESTS" = 1 ]; then
     gate retail-heap "$PY" tools/test_retail_heap.py
     gate interpolation-coverage "$PY" tools/test_interpolation_coverage.py
     gate payload-tests "$PY" tools/test_payloadcheck.py
+    gate deps-tests "$PY" tools/test_deps.py
+    gate dav1d-helper "$PY" tools/check_dav1d_mingw.py --ver us
     gate port-runner "$PY" tools/test_port_tests.py
     gate state-runner "$PY" tools/test_statecheck.py
     gate art-tags "$PY" tools/test_art_tags.py

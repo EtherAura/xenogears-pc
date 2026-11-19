@@ -6,10 +6,11 @@
 #
 #   tools/build_dav1d_mingw.sh [dav1d-x.y.z.tar.xz]
 #
-# Default tarball: $DAV1D_TARBALL, else tools/toolchain-src/dav1d-1.5.5.tar.xz
-# (a copy kept with the project), else /var/cache/distfiles/dav1d-1.5.5.tar.xz
-# (no download). Exits 0 with a note when there is none: the Windows build then
-# has no AV1 videos (PNG frames still work). Needs meson, ninja and nasm (its
+# The tarball: the argument, else $DAV1D_TARBALL, else the version pinned in
+# tools/deps.json, found and checked by tools/deps.py (in $XG_DEPS_CACHE or
+# tools/toolchain-src, else /var/cache/distfiles; `python tools/deps.py fetch`
+# downloads it). No download here. Exits 0 with a note when there is none: the
+# Windows build then has no AV1 videos (PNG frames still work). Needs meson, ninja and nasm (its
 # x86 assembly; without nasm it is built without, slower). Installs into
 # tools/toolchain/mingw64 (gitignored): lib/libdav1d.a, include/dav1d.
 # Scratch goes to tools/toolchain-src/dav1d-mingw. Runs again only when the
@@ -18,9 +19,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_TARBALL="$ROOT/tools/toolchain-src/dav1d-1.5.5.tar.xz"
-[ -f "$DEFAULT_TARBALL" ] || DEFAULT_TARBALL=/var/cache/distfiles/dav1d-1.5.5.tar.xz
-TARBALL="${1:-${DAV1D_TARBALL:-$DEFAULT_TARBALL}}"
+PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY=python3
+TARBALL="${1:-${DAV1D_TARBALL:-}}"
 PREFIX="$ROOT/tools/toolchain/mingw64"
 WORK="$ROOT/tools/toolchain-src/dav1d-mingw"
 TRIPLE=x86_64-w64-mingw32
@@ -28,17 +29,25 @@ JOBS="${JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 
-if [ ! -f "$TARBALL" ]; then
-    log "no dav1d source tarball at $TARBALL: the Windows build has no AV1 movie videos"
-    exit 0
+STAMP="$PREFIX/.stamp-dav1d"
+if [ -n "$TARBALL" ]; then
+    if [ ! -f "$TARBALL" ]; then
+        log "no dav1d source tarball at $TARBALL: the Windows build has no AV1 movie videos"
+        exit 0
+    fi
+    WANT="$(basename "$TARBALL") $(sha256sum "$TARBALL" | cut -d' ' -f1)"
+else
+    WANT="$("$PY" "$ROOT/tools/deps.py" want dav1d)"
 fi
 command -v meson >/dev/null || { log "meson not found: the Windows build has no AV1 movie videos"; exit 0; }
 command -v $TRIPLE-gcc >/dev/null || { echo "$TRIPLE-gcc not found" >&2; exit 1; }
 
-STAMP="$PREFIX/.stamp-dav1d"
-WANT="$(basename "$TARBALL") $(sha256sum "$TARBALL" | cut -d' ' -f1)"
 if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ] && [ -f "$PREFIX/lib/libdav1d.a" ]; then
     log "dav1d for MinGW is up to date ($PREFIX)"
+    exit 0
+fi
+if [ -z "$TARBALL" ] && ! TARBALL="$("$PY" "$ROOT/tools/deps.py" path dav1d)"; then
+    log "no pinned dav1d source tarball: the Windows build has no AV1 movie videos"
     exit 0
 fi
 

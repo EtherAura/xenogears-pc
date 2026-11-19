@@ -262,6 +262,13 @@ public class XgActivity extends SDLActivity {
         runOnUiThread(() -> Toast.makeText(this, text, Toast.LENGTH_LONG).show());
     }
 
+    // The game has quit (port/src/system/quit.c): the activity finishes and its task leaves
+    // the recent apps, so no dead picture of the game is left to come back to. The native
+    // side ends the process right after.
+    public void endTask() {
+        runOnUiThread(this::finishAndRemoveTask);
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == PICK_PACK) {

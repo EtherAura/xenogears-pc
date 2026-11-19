@@ -9,23 +9,32 @@ build/ with stub meson, ninja, nasm and x86_64-w64-mingw32-gcc first in PATH
 and small synthetic tarballs (a marker file in a dav1d-x.y.z/ directory, no
 dav1d code). The stubs record the extracted tree and fake the installed
 library, so the helper's own source selection, stamp and missing-source exit
-are what is checked:
-  - default: tools/toolchain-src/dav1d-1.5.5.tar.xz, before the cache;
-  - fallback: <cache>/dav1d-1.5.5.tar.xz when there is no project copy;
+are what is checked. The version comes from tools/deps.json (xg-4oq.10): the
+helper asks tools/deps.py for the pinned tarball, which is used only when its
+SHA-256 is the pinned one:
+  - default: the pinned tarball in tools/toolchain-src; a file of the same
+    name with another sum in the cache is passed over;
+  - fallback: the pinned tarball in <cache> when there is no project copy;
+  - the pinned name with a wrong sum everywhere: exit 0 with a note, no build;
   - DAV1D_TARBALL over the defaults, a positional argument over both;
   - no tarball (or a missing positional one): exit 0 with a note, no build;
-  - a second run with the same tarball is up to date (the stamp);
-  - neither Windows helper script still names dav1d 1.5.4.
+  - a second run is up to date (the stamp), also with the tarball gone;
+  - the pin is dav1d 1.5.5 and no Windows helper script names 1.5.4, or any
+    dav1d version of its own.
 The helper is copied verbatim into the layout (its root comes from its own
-path); the one change is its absolute cache directory, /var/cache/distfiles,
-pointed at the layout's own, so the host's cache is never read. dav1d is
-version-independent; --ver only labels the run (US and JP share the helper).
+path) beside a copy of tools/deps.py whose one change is its absolute cache
+directory, /var/cache/distfiles, pointed at the layout's own, so the host's
+cache is never read; each layout's tools/deps.json pins its own synthetic
+tarball. dav1d is version-independent; --ver only labels the run (US and JP
+share the helper).
 """
 
 import argparse
 import hashlib
 import io
+import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -37,6 +46,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "tools" / "build_dav1d_mingw.sh"
 WINDOWS = ROOT / "tools" / "build_windows.sh"
+DEPS = ROOT / "tools" / "deps.py"
+MANIFEST = ROOT / "tools" / "deps.json"
 CACHE = "/var/cache/distfiles"
 WANT = "dav1d-1.5.5.tar.xz"
 OLD = "1.5.4"
@@ -83,11 +94,12 @@ class Layout:
         self.log = self.root / "stub.log"
         for d in (self.cache, self.local, self.prefix, self.stubs):
             d.mkdir(parents=True)
-        text = HELPER.read_text()
-        if CACHE + "/" not in text:
-            raise SystemExit(f"{HELPER}: no {CACHE} fallback to redirect")
+        deps = DEPS.read_text()
+        if f'"{CACHE}"' not in deps:
+            raise SystemExit(f"{DEPS}: no {CACHE} fallback to redirect")
+        (self.root / "tools" / "deps.py").write_text(deps.replace(f'"{CACHE}"', f'"{self.cache}"'))
         self.helper = self.root / "tools" / "build_dav1d_mingw.sh"
-        self.helper.write_text(text.replace(CACHE + "/", str(self.cache) + "/"))
+        self.helper.write_text(HELPER.read_text())
         self.helper.chmod(0o755)
         for name, body in (("meson", STUB_MESON), ("ninja", STUB_NINJA),
                            ("nasm", STUB_TRUE),
@@ -96,9 +108,15 @@ class Layout:
             p.write_text(body)
             p.chmod(p.stat().st_mode | stat.S_IXUSR)
 
+    def pin(self, path):
+        """This layout's tools/deps.json: dav1d pinned to path's bytes."""
+        (self.root / "tools" / "deps.json").write_text(json.dumps({"dav1d": {
+            "version": "1.5.5", "file": WANT, "url": f"https://example.invalid/{WANT}", "sha256": sha(path)}}))
+        return path
+
     def run(self, *args, env_tarball=None):
         env = {k: v for k, v in os.environ.items()
-               if k not in ("DAV1D_TARBALL", "JOBS")}
+               if k not in ("DAV1D_TARBALL", "JOBS", "XG_DEPS_CACHE")}
         env["PATH"] = f"{self.stubs}{os.pathsep}{env.get('PATH', '')}"
         env["XG_STUB_LOG"] = str(self.log)
         env["XG_STUB_PREFIX"] = str(self.prefix)
@@ -140,7 +158,11 @@ def main():
         lines = [f"{script.name}:{i}" for i, l in enumerate(script.read_text().splitlines(), 1)
                  if OLD in l]
         check(f"no dav1d {OLD} reference in {script.name}", not lines, ", ".join(lines))
-    check(f"{HELPER.name} defaults to {WANT}", WANT in HELPER.read_text())
+    pinned = json.loads(MANIFEST.read_text())["dav1d"]
+    check(f"tools/deps.json pins {WANT}", pinned["file"] == WANT and pinned["version"] == "1.5.5",
+          f"{pinned['file']} {pinned['version']}")
+    own = sorted(set(re.findall(r"dav1d-\d[\d.]*", HELPER.read_text() + WINDOWS.read_text())))
+    check("no Windows helper script names a dav1d version of its own", not own, ", ".join(own))
 
     (ROOT / "build").mkdir(exist_ok=True)
     base = Path(tempfile.mkdtemp(prefix=f"check_dav1d_mingw-{a.ver}-", dir=ROOT / "build"))
@@ -153,9 +175,10 @@ def main():
                 f"exit {r.returncode}, built {lay.built()}, stamp {lay.stamp()!r}, " \
                 f"want {want_stamp!r}; {r.stdout.strip()} {r.stderr.strip()}"
 
-        # Project copy first; stale 1.5.4 decoys and the cache copy must lose.
+        # The pinned project copy; stale 1.5.4 decoys and a cache file of the same name with
+        # another sum must lose.
         lay = Layout(base, "local")
-        local = tarball(lay.local / WANT, "1.5.5", "local")
+        local = lay.pin(tarball(lay.local / WANT, "1.5.5", "local"))
         tarball(lay.cache / WANT, "1.5.5", "cache")
         tarball(lay.local / f"dav1d-{OLD}.tar.xz", OLD, "old-local")
         tarball(lay.cache / f"dav1d-{OLD}.tar.xz", OLD, "old-cache")
@@ -166,16 +189,32 @@ def main():
         check("same tarball again: up to date, no rebuild",
               r.returncode == 0 and "up to date" in r.stdout and lay.built() == ["local"],
               f"exit {r.returncode}, built {lay.built()}; {r.stdout.strip()}")
+        local.unlink()
+        (lay.cache / WANT).unlink()
+        r = lay.run()
+        check("the pinned build is up to date with its tarball gone",
+              r.returncode == 0 and "up to date" in r.stdout and lay.built() == ["local"],
+              f"exit {r.returncode}, built {lay.built()}; {r.stdout.strip()} {r.stderr.strip()}")
+
+        lay = Layout(base, "wrong-sum")
+        lay.pin(tarball(lay.root / "elsewhere" / WANT, "1.5.5", "pinned"))
+        tarball(lay.local / WANT, "1.5.5", "local-other")
+        tarball(lay.cache / WANT, "1.5.5", "cache-other")
+        r = lay.run()
+        check("the pinned name with another SHA-256 everywhere: exit 0, note, no build",
+              r.returncode == 0 and "no pinned dav1d source tarball" in r.stdout and "another SHA-256" in r.stderr
+              and not lay.built() and lay.stamp() is None,
+              f"exit {r.returncode}, built {lay.built()}; {r.stdout.strip()} {r.stderr.strip()}")
 
         lay = Layout(base, "cache")
-        cache = tarball(lay.cache / WANT, "1.5.5", "cache")
+        cache = lay.pin(tarball(lay.cache / WANT, "1.5.5", "cache"))
         tarball(lay.cache / f"dav1d-{OLD}.tar.xz", OLD, "old-cache")
         r = lay.run()
         ok, why = selected(lay, r, "cache", cache)
         check(f"fallback: cache {WANT} without a project copy", ok, why)
 
         lay = Layout(base, "env")
-        tarball(lay.local / WANT, "1.5.5", "local")
+        lay.pin(tarball(lay.local / WANT, "1.5.5", "local"))
         tarball(lay.cache / WANT, "1.5.5", "cache")
         env = tarball(lay.root / "custom" / "dav1d-9.9.9.tar.xz", "9.9.9", "env")
         r = lay.run(env_tarball=env)
@@ -183,7 +222,7 @@ def main():
         check("DAV1D_TARBALL over the defaults", ok, why)
 
         lay = Layout(base, "positional")
-        tarball(lay.local / WANT, "1.5.5", "local")
+        lay.pin(tarball(lay.local / WANT, "1.5.5", "local"))
         env = tarball(lay.root / "custom" / "dav1d-9.9.9.tar.xz", "9.9.9", "env")
         pos = tarball(lay.root / "arg" / "dav1d-8.8.8.tar.xz", "8.8.8", "positional")
         r = lay.run(pos, env_tarball=env)
@@ -191,7 +230,7 @@ def main():
         check("positional argument over DAV1D_TARBALL", ok, why)
 
         lay = Layout(base, "missing-positional")
-        tarball(lay.local / WANT, "1.5.5", "local")
+        lay.pin(tarball(lay.local / WANT, "1.5.5", "local"))
         env = tarball(lay.root / "custom" / "dav1d-9.9.9.tar.xz", "9.9.9", "env")
         gone = lay.root / "arg" / "dav1d-0.0.0.tar.xz"
         r = lay.run(gone, env_tarball=env)
@@ -201,10 +240,11 @@ def main():
               f"exit {r.returncode}, built {lay.built()}; {r.stdout.strip()} {r.stderr.strip()}")
 
         lay = Layout(base, "missing")
+        lay.pin(tarball(lay.root / "elsewhere" / WANT, "1.5.5", "pinned"))
         r = lay.run()
-        check("no tarball anywhere: exit 0, note naming the cache 1.5.5 path, no build",
-              r.returncode == 0 and f"no dav1d source tarball at {lay.cache / WANT}" in r.stdout
-              and not lay.built() and lay.stamp() is None,
+        check("no tarball anywhere: exit 0, a note that says how to fetch it, no build",
+              r.returncode == 0 and "no pinned dav1d source tarball" in r.stdout
+              and "deps.py fetch dav1d" in r.stderr and not lay.built() and lay.stamp() is None,
               f"exit {r.returncode}, built {lay.built()}; {r.stdout.strip()} {r.stderr.strip()}")
     finally:
         if a.keep:

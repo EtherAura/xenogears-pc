@@ -35,6 +35,12 @@ objects for attribution. A PE image needs its .map and .payload.json sidecars
 --record-map EXE records the executable/map hashes after a Windows link.
 PE-only allowance entries have individual budgets and require their exact
 source/symbol pattern; they never borrow another symbol's budget.
+
+A build to hand out (port/CMakeLists.txt, -DXG_DIST=ON: release packages, the
+Android APK) is also checked for the folders of the machine that made it: its
+build folder, its repository and the builder's home, as bytes and as UTF-16.
+Any left in the executable fail, each printed as a "build path" line. --dist
+fails a build that was not configured that way (what a release script passes).
 Prints one summary line starting with 'payload';
 exit status 1 when anything fails, 2 on a usage error.
 """
@@ -61,6 +67,66 @@ def build_version(build: Path) -> str | None:
         if m:
             return m.group(1).lower()
     return None
+
+
+def cache_value(build: Path, name: str) -> str | None:
+    cache = build / "CMakeCache.txt"
+    if cache.exists():
+        m = re.search(rf"^{re.escape(name)}:\w+=(.*)$", cache.read_text(errors="replace"), re.M)
+        if m:
+            return m.group(1).strip()
+    return None
+
+
+def dist_build(build: Path) -> bool:
+    """A build to hand out (port/CMakeLists.txt, -DXG_DIST=ON)."""
+    return (cache_value(build, "XG_DIST") or "").upper() in ("ON", "1", "TRUE", "YES", "Y")
+
+
+def machine_paths(build: Path, home: Path | None = None) -> list[str]:
+    """The folders of the machine that made the build, as it spells them and resolved: the
+    build folder, the repository its cache names, this checkout, and the builder's home.
+    A home shorter than /home/x is left out: "/root" or "/" turn up in any program."""
+    folders: list[Path] = [build, ROOT]
+    source = cache_value(build, "CMAKE_HOME_DIRECTORY")  # <repository>/port
+    if source:
+        folders.append(Path(source).parent)
+    if home is None:
+        try:
+            home = Path.home()
+        except (RuntimeError, KeyError):
+            home = None
+    if home is not None and len(str(home)) >= 7:
+        folders.append(home)
+    found: list[str] = []
+    for folder in folders:
+        for spelling in (str(folder), str(folder.resolve())):
+            spelling = spelling.rstrip("/")
+            if len(spelling) > 1 and spelling not in found:
+                found.append(spelling)
+    return sorted(found, key=len)
+
+
+def path_leaks(data: bytes, paths: list[str]) -> list[tuple[str, int, str]]:
+    """Where an executable names a folder of the machine that built it: (the whole string as it
+    stands in the file, how many times, the folder it names). A place is counted once, under
+    the shortest folder that matches there (the home before the repository inside it)."""
+    places: dict[int, tuple[str, int]] = {}
+    for path in paths:
+        for width, needle in ((1, path.encode()), (2, path.encode("utf-16-le"))):
+            at = data.find(needle)
+            while at >= 0:
+                places.setdefault(at, (path, width))
+                at = data.find(needle, at + 1)
+    texts: dict[str, list] = {}
+    for at, (path, width) in sorted(places.items()):
+        end = at
+        while end + width <= len(data) and 0x20 <= data[end] < 0x7F and (width == 1 or data[end + 1] == 0):
+            end += width
+        text = data[at:end].decode("utf-16-le" if width == 2 else "ascii", errors="replace")
+        entry = texts.setdefault(text, [0, path])
+        entry[0] += 1
+    return [(text, count, path) for text, (count, path) in texts.items()]
 
 
 def retail_images(ver: str) -> dict[str, bytes]:
@@ -190,6 +256,9 @@ def audit() -> int:
     ap.add_argument("--min", type=int, default=16, help="shortest run (bytes)")
     ap.add_argument("--measure", action="store_true", help="list every source with runs, src/ included")
     ap.add_argument("-v", "--verbose", action="store_true", help="list every run")
+    ap.add_argument("--dist", action="store_true",
+                    help="a build to hand out: fails unless --build was configured with -DXG_DIST=ON (whose "
+                         "executable is then also checked for paths of the build machine, with or without this)")
     a = ap.parse_args()
 
     build = Path(a.build) if Path(a.build).is_absolute() else ROOT / a.build
@@ -412,12 +481,26 @@ def audit() -> int:
                 by_file[src] = by_file.get(src, 0) + nbytes
         print(f"src/ initialised data the executable holds that matches retail: "
               f"{sum(by_file.values())} bytes in {len(by_file)} files")
-    bad = sum(totals[k][0] for k in bad_kinds) + len(over)
+    # A build to hand out names no folder of the machine that made it (xg-4oq.9). Nothing is
+    # printed when it is clean: the "payload ok" line stays the only verdict.
+    leaks: list[tuple[str, int, str]] = []
+    not_dist = a.dist and not dist_build(build)
+    if not_dist:
+        print(f"  not a build to hand out: {build} was not configured with -DXG_DIST=ON")
+    elif dist_build(build):
+        leaks = path_leaks(data, machine_paths(build))
+        for text, count, path in leaks[:12]:
+            print(f"  build path {count:5} places  {text[:200]}")
+        if len(leaks) > 12:
+            print(f"  build path: {len(leaks) - 12} more strings")
+    bad = sum(totals[k][0] for k in bad_kinds) + len(over) + len(leaks) + (1 if not_dist else 0)
     print(f"payload {'FAIL' if bad else 'ok'}: generated {totals['generated'][0]} runs/{totals['generated'][1]} bytes, "
           f"port {totals['port'][0]}/{totals['port'][1]}, other {totals['other'][0]}/{totals['other'][1]}; "
           f"library {totals['library'][0]}/{totals['library'][1]}; "
           f"allowed {totals['allowed'][0]}/{totals['allowed'][1]}, symbol names {totals['names'][0]}/{totals['names'][1]}, "
-          f"src (game C's own data) {totals['src'][0]}/{totals['src'][1]}")
+          f"src (game C's own data) {totals['src'][0]}/{totals['src'][1]}"
+          + (f"; {sum(c for _, c, _ in leaks)} paths of the build machine" if leaks else "")
+          + ("; not a build to hand out" if not_dist else ""))
     return 1 if bad else 0
 
 

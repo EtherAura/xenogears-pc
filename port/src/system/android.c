@@ -275,6 +275,10 @@ void androidActivityAction(const char* method) {
     activityCall(method, "()V", NULL, NULL);
 }
 
+void androidEndTask(void) {
+    activityCall("endTask", "()V", NULL, NULL);
+}
+
 void androidActivityActionText(const char* method, const char* arg) {
     activityCall(method, "(Ljava/lang/String;)V", arg, NULL);
 }

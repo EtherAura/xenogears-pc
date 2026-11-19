@@ -68,6 +68,11 @@ System > Engine switches between the two.
 
 After the steps above, `tools/build_windows.sh [--jp] [--debug] [OUTDIR]`
 cross-builds for Windows with MinGW-w64. It needs `x86_64-w64-mingw32-gcc`,
-CMake, Ninja, `glslc` and an SDL 3 source tarball (`SDL3_TARBALL`). The
-result, in `build/pc/dist/xenogears-us-windows-x86_64` by default, holds
-`xenogears.exe`, `xenogears-enhanced.exe` and `SDL3.dll`.
+CMake, Ninja, `glslc` and three source tarballs: SDL 3, and for the shader
+presets and the movie packs' AV1 videos, glslang and dav1d (Meson). Their
+versions, URLs and SHA-256 sums are in `tools/deps.json`;
+`python tools/deps.py fetch` downloads them into `tools/toolchain-src` and
+keeps only files whose sum matches. The build itself downloads nothing.
+`--dist` makes a build to hand out, with no path of the build machine in its
+executables. The result, in `build/pc/dist/xenogears-us-windows-x86_64` by
+default, holds `xenogears.exe`, `xenogears-enhanced.exe` and `SDL3.dll`.

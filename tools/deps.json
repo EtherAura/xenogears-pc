@@ -1,0 +1,23 @@
+{
+  "sdl3": {
+    "version": "3.4.20",
+    "file": "SDL3-3.4.20.tar.gz",
+    "url": "https://github.com/libsdl-org/SDL/releases/download/release-3.4.20/SDL3-3.4.20.tar.gz",
+    "sha256": "f3bb06f55bed9557227a700af2ea62e49497ebdf58037732a731a5fb3ef8581f",
+    "for": "the Windows build's SDL3.dll (tools/build_sdl3_mingw.sh)"
+  },
+  "glslang": {
+    "version": "1.4.363.0",
+    "file": "glslang-1.4.363.0.tar.gz",
+    "url": "https://github.com/KhronosGroup/glslang/archive/vulkan-sdk-1.4.363.0.tar.gz",
+    "sha256": "cda24ec765e6d2845d106b7caa593f34127195a88524cf87821ff0088fb6edec",
+    "for": "the Windows build's shader presets (tools/build_glslang_mingw.sh)"
+  },
+  "dav1d": {
+    "version": "1.5.5",
+    "file": "dav1d-1.5.5.tar.xz",
+    "url": "https://downloads.videolan.org/pub/videolan/dav1d/1.5.5/dav1d-1.5.5.tar.xz",
+    "sha256": "ca96b1d0ba3f01f55de7231d775892b64994ba061aaeeaaa4f662a390b3abf9e",
+    "for": "the Windows build's AV1 movie videos (tools/build_dav1d_mingw.sh)"
+  }
+}

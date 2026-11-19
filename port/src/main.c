@@ -121,7 +121,11 @@ static const char* defaultDisc(void) {
         }
     }
 #endif
-#ifdef VERSION_JP
+#ifndef XG_ROOT
+    /* A build to hand out (-DXG_DIST=ON) knows no folder of the machine that
+     * built it: with no image configured the setup screen asks for one. */
+    return "";
+#elif defined(VERSION_JP)
     return XG_ROOT "/bin/Xenogears (Japan) (Disc 1)/Xenogears (Japan) (Disc 1).cue";
 #else
     return XG_ROOT "/bin/Xenogears (USA) (Disc 1)/Xenogears (USA) (Disc 1).cue";

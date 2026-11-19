@@ -40,6 +40,43 @@ endif()
 
 set(XG_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
 
+# XG_DIST (xg-4oq.9): a build to hand out (release packages, the Android APK).
+# It names no folder of the machine that built it. The repository's folder is
+# not compiled in (XG_ROOT in the platform layer: the default disc image in
+# bin/ and the other engine's build folder are a developer's conveniences, and
+# without them a start with no disc goes to the setup screen), and the file
+# names in the code (__FILE__) and its debug information are relative to the
+# repository. tools/payloadcheck.py checks such a build's executable for those
+# folders. Off (the default) keeps a development build as it was.
+option(XG_DIST "a build to hand out: no path of the build machine in it" OFF)
+# A package with a release's version (cmake/deb.cmake: -DXG_PACKAGE_VERSION=<the
+# tag>, not the development default) is handed out by definition, whatever the
+# build folder was configured as before.
+if(DEFINED XG_PACKAGE_VERSION AND NOT XG_PACKAGE_VERSION MATCHES "^(0~dev)?$" AND NOT XG_DIST)
+    set(XG_DIST ON CACHE BOOL "a build to hand out: no path of the build machine in it" FORCE)
+endif()
+if(XG_DIST)
+    get_filename_component(XG_ROOT_ABS "${XG_ROOT}" ABSOLUTE)
+    get_filename_component(XG_ROOT_REAL "${XG_ROOT}" REALPATH)
+    # The builder's home too: the toolchain's own headers often live there (an NDK, an
+    # SDK) and their folders reach the debug information. The most general map first:
+    # where several match, GCC and Clang 17+ take the last one given and older Clang the
+    # longest, so the repository and the build folder win either way. A home shorter than
+    # /home/x is left alone, as tools/payloadcheck.py leaves it.
+    set(XG_DIST_MAPS "")
+    string(LENGTH "$ENV{HOME}" XG_HOME_LENGTH)
+    if(XG_HOME_LENGTH GREATER 6)
+        list(APPEND XG_DIST_MAPS "-ffile-prefix-map=$ENV{HOME}/=")
+    endif()
+    if(NOT XG_ROOT_REAL STREQUAL XG_ROOT_ABS)
+        list(APPEND XG_DIST_MAPS "-ffile-prefix-map=${XG_ROOT_REAL}/=")
+    endif()
+    list(APPEND XG_DIST_MAPS "-ffile-prefix-map=${XG_ROOT_ABS}/=" "-ffile-prefix-map=${CMAKE_BINARY_DIR}/=build/")
+    foreach(map IN LISTS XG_DIST_MAPS)
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${map}>")
+    endforeach()
+endif()
+
 # Which game C the executable runs (docs/ENGINE_PLAN.md). "original" compiles
 # src/, the matched C, as xenogears: the bit-validated game. "enhanced"
 # compiles engine/, the Enhanced engine's fork of it (tools/fork_engine.py),
@@ -426,7 +463,12 @@ file(GLOB XG_PLATFORM_SOURCES CONFIGURE_DEPENDS
 add_library(platform OBJECT ${XG_PLATFORM_SOURCES})
 target_compile_features(platform PRIVATE c_std_11)
 target_include_directories(platform PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
-target_compile_definitions(platform PRIVATE PLATFORM_PC VERSION_${XG_VERSION} XG_ROOT="${XG_ROOT}"
+# XG_ROOT, the repository's folder, only in a development build (XG_DIST above).
+set(XG_ROOT_DEFINE "XG_ROOT=\"${XG_ROOT}\"")
+if(XG_DIST)
+    set(XG_ROOT_DEFINE "")
+endif()
+target_compile_definitions(platform PRIVATE PLATFORM_PC VERSION_${XG_VERSION} ${XG_ROOT_DEFINE}
     XG_ENGINE_ENHANCED=${XG_ENGINE_ENHANCED})
 # -fno-strict-aliasing: platform code reads the game's packets and buffers
 # through the same punned views the game uses.

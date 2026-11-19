@@ -31,7 +31,9 @@ port/third_party/imgui/*                320  # Dear ImGui (unmodified): glyph ra
 
 
 # Windows static libraries: exact input/member bytes, not port-source votes.
-# Audited with glslang16.4.0 (SDK archive1.4.357.0), dav1d1.5.4 and MinGW GCC16.
+# Audited with glslang16.6.0 (SDK archive1.4.363.0), dav1d1.5.5 and MinGW GCC16
+# (the versions tools/deps.json pins; glslang's two switch tables are the same
+# bytes as under 16.4.0, renumbered by the compiler).
 # Budgets below are measured maxima against both US and JP retail images.
 # Evidence: work/bd-payload-pe/{mapped-symbols.log,audit.map}.
 pe library/libdav1d.a/cdef_avx512.obj:pd_01234567 25 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
@@ -74,8 +76,8 @@ pe library/libdav1d.a/mc_avx512.obj:bilin_h_perm32 20 # dav1d AV1 SIMD constants
 pe library/libdav1d.a/mc_avx512.obj:pd_0to7 29 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
 pe library/libdav1d.a/mc_avx512.obj:rescale_mul 53 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
 pe library/libdav1d.a/mc_avx512.obj:warp_8x8_permD 1 # dav1d AV1 SIMD constants: lane/shuffle indices, powers of two and arithmetic masks
-pe library/libglslang.a/GlslangToSpv.cpp.obj:CSWTCH.2655 21 # glslang compiler-generated switch result table: small integer enums
-pe library/libglslang.a/GlslangToSpv.cpp.obj:CSWTCH.7285 84 # glslang compiler-generated switch result table: small integer enums
+pe library/libglslang.a/GlslangToSpv.cpp.obj:CSWTCH.2679 21 # glslang compiler-generated switch result table: small integer enums
+pe library/libglslang.a/GlslangToSpv.cpp.obj:CSWTCH.7256 84 # glslang compiler-generated switch result table: small integer enums
 pe library/libglslang.a/ParseHelper.cpp.obj:string_273812c02dcca4db 32 # glslang standard unsupported-type diagnostic, two copies
 pe library/libglslang.a/glslang_tab.cpp.obj:_ZL11yytranslate 114 # glslang GLSL grammar table: consecutive parser indices/states
 pe library/libglslang.a/glslang_tab.cpp.obj:_ZL6yystos 110 # glslang GLSL grammar table: consecutive parser indices/states

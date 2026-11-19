@@ -2,7 +2,7 @@
 # The Windows build of the PC port (x86-64, MinGW-w64 cross-compiled on
 # Linux) and its folder to run from, in one command.
 #
-#   tools/build_windows.sh [--jp] [--debug] [--engine original|enhanced|both] [OUTDIR]
+#   tools/build_windows.sh [--jp] [--debug] [--dist] [--engine original|enhanced|both] [OUTDIR]
 #
 # Both engines by default (docs/ENGINE_PLAN.md): xenogears.exe (Original, the
 # game as shipped) and xenogears-enhanced.exe (Enhanced) in one folder, so the
@@ -10,6 +10,13 @@
 # looks for the other executable beside this one) works on Windows: the
 # executable started hands over to the chosen one, waits for it and exits with
 # its code. --engine builds one.
+#
+# --dist: a build to hand out (-DXG_DIST=ON, xg-4oq.9). Its executables name no
+# folder of this machine (no compiled-in default disc image: with none saved
+# or beside the executable, the disc setup opens), it has build folders of its
+# own (build/pc/win-<ver>-dist and -enhanced-dist, so a development build is
+# not rebuilt), and tools/payloadcheck.py --dist must pass each executable
+# before anything is installed into OUTDIR.
 #
 # 1. SDL3 for MinGW, once (tools/build_sdl3_mingw.sh, from the local tarball),
 #    and Khronos glslang for the shader presets when its tarball is there
@@ -43,11 +50,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VER=US
 TYPE=Release
 OUT=
+DIST=0
 ENGINES="original enhanced"
 while [ $# -gt 0 ]; do
     case "$1" in
         --jp) VER=JP ;;
         --debug) TYPE=Debug ;;
+        --dist) DIST=1 ;;
         --engine) shift; case "${1:-}" in
                       original|enhanced) ENGINES="$1" ;;
                       both) ENGINES="original enhanced" ;;
@@ -60,8 +69,11 @@ while [ $# -gt 0 ]; do
     shift
 done
 ver="$(echo "$VER" | tr 'A-Z' 'a-z')"
-BUILD="${XG_WIN_BUILD:-$ROOT/build/pc/win-$ver}"
-BUILD_ENHANCED="${XG_WIN_BUILD_ENHANCED:-$ROOT/build/pc/win-$ver-enhanced}"
+suffix=
+dist=OFF
+[ "$DIST" = 1 ] && suffix=-dist && dist=ON
+BUILD="${XG_WIN_BUILD:-$ROOT/build/pc/win-$ver$suffix}"
+BUILD_ENHANCED="${XG_WIN_BUILD_ENHANCED:-$ROOT/build/pc/win-$ver-enhanced$suffix}"
 OUT="${OUT:-$ROOT/build/pc/dist/xenogears-$ver-windows-x86_64}"
 PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
@@ -83,8 +95,14 @@ for engine in $ENGINES; do
     [ "$engine" = enhanced ] && dir="$BUILD_ENHANCED"
     log "Building $VER $engine ($TYPE) in $dir"
     cmake -S "$ROOT/port" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE="$TYPE" -DXG_VERSION="$VER" -DXG_ENGINE="$engine" \
-        -DPython3_EXECUTABLE="$PY" --toolchain "$ROOT/port/cmake/mingw-w64-x86_64.cmake" >/dev/null
+        -DXG_DIST="$dist" -DPython3_EXECUTABLE="$PY" --toolchain "$ROOT/port/cmake/mingw-w64-x86_64.cmake" >/dev/null
     cmake --build "$dir"
+    if [ "$DIST" = 1 ]; then
+        exe="$dir/xenogears.exe"
+        [ "$engine" = enhanced ] && exe="$dir/xenogears-enhanced.exe"
+        log "Checking $exe (no retail data, no path of this machine)"
+        "$PY" "$ROOT/tools/payloadcheck.py" --dist --build "$dir" --exe "$exe"
+    fi
     log "Installing $engine into $OUT"
     cmake --install "$dir" --prefix "$OUT" "${strip[@]}" >/dev/null
 done

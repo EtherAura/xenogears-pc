@@ -92,6 +92,7 @@ cd/libcd.c status1 state
 cd/libcd.c syncIntr state
 cd/libcd.c syncResult state
 cd/regional.c battle host voice bundles' files and settings
+cd/regional.c both derived a caption's joined lines, written again at each call
 cd/regional.c cache derived merged voice files, rebuilt as needed
 cd/regional.c cacheCount derived with cache
 cd/regional.c initialized host voice bundles' files and settings

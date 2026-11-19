@@ -35,6 +35,16 @@
 
 #include "rumble.h"
 #include "system.h"
+#ifdef __ANDROID__
+#include <sys/ioctl.h>
+
+#include "android.h"
+
+/* The exit handlers and static destructors this library registered (bionic keys
+ * each atexit() to its caller's library), and only those. */
+extern void __cxa_finalize(void* dso);
+extern void* __dso_handle;
+#endif
 
 #define QUIT_GRACE_MS 3000 /* request to forced exit (and again for the shutdown steps) */
 #define WATCH_PERIOD_MS 100
@@ -149,6 +159,37 @@ int quitRequested(void) {
     return requested != 0 || quitting;
 }
 
+/* The end of the process. On a desktop, exit(): the exit handlers the port
+ * registers (settings, save states, the timing summaries) run and the process
+ * is gone.
+ *
+ * An Android app is not alone in its process (xg-mrj.3.16): the activity's own
+ * threads (RenderThread, hwui's workers) are still running, and exit() would
+ * also run the exit handlers and static destructors of every other library in
+ * it under their feet. About one quit in four then died in
+ * "FORTIFY: pthread_mutex_lock called on a destroyed mutex" (SIGABRT) after
+ * the game had finished. So here only this library's handlers run
+ * (__cxa_finalize of its own handle: what unloading it would do), the log's
+ * pipe (the loader sends stdout and stderr to logcat through one) is given a
+ * moment to empty, and the process ends without running anyone else's. */
+static void processEnd(void) {
+#ifdef __ANDROID__
+    __cxa_finalize(&__dso_handle);
+    fflush(NULL);
+    for (int i = 0; i < 50; i++) { /* at most half a second */
+        int unread = 0;
+        if (ioctl(2, FIONREAD, &unread) != 0 || unread == 0) {
+            break;
+        }
+        usleep(10000);
+    }
+    usleep(20000); /* the pump's last line on its way to logcat */
+    _exit(0);
+#else
+    exit(0);
+#endif
+}
+
 void quitNow(void) {
     if (quitting) {
         return; /* a platform call made while shutting down */
@@ -162,11 +203,16 @@ void quitNow(void) {
     fprintf(stderr, "xenogears: quit\n");
     gpuShutdown();
     rumbleStopAll(); /* no pad left vibrating */
+#ifdef __ANDROID__
+    /* While SDL can still reach the activity: it finishes and takes its task out of the
+     * recent apps, so nothing of a game that has quit is left to come back to. */
+    androidEndTask();
+#endif
     step = "SDL_Quit";
     SDL_Quit();
     step = "exit handlers";
     fflush(NULL);
-    exit(0);
+    processEnd();
 }
 
 void quitPoll(int pump) {

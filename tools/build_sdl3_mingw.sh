@@ -3,21 +3,24 @@
 #
 #   tools/build_sdl3_mingw.sh [SDL3-x.y.z.tar.gz]
 #
-# Default tarball: $SDL3_TARBALL, else tools/toolchain-src/SDL3-3.4.16.tar.gz (a copy
-# kept with the project), else /var/cache/distfiles/SDL3-3.4.16.tar.gz
-# (no download). Installs into tools/toolchain/mingw64 (gitignored):
+# The tarball: the argument, else $SDL3_TARBALL, else the version pinned in
+# tools/deps.json, found and checked by tools/deps.py (in $XG_DEPS_CACHE or
+# tools/toolchain-src, else /var/cache/distfiles; `python tools/deps.py fetch`
+# downloads it). No download here. Installs into tools/toolchain/mingw64
+# (gitignored):
 #   bin/SDL3.dll, lib/libSDL3.dll.a, lib/cmake/SDL3, include/SDL3
 #   vulkan/include/{vulkan,vk_video}: links to the system's Vulkan headers, so
 #   the cross build sees them without the rest of /usr/include
 # Scratch goes to tools/toolchain-src/sdl3-mingw. Uses the port's toolchain
 # file (port/cmake/mingw-w64-x86_64.cmake). Runs again only when the tarball
-# changes.
+# changes: a build of the pinned version needs no tarball to say it is up to
+# date.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_TARBALL="$ROOT/tools/toolchain-src/SDL3-3.4.16.tar.gz"
-[ -f "$DEFAULT_TARBALL" ] || DEFAULT_TARBALL=/var/cache/distfiles/SDL3-3.4.16.tar.gz
-TARBALL="${1:-${SDL3_TARBALL:-$DEFAULT_TARBALL}}"
+PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY=python3
+TARBALL="${1:-${SDL3_TARBALL:-}}"
 PREFIX="$ROOT/tools/toolchain/mingw64"
 WORK="$ROOT/tools/toolchain-src/sdl3-mingw"
 TOOLCHAIN="$ROOT/port/cmake/mingw-w64-x86_64.cmake"
@@ -26,15 +29,20 @@ JOBS="$(nproc 2>/dev/null || echo 4)"
 
 log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 
-[ -f "$TARBALL" ] || { echo "no SDL3 source tarball at $TARBALL" >&2; exit 1; }
 command -v x86_64-w64-mingw32-gcc >/dev/null || { echo "x86_64-w64-mingw32-gcc not found" >&2; exit 1; }
 [ -f "$VULKAN_HEADERS/vulkan/vulkan.h" ] || { echo "no Vulkan headers in $VULKAN_HEADERS/vulkan" >&2; exit 1; }
 
 STAMP="$PREFIX/.stamp-sdl3"
-WANT="$(basename "$TARBALL") $(sha256sum "$TARBALL" | cut -d' ' -f1)"
+if [ -n "$TARBALL" ]; then
+    [ -f "$TARBALL" ] || { echo "no SDL3 source tarball at $TARBALL" >&2; exit 1; }
+    WANT="$(basename "$TARBALL") $(sha256sum "$TARBALL" | cut -d' ' -f1)"
+else
+    WANT="$("$PY" "$ROOT/tools/deps.py" want sdl3)"
+fi
 if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ] && [ -f "$PREFIX/bin/SDL3.dll" ]; then
     log "SDL3 for MinGW is up to date ($PREFIX)"
 else
+    [ -n "$TARBALL" ] || TARBALL="$("$PY" "$ROOT/tools/deps.py" path sdl3)"
     log "Extracting $(basename "$TARBALL")"
     rm -rf "$WORK"
     mkdir -p "$WORK"
