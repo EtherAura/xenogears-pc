@@ -78,6 +78,15 @@ int main() {
     EXPECT(tr("Back##help") == tr("Back##help")); // the same text for the run
     const char* unknown = "No such text in any catalog";
     EXPECT(tr(unknown) == unknown);
+    // Missing labels with ids: the English pointer, logged once without the id.
+    const char* unknownX = "No such label##x";
+    const char* unknownY = "No such label##y";
+    EXPECT(tr(unknownX) == unknownX);
+    EXPECT(tr(unknownY) == unknownY);
+    EXPECT(tr(unknownX) == unknownX);
+    // A missing text with a line break: itself, logged with the break escaped.
+    const char* unknownLines = "No such\nlines";
+    EXPECT(tr(unknownLines) == unknownLines);
     EXPECT(tr("") != nullptr && tr("")[0] == '\0');
     EXPECT(tr(nullptr) == nullptr);
     char buf[128];
@@ -131,6 +140,14 @@ int main() {
         int count = 0;
         for (const char* p = text; (p = std::strstr(p, unknown)) != nullptr; p++) count++;
         EXPECT(count == 1);
+        int labels = 0;
+        for (const char* p = text; (p = std::strstr(p, "No such label")) != nullptr; p++) labels++;
+        EXPECT(labels == 1);
+        EXPECT(std::strncmp(text, "No such label\n", 14) == 0 || std::strstr(text, "\nNo such label\n") != nullptr);
+        EXPECT(std::strstr(text, "##x") == nullptr);
+        EXPECT(std::strstr(text, "##y") == nullptr);
+        EXPECT(std::strstr(text, "\nNo such\\nlines\n") != nullptr);
+        EXPECT(std::strstr(text, "No such\nlines") == nullptr);
     }
 
     std::printf("l10ntest: %d checks, %d failed\n", checks, failures);
