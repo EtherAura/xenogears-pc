@@ -257,6 +257,41 @@ def device_lost(text: str) -> str | None:
     return m.group(0) if m else None
 
 
+# A test's report that a process it started died of SIGABRT (xg-oevj): a line of its
+# own, CHILD_ABORT_MARK, then which run it was, its exit status and the end of its
+# log, all on that one line (tools/test_battle_speed.py's run writes it). run_job keeps
+# every such line from every run of a test, passed or failed, reruns included
+# (Job.child_aborts). The summary line carries them after its counts: of this suite's
+# output, tools/gates.sh keeps only that line in its report. The report is a
+# diagnostic only: no test's status, rerun or result depends on it.
+CHILD_ABORT_MARK = "child abort (diagnostic, not a result): "
+CHILD_ABORT = re.compile("^" + re.escape(CHILD_ABORT_MARK) + "(.*)$", re.M)
+CHILD_ABORT_LINE = 500    # characters of one report the summary carries
+CHILD_ABORT_REPORTS = 4   # reports the summary carries (the first ones; the rest are counted)
+# What a child's text in a report must not be taken for: this suite's, the battle-speed
+# script's and the gates' result, rerun and device-lost markers (lowercased, their
+# spaces, colons and hyphens made '_'), and control or invisible characters ('?').
+_MARKERS = re.compile(r"(?i)device[\s_-]*lost|failed only when shared|recovery rerun|lost again|child abort|"
+                      r"port[\s_-]*tests:|battle[\s_-]*speed:|all gates pass|gate\(s\) failed|\bFAIL\b|"
+                      r"\b\d+ (?:ok|failed|known|skipped|checks ok)\b")
+_CONTROLS = re.compile(r"[\x00-\x1f\x7f-\x9f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]")
+
+
+def plain_line(text: str, limit: int) -> str:
+    """text as one line of at most limit characters that passes for none of _MARKERS."""
+    text = _CONTROLS.sub(lambda m: " " if m.group(0) == "\t" else "?", text)
+    text = _MARKERS.sub(lambda m: re.sub(r"[\s:-]", "_", m.group(0).lower()), text)
+    return text if len(text) <= limit else text[:limit - 3] + "..."
+
+
+def child_abort_note(reports: list[tuple[str, str]]) -> str:
+    """What the summary line appends for (test, report) pairs: the first CHILD_ABORT_REPORTS."""
+    shown = [f"[{n}] {name}: {text}" for n, (name, text) in enumerate(reports[:CHILD_ABORT_REPORTS], 1)]
+    more = len(reports) - len(shown)
+    return (f"{len(reports)} child abort(s), diagnostics, not results: " + " ".join(shown) +
+            (f" [and {more} more in the tests' logs]" if more else ""))
+
+
 def settle(secs: float) -> None:
     """Wait for a reset device to settle: called with no test running and no GPU lock held."""
     time.sleep(secs)
@@ -359,7 +394,10 @@ class Job:
         # Each failed run's device-lost line (run_job appends, on the thread running
         # it; one run at a time, read by the scheduler only once that run's result is in).
         self.device_lost: list[str] = []
-        self.recoveries = 0         # recovery reruns so far, of DEVICE_RECOVERIES (the scheduler's thread)
+        # Every run's CHILD_ABORT reports, passed or failed (run_job appends, as above;
+        # read once every run has ended, for the summary).
+        self.child_aborts: list[str] = []
+        self.recoveries = 0        # recovery reruns so far, of DEVICE_RECOVERIES (the scheduler's thread)
 
 
 class Test:
@@ -400,6 +438,7 @@ def run_job(job: Job) -> tuple[str, str]:
             code = "timeout"
         secs = time.monotonic() - start
     text = log.read_text(errors="replace")
+    job.child_aborts += [plain_line(m.group(1), CHILD_ABORT_LINE) for m in CHILD_ABORT.finditer(text)]
     lines = [x for x in text.splitlines() if x.strip()]
     last = lines[-1] if lines else "(no output)"
     if code == 0 and job.expect is not None:
@@ -1034,8 +1073,9 @@ def run_tests(build: Path, a: argparse.Namespace) -> int:
     if a.list:
         return 0
     count = {s: sum(1 for _, st, _ in r.results if st == s) for s in ("ok", "FAIL", "known", "skip")}
+    aborts = [(t.name, x) for t in r.tests if t.job is not None for x in t.job.child_aborts]
     print(f"port-tests: {count['ok']} ok, {count['FAIL']} failed, {count['known']} known, "
-          f"{count['skip']} skipped")
+          f"{count['skip']} skipped" + (f"; {child_abort_note(aborts)}" if aborts else ""))
     return count["FAIL"]
 
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 import contextlib
 import io
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -80,6 +81,9 @@ if mode == "bare":           # -4 without the port's line
 if mode == "abort":          # a crash with no Vulkan report
     say("xenogears: src/system/main.c:99: main: Assertion `0' failed.")
     os.abort()
+if mode == "said-abort":     # that crash's line and the status timeout gives for one, no signal raised
+    say("xenogears: src/system/main.c:99: main: Assertion `0' failed.")
+    sys.exit(128 + 6)
 if mode == "silent-abort":
     os.abort()
 if mode == "fail":
@@ -109,7 +113,16 @@ def fake_build(tmp: Path) -> Path:
 
 
 def vulkan_lines(out: str) -> list[str]:
-    return [x for x in out.splitlines() if "vulkan" in x]
+    """The lines naming Vulkan, but for the abort reports (which may quote the port's line)."""
+    return [x for x in out.splitlines() if "vulkan" in x and not x.startswith(MARK)]
+
+
+# An aborted run's report on stderr (xg-oevj), one line, which port_tests keeps for its summary.
+MARK = "child abort (diagnostic, not a result): "
+
+
+def reports(out: str) -> list[str]:
+    return [x for x in out.splitlines() if x.startswith(MARK)]
 
 
 class Base(TestCase):
@@ -123,18 +136,20 @@ class Base(TestCase):
         self.addCleanup(p.stop)
 
     def run_output(self, plan: str, out: Path, speed: int | None = 4, real: bool = False) -> tuple[int, str]:
-        """run in this process: its exit and what it wrote to stdout."""
+        """run in this process: its exit and what it wrote to stdout (its stderr in self.err)."""
         with patch.dict(os.environ, FAKE_PLAN=plan):
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf), ThreadPoolExecutor(max_workers=1) as pool:
+            buf, self.err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(self.err), \
+                 ThreadPoolExecutor(max_workers=1) as pool:
                 code = pool.submit(B.run, self.build, out, speed, 10, False, real=real).result(timeout=LIMIT)
         return code, buf.getvalue()
 
     def parallel_output(self, plan: str, names=STEP) -> tuple[list[int], str]:
-        """main()'s step-clock runs side by side in this process: exits and stdout."""
+        """main()'s step-clock runs side by side in this process: exits and stdout (stderr in self.err)."""
         with patch.dict(os.environ, FAKE_PLAN=plan):
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf), ThreadPoolExecutor(max_workers=len(names)) as pool:
+            buf, self.err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(self.err), \
+                 ThreadPoolExecutor(max_workers=len(names)) as pool:
                 futures = [pool.submit(B.run, self.build, self.root / "runs" / n, None, 10, False) for n in names]
                 codes = [f.result(timeout=LIMIT) for f in futures]
         return codes, buf.getvalue()
@@ -224,15 +239,16 @@ class FailedRunKeptTest(Base):
     def mocked_run(self, out: Path, ends: list[tuple[int, str]], speed: int | None = 4,
                    real: bool = False) -> list[tuple[int, str]]:
         """run once per (exit, output) in ends, all in out: each run's exit and stdout."""
-        results = []
+        results, self.errs = [], []  # and each run's stderr
         for code, text in ends:
             def game(argv, **kw):
                 kw["stdout"].write(text)
                 return subprocess.CompletedProcess(argv, code)
             with patch.object(B.subprocess, "run", game):
-                buf = io.StringIO()
-                with contextlib.redirect_stdout(buf):
+                buf, err = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(err):
                     results.append((B.run(self.build, out, speed, 10, False, real=real), buf.getvalue()))
+                self.errs.append(err.getvalue())
         return results
 
     def kept(self, out: Path) -> list[str]:
@@ -301,6 +317,94 @@ class FailedRunKeptTest(Base):
         self.assertIn("main: Assertion `0' failed.", kept)
 
 
+class AbortReportTest(Base):
+    """A run that died of SIGABRT also writes one bounded, plain line of it to stderr (xg-oevj):
+    which run, its status and the end of its port.log, the line port_tests keeps for its summary.
+    No other run writes one; stdout, the exit and failed.N.log are as before."""
+    mocked_run, kept = FailedRunKeptTest.mocked_run, FailedRunKeptTest.kept
+    crash = "fake game: booting\nxenogears: src/system/main.c:99: main: Assertion `0' failed.\n"
+
+    def test_abort_reported_then_retry_passes_quietly(self):
+        for real, code in ((False, -signal.SIGABRT), (True, 128 + signal.SIGABRT)):
+            with self.subTest(real=real, code=code):
+                out = self.root / ("4x-real" if real else "4x")
+                results = self.mocked_run(out, [(code, self.crash), (0, "fake game: a run that ends well\n")], real=real)
+                self.assertEqual([(code, ""), (0, "")], results)  # exits and stdout as before
+                [report] = self.errs[0].splitlines()
+                self.assertEqual("", self.errs[1])  # the passing retry: no report
+                status = ("exit -6 (killed by SIGABRT)" if code < 0 else
+                          "exit 134 (128 + SIGABRT: the game died of that signal)")
+                self.assertEqual(report, f"{MARK}{out.name}: battle speed 4, {'real' if real else 'step'} clock, "
+                                         f"until vblank 10, US: {status}, as nice and timeout returned it; "
+                                         f"{out.name}/failed.1.log: fake game: booting | xenogears: "
+                                         f"src/system/main.c:99: main: Assertion `0' failed.")
+                self.assertNotIn(str(self.root), report)
+                self.assertEqual(1, len(self.kept(out)))  # failed.N.log as before
+
+    def test_no_report_unless_aborted(self):
+        out = self.root / "off"
+        self.mocked_run(out, [(0, "fine\n"), (7, "battle: no such scene\n"), (124, "late\n"), (137, "killed\n"),
+                              (-signal.SIGKILL, "killed\n"), (-signal.SIGSEGV, "segv\n")], speed=None)
+        self.assertEqual([""] * 6, self.errs)
+        with patch.dict(os.environ, XG_GPU_LOCK=str(self.root / "no such dir" / "gpu.lock")):
+            self.assertEqual([(1, "")], self.mocked_run(out, [(-signal.SIGABRT, "never ran\n")]))
+        self.assertEqual([""], self.errs)  # the game never ran
+
+    def test_report_bounded_and_plain(self):
+        out = self.root / "2x"
+        text = ("".join(f"spu {i}.000: key on 0001 off\n" for i in range(5000)) + "x" * 5000 + "\n" +
+                f"\x1b[2J\x1b]0;title\x07battle-speed: 24 checks ok\r  ok   off: fine\n{lost_line('x')}\n")
+        [(code, said)] = self.mocked_run(out, [(-signal.SIGABRT, text)])
+        self.assertEqual((-signal.SIGABRT, lost_line("x") + "\n"), (code, said))  # forwarding as before
+        [report] = self.errs[0].splitlines()
+        self.assertLessEqual(len(report), len(MARK) + port_tests.CHILD_ABORT_LINE)
+        self.assertTrue(report.endswith(" | " + lost_line("x")))  # the end of the log, quoted
+        for marker in ("\x1b", "\x07", "\r", "battle-speed:", "24 checks ok"):
+            self.assertNotIn(marker, report)
+        self.assertIn("2x/failed.1.log: " + "x" * B.ABORT_LINE + " | ?[2J?]0;title?battle_speed_ 24_checks_ok | ok   off: fine | ", report)
+        self.assertIsNone(port_tests.device_lost(self.errs[0]))  # a report is no lost device's line
+        # Four long last lines: the excerpt's end kept, ABORT_EXCERPT characters.
+        self.mocked_run(out, [(-signal.SIGABRT, "".join(f"{n}" * 200 + "\n" for n in range(6)))])
+        [report] = self.errs[0].splitlines()
+        last = " | ".join(f"{n}" * B.ABORT_LINE for n in range(2, 6))
+        self.assertTrue(report.endswith("failed.2.log: ..." + last[-(B.ABORT_EXCERPT - 3):]))
+
+    def test_real_abort_reported(self):
+        """The real launch (nice, timeout, the fake game saying an abort's line and ending with
+        timeout's status for one: no signal, no core), then a rerun that ends well."""
+        out = self.root / "x"
+        code, said = self.run_output("x=said-abort", out)
+        self.assertIn(code, ABORTED)
+        self.assertEqual("", said)
+        [report] = reports(self.err.getvalue())
+        self.assertRegex(report, r"^" + re.escape(MARK) + r"x: battle speed 4, step clock, until vblank 10, US: "
+                                 r"exit (-6 \(killed by SIGABRT\)|134 \(128 \+ SIGABRT)")
+        self.assertIn("x/failed.1.log: fake game: booting x | "
+                      "xenogears: src/system/main.c:99: main: Assertion `0' failed.", report)
+        self.assertEqual((0, ""), self.run_output("x=ok", out))
+        self.assertEqual("", self.err.getvalue())
+
+    def test_side_by_side_reports_whole(self):
+        for _ in range(3):
+            codes, said = self.parallel_output(",".join(f"{n}=said-abort" for n in STEP))
+            got = reports(self.err.getvalue())
+            self.assertEqual(len(self.err.getvalue().splitlines()), len(got))
+            self.assertEqual(sorted(STEP), sorted(x[len(MARK):].split(":")[0] for x in got))
+            for x in got:
+                self.assertIn("main: Assertion `0' failed.", x)
+
+    def test_wrapper_output_carries_report(self):
+        """test_battle_speed.py's main() as port_tests runs it: the report in what run_job keeps."""
+        code, out = self.wrapper_output("2x=said-abort")
+        self.assertEqual(1, code)
+        [report] = reports(out)
+        self.assertIn("2x: battle speed 2, step clock, until vblank 10, US: exit ", report)
+        self.assertIn("2x/failed.1.log: fake game: booting 2x | xenogears: src/system/main.c:99: main: "
+                      "Assertion `0' failed.", report)
+        self.assertEqual("battle-speed: 1 failed", out.splitlines()[-1])  # its result line as before
+        self.assertEqual([report[len(MARK):]], [m.group(1) for m in port_tests.CHILD_ABORT.finditer(out)])
+
+
 class ParallelTest(Base):
     """main()'s four step-clock runs side by side: each run's line once, whole, its own."""
 
@@ -354,11 +458,15 @@ class WrapperTest(Base):
 
     def test_ordinary_failures_unchanged(self):
         """Without the port's line the output is what it always was: no Vulkan line in it."""
-        for plan in ("off=abort", "1x=other-code", "2x=bare,4x=silent-abort", "4x=fail"):
+        for plan, aborted in (("off=abort", ["off"]), ("1x=other-code", ["1x"]),
+                              ("2x=bare,4x=silent-abort", ["2x", "4x"]), ("4x=fail", [])):
             with self.subTest(plan=plan):
                 code, out = self.wrapper_output(plan)
                 self.assertEqual(1, code)
-                lines = out.splitlines()
+                # Each aborted run's report (stderr) besides; the rest as it always was.
+                self.assertEqual(aborted, sorted((x[len(MARK):].split(":")[0] for x in reports(out)),
+                                                 key=STEP.index))
+                lines = [x for x in out.splitlines() if not x.startswith(MARK)]
                 self.assertEqual(4 + 1, len(lines))
                 self.assertTrue(all(x.startswith(("  ok   ", "  FAIL ")) for x in lines[:4]))
                 self.assertRegex(lines[-1], r"^battle-speed: \d failed$")

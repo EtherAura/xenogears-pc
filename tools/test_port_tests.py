@@ -7,6 +7,8 @@ import io
 import os
 from pathlib import Path
 import queue
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1226,6 +1228,110 @@ class DeviceLossTests(unittest.TestCase):
         self.assertEqual(runner.results[0][1], "known")
         self.assertEqual(children.started.count("lossy"), 1)
         self.assert_paused(0)
+
+
+# test_battle_speed.py's line for a game run that died of SIGABRT (xg-oevj), as it writes it.
+ABORT_MARK = "child abort (diagnostic, not a result): "
+ABORT = ("4x: battle speed 4, step clock, until vblank 3000, US: exit -6 (killed by SIGABRT), as nice and "
+         "timeout returned it; 4x/failed.1.log: fake game: booting | xenogears: src/system/main.c:99: main: "
+         "Assertion `0' failed.")
+
+
+class ChildAbortTests(unittest.TestCase):
+    """A test's report of a child that aborted reaches the summary line, the one line of the
+    suite tools/gates.sh keeps, even when a rerun passes; it changes no status, rerun or result,
+    and its text passes for no marker. The children are Children (mocked subprocess.run)."""
+    D = DeviceLossTests
+    exe, setUp, pause, assert_paused, shared, suite = D.exe, D.setUp, D.pause, D.assert_paused, D.shared, D.suite
+    retries, recovers, lost, passed, recovered = D.retries, D.recovers, D.lost, D.passed, D.recovered
+
+    def summary(self, out):
+        """The line tools/gates.sh keeps of the suite's output (its first starting 'port-tests')."""
+        return next(x for x in out.splitlines() if x.startswith("port-tests"))
+
+    def test_abort_reported_when_the_rerun_alone_passes(self):
+        children = self.shared(lambda run: 1 if run == 0 else 0,
+                               lambda run: ABORT_MARK + ABORT + "\nbattle-speed: 1 failed\n" if run == 0 else "")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 0, out)  # the pass decision is the rerun's, as before
+        self.assertEqual([(n, s) for n, s, _ in runner.results], [("lossy", "ok"), ("other", "ok")])
+        self.assertIn("FAILED ONLY WHEN SHARED", runner.results[0][2])
+        self.assertEqual(self.retries(runner), ["lossy"])
+        self.assertEqual(self.recovers(runner), [])
+        self.assertEqual(self.summary(out), "port-tests: 2 ok, 0 failed, 0 known, 0 skipped; 1 child abort(s), "
+                                            f"diagnostics, not results: [1] lossy: {ABORT}")
+        self.assertEqual(1, out.count("Assertion"))  # in the summary only: no test line carries it
+
+    def test_abort_reported_when_a_recovery_rerun_passes(self):
+        children = self.shared(lambda run: 1 if run == 0 else 0,
+                               lambda run: f"{ABORT_MARK}{ABORT}\n{LOST}\n" if run == 0 else "")
+        code, out, runner = self.suite(2, children)
+        self.assertEqual(code, 0, out)
+        self.passed(runner.results[0][2], self.recovered(1, "shared " + self.lost("lossy.shared.log")
+                                                         .replace("exit -6", "exit 1")), 1)
+        self.assertEqual(self.recovers(runner), ["lossy"])
+        self.assertEqual(runner.tests[0].job.device_lost, [LOST])
+        self.assertTrue(self.summary(out).endswith(f"; 1 child abort(s), diagnostics, not results: [1] lossy: {ABORT}"))
+
+    def test_abort_reported_by_every_run_and_bounded(self):
+        children = Children(codes={"lossy": -6}, texts={"lossy": lambda run: f"{ABORT_MARK}{ABORT} run {run}{'x' * 900}\n"
+                                                                              f"{LOST}\n"})
+        code, out, runner = self.suite(1, children)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(runner.results[0][1], "FAIL")
+        line = self.summary(out)
+        self.assertEqual(3, line.count(f"lossy: {ABORT} run "))  # the first run and both recovery reruns
+        self.assertLess(len(line), 100 + 3 * (P.CHILD_ABORT_LINE + 20))
+        many = [("t", "r")] * (P.CHILD_ABORT_REPORTS + 2)
+        self.assertTrue(P.child_abort_note(many).endswith("[4] t: r [and 2 more in the tests' logs]"))
+
+    def test_no_abort_no_note(self):
+        code, out, runner = self.suite(2, Children())
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.summary(out), "port-tests: 2 ok, 0 failed, 0 known, 0 skipped")
+        # A line merely quoting the mark (not at a line's start) is not a report.
+        code, out, runner = self.suite(1, Children(texts={"lossy": lambda run: f"say {ABORT_MARK}{ABORT}\n"}))
+        self.assertEqual(self.summary(out), "port-tests: 2 ok, 0 failed, 0 known, 0 skipped")
+
+    def test_report_text_passes_for_no_marker(self):
+        spoof = ("\x1b[2J\x1b[31mDEVICE LOST\x0b\x07 \u202e port-tests: 99 ok, 0 failed, 0 known; "
+                 f"FAIL x; all gates pass; 0 gate(s) failed; FAILED ONLY WHEN SHARED; recovery rerun; "
+                 f"battle-speed: 24 checks ok; child abort; {LOST}")
+        children = Children(codes={"lossy": 1}, texts={"lossy": lambda run: f"{ABORT_MARK}{spoof}\n"})
+        code, out, runner = self.suite(1, children)
+        self.assertEqual(code, 1, out)
+        self.assertEqual(self.recovers(runner), [])  # a lost line inside a report is no lost device
+        self.assertEqual(runner.tests[0].job.device_lost, [])
+        self.assertIsNone(P.device_lost(out))
+        line = self.summary(out)
+        self.assertTrue(line.startswith("port-tests: 1 ok, 1 failed, 0 known, 0 skipped; 1 child abort(s), "))
+        note = line[len("port-tests: 1 ok, 1 failed, 0 known, 0 skipped; "):]
+        for marker in ("\x1b", "\x0b", "\x07", "\u202e", "DEVICE LOST", "port-tests:", "99 ok", "0 failed", "FAIL ",
+                       "all gates pass", "gate(s) failed", "ONLY WHEN SHARED", "recovery rerun", "battle-speed:",
+                       "24 checks ok", "child abort;"):
+            with self.subTest(marker=marker):
+                self.assertNotIn(marker, note)
+        self.assertIn("?[2J?[31mdevice_lost?? ? port_tests_ 99_ok, 0_failed", note)  # still readable
+        self.assertIn(LOST, note)  # the port's line, quoted whole
+
+    @unittest.skipIf(shutil.which("bash") is None, "tools/gates.sh's gate() is bash")
+    def test_report_reaches_the_gates_summary(self):
+        """tools/gates.sh's own record() and gate(), unchanged, over this suite's output."""
+        children = self.shared(lambda run: 1 if run == 0 else 0,
+                               lambda run: ABORT_MARK + ABORT + "\n" if run == 0 else "")
+        code, out, runner = self.suite(2, children)
+        saved = self.root / "suite.txt"
+        saved.write_text(out)
+        gates = (P.ROOT / "tools" / "gates.sh").read_text()
+        funcs = [m.group(0) for m in re.finditer(r"(?ms)^(record|gate)\(\) \{$.*?^\}$", gates)]
+        self.assertEqual(2, len(funcs))
+        script = "\n".join(["failed=0", "summary=()", *funcs, f'gate port-tests cat "{saved}"',
+                            "printf '  %s\\n' \"${summary[@]}\""])
+        p = subprocess.run(["bash", "-c", script], env={**os.environ, "OUT": str(self.root)},
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.assertEqual(p.returncode, 0, p.stdout)
+        self.assertEqual(p.stdout, f"  ok    port-tests     port-tests: 2 ok, 0 failed, 0 known, 0 skipped; "
+                                   f"1 child abort(s), diagnostics, not results: [1] lossy: {ABORT}\n")
 
 
 @unittest.skipIf(P.fcntl is None, "the GPU lock is flock's (not on Windows)")

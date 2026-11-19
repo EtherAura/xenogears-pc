@@ -29,7 +29,8 @@ speed: the commit before it), which must be the off run to the bit.
 
 Prints one line per check and 'battle-speed: N checks ok' (exit 0), or the
 failures (exit 1). A run that fails leaves OUT/RUN/failed.N.log: which run, its
-exit status and the end of its port.log, kept across later runs in OUT.
+exit status and the end of its port.log, kept across later runs in OUT; one
+that died of SIGABRT also writes a line of that to stderr (ABORTED).
 """
 
 from __future__ import annotations
@@ -69,6 +70,29 @@ _said = threading.Lock()  # main()'s side-by-side runs write a whole line each
 # has a directory of its own (main()'s side-by-side runs too), so only that
 # run's thread writes there.
 FAILED_TAIL = 16384  # bytes of port.log kept
+
+# A run that died of SIGABRT (its status through nice and timeout: -SIGABRT, or
+# timeout's 128 + SIGABRT) also says so on stderr, on one line of its own:
+# port_tests.CHILD_ABORT_MARK, the run, its status, its failed.N.log and the end of its
+# port.log, bounded, made plain by port_tests.plain_line. port_tests keeps that line
+# for its summary, the line tools/gates.sh keeps (xg-oevj), even when a rerun passes.
+# _said keeps it whole beside the other runs' lines. It is a diagnostic only: the exit
+# status and the checks stay the same.
+ABORTED = (-signal.SIGABRT, 128 + signal.SIGABRT)
+ABORT_LINES = 4      # the last non-empty lines of port.log in the line
+ABORT_LINE = 120     # characters of each
+ABORT_EXCERPT = 280  # characters of them all, the end kept
+
+
+def abort_report(out: Path, code: int, what: str, kept: Path, text: str) -> str:
+    """The stderr line for a run that aborted: what is the run, text its port.log."""
+    lines = [x.strip()[:ABORT_LINE] for x in text.splitlines() if x.strip()][-ABORT_LINES:]
+    excerpt = " | ".join(lines).replace(str(ROOT) + os.sep, "").replace(str(Path.home()), "~") or "(port.log empty)"
+    if len(excerpt) > ABORT_EXCERPT:
+        excerpt = "..." + excerpt[-(ABORT_EXCERPT - 3):]
+    return port_tests.CHILD_ABORT_MARK + port_tests.plain_line(
+        f"{what}: {exit_status(code)}, as nice and timeout returned it; {kept.relative_to(out.parent)}: {excerpt}",
+        port_tests.CHILD_ABORT_LINE)
 
 
 def exit_status(code: int) -> str:
@@ -170,13 +194,19 @@ def run(build: Path, out: Path, speed: int | None, until: int, jp: bool, real: b
             p = subprocess.run(["nice", "-n", "19", "timeout", "-s", "INT", "-k", "30", "900", *cmd, str(disc)],
                                env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out)
     if p.returncode != 0:
-        keep_failed_run(out, p.returncode, f"{out.name} ({out}): battle speed {speed or 'off'}, "
-                        f"{'real' if real else 'step'} clock, until vblank {until}, {'JP' if jp else 'US'}")
-        lost = port_tests.DEVICE_LOST.search((out / "port.log").read_text(errors="replace"))
+        label = (f"battle speed {speed or 'off'}, {'real' if real else 'step'} clock, until vblank {until}, "
+                 f"{'JP' if jp else 'US'}")
+        kept = keep_failed_run(out, p.returncode, f"{out.name} ({out}): {label}")
+        text = (out / "port.log").read_text(errors="replace")
+        lost = port_tests.DEVICE_LOST.search(text)
         if lost is not None:
             with _said:
                 sys.stdout.write(lost.group(0) + "\n")
                 sys.stdout.flush()
+        if p.returncode in ABORTED:
+            with _said:
+                sys.stderr.write(abort_report(out, p.returncode, f"{out.name}: {label}", kept, text) + "\n")
+                sys.stderr.flush()
     (out / "device.raw").unlink(missing_ok=True)
     return p.returncode
 
