@@ -2,7 +2,10 @@
 rejected because a hand-written row or count did not match the runner's facts (a run mostly in another field, a party
 the spec did not ask for, 22 runs written where 21 were kept)."""
 from pathlib import Path
+import argparse
+import contextlib
 import importlib.util
+import io
 import tempfile
 import unittest
 
@@ -89,6 +92,52 @@ class RowTests(unittest.TestCase):
         runs = self.cp.chapter_runs('demo', 0.001)[0]   # a round that began before both runs
         self.assertEqual(self.cp.run_line('demo', runs), 'runs of demo: 2 kept in all, 2 made in this round')
         self.assertEqual(self.cp.run_line('demo', self.cp.chapter_runs('demo', None)[0]), 'runs of demo: 2 kept in all, 0 made in this round')
+
+
+VALIDATED = ('new', 'catalogue', 'atlas', 'plan', 'overview', 'reuse', 'register', 'prompts')
+REQUIRED = {'new': ['--title', 't', '--fields', '1'], 'catalogue': ['--fields', '1'], 'register': ['--title', 't', '--prefix', 'p'],
+            'prompts': ['--title', 't', '--subjects', 's']}
+BAD = ('', '../lair', 'a/b', 'lair/..', '/lair', 'a\\b', '.', '..', '.lair', 'lair.', 'a..b', 'nortune--city', '-lair', 'lair-',
+       'Lair', 'lair npcs', 'lair_npcs', 'lair\n')
+
+
+class NameTests(unittest.TestCase):
+    """xg-km5l: a chapter's name becomes a path under work/art and the pack tag, so it is checked before any handler."""
+    def setUp(self):
+        self.cp = chapter_prep(); self.called = []
+        for c in VALIDATED + ('facts', 'row'):
+            setattr(self.cp, 'cmd_' + c, lambda a, c=c: self.called.append((c, a.name)))
+
+    def run_main(self, argv):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            try: self.cp.main(argv)
+            except SystemExit as e: return e.code, err.getvalue()
+        return None, err.getvalue()
+
+    def test_the_validator_takes_dash_joined_words_only(self):
+        for good in ('lair', 'nortune-burning-city', 'ch1b', 'room-01', 'party-citan-sword'):
+            self.assertEqual(self.cp.chapter_name(good), good)
+        for bad in BAD:
+            with self.assertRaises(argparse.ArgumentTypeError, msg=repr(bad)): self.cp.chapter_name(bad)
+
+    def test_every_naming_subcommand_refuses_a_bad_name_before_its_handler(self):
+        for c in VALIDATED:
+            for bad in BAD:
+                code, err = self.run_main([c, bad] + REQUIRED.get(c, []))
+                self.assertEqual(code, 2, (c, bad))   # a usage error; '-lair' reads as an option, so the name is missing
+                self.assertIn('the following arguments are required: name' if bad.startswith('-') else 'is not a chapter name', err, (c, bad))
+        self.assertEqual(self.called, [])
+
+    def test_a_good_name_reaches_the_handler_unchanged(self):
+        for c in VALIDATED:
+            for good in ('lair', 'nortune-burning-city'):
+                self.assertEqual(self.run_main([c, good] + REQUIRED.get(c, [])), (None, ''))
+        self.assertEqual(self.called, [(c, g) for c in VALIDATED for g in ('lair', 'nortune-burning-city')])
+
+    def test_facts_and_row_are_left_as_they_were(self):
+        p = self.cp.parser()
+        self.assertEqual(p.parse_args(['facts', 'Lair', 'party_x']).name, ['Lair', 'party_x'])
+        self.assertEqual(p.parse_args(['row', 'Lair']).name, 'Lair')
 
 
 if __name__ == '__main__':
