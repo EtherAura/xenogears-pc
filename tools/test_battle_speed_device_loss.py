@@ -216,6 +216,91 @@ class RunTest(Base):
         self.assertIn("GPU lock", (out / "port.log").read_text())
 
 
+class FailedRunKeptTest(Base):
+    """run keeps a failed run's status and the end of its port.log in failed.N.log (xg-oevj),
+    which the next run in the same directory (a retry's) leaves alone. The game is a mocked
+    subprocess.run: it writes the given output to the log run hands it and ends as told."""
+
+    def mocked_run(self, out: Path, ends: list[tuple[int, str]], speed: int | None = 4,
+                   real: bool = False) -> list[tuple[int, str]]:
+        """run once per (exit, output) in ends, all in out: each run's exit and stdout."""
+        results = []
+        for code, text in ends:
+            def game(argv, **kw):
+                kw["stdout"].write(text)
+                return subprocess.CompletedProcess(argv, code)
+            with patch.object(B.subprocess, "run", game):
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    results.append((B.run(self.build, out, speed, 10, False, real=real), buf.getvalue()))
+        return results
+
+    def kept(self, out: Path) -> list[str]:
+        return [(out / f"failed.{n}.log").read_text() for n in range(1, 10) if (out / f"failed.{n}.log").exists()]
+
+    def test_preserves_abnormal_exit_log_after_retry_succeeds(self):
+        for real in (False, True):
+            with self.subTest(real=real):
+                out = self.root / ("4x-real" if real else "4x")
+                crash = "fake game: booting\nxenogears: src/system/main.c:99: main: Assertion `0' failed.\n"
+                results = self.mocked_run(out, [(-signal.SIGABRT, crash), (0, "fake game: a run that ends well\n")],
+                                          real=real)
+                self.assertEqual([(-signal.SIGABRT, ""), (0, "")], results)  # exits as they were, stdout quiet
+                self.assertNotIn("Assertion", (out / "port.log").read_text())  # the retry's own log
+                [kept] = self.kept(out)
+                self.assertIn(f"run: {out.name} ({out}): battle speed 4, {'real' if real else 'step'} clock", kept)
+                self.assertIn("status: exit -6 (killed by SIGABRT)\n", kept)
+                self.assertTrue(kept.endswith(crash))
+
+    def test_preserves_abnormal_exit_log_every_failed_attempt(self):
+        out = self.root / "off"
+        results = self.mocked_run(out, [(128 + signal.SIGABRT, "first\n"), (124, "second"), (7, "third\n")], speed=None)
+        self.assertEqual([134, 124, 7], [c for c, _ in results])
+        first, second, third = self.kept(out)
+        self.assertIn("battle speed off, step clock", first)
+        self.assertIn("status: exit 134 (128 + SIGABRT: the game died of that signal)\n", first)
+        self.assertTrue(first.endswith("all 6 bytes):\nfirst\n"))
+        self.assertIn("status: exit 124 (timeout", second)
+        self.assertTrue(second.endswith("second\n"))
+        self.assertIn("status: exit 7\n", third)
+
+    def test_preserves_abnormal_exit_log_bounded(self):
+        out = self.root / "2x"
+        text = "".join(f"spu {i}.000: key on 0001 off\n" for i in range(5000)) + "abort: the last line\n"
+        [(code, said)] = self.mocked_run(out, [(-signal.SIGABRT, text)])
+        self.assertEqual((-signal.SIGABRT, ""), (code, said))
+        [kept] = self.kept(out)
+        self.assertIn(f"the last {B.FAILED_TAIL} of its {len(text)} bytes", kept)
+        self.assertTrue(kept.endswith(text[-B.FAILED_TAIL:]))
+        self.assertLess(len(kept), B.FAILED_TAIL + 400)
+
+    def test_preserves_abnormal_exit_log_lost_device_still_forwarded(self):
+        out = self.root / "x"
+        [(code, said)] = self.mocked_run(out, [(-signal.SIGABRT, lost_line("x") + "\n")])
+        self.assertEqual(-signal.SIGABRT, code)
+        self.assertEqual(lost_line("x"), port_tests.device_lost(said))
+        [kept] = self.kept(out)
+        self.assertIn(lost_line("x"), kept)
+
+    def test_preserves_abnormal_exit_log_not_for_success_or_lock(self):
+        out = self.root / "1x"
+        self.assertEqual([(0, "")], self.mocked_run(out, [(0, "fine\n")]))
+        self.assertEqual([], self.kept(out))
+        with patch.dict(os.environ, XG_GPU_LOCK=str(self.root / "no such dir" / "gpu.lock")):
+            self.assertEqual(1, self.mocked_run(out, [(-signal.SIGABRT, "never ran\n")])[0][0])
+        self.assertEqual([], self.kept(out))  # the game never ran: port.log says why, as before
+
+    def test_preserves_abnormal_exit_log_real_game_process(self):
+        """The real launch (nice, timeout, the fake game aborting), then a rerun that ends well."""
+        out = self.root / "x"
+        code, _ = self.run_output("x=abort", out)
+        self.assertIn(code, ABORTED)
+        self.assertEqual((0, ""), self.run_output("x=ok", out))
+        [kept] = self.kept(out)
+        self.assertRegex(kept, r"status: exit (-6 \(killed by SIGABRT\)|134 \(128 \+ SIGABRT)")
+        self.assertIn("main: Assertion `0' failed.", kept)
+
+
 class ParallelTest(Base):
     """main()'s four step-clock runs side by side: each run's line once, whole, its own."""
 

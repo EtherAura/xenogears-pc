@@ -28,7 +28,8 @@ game frame of every run), on the stepped clock, four runs: battle speed off
 speed: the commit before it), which must be the off run to the bit.
 
 Prints one line per check and 'battle-speed: N checks ok' (exit 0), or the
-failures (exit 1).
+failures (exit 1). A run that fails leaves OUT/RUN/failed.N.log: which run, its
+exit status and the end of its port.log, kept across later runs in OUT.
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ import argparse
 import bisect
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -58,6 +60,57 @@ FRAMES = "1000-{until}/3"  # the pictures compared: every third vblank of the ba
 # its own: tools/port_tests.py's DEVICE_LOST finds it in this script's output
 # (xg-au4), as in tools/statecheck.py's run_port. Nothing else changes.
 _said = threading.Lock()  # main()'s side-by-side runs write a whole line each
+
+# A run of the game that fails leaves what it was, how it ended and the end of
+# its port.log (its stdout and stderr, bounded) in OUT/failed.N.log, N the next
+# free number: the next run in the same directory (a rerun of this script, as
+# port_tests' retries are, uses the same scratch) starts a new port.log, but
+# never touches these (xg-oevj). A run that ends well writes none. Each run
+# has a directory of its own (main()'s side-by-side runs too), so only that
+# run's thread writes there.
+FAILED_TAIL = 16384  # bytes of port.log kept
+
+
+def exit_status(code: int) -> str:
+    """How a run ended, as run sees it through nice and timeout."""
+    if code < 0:
+        try:
+            return f"exit {code} (killed by {signal.Signals(-code).name})"
+        except ValueError:
+            return f"exit {code} (killed by signal {-code})"
+    if code == 124:
+        return "exit 124 (timeout: past its time, interrupted)"
+    if code > 128:
+        try:
+            return f"exit {code} (128 + {signal.Signals(code - 128).name}: the game died of that signal)"
+        except ValueError:
+            pass
+    return f"exit {code}"
+
+
+def keep_failed_run(out: Path, code: int, what: str) -> Path:
+    """Record a failed run in OUT/failed.N.log (see FAILED_TAIL); its path."""
+    log = out / "port.log"
+    with open(log, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        f.seek(max(0, size - FAILED_TAIL))
+        tail = f.read().decode(errors="replace")
+    n = 1
+    while True:
+        kept = out / f"failed.{n}.log"
+        try:
+            f = open(kept, "x")
+        except FileExistsError:
+            n += 1
+            continue
+        break
+    with f:
+        cut = f"the last {FAILED_TAIL} of its {size} bytes" if size > FAILED_TAIL else f"all {size} bytes"
+        f.write(f"run: {what}\nstatus: {exit_status(code)}\nport.log ({cut}):\n{tail}")
+        if tail and not tail.endswith("\n"):
+            f.write("\n")
+    return kept
 
 
 def run(build: Path, out: Path, speed: int | None, until: int, jp: bool, real: bool = False) -> int:
@@ -117,6 +170,8 @@ def run(build: Path, out: Path, speed: int | None, until: int, jp: bool, real: b
             p = subprocess.run(["nice", "-n", "19", "timeout", "-s", "INT", "-k", "30", "900", *cmd, str(disc)],
                                env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out)
     if p.returncode != 0:
+        keep_failed_run(out, p.returncode, f"{out.name} ({out}): battle speed {speed or 'off'}, "
+                        f"{'real' if real else 'step'} clock, until vblank {until}, {'JP' if jp else 'US'}")
         lost = port_tests.DEVICE_LOST.search((out / "port.log").read_text(errors="replace"))
         if lost is not None:
             with _said:
