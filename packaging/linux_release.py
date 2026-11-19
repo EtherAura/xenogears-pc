@@ -160,7 +160,8 @@ ELF_X86_64, ET_EXEC, ET_DYN, PT_INTERP = 62, 2, 3, 3
 # The payload audit: this checkout's auditor and what it reads.
 CHECKOUT = Path(__file__).resolve().parent.parent  # packaging/ is in the checkout's root
 AUDITOR = CHECKOUT / "tools" / "payloadcheck.py"
-AUDITOR_FILES = (AUDITOR, CHECKOUT / "tools" / "payload_pe.py", CHECKOUT / "tools" / "payload_allow.txt")
+AUDITOR_FILES = (AUDITOR, CHECKOUT / "tools" / "payload_pe.py", CHECKOUT / "tools" / "payload_elf.py",
+                 CHECKOUT / "tools" / "payload_allow.txt")
 VERSIONS = ("us", "jp")
 ENGINES = {"bin/xenogears": "original", "bin/xenogears-enhanced": "enhanced"}  # the build's XG_ENGINE
 AUDIT_TIMEOUT = 3600  # seconds, each executable

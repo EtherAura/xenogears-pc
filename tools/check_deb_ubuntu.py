@@ -29,15 +29,16 @@
    run unchanged with the real dpkg-deb. Accepted: public and private
    layouts, an empty build folder, build and output inside the source tree's
    build/ (only the documented paths change, no __pycache__), metacharacter
-   paths given relative to another working folder, this repository's own
-   tree as the source, the variables that are not on the refused list.
+   paths given relative to another working folder, and the variables that
+   are not on the refused list. The fixture auditor checks that its input
+   is the executable from the synthetic package.
    Refused (exit 1, the step named, no success line, output bytes and times
    unchanged; before configure also the build folder unchanged and no command
    run): every non-empty build folder (contaminated caches, a compatible
    cache, unrelated and hidden-only files and folders, symbolic links),
    unsafe paths, missing inputs and helpers, bad tags, wrong OS, version,
    architecture, each refused variable, missing tools, configure failure and
-   deb_build.py's own failures (build, cpack, inputs, package, strict
+   deb_build.py's own failures (build, cpack, inputs, package, payload, strict
    Depends). Two failures injected by the harness after deb_build.py's real
    staging (its exit status changed; one staged file taken away): exit 1, no
    success line, the message names what the output folder holds, and nothing
@@ -193,6 +194,17 @@ NESTED = ("# FIXTURE (tools/check_deb_ubuntu.py): stands for a build tool that i
           "with open(sys.argv[1], 'a') as log:\n"
           "    log.write(f'{sys.argv[2]} {sys.flags.dont_write_bytecode} {fixture_nested_mod.VALUE}\\n')\n")
 NESTED_MOD = "# FIXTURE module (tools/check_deb_ubuntu.py)\nVALUE = 'imported'\n"
+FIXTURE_ELF = "\x7fELF\x02\x01 synthetic packaged bytes\n"
+AUDIT_STUB = f'''# FIXTURE auditor: checks only argv and the bytes of the packaged fixture.
+from pathlib import Path
+import sys
+flag, ver_flag, ver, build_flag, build, exe_flag, exe = sys.argv[1:]
+if (flag, ver_flag, ver, build_flag, exe_flag) != ("--dist", "--ver", "us", "--build", "--exe") or \
+        not (Path(build) / "CMakeCache.txt").is_file() or Path(exe).read_bytes() != {FIXTURE_ELF.encode()!r}:
+    sys.exit(13)
+print(f"retail module data in {{exe}} (US): 1 module images, runs of >= 16 bytes")
+print("payload ok: fixture bytes supplied to the stub auditor")
+'''
 # Options that pick a CPU above baseline x86-64 (or name one: native, x86-64-v2..v4).
 CPU_OPTION = re.compile(r"-m(arch|tune|cpu)\b|-m(avx|sse|fma|bmi|f16c|popcnt|lzcnt|movbe|pclmul|aes)\w*|"
                         r"x86-64-v[234]|\bnative\b", re.I)
@@ -293,6 +305,7 @@ def make_source(work: Path, label: str, layout: str = "public") -> tuple[Path, P
     shutil.copy2(ROOT / "port/cmake/deb.cmake", src / "port/cmake/deb.cmake")
     (src / "tools/fixture_nested.py").write_text(NESTED)
     (src / "tools/fixture_nested_mod.py").write_text(NESTED_MOD)
+    (src / "tools/payloadcheck.py").write_text(AUDIT_STUB)
     (src / "src").mkdir()
     (src / "src/fixture.c").write_text("/* fixture source, not game code */\n")
     (src / "NOTES.txt").write_text("unrelated fixture file\n")
@@ -559,7 +572,8 @@ def check_real_host(work: Path) -> None:
 
 def check_fixtures(work: Path) -> None:
     r = Runner(work)
-    good = cdb.fixture_deb(work, "good", cdb.good_files())
+    audited_files = cdb.good_files(usr__bin__xenogears=(FIXTURE_ELF, 0o755))
+    good = cdb.fixture_deb(work, "good", audited_files)
     full = make_bin(work, "full", good)
 
     # Accepted: the public layout, then the private layout into an empty build folder and a new output folder.
@@ -607,11 +621,12 @@ def check_fixtures(work: Path) -> None:
     pwned = [p for p in (ROOT, work, elsewhere, osrc, obuild, oout) if (p / "PWNED").exists()]
     check(not pwned, f"no shell ran the metacharacters (no PWNED file: {pwned or 'none'})")
 
-    # This repository's own tree as the source (the private layout's real inputs; stubbed tools).
+    # A synthetic package must fail when pointed at this repository's real auditor.
     if (ROOT / "build/pc/sources.cmake").is_file():
         held = sorted(p.name for p in PACKAGING.iterdir())
-        r.accepted("this repository's tree as the source", script, ROOT, fresh(work / "builds/repo-src"),
-                   out_folder(work, "repo-src"), bin_dir=full, deb=good)
+        r.refused("the real auditor refuses a synthetic package", script, ROOT, fresh(work / "builds/repo-src"),
+                  out_folder(work, "repo-src"), "package/payload", ("did not pass payloadcheck",),
+                  bin_dir=full, commands=["arch", "configure", "build", "cpack"])
         check(sorted(p.name for p in PACKAGING.iterdir()) == held, "nothing new beside the repository's own helpers")
 
     # The variables that are NOT on the refused list do not stop a run (the docstring says so).
@@ -752,8 +767,9 @@ def check_fixtures(work: Path) -> None:
     r.refused("configure fails", script, src, nb(), out_folder(work, "o"), "configure",
               ("cmake exit status 1", "fixture: configure failed"),
               bin_dir=make_bin(work, "configure-fail", good, configure="fail"), commands=["arch", "configure"])
-    weak = cdb.fixture_deb(work, "depends-vulkan-only", cdb.good_files(), depends="libvulkan1")
+    weak = cdb.fixture_deb(work, "depends-vulkan-only", audited_files, depends="libvulkan1")
     noexe = cdb.fixture_deb(work, "no-executable", cdb.good_files(usr__bin__xenogears=None))
+    wrong = cdb.fixture_deb(work, "wrong-payload", cdb.good_files(usr__bin__xenogears=(FIXTURE_ELF + "added", 0o755)))
     for what, bin_dir, step, expect, cmds in (
             ("the build fails", make_bin(work, "build-fail", good, build="fail"), "package/build",
              ("fixture: the build failed",), ["arch", "configure", "build"]),
@@ -763,6 +779,8 @@ def check_fixtures(work: Path) -> None:
              cpack={"CPACK_DEBIAN_PACKAGE_ARCHITECTURE": "arm64"}), "package/inputs", ("arm64",), ["arch", "configure"]),
             ("a package without the executable", make_bin(work, "no-exe", noexe), "package/package",
              ("missing usr/bin/xenogears",), ["arch", "configure", "build", "cpack"]),
+            ("auditor rejects the packaged bytes", make_bin(work, "wrong-payload", wrong), "package/payload",
+             ("did not pass payloadcheck", "exit 13"), ["arch", "configure", "build", "cpack"]),
             ("strict Depends: libvulkan1 alone (as this host's real package)", make_bin(work, "weak", weak),
              "package/companions", ("no mandatory libsdl3-0", "no mandatory libc6"),
              ["arch", "configure", "build", "cpack"])):
@@ -819,7 +837,7 @@ def check_baseline(work: Path) -> list[str] | None:
     Returns the pristine run's configure arguments (None if it was not accepted)."""
     r = Runner(work)
     pristine = None
-    good = cdb.fixture_deb(work, "baseline", cdb.good_files())
+    good = cdb.fixture_deb(work, "baseline", cdb.good_files(usr__bin__xenogears=(FIXTURE_ELF, 0o755)))
     full = make_bin(work, "baseline", good)
     cmake_files = [ROOT / "port/CMakeLists.txt", *sorted((ROOT / "port").rglob("*.cmake"))]
 

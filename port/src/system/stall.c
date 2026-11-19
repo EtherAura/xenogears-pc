@@ -14,6 +14,8 @@
  * Linux, the game thread's backtrace, and says again when the game moves on.
  * While a stall lasts it serves SIGUSR1's VRAM dump itself
  * (gpuServeStalledDump), since no vblank comes to do it. XG_STALL_MS=0: off.
+ * In the background (SDL's app lifecycle events) it says nothing: SDL holds
+ * the game thread there on purpose (xg-mrj.3.19).
  *
  * A short XG_STALL_MS (under a second) finds the host's hitches instead: a
  * game thread blocked for longer than the sound's queue (60 for the 60 ms
@@ -217,7 +219,45 @@ static void printBacktrace(void) {
 
 #endif /* STALL_BACKTRACE */
 
+/* ---- the app in the background ----
+ *
+ * SDL holds the game thread in its event pump while the app is in the
+ * background (SDL_HINT_ANDROID_BLOCK_ON_PAUSE): no safe point, and no stall.
+ * The pump sends "to the background" just before it blocks, so the game's
+ * own reading of the queue (ui/menu.cpp's lifecycle) sees it only after the
+ * return: the watch takes it from an event watch, called as the event is
+ * sent, on whichever thread sends it. It writes only the two counters. */
+
+static SDL_AtomicInt away;        /* 1 from "to the background" until "back" */
+static SDL_AtomicInt awayChanges; /* changes of `away` (a stay shorter than a poll too) */
+
+static bool SDLCALL onLifecycle(void* user, SDL_Event* e) {
+    int to;
+    (void)user;
+    switch (e->type) {
+    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+        to = 1;
+        break;
+    case SDL_EVENT_WILL_ENTER_FOREGROUND:
+    case SDL_EVENT_DID_ENTER_FOREGROUND:
+        to = 0;
+        break;
+    default:
+        return true;
+    }
+    if (SDL_SetAtomicInt(&away, to) != to) {
+        SDL_AddAtomicInt(&awayChanges, 1);
+    }
+    return true;
+}
+
 /* ---- the watch ---- */
+
+static uint32_t last;
+static int still;
+static int reported;
+static int seenChanges;
 
 static void report(int polls, int dumped) {
     if (polls * pollMs < 1000) {
@@ -254,68 +294,92 @@ static void report(int polls, int dumped) {
     fflush(stderr);
 }
 
-static int watch(void* arg) {
-    uint32_t last = hwHeartbeat();
-    int still = 0;
-    int reported = 0;
+int stallPoll(void) {
+    int changes = SDL_GetAtomicInt(&awayChanges);
+    int isAway = SDL_GetAtomicInt(&away);
+    uint32_t now = hwHeartbeat();
 
+    if (isAway || changes != seenChanges) {
+        /* Away, or back since the last poll: the time away is no stall, the
+         * count starts again from the return, and the first safe point after
+         * it is no recovery. */
+        seenChanges = changes;
+        last = now;
+        still = 0;
+        reported = 0;
+        return STALL_QUIET;
+    }
+    if (now != last) {
+        int was = reported;
+        /* A short one's length is XG_CPU_TIMING's (the polls pause while
+         * the backtrace is taken). */
+        if (reported && still * pollMs < 1000) {
+            fprintf(stderr, "xenogears: the game thread reached a safe point again (vblank %u)\n",
+                    (unsigned)hwVSyncCount());
+        } else if (reported) {
+            fprintf(stderr, "xenogears: the game thread reached a safe point again after %.1f s (vblank %u)\n",
+                    still * pollMs / 1000.0, (unsigned)hwVSyncCount());
+        }
+        last = now;
+        still = 0;
+        reported = 0;
+        return was ? STALL_RECOVERED : STALL_QUIET;
+    }
+    if (hwVSyncCount() == 0 || quitRequested()) {
+        return STALL_QUIET; /* not running yet, or on its way out (quit.c's watchdog) */
+    }
+    /* Counted in polls, not by the clock: a debugger stopping the whole
+     * process is no stall. */
+    still++;
+    int dumped = still * pollMs >= DUMP_MS && gpuServeStalledDump != NULL && gpuServeStalledDump();
+    if (!reported && (still >= reportPolls || dumped)) {
+        report(still, dumped);
+        reported = 1;
+        return STALL_REPORTED;
+    } else if (dumped) {
+#ifdef STALL_BACKTRACE
+        printBacktrace();
+#endif
+    }
+    return STALL_QUIET;
+}
+
+static int watch(void* arg) {
     (void)arg;
     for (;;) {
         SDL_Delay(pollMs);
-        uint32_t now = hwHeartbeat();
-        if (now != last) {
-            /* A short one's length is XG_CPU_TIMING's (the polls pause while
-             * the backtrace is taken). */
-            if (reported && still * pollMs < 1000) {
-                fprintf(stderr, "xenogears: the game thread reached a safe point again (vblank %u)\n",
-                        (unsigned)hwVSyncCount());
-            } else if (reported) {
-                fprintf(stderr, "xenogears: the game thread reached a safe point again after %.1f s (vblank %u)\n",
-                        still * pollMs / 1000.0, (unsigned)hwVSyncCount());
-            }
-            last = now;
-            still = 0;
-            reported = 0;
-            continue;
-        }
-        if (hwVSyncCount() == 0 || quitRequested()) {
-            continue; /* not running yet, or on its way out (quit.c's watchdog) */
-        }
-        /* Counted in polls, not by the clock: a debugger stopping the whole
-         * process is no stall. */
-        still++;
-        int dumped = still * pollMs >= DUMP_MS && gpuServeStalledDump != NULL && gpuServeStalledDump();
-        if (!reported && (still >= reportPolls || dumped)) {
-            report(still, dumped);
-            reported = 1;
-        } else if (dumped) {
-#ifdef STALL_BACKTRACE
-            printBacktrace();
-#endif
-        }
+        stallPoll();
     }
     return 0;
 }
 
-void stallInit(void) {
-    static int done;
-    const char* ms = getenv("XG_STALL_MS");
-
-    if (done) {
-        return;
-    }
-    done = 1;
+int stallSetup(const char* ms) {
     int limit = ms != NULL && ms[0] != '\0' ? atoi(ms) : 2000;
     if (limit > 0 && limit < 3 * POLL_MS) {
         pollMs = limit / 3 < 10 ? 10 : limit / 3;
     }
     reportPolls = limit / pollMs;
     if (reportPolls <= 0) {
-        return;
+        return 0;
     }
 #ifdef STALL_BACKTRACE
     backtraceInit();
 #endif
+    last = hwHeartbeat();
+    SDL_AddEventWatch(onLifecycle, NULL);
+    return reportPolls;
+}
+
+void stallInit(void) {
+    static int done;
+
+    if (done) {
+        return;
+    }
+    done = 1;
+    if (stallSetup(getenv("XG_STALL_MS")) == 0) {
+        return;
+    }
     SDL_Thread* t = SDL_CreateThread(watch, "stall watch", NULL);
     if (t != NULL) {
         SDL_DetachThread(t);

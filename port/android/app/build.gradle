@@ -5,8 +5,11 @@ plugins {
 // tools/build_android.sh passes these: SDL3's source (its Java glue), the native
 // libraries per ABI (jniLibs/<abi>/libSDL3.so, libxgloader.so, libxenogears-<region>.so)
 // and the ABIs built.
-def home = System.getProperty('user.home')
-def sdlSource = providers.gradleProperty('xg.sdlSource').getOrElse("${home}/Android/src/SDL3-3.4.16")
+// SDL3's source has no default: tools/build_android.sh unpacks the version tools/deps.json pins.
+def sdlSource = providers.gradleProperty('xg.sdlSource').orNull
+if (sdlSource == null) {
+    throw new GradleException('xg.sdlSource is not set: build the app with tools/build_android.sh')
+}
 def jniLibsDir = providers.gradleProperty('xg.jniLibs').getOrElse("${rootDir}/../../build/android/jniLibs")
 def abis = providers.gradleProperty('xg.abis').getOrElse('x86_64,arm64-v8a').split(',')
 // The licence files the APK carries (assets/licenses: tools/build_android.sh puts them there).

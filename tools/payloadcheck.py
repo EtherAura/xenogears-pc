@@ -35,6 +35,9 @@ objects for attribution. A PE image needs its .map and .payload.json sidecars
 --record-map EXE records the executable/map hashes after a Windows link.
 PE-only allowance entries have individual budgets and require their exact
 source/symbol pattern; they never borrow another symbol's budget.
+An ELF build with static glslang can also carry a sealed link map. Only exact
+read-only archive slices, matched by location, member and section fingerprint,
+may use its ELF-only allowances. The seal also covers the installed strip.
 
 A build to hand out (port/CMakeLists.txt, -DXG_DIST=ON: release packages, the
 Android APK) is also checked for the folders of the machine that made it: its
@@ -54,6 +57,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+import payload_elf
 import payload_pe
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -129,14 +133,16 @@ def path_leaks(data: bytes, paths: list[str]) -> list[tuple[str, int, str]]:
     return [(text, count, path) for text, (count, path) in texts.items()]
 
 
-def retail_images(ver: str) -> dict[str, bytes]:
+def retail_images(ver: str, complete: bool = False) -> dict[str, bytes]:
     """module -> its image as loaded (config/<ver>/disc.yaml's names, extracted under disc/<ver>/)."""
     out = {}
     for m in re.finditer(r"\{name:\s*(\w+),([^}]*)\}", (ROOT / "config" / ver / "disc.yaml").read_text()):
         name = m.group(1)
         path = ROOT / "disc" / ver / (f"{name}.exe" if "iso:" in m.group(2) else f"{name}.bin")
-        if path.exists():
+        if path.is_file():
             out[name] = path.read_bytes()
+        if complete and not out.get(name):
+            raise ValueError(f"missing or empty extracted module image: {ver}/{path.name}")
     return out
 
 
@@ -230,17 +236,18 @@ def symbols(path: Path, exe: Path) -> list[tuple[int, int, str]]:
     return sorted(out)
 
 
-def load_allow(pe: bool = False) -> list[tuple[str, int, str, bool]]:
-    """(pattern, budget, reason, strict PE-only rule) entries of payload_allow.txt."""
+def load_allow(kind: str = "") -> list[tuple[str, int, str, bool]]:
+    """(pattern, budget, reason, format-specific rule) entries of payload_allow.txt."""
     out = []
     if ALLOW.exists():
         for line in ALLOW.read_text().splitlines():
             body, _, why = line.partition("#")
             parts = body.split()
-            strict = len(parts) == 3 and parts[0] == "pe"
+            strict = len(parts) == 3 and parts[0] in ("pe", "elf")
+            applies = not strict or parts[0] == kind
             if strict:
                 parts = parts[1:]
-            if len(parts) == 2 and why.strip() and (not strict or pe):
+            if len(parts) == 2 and why.strip() and applies:
                 out.append((parts[0], int(parts[1], 0), why.strip(), strict))
     return out
 
@@ -248,6 +255,9 @@ def load_allow(pe: bool = False) -> list[tuple[str, int, str, bool]]:
 def audit() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--record-map":
         payload_pe.record(Path(sys.argv[2]))
+        return 0
+    if len(sys.argv) == 4 and sys.argv[1] == "--record-elf-map":
+        payload_elf.record(Path(sys.argv[2]), sys.argv[3])
         return 0
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--build", default="build/pc/release", help="configured CMake build directory")
@@ -276,7 +286,7 @@ def audit() -> int:
     if exe is None or not exe.exists():
         print(f"payload: no executable in {build}")
         return 2
-    images = retail_images(ver)
+    images = retail_images(ver, complete=a.dist)
     if not images:
         print(f"payload: no extracted module images under disc/{ver} (run tools/extract.py)")
         return 2
@@ -284,11 +294,7 @@ def audit() -> int:
     wanted = windows(images, n)
     data = exe.read_bytes()
     pe = data[:2] == b"MZ"
-    try:
-        mapping = payload_pe.verified_map(exe) if pe else None
-    except ValueError as e:
-        print(f"payload: {e}")
-        return 2
+    mapped_elf = not pe and cache_value(build, "XG_ELF_PAYLOAD_MAP") == "ON"
     found = []
     for start, end in runs(hits(data, wanted, n), n):
         # Zero bytes at either end are padding; what is left must still be a whole window.
@@ -328,7 +334,13 @@ def audit() -> int:
             if keep is None or w in keep:
                 holder.setdefault(w, []).append((cat, src))
     secs = sections(exe)
-    origins = payload_pe.Origins(build, mapping, objs) if mapping is not None else None
+    if pe:
+        origins = payload_pe.Origins(build, payload_pe.verified_map(exe), objs)
+    elif mapped_elf:
+        linked = build / ("xenogears-enhanced" if cache_value(build, "XG_ENGINE") == "enhanced" else "xenogears")
+        origins = payload_elf.Origins(build, payload_elf.verified_map(linked, exe), objs)
+    else:
+        origins = None
     syms = symbols(exe, exe)
     starts = [s[0] for s in syms]
     longest = max((s[1] for s in syms), default=0)
@@ -405,12 +417,20 @@ def audit() -> int:
             out[k] = out.get(k, 0) + 1
         return out
 
-    allow = load_allow(pe)
+    allow = load_allow("pe" if pe else "elf" if mapped_elf else "")
     per: dict[tuple[str, str, str], list[tuple[int, int, int]]] = {}  # (start, end, bytes of the run here)
     for start, end in found:
         sec = next((x for x in secs if x[0] <= start < x[0] + x[1]), None)
-        pieces = origins.pieces(sec[2] + start - sec[0], data[start:end]) if origins and sec and sec[4] else \
-            [(0, end - start, None)]
+        pieces = [(0, end - start, None)]
+        if origins and sec and sec[4]:
+            offset, size, address, name, _ = sec
+            if mapped_elf:
+                stop = min(end, offset + size)
+                pieces = list(origins.pieces(address + start - offset, data[start:stop], name, address, size))
+                if stop < end:
+                    pieces.append((stop - start, end - start, None))
+            else:
+                pieces = origins.pieces(address + start - offset, data[start:end])
         for lo, hi, key in pieces:
             attrs = {key: hi - lo} if key else attribute(start + lo, start + hi)
             for k, nbytes in attrs.items():
@@ -423,6 +443,10 @@ def audit() -> int:
         """The first entry for source:symbol, or, where the symbol is not known (merged strings,
         a PE file's local data), the first entry for the source."""
         for pat, budget, why, strict in allow:
+            if strict and mapped_elf:
+                if pat == f"{src}:{sym}":
+                    return pat, budget, why, strict
+                continue
             if fnmatch.fnmatchcase(f"{src}:{sym}", pat) or fnmatch.fnmatchcase(src, pat) or (
                     not strict and sym == "-" and fnmatch.fnmatchcase(src, source_part(pat))):
                 return pat, budget, why, strict

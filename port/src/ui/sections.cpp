@@ -735,6 +735,7 @@ void displaySection() {
         overrideNote("fullscreen");
     }
 
+#ifndef __ANDROID__ // the window fills the screen there, with or without the system bars
     if (row("Window size", "window_width window_height")) {
         ImGui::BeginDisabled(full);
         ImGui::SetNextItemWidth(84.0f * scale());
@@ -777,6 +778,7 @@ void displaySection() {
         overrideNote("window_width");
         overrideNote("window_height");
     }
+#endif
 
     // ---- how sharp: the resolution, colour and the filters
     opt::group(N_("Quality"));

@@ -3,6 +3,7 @@
 
     python packaging/deb_build.py --build-dir <cmake build> --tag v<YYYY>.<MM>.<N> --out-dir <dir>
     python packaging/deb_build.py ... --shlibdeps-private-dir <dir>   # repeatable, see below
+    python packaging/deb_build.py ... --audit-source <source>   # Ubuntu release builder
 
 The build folder must already be configured as the release ships it:
 
@@ -31,6 +32,9 @@ The steps, each named in the failure message when it fails:
              root) and the licences in /usr/share/doc/xenogears-pc (COPYING,
              LICENSE-Jukebox-font.txt, LICENSE-imgui.txt, and LICENSE-glslang.txt
              and LICENSE-dav1d.txt when the cache links them), nothing else
+  payload    with --audit-source, check the executable bytes taken from the .deb
+             against the extracted retail modules with tools/payloadcheck.py
+             --dist before making any release assets
   companions python -I packaging/deb_assets.py --deb <it> --tag <tag>
              --build-dir <build> --require-deps, into the temporary folder: it
              must write exactly <deb>.sha256 (the package's hash) and
@@ -159,7 +163,7 @@ def dpkg_deb(dpkg_deb_tool: str, *args) -> bytes:
     return result.stdout
 
 
-def check_package(tool: str, deb: Path, package: str, version: str, arch: str, exe: str, need: set[str]) -> None:
+def check_package(tool: str, deb: Path, package: str, version: str, arch: str, exe: str, need: set[str]) -> bytes:
     fields = {}
     for line in dpkg_deb(tool, "-f", deb).decode(errors="replace").splitlines():
         if ":" in line and line[:1] not in (" ", "\t"):
@@ -169,11 +173,17 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
         if fields.get(field) != want:
             raise StepError("package", f"{deb.name}: {field} is {fields.get(field)!r}, not {want!r}")
     members = {}
+    payload = b""
     try:
         with tarfile.open(fileobj=io.BytesIO(dpkg_deb(tool, "--fsys-tarfile", deb)), mode="r:") as tar:
             for member in tar:
                 if not member.isdir():
-                    members[member.name.removeprefix("./")] = member
+                    path = member.name.removeprefix("./")
+                    if path in members:
+                        raise StepError("package", f"{deb.name} repeats the archive member {path}")
+                    members[path] = member
+                    if path == exe and member.isfile():
+                        payload = tar.extractfile(member).read()
     except tarfile.TarError as error:
         raise StepError("package", f"{deb.name}: its file archive cannot be read ({error})") from error
     problems = [f"missing {path}" for path in sorted(need - set(members))]
@@ -184,6 +194,36 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
         problems.append(f"{exe} is mode {binary.mode & 0o7777:04o} owner {binary.uid}:{binary.gid}, not 0755 root")
     if problems:
         raise StepError("package", f"{deb.name} does not hold the executable and licences alone: " + "; ".join(problems))
+    return payload
+
+
+def audit_executable(source: Path, work: Path, build: Path, exe: str, payload: bytes) -> None:
+    auditor = source / "tools" / "payloadcheck.py"
+    if not auditor.is_file():
+        raise StepError("payload", "the source tree lacks tools/payloadcheck.py")
+    if not payload.startswith(b"\x7fELF\x02\x01"):
+        raise StepError("payload", "the packaged executable must be a little-endian ELF64 image")
+    candidate = work / Path(exe).name
+    candidate.write_bytes(payload)
+    candidate.chmod(0o500)
+    try:
+        checked = subprocess.run([sys.executable, "-E", "-s", "-B", str(auditor), "--dist", "--ver", "us",
+                                  "--build", str(build), "--exe", str(candidate)],
+                                 capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=3600)
+    except OSError as error:
+        raise StepError("payload", "could not start tools/payloadcheck.py") from error
+    except subprocess.TimeoutExpired as error:
+        raise StepError("payload", "payloadcheck --dist timed out") from error
+    if candidate.read_bytes() != payload:
+        raise StepError("payload", "the extracted executable changed during its audit")
+    lines = checked.stdout.splitlines()
+    heading = f"retail module data in {candidate} (US): "
+    if checked.returncode or len(lines) != 2 or not lines[0].startswith(heading) or not lines[1].startswith("payload ok:"):
+        summary = next((line for line in reversed(lines) if line.startswith("payload FAIL:")), "")
+        detail = f" ({summary})" if summary else ""
+        raise StepError("payload", f"packaged {Path(exe).name} did not pass payloadcheck --dist (exit "
+                                  f"{checked.returncode}){detail}")
+    print(f"{Path(exe).name} in the .deb: {lines[1]}", flush=True)
 
 
 def companions(work: Path, deb: Path, tag: str, build: Path) -> list[Path]:
@@ -226,7 +266,8 @@ def stage(files: list[Path], out_dir: Path) -> None:
         raise error if isinstance(error, StepError) else StepError("stage", f"{out_dir}: {error}") from error
 
 
-def build_package(build: Path, tag: str, out_dir: Path, private_dirs: list[Path]) -> list[Path]:
+def build_package(build: Path, tag: str, out_dir: Path, private_dirs: list[Path],
+                  audit_source: Path | None = None) -> list[Path]:
     assets = load_assets()
     try:
         version = assets.version_from_tag(tag)
@@ -258,7 +299,9 @@ def build_package(build: Path, tag: str, out_dir: Path, private_dirs: list[Path]
         if not deb.is_file() or deb.is_symlink():
             made = sorted(p.name for p in (work / "cpack").glob("*.deb")) if (work / "cpack").is_dir() else []
             raise StepError("cpack", f"cpack did not make {name} (it made {made or 'no package'})")
-        check_package(tools["dpkg-deb"], deb, assets.PACKAGE, version, assets.ARCH, exe, need)
+        payload = check_package(tools["dpkg-deb"], deb, assets.PACKAGE, version, assets.ARCH, exe, need)
+        if audit_source is not None:
+            audit_executable(audit_source, work, build, exe, payload)
         files = companions(work, deb, tag, build) + [deb]
         stage(files, out_dir)
     return [out_dir / path.name for path in files]
@@ -269,11 +312,14 @@ def main() -> int:
     ap.add_argument("--build-dir", type=Path, required=True, help="the configured Release build (CMakeCache.txt)")
     ap.add_argument("--tag", required=True, help="the release tag, vYYYY.MM.N")
     ap.add_argument("--out-dir", type=Path, required=True, help="where the .deb and its companions go")
+    ap.add_argument("--audit-source", type=Path,
+                    help="audit the packaged executable using this source tree's auditor and retail modules")
     ap.add_argument("--shlibdeps-private-dir", type=Path, action="append", default=[],
                     help="a folder dpkg-shlibdeps may search for the executable's libraries (repeatable)")
     args = ap.parse_args()
     try:
-        staged = build_package(args.build_dir.resolve(), args.tag, args.out_dir.resolve(), args.shlibdeps_private_dir)
+        staged = build_package(args.build_dir.resolve(), args.tag, args.out_dir.resolve(),
+                               args.shlibdeps_private_dir, args.audit_source.resolve() if args.audit_source else None)
     except StepError as error:
         print(f"deb_build: FAILED at step {error.step}: {error}", file=sys.stderr)
         print("deb_build: nothing staged; this is not a release package set", file=sys.stderr)

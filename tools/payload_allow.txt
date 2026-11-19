@@ -14,6 +14,8 @@
 # Optional "pe" prefix: Windows-only, exact source:symbol pattern and its
 # own budget (no unknown-symbol fallback or pooling across symbols). Library
 # member/symbol origins are checked against the linked map and object bytes.
+# The "elf" prefix likewise requires one mapped archive member and the exact
+# SHA-256 of its input section. Its budget is independent of port sources.
 
 port/src/gte/libgte.c:libgteAtanTable  2100  # LIBGTE's arctangent table (ratan2): src/main/psyq/libgte/ratan.c's own initialiser, #included there; decompiled game C's data like the rest of src/ (reported with it by --measure)
 port/src/system/spu.c:reverbPresets     640  # LIBSPU's ten reverb presets (SpuSetReverbModeType): SDK register values the port's LIBSPU writes, documented in psx-spx
@@ -28,6 +30,17 @@ port/src/game/worldmap/start.c           32  # clang builds: the vectoriser's la
 port/src/extras/*                       256  # "%d %d %d %d" and "(%d,%d)-(%d,%d)" formats, hex digits, consecutive numbers: coincidence
 port/src/ui/*                            96  # hex digits, button glyph ids, -1 fills: coincidence
 port/third_party/imgui/*                320  # Dear ImGui (unmodified): glyph ranges and its embedded fonts' tables hold runs of small consecutive numbers: coincidence
+
+# Ubuntu amd64 glslang 16.2.0-2 and SPIRV-Tools 2026.1-1. Each limit is measured
+# in the stripped US package and tied to the source archive member's section.
+elf library/libSPIRV-Tools-opt.a/convert_to_half_pass.cpp.o:.rodata@6ee4542dc5efd283b23233515be956e08df39f964e416092aa8b24bb309f6b62 82 # SPIR-V optimiser opcode constants
+elf library/libSPIRV-Tools-opt.a/ir_context.cpp.o:.rodata@080520bef8279f294d3f02d8cfd43d9276b6759fce89265fd297c7fc65256a57 143 # SPIR-V optimiser opcode constants
+elf library/libSPIRV-Tools-opt.a/relax_float_ops_pass.cpp.o:.rodata@17a815d1745a6500cd70c4e61540de28f9be6bd6c942551a91ffb6a71d157dd1 82 # SPIR-V optimiser opcode constants
+elf library/libglslang.a/GlslangToSpv.cpp.o:.rodata@1be2265fc007e5e53a062c568d97b69f6e8a270e33c5792c225a03270fa47f12 105 # glslang SPIR-V translation constants
+elf library/libglslang.a/ParseHelper.cpp.o:.rodata.str1.8@90f9aaca63914200c2cfb649146d6398a4b12d4a2ccee99bf7534a4f29cc09fb 32 # glslang shader diagnostic strings
+elf library/libglslang.a/glslang_tab.cpp.o:.rodata@2728569de50eec023418c37158cf95af12921f9aef9b47af44542a3fdc4e99d7 6111 # generated GLSL grammar tables
+elf library/libglslang.a/hlslGrammar.cpp.o:.rodata.str1.8@dae9ed7c2164d14c40fbc73e56aeec702eade00b692770e95884fd7553748638 17 # glslang HLSL diagnostic string
+elf library/libglslang.a/hlslParseHelper.cpp.o:.rodata.str1.8@16118bb218e992a3e47703f4603286ec647d4b9373b208c630bf52eafb9c4c0d 16 # glslang HLSL diagnostic string
 
 
 # Windows static libraries: exact input/member bytes, not port-source votes.

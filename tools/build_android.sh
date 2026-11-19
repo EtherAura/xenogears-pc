@@ -11,8 +11,10 @@
 # Needs (docs/ANDROID_PLAN.md "Android tooling"): the Android SDK in
 # $ANDROID_HOME (default ~/Android/sdk: platform android-36, build-tools
 # 36.1.0, NDK $XG_NDK_VERSION), Gradle (default ~/Android/gradle-9.9.0), a
-# JDK 17+ ($JAVA_HOME), SDL3's source ($XG_SDL3_SOURCE, default
-# ~/Android/src/SDL3-3.4.16: its Java glue and its library), and what the PC
+# JDK 17+ ($JAVA_HOME), SDL3's source (its Java glue and its library: the
+# version tools/deps.json pins, unpacked once from the tarball tools/deps.py
+# finds and checks into build/android/src; `python tools/deps.py fetch sdl3`
+# downloads it; $XG_SDL3_SOURCE names another source folder), and what the PC
 # build needs (python tools/configure.py, tools/pc_sources.py: the game C,
 # the host gcc with -m32 for pc_link's layout probes, glslc).
 #
@@ -74,9 +76,28 @@ export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
 NDK_VERSION="${XG_NDK_VERSION:-29.0.14206865}"
 NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
 GRADLE="${XG_GRADLE:-$HOME/Android/gradle-9.9.0/bin/gradle}"
-SDL3_SOURCE="${XG_SDL3_SOURCE:-$HOME/Android/src/SDL3-3.4.16}"
 API=33 # Android 13: Vulkan 1.3 on current drivers (docs/ANDROID_PLAN.md decisions)
 OUT="$ROOT/build/android"
+PY="$ROOT/.venv/bin/python"
+[ -x "$PY" ] || PY=python3
+# SDL3's source: the pinned version, unpacked from its checked tarball (xg-mrj.3.17), unless
+# XG_SDL3_SOURCE names one. SDL_STAMP names what was built from it, so a change of version (or
+# of folder) rebuilds SDL3 for every ABI.
+if [ -n "${XG_SDL3_SOURCE:-}" ]; then
+    SDL3_SOURCE="$XG_SDL3_SOURCE"
+    SDL_STAMP="source $SDL3_SOURCE"
+else
+    SDL_STAMP="$("$PY" "$ROOT/tools/deps.py" want sdl3)"
+    SDL3_SOURCE="$OUT/src/SDL3-$("$PY" "$ROOT/tools/deps.py" version sdl3)"
+    if [ "$(cat "$SDL3_SOURCE/.xg-stamp" 2>/dev/null)" != "$SDL_STAMP" ]; then
+        tarball="$("$PY" "$ROOT/tools/deps.py" path sdl3)" || exit 1
+        rm -rf "$SDL3_SOURCE"
+        mkdir -p "$OUT/src"
+        tar -xzf "$tarball" -C "$OUT/src"
+        [ -f "$SDL3_SOURCE/CMakeLists.txt" ] || { echo "build_android.sh: $tarball holds no $(basename "$SDL3_SOURCE")" >&2; exit 1; }
+        echo "$SDL_STAMP" > "$SDL3_SOURCE/.xg-stamp"
+    fi
+fi
 TOOLCHAIN="$NDK/build/cmake/android.toolchain.cmake"
 READELF="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
 for need in "$TOOLCHAIN" "$SDL3_SOURCE/CMakeLists.txt" "$GRADLE" "$ROOT/build/pc/sources.cmake"; do
@@ -89,8 +110,6 @@ if [ "$HAS_ARM64" = 1 ] && [ "$NATIVE_ONLY" = 0 ] && [ ! -x "$READELF" ]; then
     echo "build_android.sh: missing $READELF (the APK's 16 KB alignment check needs it)" >&2
     exit 1
 fi
-PY="$ROOT/.venv/bin/python"
-[ -x "$PY" ] || PY=python3
 # 16 KB page devices (xg-6gm): every lib/arm64-v8a/*.so the APK packs, SDL3 and libc++_shared
 # included, must have each LOAD segment aligned to 0x4000 or more; read from the APK itself and
 # cross-checked with the NDK's llvm-readelf (tools/check_android_alignment.py).
@@ -106,13 +125,15 @@ mkdir -p "$OUT"
 for abi in "${ABIS[@]}"; do
     # SDL3 for the ABI: a shared library, as SDL's activity loads it.
     sdl="$OUT/sdl3-$abi"
-    if [ ! -f "$sdl/lib/cmake/SDL3/SDL3Config.cmake" ]; then
+    if [ ! -f "$sdl/lib/cmake/SDL3/SDL3Config.cmake" ] || [ "$(cat "$sdl/.xg-stamp" 2>/dev/null)" != "$SDL_STAMP" ]; then
+        rm -rf "$sdl" "$OUT/sdl3-build-$abi"
         cmake -S "$SDL3_SOURCE" -B "$OUT/sdl3-build-$abi" -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$API" \
             -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF \
             -DCMAKE_INSTALL_PREFIX="$sdl"
         cmake --build "$OUT/sdl3-build-$abi"
         cmake --install "$OUT/sdl3-build-$abi"
+        echo "$SDL_STAMP" > "$sdl/.xg-stamp"
     fi
     jni="$OUT/jniLibs/$abi"
     mkdir -p "$jni"

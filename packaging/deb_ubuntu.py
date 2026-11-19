@@ -50,9 +50,9 @@ The steps, each named in the failure message when it fails:
                 -DXG_PACKAGE_VERSION=<the tag without its v>: deb_build.py's
                 documented configuration, every other option at its default
   package       python -I -B packaging/deb_build.py --build-dir <build> --tag
-                <tag> --out-dir <out>, unchanged and without
+                <tag> --out-dir <out> --audit-source <source>, without
                 --shlibdeps-private-dir: the build, cpack, the package's files,
-                the strict Depends check (--require-deps), the .sha256 and SBOM
+                the packaged ELF audit, the strict Depends check (--require-deps), the .sha256 and SBOM
                 and the staging are all its own; its failing step is named
                 (package/<its step>). When it reports success this script
                 looks once more for the three files in --out-dir.
@@ -238,7 +238,7 @@ def package(source: Path, build_arg: Path, tag: str, out_arg: Path) -> list[Path
     watch = (out, names)  # from here deb_build.py may have staged: a failure says what --out-dir holds
     try:
         result = run("package", [sys.executable, "-I", "-B", BUILD_HELPER, "--build-dir", build, "--tag", tag,
-                                 "--out-dir", out], env)
+                                 "--out-dir", out, "--audit-source", source.resolve()], env)
     except StepError as error:
         error.watch = watch
         raise

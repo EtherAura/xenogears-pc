@@ -16,7 +16,7 @@ Three kinds of test, kept apart:
     sums, cleanup, repeatability; the argv, the folder, the closed input, the
     order, each refusal), not the auditor.
   REAL AUDITOR, SYNTHETIC IMAGES. The repository's unchanged
-    tools/payloadcheck.py, payload_pe.py and payload_allow.txt, with module
+    tools/payloadcheck.py, payload_pe.py, payload_elf.py and payload_allow.txt, with module
     images that are hash streams and executables compiled here from a few
     lines of C (one holding 96 bytes of a synthetic image): the real auditor
     passes and refuses through the helper.
@@ -61,7 +61,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "tools/publish/repo-port/packaging/linux_release.py"
-AUDITOR_FILES = ("payloadcheck.py", "payload_pe.py", "payload_allow.txt")
+AUDITOR_FILES = ("payloadcheck.py", "payload_pe.py", "payload_elf.py", "payload_allow.txt")
 DOC = "share/doc/xenogears-pc"
 LICENCES = ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt", "LICENSE-glslang.txt", "LICENSE-dav1d.txt")
 ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}  # main() adds a private TMPDIR
@@ -189,6 +189,7 @@ def make_layout(path: Path, auditor: str, control: Path | None = None, ver: str 
     if auditor == "stub":
         (path / "tools" / "payloadcheck.py").write_text(STUB.replace("@CONTROL@", repr(str(control))))
         (path / "tools" / "payload_pe.py").write_text("# STUB AUDITOR's module: plumbing only\n")
+        (path / "tools" / "payload_elf.py").write_text("# STUB AUDITOR's module: plumbing only\n")
         (path / "tools" / "payload_allow.txt").write_text("# STUB AUDITOR's allowance file: plumbing only\n")
     else:
         for name in AUDITOR_FILES:
@@ -388,7 +389,8 @@ def hostile(base: Path, name: str) -> tuple[Path, dict, Path]:
     mark = base / f"{name}-hostile-ran"
     code = f"open({str(mark)!r}, 'a').write(__file__ + '\\n')\n"
     cwd = base / f"{name} hostile cwd"
-    for rel in ("payloadcheck.py", "payload_pe.py", "tools/payloadcheck.py", "tools/payload_pe.py",
+    for rel in ("payloadcheck.py", "payload_pe.py", "payload_elf.py", "tools/payloadcheck.py", "tools/payload_pe.py",
+                "tools/payload_elf.py",
                 "packaging/linux_release.py"):
         (cwd / rel).parent.mkdir(parents=True, exist_ok=True)
         (cwd / rel).write_text(code)
@@ -399,7 +401,7 @@ def hostile(base: Path, name: str) -> tuple[Path, dict, Path]:
         os.chmod(path / exe, 0o755)
     pythonpath = base / f"{name} hostile pythonpath"
     pythonpath.mkdir()
-    for mod in ("payloadcheck.py", "payload_pe.py"):
+    for mod in ("payloadcheck.py", "payload_pe.py", "payload_elf.py"):
         (pythonpath / mod).write_text(code)
     env = ENV | {"PATH": f"{path}:{ENV['PATH']}", "PYTHONPATH": str(pythonpath)}
     return cwd, env, mark
@@ -966,6 +968,7 @@ def auditor_images(layout: Path, ver: str) -> list[str]:
         sys.dont_write_bytecode = bytecode
         sys.path.remove(str(layout / "tools"))
         sys.modules.pop("payload_pe", None)
+        sys.modules.pop("payload_elf", None)
 
 
 def real_list_tests(base: Path, cc: str) -> None:

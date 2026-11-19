@@ -166,6 +166,15 @@ int presentFillMode(void);                 /* widefill: 0 bars, 1 zoom, 2 blur *
 void presentSetFill(int mode);
 int presentExpandedVertical(void);
 void presentSetExpandedVertical(int on);
+/* fullscreen's value when settings.ini has none. On by default on Android, where a
+ * windowed app keeps the status bar and the taskbar or navigation bar over the
+ * picture and the touch pad (xg-mrj.3.18); fullscreen there is SDL's immersive
+ * mode, and a swipe shows the bars for a moment. */
+#ifdef __ANDROID__
+#define PRESENT_FULLSCREEN_DEFAULT 1
+#else
+#define PRESENT_FULLSCREEN_DEFAULT 0
+#endif
 int presentSetFullscreen(int on);          /* 0 if the window could not change */
 void presentSetWindowSize(int w, int h);   /* the window when not fullscreen */
 struct SDL_Window* presentWindow(void);

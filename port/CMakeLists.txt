@@ -230,7 +230,10 @@ add_executable(backuptest EXCLUDE_FROM_ALL src/system/test/backuptest.c src/syst
 # Select rule beside its chord.
 add_executable(battlespeedtest EXCLUDE_FROM_ALL src/system/test/battlespeedtest.c src/system/settings.c
     src/system/gameplay.c)
-foreach(tool rewindpacktest statefiletest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest)
+# The stall watchdog in the app's background (stall.c, xg-mrj.3.19): SDL's
+# lifecycle events, polls without a thread or a clock.
+add_executable(stallwatchtest EXCLUDE_FROM_ALL src/system/test/stallwatchtest.c src/system/stall.c)
+foreach(tool rewindpacktest statefiletest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest stallwatchtest)
     target_include_directories(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
     target_compile_definitions(${tool} PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
     target_compile_options(${tool} PRIVATE -fno-strict-aliasing)
@@ -486,6 +489,12 @@ set(XG_GLSLANG_LICENSE "")
 if(XG_GLSLANG)
     find_package(glslang CONFIG QUIET)
     if(glslang_FOUND)
+        # Some glslang packages reference the optimizer without importing its
+        # target. Import it so the link also gets the base SPIRV-Tools library.
+        get_target_property(glslang_dependencies glslang::glslang INTERFACE_LINK_LIBRARIES)
+        if("SPIRV-Tools-opt" IN_LIST glslang_dependencies AND NOT TARGET SPIRV-Tools-opt)
+            find_package(SPIRV-Tools-opt CONFIG REQUIRED)
+        endif()
         set(XG_GLSLANG_LIBS glslang::glslang glslang::glslang-default-resource-limits)
         set(XG_GLSLANG_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glslang/LICENSE.txt")
         target_compile_definitions(platform PRIVATE XG_HAVE_GLSLANG=1)
@@ -746,6 +755,31 @@ elseif(XG_SHARED)
     set_target_properties(xenogears_game PROPERTIES OUTPUT_NAME xenogears)
 endif()
 target_link_libraries(${XG_GAME_TARGET} PRIVATE SDL3::SDL3 m ${XG_GLSLANG_LIBS} ${XG_DAV1D_LIBS})
+set(XG_ELF_PAYLOAD_MAP OFF CACHE INTERNAL "Use archive provenance in the ELF payload audit" FORCE)
+if(XG_DIST AND NOT XG_SHARED AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+        CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND
+        CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND XG_GLSLANG_LIBS)
+    get_target_property(glslang_type glslang::glslang TYPE)
+    if(glslang_type STREQUAL "STATIC_LIBRARY")
+        set(XG_ELF_PAYLOAD_MAP ON CACHE INTERNAL "Use archive provenance in the ELF payload audit" FORCE)
+        set(elf_audit_name xenogears)
+        if(XG_ENGINE STREQUAL "enhanced")
+            set(elf_audit_name xenogears-enhanced)
+        endif()
+        # Keep the input offsets of string pools intact for the archive audit.
+        target_link_options(xenogears PRIVATE -Wl,--unique=.rodata.str*
+            "-Wl,-Map,$<TARGET_FILE:xenogears>.map")
+        set_property(TARGET xenogears APPEND PROPERTY LINK_DEPENDS
+            "${XG_ROOT}/tools/payloadcheck.py" "${XG_ROOT}/tools/payload_elf.py"
+            "${XG_ROOT}/tools/payload_pe.py")
+        add_custom_command(TARGET xenogears POST_BUILD
+            COMMAND Python3::Interpreter "${XG_ROOT}/tools/payloadcheck.py" --record-elf-map
+                    $<TARGET_FILE:xenogears> "${CMAKE_STRIP}"
+            BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/${elf_audit_name}.map"
+                       "${CMAKE_CURRENT_BINARY_DIR}/${elf_audit_name}.payload.json"
+            VERBATIM)
+    endif()
+endif()
 if(WIN32)
     # Low addresses as on Linux: a fixed image base far below the scratchpad
     # (0x1F800000), never relocated. Linux's 8 MB main stack. The C and GCC

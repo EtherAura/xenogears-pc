@@ -169,7 +169,7 @@ std::vector<Spec>& table() {
         fills, 3);
     add("fullscreen", N_("Fullscreen"),
         [](int) { return presentWindow() != NULL && (SDL_GetWindowFlags(presentWindow()) & SDL_WINDOW_FULLSCREEN) ? 1 : 0; },
-        [](int, int v) { presentSetFullscreen(v); }, 0).mine = false;
+        [](int, int v) { presentSetFullscreen(v); }, PRESENT_FULLSCREEN_DEFAULT).mine = false;
     add("upscale", N_("Resolution"), [](int) { return hiresUpscale(); }, [](int, int v) { hiresSetUpscale(v); }, 1,
         upscaleNames, 13);
     {

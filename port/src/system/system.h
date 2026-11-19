@@ -41,6 +41,13 @@ void quitNow(void);           /* shut down and exit (game thread) */
  * that waits for an interrupt and calls nothing) and reports it. */
 void stallInit(void);         /* on the game thread, from hwInit */
 uint32_t hwHeartbeat(void);   /* hw.c: safe points so far (any thread) */
+/* stallInit's parts (stallwatchtest drives them): stallSetup takes
+ * XG_STALL_MS's value (NULL: the default) and returns the polls a stall lasts
+ * before its report (0: off; else the lifecycle event watch is in);
+ * stallPoll is one of the watch thread's polls. */
+enum { STALL_QUIET, STALL_REPORTED, STALL_RECOVERED };
+int stallSetup(const char* ms);
+int stallPoll(void);
 
 /* slowdown.c: the PS1's frame timing replayed from a Redux log (XG_SLOWDOWN). */
 void slowdownVSync(int32_t arg);     /* each VSync call, before it does anything */

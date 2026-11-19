@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Payload gate regressions on synthetic COFF/ELF files, not retail assets."""
 from contextlib import redirect_stdout
+import hashlib
 import io
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -10,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 import payloadcheck as P
+import payload_elf as ELF
 import payload_pe as PE
 
 PAYLOAD = bytes((i * 73 + 19) % 251 + 1 for i in range(80))
@@ -45,7 +48,6 @@ class MapTests(unittest.TestCase):
             with self.assertRaises(ValueError): PE.Coff(data)
 
 
-@unittest.skipUnless(MINGW, "MinGW compiler not installed")
 class AuditTests(unittest.TestCase):
     def setUp(self):
         scratch = ROOT / 'work/payload-tests'
@@ -58,6 +60,8 @@ class AuditTests(unittest.TestCase):
     def tearDown(self): self.tmp.cleanup()
 
     def compile(self, relative, text, cc=MINGW):
+        if not cc or not shutil.which(cc):
+            self.skipTest("the fixture's compiler is not installed")
         obj = self.build/relative
         obj.parent.mkdir(parents=True,exist_ok=True)
         source = obj.with_suffix('.c')
@@ -65,7 +69,9 @@ class AuditTests(unittest.TestCase):
         subprocess.run([cc,'-c','-O0',str(source),'-o',str(obj)],check=True,capture_output=True)
         return obj
 
-    def fixture(self, extra=None, native=False, second=False):
+    def fixture(self, extra=None, native=False, second=False, elf_map=False):
+        if elf_map and (platform.system(), platform.machine()) != ('Linux', 'x86_64'):
+            self.skipTest("ELF map fixtures require a native x86-64 Linux toolchain")
         cc = 'cc' if native else MINGW
         extension = 'o' if native else 'obj'
         entry = self.compile(f'CMakeFiles/platform.dir/src/entry.c.{extension}',
@@ -82,12 +88,17 @@ class AuditTests(unittest.TestCase):
                 f'unknown.{extension}' if extra=='unknown' else \
                 f'CMakeFiles/platform.dir/src/injected.c.{extension}'
             args.append(str(self.compile(where,f'const unsigned char injected[]={{ {body} }};',cc)))
-        exe = self.build/('fixture' if native else 'fixture.exe')
+        exe = self.build/('xenogears' if elf_map else 'fixture' if native else 'fixture.exe')
         args += [str(archive),'-o',str(exe)]
         if native: args += ['-no-pie']
         else: args += ['-Wl,--image-base,0x400000','-Wl,--disable-dynamicbase','-Wl,-Map,'+str(exe)+'.map']
+        if elf_map: args += [f'-Wl,-Map,{exe}.map']
         subprocess.run(args,check=True,capture_output=True)
-        if not native: PE.record(exe)
+        if elf_map:
+            (self.build / 'CMakeCache.txt').write_text('XG_ELF_PAYLOAD_MAP:INTERNAL=ON\n')
+            ELF.record(exe, 'strip')
+        elif not native:
+            PE.record(exe)
         return exe,archive,table
 
     def run_audit(self, exe):
@@ -160,6 +171,42 @@ class AuditTests(unittest.TestCase):
         exe,_,_ = self.fixture()
         with exe.open('ab') as f: f.write(b'changed')
         self.assertEqual(self.run_audit(exe)[0],2)
+
+    def elf_rule(self, table, limit=len(PAYLOAD)):
+        raw, _ = ELF.read_only_sections(table.read_bytes())['.rodata'][0]
+        fingerprint = hashlib.sha256(raw).hexdigest()
+        self.allow.write_text(f'elf library/libfixture.a/tables.o:.rodata@{fingerprint} {limit}'
+                              ' # synthetic library constant\n')
+
+    def test_elf_stripped_archive_allowance(self):
+        linked, _, table = self.fixture(native=True, elf_map=True)
+        self.elf_rule(table)
+        installed = self.build / 'installed'
+        subprocess.run(['strip', '-o', str(installed), str(linked)], check=True, capture_output=True)
+        code, log = self.run_audit(installed)
+        self.assertEqual(code, 0, log)
+        with installed.open('ab') as out:
+            out.write(b'modified package')
+        code, log = self.run_audit(installed)
+        self.assertEqual(code, 2, log)
+        self.assertIn('candidate differs from both', log)
+
+    def test_elf_rule_fails_on_archive_changes(self):
+        exe, archive, table = self.fixture(native=True, elf_map=True)
+        self.elf_rule(table)
+        blob = archive.read_bytes()
+        archive.write_bytes(blob.replace(PAYLOAD, bytes([PAYLOAD[0] ^ 1]) + PAYLOAD[1:]))
+        code, log = self.run_audit(exe)
+        self.assertEqual(code, 1, log)
+        self.assertIn('mapped ELF input bytes disagree', log)
+
+    def test_elf_rule_is_limited_to_verified_archive_and_budget(self):
+        exe, _, table = self.fixture(extra='port', native=True, elf_map=True)
+        self.elf_rule(table, len(PAYLOAD) - 1)
+        code, log = self.run_audit(exe)
+        self.assertEqual(code, 1, log)
+        self.assertIn('over budget: library/libfixture.a/tables.o', log)
+        self.assertIn('port/src/injected.c', log)
 
     def test_stale_member_bytes_cannot_borrow_another_object(self):
         exe,archive,_ = self.fixture(); self.rule()

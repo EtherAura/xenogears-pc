@@ -53,7 +53,8 @@
  *                   present_filter is not set
  *   present_movie_filter=same  the same for 24-bit pictures (movies): same
  *                   (as present_filter, default) or one of the filters
- *   fullscreen=0|1  borderless fullscreen on the window's display
+ *   fullscreen=0|1  borderless fullscreen on the window's display (default 0;
+ *                   1 on Android: SDL's immersive mode, no system bars)
  *   window_width, window_height, window_x, window_y: the window when not
  *                   fullscreen or maximised (kept at exit; no position on
  *                   Wayland, where a program cannot see or set it)
@@ -188,7 +189,8 @@ static void loadOptions(void) {
                                        "scale stays exact (linear and bicubic are nearest there)");
     settingsDescribe("present_movie_filter", "present_movie_filter: the same for movies (24-bit pictures): same (as "
                                              "present_filter) or a filter");
-    settingsDescribe("fullscreen", "fullscreen: 1 or 0");
+    settingsDescribe("fullscreen", PRESENT_FULLSCREEN_DEFAULT ? "fullscreen: 1 (default: no system bars) or 0"
+                                                               : "fullscreen: 1 or 0");
     settingsDescribe("window_width", "window_width, window_height: the window's size when not fullscreen");
     settingsDescribe("window_x", "window_x, window_y: its position (not on Wayland)");
 
@@ -1093,7 +1095,7 @@ SDL_Window* presentCreateWindow(const char* title) {
     pr.window = SDL_CreateWindowWithProperties(p);
     SDL_DestroyProperties(p);
     pr.createdW = w; pr.createdH = h; pr.createdNs = SDL_GetTicksNS(); pr.sizeAsserted = 0;
-    if (pr.window != NULL && settingsBool("fullscreen", 0)) {
+    if (pr.window != NULL && settingsBool("fullscreen", PRESENT_FULLSCREEN_DEFAULT)) {
         /* After creation, as F11 does: a window created fullscreen came up
          * at its windowed size under KWin (Wayland). */
         SDL_SetWindowFullscreen(pr.window, true);
@@ -1103,7 +1105,8 @@ SDL_Window* presentCreateWindow(const char* title) {
         int pw = 0, ph = 0;
         SDL_GetWindowSizeInPixels(pr.window, &pw, &ph);
         fprintf(stderr, "present: window %dx%d (%dx%d pixels, %s)%s; aspect %s, scale %s, filter %s, movies %s\n", w, h,
-                pw, ph, SDL_GetCurrentVideoDriver(), settingsBool("fullscreen", 0) ? ", fullscreen" : "", pr.aspectText,
+                pw, ph, SDL_GetCurrentVideoDriver(),
+                settingsBool("fullscreen", PRESENT_FULLSCREEN_DEFAULT) ? ", fullscreen" : "", pr.aspectText,
                 scaleNames[pr.scale], filterNames[pr.filter],
                 pr.movieFilter == PRESENT_FILTER_SAME ? "same" : filterNames[pr.movieFilter]);
     }
@@ -1156,7 +1159,7 @@ void presentWindowEvent(const SDL_Event* e) {
     case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
     case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
         /* The desktop's own fullscreen control counts too. */
-        if (settingsBool("fullscreen", 0) != (e->type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN)) {
+        if (settingsBool("fullscreen", PRESENT_FULLSCREEN_DEFAULT) != (e->type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN)) {
             settingsSet("fullscreen", e->type == SDL_EVENT_WINDOW_ENTER_FULLSCREEN ? "1" : "0");
         }
         break;
