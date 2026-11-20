@@ -140,5 +140,46 @@ class NameTests(unittest.TestCase):
         self.assertEqual(p.parse_args(['row', 'Lair']).name, 'Lair')
 
 
+FIELDS_BAD = ('159-131', '84-110,159-131', '159-131,293', 'x', '84-', '-84', '84-x', '84-110-120', '84,,110', '84,', '', ',')
+
+
+class FieldsTests(unittest.TestCase):
+    """xg-ncwq: --fields is read when the command line is, so a reversed range or a typo stops there with a usage error
+    instead of an empty extract.tsv or a bare ValueError, and new no longer copies an unreadable spec into its headers."""
+    def setUp(self):
+        self.cp = chapter_prep(); self.called = []
+        for c in ('new', 'catalogue'):
+            setattr(self.cp, 'cmd_' + c, lambda a, c=c: self.called.append((c, a.fields)))
+
+    def run_main(self, argv):
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            try: self.cp.main(argv)
+            except SystemExit as e: return e.code, err.getvalue()
+        return None, err.getvalue()
+
+    def test_the_validator_keeps_a_good_spec_as_written(self):
+        for good in ('84-110,293', '84-110', '293', '74-83,293', '7-7'):
+            self.assertEqual(self.cp.field_spec(good), good)
+        self.assertEqual(self.cp.fields_of('84-110,293'), set(range(84, 111)) | {293})
+
+    def test_the_validator_refuses_reversed_malformed_and_empty_specs(self):
+        for bad in FIELDS_BAD:
+            with self.assertRaises(argparse.ArgumentTypeError, msg=repr(bad)): self.cp.field_spec(bad)
+        with self.assertRaisesRegex(argparse.ArgumentTypeError, 'reversed'): self.cp.field_spec('84-110,159-131')
+
+    def test_new_and_catalogue_refuse_a_bad_spec_before_their_handlers(self):
+        for c, extra in (('new', ['--title', 't']), ('catalogue', [])):
+            for bad in FIELDS_BAD:
+                code, err = self.run_main([c, 'lair', '--fields', bad] + extra)
+                self.assertEqual(code, 2, (c, bad))
+                self.assertIn('argument --fields', err, (c, bad))
+        self.assertEqual(self.called, [])
+
+    def test_new_and_catalogue_get_a_good_spec_unchanged(self):
+        for c, extra in (('new', ['--title', 't']), ('catalogue', [])):
+            self.assertEqual(self.run_main([c, 'lair', '--fields', '84-110,293'] + extra), (None, ''))
+        self.assertEqual(self.called, [('new', '84-110,293'), ('catalogue', '84-110,293')])
+
+
 if __name__ == '__main__':
     unittest.main()

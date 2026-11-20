@@ -21,6 +21,44 @@ def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def is_x64_dll(data: bytes) -> bool:
+    if len(data) < 64 or data[:2] != b"MZ":
+        return False
+    pe, = struct.unpack_from("<I", data, 0x3c)
+    if pe < 64 or pe + 26 > len(data) or data[pe:pe + 4] != b"PE\0\0":
+        return False
+    machine, _, _, _, _, optional, flags = struct.unpack_from("<HHIIIHH", data, pe + 4)
+    return (machine == 0x8664 and bool(flags & 0x2000) and optional >= 2 and pe + 24 + optional <= len(data)
+            and struct.unpack_from("<H", data, pe + 24) == (0x20b,))
+
+
+def export_ordinals(data: bytes, sections: list[tuple[int, int, int, str, bool]]) -> tuple[int, int] | None:
+    """Locate the identity export ordinal table in a validated x64 PE DLL."""
+    pe, = struct.unpack_from("<I", data, 0x3c)
+    optional = pe + 24
+    optional_size, = struct.unpack_from("<H", data, pe + 20)
+    if optional_size < 120:
+        return None
+    # PE32+: image base, NumberOfRvaAndSizes, then the export directory entry.
+    base, = struct.unpack_from("<Q", data, optional + 24)
+    count, rva, length = struct.unpack_from("<III", data, optional + 108)
+    section = next((s for s in sections if s[3] == ".edata" and s[4]), None)
+    if not count or section is None:
+        return None
+    offset, size, address, _, _ = section
+    if base + rva != address or not 40 <= length <= size or offset + length > len(data):
+        return None
+    ordinal_base, functions, names, function_rva, name_rva, ordinal_rva = struct.unpack_from("<6I", data, offset + 16)
+    if (ordinal_base != 1 or not 0 < functions == names <= 65536 or function_rva != rva + 40
+            or name_rva != function_rva + 4 * functions or ordinal_rva != name_rva + 4 * names):
+        return None
+    first = offset + ordinal_rva - rva
+    end = first + 2 * names
+    if end > offset + length or data[first:end] != struct.pack(f"<{names}H", *range(names)):
+        return None
+    return first, end
+
+
 def record(exe: Path) -> None:
     mapping = Path(str(exe) + ".map")
     seal = {"version": 1, "exe": digest(exe), "map": digest(mapping)}

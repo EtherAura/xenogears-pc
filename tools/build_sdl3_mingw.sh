@@ -12,9 +12,10 @@
 #   vulkan/include/{vulkan,vk_video}: links to the system's Vulkan headers, so
 #   the cross build sees them without the rest of /usr/include
 # Scratch goes to tools/toolchain-src/sdl3-mingw. Uses the port's toolchain
-# file (port/cmake/mingw-w64-x86_64.cmake). Runs again only when the tarball
-# changes: a build of the pinned version needs no tarball to say it is up to
-# date.
+# file (port/cmake/mingw-w64-x86_64.cmake). New links leave a sealed map
+# beside the unstripped DLL there for the portable ZIP's payload audit.
+# Runs again only when the tarball changes. A build of the pinned version
+# needs no tarball to say it is up to date.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -54,6 +55,7 @@ else
     cmake -S "$SRC" -B "$WORK/build" -G Ninja \
         --toolchain "$TOOLCHAIN" \
         -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_SHARED_LINKER_FLAGS=-Wl,-Map,SDL3.dll.map \
         -DCMAKE_INSTALL_PREFIX="$PREFIX" \
         -DSDL_SHARED=ON -DSDL_STATIC=OFF \
         -DSDL_TESTS=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_EXAMPLES=OFF \
@@ -61,6 +63,7 @@ else
 
     log "Building SDL3"
     cmake --build "$WORK/build" -j "$JOBS"
+    "$PY" "$ROOT/tools/payloadcheck.py" --record-map "$WORK/build/SDL3.dll"
     rm -rf "$PREFIX/include/SDL3" "$PREFIX/lib/cmake/SDL3"
     cmake --install "$WORK/build" --strip
     echo "$WANT" > "$STAMP"

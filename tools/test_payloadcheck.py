@@ -101,10 +101,10 @@ class AuditTests(unittest.TestCase):
             PE.record(exe)
         return exe,archive,table
 
-    def run_audit(self, exe):
+    def run_audit(self, exe, *options):
         log = io.StringIO()
         with patch.object(P,'ALLOW',self.allow), patch.object(P,'retail_images',return_value={'synthetic':PAYLOAD}), \
-             patch('sys.argv',['payloadcheck','--build',str(self.build),'--exe',str(exe),'--ver','us']), redirect_stdout(log):
+             patch('sys.argv',['payloadcheck','--build',str(self.build),'--exe',str(exe),'--ver','us',*options]), redirect_stdout(log):
             code = P.main()
         return code, log.getvalue()
 
@@ -120,6 +120,41 @@ class AuditTests(unittest.TestCase):
         exe,_,_ = self.fixture(); self.rule()
         code,log = self.run_audit(exe)
         self.assertEqual(code,0,log)
+
+    def test_sdl3_dll_requires_verified_map_and_precise_allowance(self):
+        body = ','.join(map(str, PAYLOAD))
+        table = self.compile('CMakeFiles/SDL3-shared.dir/src/table.c.obj',
+                             f'__declspec(dllexport) const unsigned char knownTable[] = {{ {body} }};')
+        dll = self.build / 'SDL3.dll'
+        subprocess.run([MINGW, '-shared', '-nostdlib', '-Wl,-e,0', f'-Wl,-Map,{dll}.map', str(table),
+                        '-o', str(dll)], check=True, capture_output=True)
+        (self.build / 'CMakeCache.txt').write_text('CMAKE_PROJECT_NAME:STATIC=SDL3\n'
+                                                  'CMAKE_BUILD_TYPE:STRING=Release\nSDL_SHARED:BOOL=ON\n')
+        PE.record(dll)
+        for rule in ('library/SDL3/*', 'pe library/SDL3/*'):
+            self.allow.write_text(f'{rule} 80 # fixture broad rule\n')
+            code, log = self.run_audit(dll, '--dist', '--sdl3')
+            self.assertEqual(code, 1, log)
+            self.assertIn('library/SDL3/src/table.c.obj (knownTable)', log)
+        self.allow.write_text('pe library/SDL3/src/table.c.obj:knownTable 80 # fixture precise rule\n')
+        code, log = self.run_audit(dll, '--dist', '--sdl3')
+        self.assertEqual(code, 0, log)
+        sections = P.sections(dll)
+        original = dll.read_bytes()
+        changed = bytearray(original)
+        first, end = PE.export_ordinals(changed, sections)
+        self.assertEqual(changed[first:end], b'\x00\x00')
+        changed[first] = 1
+        self.assertIsNone(PE.export_ordinals(changed, sections))
+        dll.write_bytes(changed)
+        code, log = self.run_audit(dll, '--dist', '--sdl3')
+        self.assertEqual(code, 2)
+        self.assertIn('stale executable/map hashes', log)
+        dll.write_bytes(original + bytes(16) + PAYLOAD)
+        PE.record(dll)
+        code, log = self.run_audit(dll, '--dist', '--sdl3')
+        self.assertEqual(code, 1, log)
+        self.assertIn('no object holds these bytes', log)
 
     def test_budget_cannot_borrow_from_other_symbol(self):
         exe,_,_ = self.fixture(second=True); self.rule(79)

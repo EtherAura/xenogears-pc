@@ -39,7 +39,7 @@
 # 5. the stage: exactly the files the install makes (both engines, SDL3.dll,
 #    the licences of every library, glslang's and dav1d's included), and no
 #    other executable;
-# 6. per engine: its CMakeCache.txt (region, engine, Release, XG_DIST=ON); the
+# 6. per engine and SDL3: its Release CMake build and the
 #    linked executable against the seal of its link map (<exe>.payload.json:
 #    the executable's and the map's SHA-256); tools/payloadcheck.py --dist on it;
 #    a private copy of that verified executable stripped by the command and
@@ -55,9 +55,8 @@
 # 8. both copied into OUT as new files (the .zip first), checked again there;
 #    on a failure the ones copied are removed.
 #
-# SDL3.dll is the stage's one executable that is not audited: it is built from
-# SDL3's pinned tarball alone and has no link map. The game still reads the
-# player's disc at every start; nothing of the disc is packaged. This makes the
+# The game still reads the player's disc at every start; nothing of the disc
+# is packaged. This makes the
 # .zip only: no setup.exe, no signing, no upload, no Windows run.
 set -euo pipefail
 
@@ -114,7 +113,7 @@ def release(root):
     import windows_release
     return windows_release
 
-ENGINES = {"original": "xenogears.exe", "enhanced": "xenogears-enhanced.exe"}
+AUDIT_TARGETS = {"original": "xenogears.exe", "enhanced": "xenogears-enhanced.exe", "sdl3": "SDL3.dll"}
 IMAGE_ENTRY = re.compile(r"\{name:\s*(\w+),([^}]*)\}")
 NAME_KEY = re.compile(r"\bname\s*:")
 HEADING = re.compile(r"retail module data in (.+) \((US|JP)\): ([0-9]+) module images, runs of >= ([0-9]+) bytes")
@@ -124,7 +123,7 @@ STRIP = re.compile(r'execute_process\(COMMAND ("[^"]*"(?: "[^"]*")*)\)')
 STAGE_FILES = {"xenogears.exe", "xenogears-enhanced.exe", "SDL3.dll", "COPYING.txt", "README.txt",
                "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "LICENSE-Jukebox-font.txt", "LICENSE-glslang.txt",
                "LICENSE-dav1d.txt"}
-EXECUTABLES = {"xenogears.exe", "xenogears-enhanced.exe", "SDL3.dll"}
+EXECUTABLES = set(AUDIT_TARGETS.values())
 
 def names(root, tag):
     try:
@@ -216,38 +215,41 @@ def cache_value(text, key):
     m = re.search(rf"^{key}:\w+=(.*?)\s*$", text, re.M)
     return m.group(1) if m else None
 
-def linked(build, engine, region):
+def linked(build, target, region):
     build = Path(build)
-    name = ENGINES[engine]
+    name = AUDIT_TARGETS[target]
     exe, mapping, seal = build / name, build / f"{name}.map", build / f"{name}.payload.json"
     try:
         text = (build / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
     except OSError:
-        fail(f"{engine}: no CMakeCache.txt in its build")
-    for key, want in (("XG_VERSION", region.upper()), ("XG_ENGINE", engine), ("XG_DIST", "ON"),
-                      ("CMAKE_BUILD_TYPE", "Release")):
+        fail(f"{target}: no CMakeCache.txt in its build")
+    expected = {"CMAKE_BUILD_TYPE": "Release"}
+    if target != "sdl3":
+        expected.update(XG_VERSION=region.upper(), XG_ENGINE=target, XG_DIST="ON")
+    for key, want in expected.items():
         if (cache_value(text, key) or "").upper() != want.upper():
-            fail(f"{engine}: its build has {key}={cache_value(text, key)}, not {want}")
+            fail(f"{target}: its build has {key}={cache_value(text, key)}, not {want}")
     for p in (exe, mapping, seal):
         if p.is_symlink() or not p.is_file():
-            fail(f"{engine}: no {p.name} in its build")
+            fail(f"{target}: no {p.name} in its build")
     try:
         sealed = json.loads(seal.read_text())
     except ValueError:
-        fail(f"{engine}: {seal.name} is not a seal")
+        fail(f"{target}: {seal.name} is not a seal")
     if sealed != {"version": 1, "exe": sha(exe), "map": sha(mapping)}:
-        fail(f"{engine}: the linked {name} and its map do not match their seal {seal.name}")
+        fail(f"{target}: the linked {name} and its map do not match their seal {seal.name}")
     try:
         install = (build / "cmake_install.cmake").read_text(encoding="utf-8")
     except OSError:
-        fail(f"{engine}: no cmake_install.cmake in its build")
-    target = '"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/./' + name + '"'
-    found = [m.group(1) for m in STRIP.finditer(install) if m.group(1).endswith(" " + target)]
+        fail(f"{target}: no cmake_install.cmake in its build")
+    directory = "bin" if target == "sdl3" else "."
+    destination = '"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/' + f'{directory}/{name}"'
+    found = [m.group(1) for m in STRIP.finditer(install) if m.group(1).endswith(" " + destination)]
     if len(found) != 1:
-        fail(f"{engine}: cmake_install.cmake has {len(found)} strip commands for {name}, not one")
-    argv = re.findall(r'"([^"]*)"', found[0][:-len(target)])
+        fail(f"{target}: cmake_install.cmake has {len(found)} strip commands for {name}, not one")
+    argv = re.findall(r'"([^"]*)"', found[0][:-len(destination)])
     if not argv or "$" in "".join(argv) or not os.path.isabs(argv[0]):
-        fail(f"{engine}: the install's strip command is not plain")
+        fail(f"{target}: the install's strip command is not plain")
     print(json.dumps({"exe": sha(exe), "map": sha(mapping), "strip": argv}))
 
 def strip_argv(sealed):
@@ -258,6 +260,8 @@ def audit(tree, exe, build, region, count):
     before = sha(exe)
     argv = [sys.executable, "-E", "-s", "-B", str(tree / "tools" / "payloadcheck.py"), "--exe", str(exe), "--build", str(build),
             "--ver", region, "--dist"]
+    if exe.name == AUDIT_TARGETS["sdl3"]:
+        argv.append("--sdl3")
     try:
         proc = subprocess.run(argv, cwd=tree, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                               errors="replace", timeout=3600)
@@ -281,12 +285,12 @@ def audit(tree, exe, build, region, count):
     said = "".join(f"\n    | {l[:200]}" for l in (lines[-20:] + proc.stderr.splitlines()[-5:]))
     fail(f"payload audit of {exe} FAILED: {why}{said}")
 
-def same_seal(build, engine, want):
+def same_seal(build, target, want):
     build = Path(build)
-    name = ENGINES[engine]
+    name = AUDIT_TARGETS[target]
     want = json.loads(want)
     if sha(build / name) != want["exe"] or sha(build / f"{name}.map") != want["map"]:
-        fail(f"{engine}: the linked executable or its map changed after its audit")
+        fail(f"{target}: the linked executable or its map changed after its audit")
 
 def map_is(path, want):
     if sha(path) != json.loads(want)["map"]:
@@ -333,10 +337,10 @@ def zipcheck(root, tag, archive, sidecar, stagedir, audited):
             data = z.read(f"{top}/{f}")
             if hashlib.sha256(data).hexdigest() != sha(stagedir / f):
                 fail(f"{archive.name}: {f} is not the staged bytes")
-            if f in ENGINES.values() and data != (audited / f).read_bytes():
+            if f in EXECUTABLES and data != (audited / f).read_bytes():
                 fail(f"{archive.name}: {f} is not the audited bytes")
             print(f"zip: {top}/{f} {len(data)} bytes sha256 {hashlib.sha256(data).hexdigest()}"
-                  + (" (= audited installed bytes)" if f in ENGINES.values() else ""))
+                  + (" (= audited installed bytes)" if f in EXECUTABLES else ""))
     if sidecar.read_text() != f"{sha(archive)}  {archive.name}\n":
         fail(f"{sidecar.name}: not the .zip's SHA-256")
     print(f"sha256: {sidecar.read_text().strip()}")
@@ -408,7 +412,7 @@ log "$COUNT module images extracted"
 
 export SOURCE_DATE_EPOCH=0
 export XG_DEPS_CACHE="$CACHE"
-unset TARBALL || true
+unset TARBALL SDL3_TARBALL || true
 BUILD_O="$TREE/build/pc/win-$REGION-dist"
 BUILD_E="$TREE/build/pc/win-$REGION-enhanced-dist"
 regionflag=()
@@ -419,43 +423,42 @@ XG_WIN_BUILD="$BUILD_O" XG_WIN_BUILD_ENHANCED="$BUILD_E" \
     || die "tools/build_windows.sh --dist failed"
 py stage "$STAGE"
 
-for engine in original enhanced; do
-    build="$BUILD_O"; name=xenogears.exe
-    [ "$engine" = enhanced ] && build="$BUILD_E" && name=xenogears-enhanced.exe
-    log "$engine: the linked $name against its sealed map"
-    sealed="$(py linked "$build" "$engine" "$REGION")"
+mkdir -p "$AUDIT/all"
+for target in original enhanced sdl3; do
+    case "$target" in
+        original) build="$BUILD_O"; name=xenogears.exe ;;
+        enhanced) build="$BUILD_E"; name=xenogears-enhanced.exe ;;
+        sdl3) build="$TREE/tools/toolchain-src/sdl3-mingw/build"; name=SDL3.dll ;;
+    esac
+    log "$target: the linked $name against its sealed map"
+    sealed="$(py linked "$build" "$target" "$REGION")"
     py audit "$TREE" "$build/$name" "$build" "$REGION" "$COUNT"
     strip_cmd=()
     while IFS= read -r a; do strip_cmd+=("$a"); done < <(py strip-argv "$sealed")
-    mkdir -p "$AUDIT/$engine"
-    copy="$AUDIT/$engine/$name"
+    copy="$AUDIT/all/$name"
     cp "$build/$name" "$copy"
     chmod u+w "$copy"
-    log "$engine: the install's strip (${strip_cmd[*]}) on a private copy"
-    "${strip_cmd[@]}" "$copy" </dev/null || die "$engine: strip failed"
-    cmp "$copy" "$STAGE/$name" || die "$engine: the staged $name is not the reproducible strip of the verified linked executable"
-    log "$engine: staged $name = the reproducible strip ($("$PY" -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$copy"))"
-    py same-seal "$build" "$engine" "$sealed"
+    log "$target: the install's strip (${strip_cmd[*]}) on a private copy"
+    "${strip_cmd[@]}" "$copy" </dev/null || die "$target: strip failed"
+    cmp "$copy" "$STAGE/$name" || die "$target: the staged $name is not the reproducible strip of the verified linked executable"
+    log "$target: staged $name = the reproducible strip ($("$PY" -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$copy"))"
+    py same-seal "$build" "$target" "$sealed"
     cp "$build/$name.map" "$copy.map"
     py map-is "$copy.map" "$sealed"
-    "$PY" -E -s -B "$TREE/tools/payloadcheck.py" --record-map "$copy" </dev/null || die "$engine: sealing the audit copy failed"
+    "$PY" -E -s -B "$TREE/tools/payloadcheck.py" --record-map "$copy" </dev/null || die "$target: sealing the audit copy failed"
     chmod a-w "$copy"
-    log "$engine: the installed bytes"
+    log "$target: the installed bytes"
     py audit "$TREE" "$copy" "$build" "$REGION" "$COUNT"
-    cmp "$copy" "$STAGE/$name" || die "$engine: the staged $name changed after its audit"
+    cmp "$copy" "$STAGE/$name" || die "$target: the staged $name changed after its audit"
 done
 
 log "Zip and checksum"
-mkdir -p "$ASSETS" "$AUDIT/all"
+mkdir -p "$ASSETS"
 "$PY" -I "$ROOT/packaging/windows_release.py" zip --tag "$TAG" --stage "$STAGE" --out-dir "$ASSETS" </dev/null >/dev/null \
     || die "windows_release.py zip failed"
 "$PY" -I "$ROOT/packaging/windows_release.py" sha256 --tag "$TAG" "$ASSETS/$ZIP" </dev/null >/dev/null \
     || die "windows_release.py sha256 failed"
 py only "$ASSETS" "$ZIP" "$ZIP.sha256"
-for name in xenogears.exe xenogears-enhanced.exe; do
-    engine=original; [ "$name" = xenogears-enhanced.exe ] && engine=enhanced
-    cp "$AUDIT/$engine/$name" "$AUDIT/all/$name"
-done
 py zipcheck "$ROOT" "$TAG" "$ASSETS/$ZIP" "$ASSETS/$ZIP.sha256" "$STAGE" "$AUDIT/all"
 
 made_out=0

@@ -7,7 +7,7 @@ offline portable Windows .zip of xenogears-pc (xg-4oq.3).
 The helper runs as the public tree would run it (bash packaging/build-windows-zip.sh
 from another folder, every path with spaces in it), in a fixture public tree:
 the real packaging/windows_release.py and tools/deps.py beside DOUBLES of the
-disc extraction, configure.py, build_windows.sh (two "engines" of labelled fixture
+disc extraction, configure.py, build_windows.sh (both engines and SDL3 as labelled fixture
 bytes, their link maps, seals and cmake_install.cmake strip commands), the strip
 it names and payloadcheck.py. Nothing here is a build, a disc or game data; the
 real proof is the helper's run on a player's disc and the pinned tarballs.
@@ -90,37 +90,45 @@ args = sys.argv[1:]
 assert "--dist" in args and args[args.index("--engine") + 1] == "both"
 stage = Path(args[-1])
 env = os.environ
+assert "SDL3_TARBALL" not in env  # the ZIP build uses the pinned cache even with a developer override
 with open(env["FIXTURE_LOG"], "a") as log:
     log.write(json.dumps({{"build": args, "SOURCE_DATE_EPOCH": env.get("SOURCE_DATE_EPOCH"),
                           "XG_DEPS_CACHE": env.get("XG_DEPS_CACHE")}}) + "\\n")
 region = "JP" if "--jp" in args else "US"
 stage.mkdir(parents=True)
-for engine, name, build in (("original", "xenogears.exe", env["XG_WIN_BUILD"]),
-                            ("enhanced", "xenogears-enhanced.exe", env["XG_WIN_BUILD_ENHANCED"])):
-    if engine == "enhanced" and env.get("FIXTURE_NO_ENHANCED"):
+for target, name, build in (("original", "xenogears.exe", env["XG_WIN_BUILD"]),
+                            ("enhanced", "xenogears-enhanced.exe", env["XG_WIN_BUILD_ENHANCED"]),
+                            ("sdl3", "SDL3.dll", tools / "toolchain-src/sdl3-mingw/build")):
+    if target == "enhanced" and env.get("FIXTURE_NO_ENHANCED"):
         continue
     build = Path(build)
     build.mkdir(parents=True)
-    (build / "CMakeCache.txt").write_text(f"CMAKE_BUILD_TYPE:STRING=Release\\nXG_VERSION:STRING={{region}}\\n"
-                                          f"XG_ENGINE:STRING={{engine}}\\nXG_DIST:BOOL=ON\\n")
+    if target == "sdl3":
+        cache = "CMAKE_PROJECT_NAME:STATIC=SDL3\\nSDL_SHARED:BOOL=ON\\n"
+        destination = "bin"
+    else:
+        cache = f"XG_VERSION:STRING={{region}}\\nXG_ENGINE:STRING={{target}}\\nXG_DIST:BOOL=ON\\n"
+        destination = "."
+    (build / "CMakeCache.txt").write_text("CMAKE_BUILD_TYPE:STRING=Release\\n" + cache)
     exe = build / name
     exe.write_bytes(b"MZ fixture linked " + name.encode() + b"\\nSYMBOLS\\nfixture symbols of " + name.encode())
     (build / (name + ".map")).write_text("fixture map of " + name)
     def h(p): return hashlib.sha256(p.read_bytes()).hexdigest()
     seal = {{"version": 1, "exe": h(exe), "map": h(build / (name + ".map"))}}
-    if env.get("FIXTURE_BAD_SEAL") == engine:
+    if env.get("FIXTURE_BAD_SEAL") == target:
         seal["map"] = "0" * 64
     (build / (name + ".payload.json")).write_text(json.dumps(seal, sort_keys=True) + "\\n")
     strip = tools / "fixture_strip.py"
     (build / "cmake_install.cmake").write_text(
         'if(CMAKE_INSTALL_DO_STRIP)\\n  execute_process(COMMAND "' + str(strip) + '" "--fixture-flag" '
-        '"$ENV{{DESTDIR}}${{CMAKE_INSTALL_PREFIX}}/./' + name + '")\\nendif()\\n')
+        '"$ENV{{DESTDIR}}${{CMAKE_INSTALL_PREFIX}}/' + destination + '/' + name + '")\\nendif()\\n')
     shutil.copy(exe, stage / name)
     subprocess.run([str(strip), "--fixture-flag", str(stage / name)], check=True)
-    if env.get("FIXTURE_STAGE_DIFFERS") == engine:
+    if env.get("FIXTURE_STAGE_DIFFERS") == target:
         with open(stage / name, "ab") as f:
             f.write(b"!")
-(stage / "SDL3.dll").write_bytes(b"MZ fixture SDL3.dll")
+    if target == "sdl3" and env.get("FIXTURE_NO_SDL_MAP"):
+        (build / "SDL3.dll.map").unlink()
 for n in ("COPYING.txt", "README.txt", "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "LICENSE-Jukebox-font.txt",
           "LICENSE-glslang.txt", "LICENSE-dav1d.txt"):
     (stage / n).write_text("fixture " + n + "\\n")
@@ -150,6 +158,7 @@ if sys.argv[1] == "--record-map":
 a = sys.argv
 exe, ver = Path(a[a.index("--exe") + 1]), a[a.index("--ver") + 1]
 assert "--dist" in a and Path(a[a.index("--build") + 1]).is_dir()
+assert ("--sdl3" in a) == (exe.name == "SDL3.dll")
 with open(os.environ["FIXTURE_LOG"], "a") as log:
     log.write(json.dumps({{"audit": exe.name, "stripped": exe.read_bytes().endswith(b"stripped")}}) + "\\n")
 seal = json.loads(Path(str(exe) + ".payload.json").read_text())
@@ -207,7 +216,7 @@ def expected_stage() -> dict[str, bytes]:
     out = {}
     for name in ("xenogears.exe", "xenogears-enhanced.exe"):
         out[name] = b"MZ fixture linked " + name.encode() + b"\nstripped"
-    out["SDL3.dll"] = b"MZ fixture SDL3.dll"
+    out["SDL3.dll"] = b"MZ fixture linked SDL3.dll\nstripped"
     for n in ("COPYING.txt", "README.txt", "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "LICENSE-Jukebox-font.txt",
               "LICENSE-glslang.txt", "LICENSE-dav1d.txt"):
         out[n] = f"fixture {n}\n".encode()
@@ -263,7 +272,7 @@ def refused(run: Run, what: str, expect: str, out: Path | None = None, built: bo
 
 def success(run: Run) -> None:
     out = run.base / "out dir" / "release assets"
-    result = run(out)
+    result = run(out, SDL3_TARBALL=run.base / "unpinned SDL3.tar.gz")
     if not check(result.returncode == 0, f"helper exit 0 on the fixture ({result.stderr.strip()[-300:]!r})"):
         return
     check(sorted(os.listdir(out)) == sorted([ZIP, ZIP + ".sha256"]),
@@ -275,8 +284,9 @@ def success(run: Run) -> None:
           "the builder ran once with SOURCE_DATE_EPOCH=0 and the verified cache as XG_DEPS_CACHE")
     audits = [(e["audit"], e["stripped"]) for e in logged if "audit" in e]
     check(audits == [("xenogears.exe", False), ("xenogears.exe", True),
-                     ("xenogears-enhanced.exe", False), ("xenogears-enhanced.exe", True)],
-          f"both engines audited: the linked executable, then the installed bytes ({audits})")
+                     ("xenogears-enhanced.exe", False), ("xenogears-enhanced.exe", True),
+                     ("SDL3.dll", False), ("SDL3.dll", True)],
+          f"both engines and SDL3 audited: the linked image, then the installed bytes ({audits})")
     want = expected_stage()
     data = (out / ZIP).read_bytes()
     with zipfile.ZipFile(out / ZIP) as z:
@@ -320,14 +330,15 @@ def refusals(run: Run, pins: dict) -> None:
     (out2 / (ZIP + ".sha256")).write_text("kept\n")
     refused(run, "OUT already holds the .sha256", "already holds", out=out2, built=False)
     check((out2 / (ZIP + ".sha256")).read_text() == "kept\n", "the existing .sha256 is kept as it was")
-    # Provenance, byte equality and the audits, for each engine.
-    for engine, name in (("original", "xenogears.exe"), ("enhanced", "xenogears-enhanced.exe")):
-        refused(run, f"{engine}: a bad original seal", "do not match their seal", FIXTURE_BAD_SEAL=engine)
-        refused(run, f"{engine}: the staged PE is not the reproducible strip", "not the reproducible strip",
-                FIXTURE_STAGE_DIFFERS=engine)
-        refused(run, f"{engine}: the linked executable's audit refuses", "FAILED", FIXTURE_AUDIT_FAIL=f"{name}:linked")
-        refused(run, f"{engine}: the installed bytes' audit refuses", "FAILED",
+    # Provenance, byte equality and the audits, for each executable.
+    for target, name in (("original", "xenogears.exe"), ("enhanced", "xenogears-enhanced.exe"), ("sdl3", "SDL3.dll")):
+        refused(run, f"{target}: a bad original seal", "do not match their seal", FIXTURE_BAD_SEAL=target)
+        refused(run, f"{target}: the staged PE is not the reproducible strip", "not the reproducible strip",
+                FIXTURE_STAGE_DIFFERS=target)
+        refused(run, f"{target}: the linked executable's audit refuses", "FAILED", FIXTURE_AUDIT_FAIL=f"{name}:linked")
+        refused(run, f"{target}: the installed bytes' audit refuses", "FAILED",
                 FIXTURE_AUDIT_FAIL=f"{name}:installed")
+    refused(run, "SDL3: no linker map", "no SDL3.dll.map", FIXTURE_NO_SDL_MAP=1)
     refused(run, "a stage without the Enhanced engine", "no xenogears-enhanced.exe", FIXTURE_NO_ENHANCED=1)
     refused(run, "an unexpected executable in the stage", "unexpected executable", FIXTURE_STAGE_EXE=1)
     refused(run, "an extraction with an unexpected file", "extraction incomplete or unexpected",

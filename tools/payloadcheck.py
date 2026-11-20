@@ -34,7 +34,9 @@ objects for attribution. A PE image needs its .map and .payload.json sidecars
 (the Windows CMake link creates them); copies need those sidecars too.
 --record-map EXE records the executable/map hashes after a Windows link.
 PE-only allowance entries have individual budgets and require their exact
-source/symbol pattern; they never borrow another symbol's budget.
+source/symbol pattern; they never borrow another symbol's budget. Use
+--sdl3 --dist --ver REGION --exe SDL3.dll with the MinGW SDL3 build directory
+to check the DLL using its own sealed map, with exact PE library allowances.
 An ELF build with static glslang can also carry a sealed link map. Only exact
 read-only archive slices, matched by location, member and section fingerprint,
 may use its ELF-only allowances. The seal also covers the installed strip.
@@ -204,6 +206,12 @@ def objects(build: Path) -> list[tuple[str, str, Path, str]]:
     return out
 
 
+def sdl3_objects(build: Path) -> list[tuple[str, str, Path, str]]:
+    directory = build / "CMakeFiles/SDL3-shared.dir"
+    return [("library", f"library/SDL3/{obj.relative_to(directory)}", obj, "SDL3-shared")
+            for obj in sorted([*directory.rglob("*.o"), *directory.rglob("*.obj")])]
+
+
 def tool(name: str, exe: Path) -> str:
     """binutils for the executable's format (a MinGW one for a PE file when there is one)."""
     if exe.read_bytes()[:2] == b"MZ":
@@ -269,7 +277,10 @@ def audit() -> int:
     ap.add_argument("--dist", action="store_true",
                     help="a build to hand out: fails unless --build was configured with -DXG_DIST=ON (whose "
                          "executable is then also checked for paths of the build machine, with or without this)")
+    ap.add_argument("--sdl3", action="store_true", help="audit a Release SDL3.dll with the SDL3 MinGW build's map and objects")
     a = ap.parse_args()
+    if a.sdl3 and (not a.exe or not a.ver or not a.dist):
+        ap.error("--sdl3 requires --exe, --ver and --dist")
 
     build = Path(a.build) if Path(a.build).is_absolute() else ROOT / a.build
     ver = a.ver or build_version(build)
@@ -294,6 +305,11 @@ def audit() -> int:
     wanted = windows(images, n)
     data = exe.read_bytes()
     pe = data[:2] == b"MZ"
+    if a.sdl3 and (exe.name != "SDL3.dll" or not payload_pe.is_x64_dll(data)
+                   or cache_value(build, "CMAKE_PROJECT_NAME") != "SDL3"
+                   or cache_value(build, "CMAKE_BUILD_TYPE") != "Release"
+                   or cache_value(build, "SDL_SHARED") != "ON"):
+        raise ValueError("--sdl3 needs an x64 SDL3.dll and its SDL3 shared Release build")
     mapped_elf = not pe and cache_value(build, "XG_ELF_PAYLOAD_MAP") == "ON"
     found = []
     for start, end in runs(hits(data, wanted, n), n):
@@ -307,14 +323,17 @@ def audit() -> int:
 
     # The build's objects: their symbols (to name what the executable's symbol at a run is) and
     # the retail windows each holds (for bytes outside any symbol: merged strings, constants).
-    objs = objects(build) if (build / "CMakeFiles").is_dir() else []
+    objs = sdl3_objects(build) if a.sdl3 else objects(build)
+    if a.sdl3 and not objs:
+        raise ValueError("missing objects from the SDL3 shared build")
     defined: dict[tuple[str, int], list[tuple[str, str]]] = {}
     holder: dict[bytes, list[tuple[str, str]]] = {}
     # A game module's objects bring into the executable what its linked object (modules/<m>.o)
     # still holds: the module link zeroes their retail bytes (tools/pc_srcdata.py), so only the
     # windows that object holds count for them.
     linked: dict[str, set[bytes] | None] = {}
-    for cat, src, o, target in objs:
+    # SDL3 allowances require mapped bytes. Do not infer origins from symbols or windows.
+    for cat, src, o, target in ([] if a.sdl3 else objs):
         for _, size, name in symbols(o, exe):
             defined.setdefault((name, size), []).append((cat, src))
         keep = None
@@ -334,6 +353,9 @@ def audit() -> int:
             if keep is None or w in keep:
                 holder.setdefault(w, []).append((cat, src))
     secs = sections(exe)
+    if a.sdl3 and not secs:
+        raise ValueError("SDL3.dll has no readable PE sections")
+    ordinals = payload_pe.export_ordinals(data, secs) if a.sdl3 else None
     if pe:
         origins = payload_pe.Origins(build, payload_pe.verified_map(exe), objs)
     elif mapped_elf:
@@ -341,7 +363,7 @@ def audit() -> int:
         origins = payload_elf.Origins(build, payload_elf.verified_map(linked, exe), objs)
     else:
         origins = None
-    syms = symbols(exe, exe)
+    syms = [] if a.sdl3 else symbols(exe, exe)
     starts = [s[0] for s in syms]
     longest = max((s[1] for s in syms), default=0)
 
@@ -367,6 +389,8 @@ def audit() -> int:
         """Bytes of an executable run by (category, source, symbol or '-'): the whole run to the
         object that defines the symbol covering most of it; else each byte to the best object
         holding a window over it ('other' when none does)."""
+        if a.sdl3:
+            return {("other", "no object holds these bytes", "-"): end - start}
         sec = next((x for x in secs if x[0] <= start < x[0] + x[1]), None)
         if sec is None:
             # Outside every section with contents: the symbol and string tables, which objdump -h
@@ -418,11 +442,15 @@ def audit() -> int:
         return out
 
     allow = load_allow("pe" if pe else "elf" if mapped_elf else "")
+    if a.sdl3:
+        allow = [entry for entry in allow if entry[3] and entry[0].startswith("library/")]
     per: dict[tuple[str, str, str], list[tuple[int, int, int]]] = {}  # (start, end, bytes of the run here)
     for start, end in found:
         sec = next((x for x in secs if x[0] <= start < x[0] + x[1]), None)
         pieces = [(0, end - start, None)]
-        if origins and sec and sec[4]:
+        if ordinals and ordinals[0] <= start < end <= ordinals[1]:
+            pieces = [(0, end - start, ("library", "library/SDL3/PE-exports", "ordinals"))]
+        elif origins and sec and sec[4]:
             offset, size, address, name, _ = sec
             if mapped_elf:
                 stop = min(end, offset + size)
@@ -443,7 +471,7 @@ def audit() -> int:
         """The first entry for source:symbol, or, where the symbol is not known (merged strings,
         a PE file's local data), the first entry for the source."""
         for pat, budget, why, strict in allow:
-            if strict and mapped_elf:
+            if a.sdl3 or (strict and mapped_elf):
                 if pat == f"{src}:{sym}":
                     return pat, budget, why, strict
                 continue
@@ -508,10 +536,10 @@ def audit() -> int:
     # A build to hand out names no folder of the machine that made it (xg-4oq.9). Nothing is
     # printed when it is clean: the "payload ok" line stays the only verdict.
     leaks: list[tuple[str, int, str]] = []
-    not_dist = a.dist and not dist_build(build)
+    not_dist = a.dist and not a.sdl3 and not dist_build(build)
     if not_dist:
         print(f"  not a build to hand out: {build} was not configured with -DXG_DIST=ON")
-    elif dist_build(build):
+    elif a.sdl3 or dist_build(build):
         leaks = path_leaks(data, machine_paths(build))
         for text, count, path in leaks[:12]:
             print(f"  build path {count:5} places  {text[:200]}")
