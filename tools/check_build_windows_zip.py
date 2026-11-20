@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Fixture check of packaging/build-windows-zip.sh (tools/publish/repo-port), the
-offline portable Windows .zip of xenogears-pc (xg-4oq.3).
+"""Fixture check of packaging/build-windows-zip.sh (tools/publish/repo-port),
+the offline Windows ZIP and installer build of xenogears-pc (xg-4oq.3).
 
     python tools/check_build_windows_zip.py [--ver us|jp] [--keep]
 
@@ -9,8 +9,8 @@ from another folder, every path with spaces in it), in a fixture public tree:
 the real packaging/windows_release.py and tools/deps.py beside DOUBLES of the
 disc extraction, configure.py, build_windows.sh (both engines and SDL3 as labelled fixture
 bytes, their link maps, seals and cmake_install.cmake strip commands), the strip
-it names and payloadcheck.py. Nothing here is a build, a disc or game data; the
-real proof is the helper's run on a player's disc and the pinned tarballs.
+it names, payloadcheck.py and makensis. Nothing here is a build, a disc or game
+data. The real proof uses a player's disc, the pinned tarballs and NSIS.
 
 Checked: the counter-zero tag and the exact asset names; a missing or corrupt
 cache refused before anything is built, with no fetch; a bad seal, a staged
@@ -18,7 +18,9 @@ executable that is not the reproducible strip, and either engine's audit refusal
 (of the linked executable or of the installed bytes) refused; an incomplete stage
 or extraction refused; existing outputs kept; on each refusal nothing new in OUT
 and no work folder left; on success the .zip holding exactly the stage's bytes,
-its executables the audited bytes, no map or seal, and its .sha256.
+its executables the audited bytes, no map or seal, and its .sha256. Installer
+mode checks makensis before building, compiles from the audited stage, and
+checks the installer checksum and compiler record before promoting assets.
 """
 from __future__ import annotations
 
@@ -39,6 +41,8 @@ OVERLAY = ROOT / "tools" / "publish" / "repo-port" / "packaging"
 HELPER = "build-windows-zip.sh"
 TAG, ZIP = "v2026.11.0", "xenogears-pc-2026.11.0-windows-x64.zip"
 FOLDER = ZIP[:-4]
+SETUP = FOLDER + "-setup.exe"
+BUILD_INFO = SETUP + ".build.json"
 LABEL = "FIXTURE DOUBLE for tools/check_build_windows_zip.py (not a build, not game data)"
 MODULES = ["fixture_main", "fixture_one", "fixture_two"]  # the first an executable (iso:), as main is
 
@@ -178,11 +182,41 @@ print("payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; library 0/0; a
 '''
 
 
+MAKENSIS = f'''#!/usr/bin/env python3
+# {LABEL}: makensis
+import hashlib, json, os, re, sys
+from pathlib import Path
+log = Path(os.environ["FIXTURE_LOG"])
+def record(event):
+    with log.open("a") as stream:
+        stream.write(json.dumps(event) + "\\n")
+if sys.argv[1:] == ["-VERSION"]:
+    version = os.environ.get("FIXTURE_NSIS_VERSION", "v3.10")
+    if os.environ.get("FIXTURE_NSIS_DRIFT") and '"nsis": "version"' in log.read_text():
+        version = "v3.11"
+    record({{"nsis": "version", "version": version}})
+    print(version)
+    sys.exit(0)
+assert len(sys.argv) == 3 and sys.argv[1] == "-V2"
+script = Path(sys.argv[2])
+text = script.read_text()
+sources = [script.parent / rel for rel in re.findall(r'^  File "([^"]+)"$', text, re.M)]
+files = {{path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sources}}
+record({{"nsis": "compile", "files": files, "read_only": all(
+    not (path.stat().st_mode & 0o222 or path.parent.stat().st_mode & 0o222) for path in sources)}})
+name = re.search(r'^OutFile "([^"]+)"$', text, re.M).group(1)
+output = script.with_name(name)
+output.write_bytes(b"MZ fixture installer\\n" + json.dumps(files, sort_keys=True).encode())
+if os.environ.get("FIXTURE_NSIS_FAIL"):
+    sys.exit("fixture NSIS compile failure")
+'''
+
+
 def make_public(base: Path, region: str) -> tuple[Path, Path, Path, dict]:
     """The fixture public tree, a disc folder and a cache folder, all with spaces in their paths."""
     public = base / "public tree"
     (public / "packaging").mkdir(parents=True)
-    for name in (HELPER, "windows_release.py", "xenogears-pc-installer.nsi.in"):
+    for name in (HELPER, "release_inputs.py", "windows_release.py", "xenogears-pc-installer.nsi.in"):
         shutil.copy2(OVERLAY / name, public / "packaging" / name)
     tools = public / "tools"
     tools.mkdir()
@@ -231,8 +265,14 @@ class Run:
         self.scratch = base / "scratch space"
         self.scratch.mkdir(exist_ok=True)
         self.log = base / "fixture log.jsonl"
+        self.compiler = base / "NSIS compiler" / "makensis"
+        self.compiler.parent.mkdir()
+        self.compiler.write_text(MAKENSIS)
+        self.compiler.chmod(0o755)
+        self.installer = ("--installer", "--makensis", self.compiler)
 
-    def __call__(self, out: Path, tag: str = TAG, cache: Path | None = None, **knobs) -> subprocess.CompletedProcess:
+    def __call__(self, out: Path, tag: str = TAG, cache: Path | None = None,
+                 extra: tuple[str | Path, ...] = (), **knobs) -> subprocess.CompletedProcess:
         self.log.unlink(missing_ok=True)
         self.log.touch()
         env = {k: v for k, v in os.environ.items() if not k.startswith(("FIXTURE_", "XG_", "SOURCE_DATE"))}
@@ -240,7 +280,7 @@ class Run:
         env.update({k: str(v) for k, v in knobs.items()})
         argv = ["bash", str(self.public / "packaging" / HELPER), "--discs", str(self.discs),
                 "--cache", str(cache or self.cache), "--version", tag, "--out", str(out), "--region", self.region,
-                "--scratch", str(self.scratch)]
+                "--scratch", str(self.scratch), *map(str, extra)]
         return subprocess.run(argv, cwd=self.cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True,
                               text=True, timeout=300)
 
@@ -251,7 +291,8 @@ class Run:
         return sorted(p.name for p in self.scratch.iterdir())
 
 
-def refused(run: Run, what: str, expect: str, out: Path | None = None, built: bool | None = None, **kw) -> None:
+def refused(run: Run, what: str, expect: str, out: Path | None = None, built: bool | None = None,
+            compiled: bool | None = None, **kw) -> None:
     out = out or run.base / f"out {what}"
     before = sorted(os.listdir(out)) if out.exists() else None
     result = run(out, **kw)
@@ -266,6 +307,8 @@ def refused(run: Run, what: str, expect: str, out: Path | None = None, built: bo
           and after == before and not run.leftovers())
     if built is not None:
         ok = ok and any("build" in e for e in logged) == built
+    if compiled is not None:
+        ok = ok and any(e.get("nsis") == "compile" for e in logged) == compiled
     check(ok, f"refused: {what} (exit {result.returncode}, {last[:160]!r}, OUT {after}, "
               f"scratch {run.leftovers()})")
 
@@ -304,6 +347,51 @@ def success(run: Run) -> None:
     check(not run.leftovers(), "the work folder is removed")
     check(not (run.public / "disc").exists() and not (run.public / "build").exists(),
           "the public tree itself is untouched (extraction and builds in the private copy)")
+
+
+def installer_checks(run: Run) -> None:
+    out = run.base / "Windows release bundle"
+    result = run(out, extra=run.installer)
+    if check(result.returncode == 0, f"installer build exits 0 ({result.stderr.strip()[-300:]!r})"):
+        check({p.name for p in out.iterdir()} == {ZIP, ZIP + ".sha256", SETUP, SETUP + ".sha256", BUILD_INFO},
+              "the bundle has the installer, ZIP, both checksums and the compiler record")
+        events = run.logged()
+        compiled = [i for i, e in enumerate(events) if e.get("nsis") == "compile"]
+        audits = [i for i, e in enumerate(events) if "audit" in e]
+        check(len(compiled) == 1 and len(audits) == 6 and max(audits) < compiled[0],
+              "makensis compiles once after both audits of all three binaries")
+        check(events[0] == {"nsis": "version", "version": "v3.10"}, "makensis is checked before extraction")
+        if compiled:
+            expected = {name: sha(data) for name, data in expected_stage().items()}
+            check(events[compiled[0]] == {"nsis": "compile", "files": expected, "read_only": True},
+                  "the rendered installer reads the exact audited, read-only stage")
+        check((out / ZIP).read_bytes() == (run.base / "out dir" / "release assets" / ZIP).read_bytes(),
+              "installer mode produces the same ZIP as the portable build")
+        check(json.loads((out / BUILD_INFO).read_text()) == {
+            "asset": SETUP, "makensis_minimum": "3.10", "makensis_version": "v3.10"},
+            "the installer build record names the compiler and minimum version")
+        for name in (SETUP, ZIP):
+            check((out / (name + ".sha256")).read_text() == f"{sha((out / name).read_bytes())}  {name}\n",
+                  f"{name} matches its checksum")
+        check(not run.leftovers(), "the installer work folder is removed")
+    refused(run, "a compiler without installer mode", "--makensis requires --installer",
+            extra=("--makensis", run.compiler), built=False, compiled=False)
+    refused(run, "an absent installer compiler", "no makensis",
+            extra=("--installer", "--makensis", run.base / "missing makensis"), built=False, compiled=False)
+    refused(run, "makensis 3.09", "older than 3.10", extra=run.installer, FIXTURE_NSIS_VERSION="v3.09",
+            built=False, compiled=False)
+    existing = run.base / "out existing installer"
+    existing.mkdir()
+    (existing / BUILD_INFO).write_text("kept\n")
+    refused(run, "OUT already holds the installer build record", "already holds", out=existing, extra=run.installer,
+            built=False, compiled=False)
+    check((existing / BUILD_INFO).read_text() == "kept\n", "the existing installer build record is preserved")
+    refused(run, "the SDL3 installed audit fails in installer mode", "FAILED", extra=run.installer,
+            FIXTURE_AUDIT_FAIL="SDL3.dll:installed", built=True, compiled=False)
+    refused(run, "makensis fails after starting the compile", "package failed", extra=run.installer,
+            FIXTURE_NSIS_FAIL=1, built=True, compiled=True)
+    refused(run, "makensis version changes after preflight", "expected the preflight makensis version",
+            extra=run.installer, FIXTURE_NSIS_DRIFT=1, built=True, compiled=True)
 
 
 def refusals(run: Run, pins: dict) -> None:
@@ -370,6 +458,7 @@ def main() -> int:
         public, discs, cache, pins = make_public(base, a.ver)
         run = Run(base, public, discs, cache, a.ver)
         success(run)
+        installer_checks(run)
         refusals(run, pins)
     finally:
         if a.keep:

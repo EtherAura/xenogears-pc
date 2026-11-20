@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
-# The portable Windows .zip of xenogears-pc and its .sha256, built offline from
-# this checkout, the player's own disc and a folder of the pinned dependency
-# tarballs, with both engines, every installed executable through the payload
-# audit.
+# The Windows .zip and optional NSIS installer of xenogears-pc, built offline
+# from this checkout, the player's own disc and the pinned dependency tarballs.
+# Both engines and SDL3 go through the payload audit before packaging.
 #
 #   bash packaging/build-windows-zip.sh --discs DIR --cache DIR --version vYYYY.MM.N --out OUT \
-#       [--region us|jp] [--scratch DIR]
+#       [--region us|jp] [--scratch DIR] [--installer [--makensis EXE]]
 #
 # --discs   the folder holding the player's Disc 1 image, under the name
 #           config/<region>/disc.yaml gives it (directly, or in a folder of its
@@ -17,16 +16,18 @@
 #           corrupt tarball is a refusal (python tools/deps.py fetch --cache DIR
 #           is a separate step, with network).
 # --version the release tag, as packaging/windows_release.py names reads it.
-# --out     where xenogears-pc-<version>-windows-x64.zip and its .sha256 go
-#           (made if missing). It must not hold either name: nothing there is
-#           ever overwritten or deleted.
+# --out     where the assets and their checksums go (made if missing).
+#           The requested names must be free. Existing files are preserved.
+# --installer  also make setup.exe, its .sha256 and the NSIS build record.
+#              Requires makensis 3.10 or later before the build starts.
+# --makensis   compiler for --installer (default: makensis on PATH).
 # --region  the disc's region (default us).
 # --scratch the folder the private work folder is made in (default $TMPDIR or
 #           /tmp); it needs room for a full build, the libraries included. The
 #           work folder is removed at the end, whatever happens.
 #
 # Steps, each a refusal (exit 1, nothing new in OUT) when it fails:
-# 1. the tag's names, and OUT free of both;
+# 1. the tag's names, OUT free of those assets, and installer compiler preflight;
 # 2. the cache check;
 # 3. a private copy of this checkout (without build/, disc/, bin/, work/,
 #    .git, .venv or tools/toolchain*) with its own disc/<region>, extracted from
@@ -49,15 +50,14 @@
 #    --dist on the copy: the installed bytes' audit. An audit passes only on
 #    exit 0, a heading naming the copy, the region and every module image, and
 #    one clean "payload ok" line;
-# 7. windows_release.py zip and sha256 in the work folder; the .zip must hold
-#    the stage's files, its executables the audited bytes, and no map or seal;
-#    the .sha256 the .zip's SHA-256;
-# 8. both copied into OUT as new files (the .zip first), checked again there;
-#    on a failure the ones copied are removed.
+# 7. package the audited stage in the work folder. Check that the .zip holds
+#    the stage's files and its executables match the audited copies. Check the
+#    asset checksums and the installer compiler record when requested;
+# 8. copy the verified assets into OUT as new files and verify the copies.
+#    If a copy fails, remove the new files made during that attempt.
 #
-# The game still reads the player's disc at every start; nothing of the disc
-# is packaged. This makes the
-# .zip only: no setup.exe, no signing, no upload, no Windows run.
+# The game reads the player's disc at every start. This helper builds unsigned
+# release assets for local use.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,25 +67,28 @@ PY="$(command -v python3 || true)"
 die() { printf 'build-windows-zip: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
 
-DISCS= CACHE= TAG= OUT= REGION=us SCRATCH_PARENT="${TMPDIR:-/tmp}"
+DISCS= CACHE= TAG= OUT= REGION=us SCRATCH_PARENT="${TMPDIR:-/tmp}" INSTALLER=0 MAKENSIS=
 while [ $# -gt 0 ]; do
     case "$1" in
-        --discs|--cache|--version|--out|--region|--scratch)
+        --discs|--cache|--version|--out|--region|--scratch|--makensis)
             [ $# -ge 2 ] || die "$1 needs a value"
             case "$1" in
                 --discs) DISCS="$2" ;; --cache) CACHE="$2" ;; --version) TAG="$2" ;;
                 --out) OUT="$2" ;; --region) REGION="$2" ;; --scratch) SCRATCH_PARENT="$2" ;;
+                --makensis) [ -n "$2" ] || die "--makensis needs an executable"; MAKENSIS="$2" ;;
             esac
             shift 2 ;;
+        --installer) INSTALLER=1; shift ;;
         -h|--help) sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
         *) die "unknown argument $1" ;;
     esac
 done
 [ -n "$DISCS" ] && [ -n "$CACHE" ] && [ -n "$TAG" ] && [ -n "$OUT" ] || die "--discs, --cache, --version and --out are required"
 case "$REGION" in us|jp) ;; *) die "--region takes us or jp" ;; esac
+[ -z "$MAKENSIS" ] || [ "$INSTALLER" = 1 ] || die "--makensis requires --installer"
 [ -n "$PY" ] || die "no python3"
 for f in tools/deps.py tools/deps.json tools/extract.py tools/configure.py tools/build_windows.sh \
-         tools/payloadcheck.py "config/$REGION/disc.yaml" packaging/windows_release.py; do
+         tools/payloadcheck.py "config/$REGION/disc.yaml" packaging/windows_release.py packaging/release_inputs.py; do
     [ -f "$ROOT/$f" ] || die "no $f beside packaging/ (run this from a xenogears-pc checkout)"
 done
 [ -d "$DISCS" ] || die "--discs $DISCS: not a folder"
@@ -98,8 +101,8 @@ OUT_ABS="$("$PY" -I -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$O
 
 # The checks, in Python, run isolated (-I) with the checkout's own files named explicitly.
 read -r -d '' PYLIB <<'PYEOF' || true
-import hashlib, json, os, re, shutil, subprocess, sys, zipfile
-from pathlib import Path, PurePosixPath
+import hashlib, json, os, re, subprocess, sys, zipfile
+from pathlib import Path
 
 def fail(msg):
     print(f"build-windows-zip: {msg}", file=sys.stderr)
@@ -114,8 +117,6 @@ def release(root):
     return windows_release
 
 AUDIT_TARGETS = {"original": "xenogears.exe", "enhanced": "xenogears-enhanced.exe", "sdl3": "SDL3.dll"}
-IMAGE_ENTRY = re.compile(r"\{name:\s*(\w+),([^}]*)\}")
-NAME_KEY = re.compile(r"\bname\s*:")
 HEADING = re.compile(r"retail module data in (.+) \((US|JP)\): ([0-9]+) module images, runs of >= ([0-9]+) bytes")
 OK = re.compile(r"payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; library 0/0; "
                 r"allowed [0-9]+/[0-9]+, symbol names [0-9]+/[0-9]+, src \(game C's own data\) 0/0")
@@ -125,12 +126,23 @@ STAGE_FILES = {"xenogears.exe", "xenogears-enhanced.exe", "SDL3.dll", "COPYING.t
                "LICENSE-dav1d.txt"}
 EXECUTABLES = set(AUDIT_TARGETS.values())
 
-def names(root, tag):
+def names(root, tag, installer):
     try:
-        n = release(root).release_names(tag)
+        win = release(root)
+        n = win.release_names(tag)
     except Exception as e:
         fail(str(e))
-    print(n["zip"])
+    files = win.package_names(n) if installer == "1" else [n["zip"], n["zip"] + ".sha256"]
+    print(n["zip"], *files, sep="\n")
+
+def compiler(root, makensis):
+    win = release(root)
+    try:
+        exe = win.find_makensis(makensis)
+        version = win.makensis_version(exe)
+    except win.ReleaseError as e:
+        fail(str(e))
+    print(exe, version, sep="\n")
 
 def free(out, *wanted):
     out = Path(out)
@@ -171,45 +183,14 @@ def cache(root, cache):
             fail(f"dependency cache {cache}: {path.name} is not the pinned SHA-256; nothing fetched, nothing built")
         print(f"cache: {name} {pin['version']} {pin['sha256']} {path.name}")
 
-def copy_tree(root, tree, work):
-    root, tree, work = Path(root).resolve(), Path(tree), Path(work).resolve()
-    skip_top = {"build", "disc", "bin", "work", ".git", ".venv", ".beads"}
-    def ignore(folder, entries):
-        rel = Path(folder).resolve().relative_to(root)
-        out = {e for e in entries if e == "__pycache__" or (Path(folder) / e).resolve() == work}
-        if rel == Path("."):
-            out |= {e for e in entries if e in skip_top}
-        if rel == Path("tools"):
-            out |= {e for e in entries if e.startswith("toolchain")}
-        return out
-    shutil.copytree(root, tree, symlinks=True, ignore=ignore)
+def copy_tree(root, tree, work, cache):
+    release_inputs.copy_tree(root, tree, work, cache)
 
 def image(root, discs, region):
-    text = (Path(root) / "config" / region / "disc.yaml").read_text(encoding="utf-8")
-    m = re.search(r"^image:\s*(.+?)\s*$", text, re.M)
-    if not m:
-        fail(f"config/{region}/disc.yaml names no image")
-    base = PurePosixPath(m.group(1)).name
-    found = [p for p in (Path(discs) / base, Path(discs) / PurePosixPath(base).stem / base) if p.is_file()]
-    if len(found) != 1:
-        fail(f"--discs {discs}: {'no' if not found else 'two copies of'} {base}")
-    print(found[0])
+    print(release_inputs.disc_image(root, discs, region))
 
 def modules(tree, region):
-    tree = Path(tree)
-    text = (tree / "config" / region / "disc.yaml").read_text(encoding="utf-8")
-    entries = IMAGE_ENTRY.findall(text)
-    if not entries or len(NAME_KEY.findall(text)) != len(entries):
-        fail(f"config/{region}/disc.yaml: module entries not of the one form the auditor reads")
-    want = {f"{n}.exe" if "iso:" in rest else f"{n}.bin" for n, rest in entries}
-    if len(want) != len(entries):
-        fail(f"config/{region}/disc.yaml lists a module twice")
-    folder = tree / "disc" / region
-    have = {p.name for p in folder.iterdir()} if folder.is_dir() else set()
-    if have != want or any((folder / n).is_symlink() or not (folder / n).is_file() or (folder / n).stat().st_size == 0
-                           for n in want):
-        fail(f"extraction incomplete or unexpected: missing {sorted(want - have)}, extra {sorted(have - want)}")
-    print(len(want))
+    print(release_inputs.module_count(tree, region))
 
 def cache_value(text, key):
     m = re.search(rf"^{key}:\w+=(.*?)\s*$", text, re.M)
@@ -341,9 +322,32 @@ def zipcheck(root, tag, archive, sidecar, stagedir, audited):
                 fail(f"{archive.name}: {f} is not the audited bytes")
             print(f"zip: {top}/{f} {len(data)} bytes sha256 {hashlib.sha256(data).hexdigest()}"
                   + (" (= audited installed bytes)" if f in EXECUTABLES else ""))
-    if sidecar.read_text() != f"{sha(archive)}  {archive.name}\n":
-        fail(f"{sidecar.name}: not the .zip's SHA-256")
+    checksum(archive, sidecar)
+
+def checksum(asset, sidecar):
+    if sidecar.read_text() != f"{sha(asset)}  {asset.name}\n":
+        fail(f"{sidecar.name}: not the SHA-256 of {asset.name}")
     print(f"sha256: {sidecar.read_text().strip()}")
+
+def installercheck(root, tag, folder, version):
+    win = release(root)
+    setup = Path(folder) / win.release_names(tag)["setup"]
+    if setup.is_symlink() or not setup.is_file():
+        fail(f"{setup.name}: missing installer file")
+    with setup.open("rb") as f:
+        if f.read(2) != b"MZ":
+            fail(f"{setup.name}: missing Windows executable header")
+    record = setup.with_name(setup.name + ".build.json")
+    expected = {"asset": setup.name, "makensis_version": version,
+                "makensis_minimum": ".".join(map(str, win.MAKENSIS_MIN))}
+    try:
+        info = json.loads(record.read_text())
+    except (OSError, ValueError) as e:
+        fail(f"{record.name}: {e}")
+    if info != expected:
+        fail(f"{record.name}: expected the preflight makensis version {version} for {setup.name}")
+    print(f"installer: {setup.name} compiled with makensis {version}")
+    checksum(setup, setup.with_name(setup.name + ".sha256"))
 
 def only(folder, *wanted):
     if sorted(os.listdir(folder)) != sorted(wanted):
@@ -375,17 +379,34 @@ def promote(src, out, made_out, *assets):
     for a in assets:
         print(f"out: {out / a} sha256 {sha(out / a)}")
 
-cmd, args = sys.argv[1], sys.argv[2:]
-{"names": names, "free": free, "outside": outside, "cache": cache, "copy-tree": copy_tree, "image": image,
- "modules": modules, "linked": linked, "strip-argv": strip_argv, "audit": audit, "same-seal": same_seal,
- "map-is": map_is, "stage": stage, "zipcheck": zipcheck, "only": only, "promote": promote}[cmd](*args)
-PYEOF
-py() { "$PY" -I -c "$PYLIB" "$@"; }
+sys.path.insert(0, sys.argv[1])
+import release_inputs
 
-ZIP="$(py names "$ROOT" "$TAG")"
-log "Release $TAG: $ZIP and $ZIP.sha256 into $OUT_ABS"
-py free "$OUT_ABS" "$ZIP" "$ZIP.sha256"
+cmd, args = sys.argv[2], sys.argv[3:]
+try:
+    {"names": names, "compiler": compiler, "free": free, "outside": outside, "cache": cache,
+     "copy-tree": copy_tree, "image": image,
+     "modules": modules, "linked": linked, "strip-argv": strip_argv, "audit": audit, "same-seal": same_seal,
+     "map-is": map_is, "stage": stage, "zipcheck": zipcheck, "installercheck": installercheck,
+     "only": only, "promote": promote}[cmd](*args)
+except release_inputs.InputError as e:
+    fail(str(e))
+PYEOF
+py() { "$PY" -I -B -c "$PYLIB" "$HERE" "$@"; }
+
+requested="$(py names "$ROOT" "$TAG" "$INSTALLER")"
+mapfile -t outputs <<< "$requested"
+ZIP="${outputs[0]}"
+outputs=("${outputs[@]:1}")
+log "Release $TAG into $OUT_ABS"
+py free "$OUT_ABS" "${outputs[@]}"
 py outside "$OUT_ABS" "$DISCS" "$CACHE"
+if [ "$INSTALLER" = 1 ]; then
+    preflight="$(py compiler "$ROOT" "$MAKENSIS")"
+    mapfile -t nsis <<< "$preflight"
+    MAKENSIS="${nsis[0]}"
+    log "Installer compiler: ${nsis[1]} ($MAKENSIS)"
+fi
 
 log "Dependency cache $CACHE (no network)"
 py cache "$ROOT" "$CACHE"
@@ -402,7 +423,7 @@ ASSETS="$WORK/assets"
 export GIT_CEILING_DIRECTORIES="$WORK"
 
 log "Private copy of the checkout"
-py copy-tree "$ROOT" "$TREE" "$WORK"
+py copy-tree "$ROOT" "$TREE" "$WORK" "$CACHE"
 IMAGE="$(py image "$TREE" "$DISCS" "$REGION")"
 log "Extracting the player's disc ($REGION) into the private copy"
 "$PY" -E -s -B "$TREE/tools/extract.py" "$REGION" --image "$IMAGE" --check-image </dev/null || die "extraction failed"
@@ -452,17 +473,27 @@ for target in original enhanced sdl3; do
     cmp "$copy" "$STAGE/$name" || die "$target: the staged $name changed after its audit"
 done
 
-log "Zip and checksum"
 mkdir -p "$ASSETS"
-"$PY" -I "$ROOT/packaging/windows_release.py" zip --tag "$TAG" --stage "$STAGE" --out-dir "$ASSETS" </dev/null >/dev/null \
-    || die "windows_release.py zip failed"
-"$PY" -I "$ROOT/packaging/windows_release.py" sha256 --tag "$TAG" "$ASSETS/$ZIP" </dev/null >/dev/null \
-    || die "windows_release.py sha256 failed"
-py only "$ASSETS" "$ZIP" "$ZIP.sha256"
+if [ "$INSTALLER" = 1 ]; then
+    log "Installer, ZIP and checksums from the audited stage"
+    chmod a-w "$STAGE" "$STAGE/"*
+    "$PY" -I "$ROOT/packaging/windows_release.py" package --tag "$TAG" --stage "$STAGE" --out-dir "$ASSETS" \
+        --makensis "$MAKENSIS" </dev/null >/dev/null || die "windows_release.py package failed"
+else
+    log "Zip and checksum"
+    "$PY" -I "$ROOT/packaging/windows_release.py" zip --tag "$TAG" --stage "$STAGE" --out-dir "$ASSETS" </dev/null >/dev/null \
+        || die "windows_release.py zip failed"
+    "$PY" -I "$ROOT/packaging/windows_release.py" sha256 --tag "$TAG" "$ASSETS/$ZIP" </dev/null >/dev/null \
+        || die "windows_release.py sha256 failed"
+fi
+py only "$ASSETS" "${outputs[@]}"
 py zipcheck "$ROOT" "$TAG" "$ASSETS/$ZIP" "$ASSETS/$ZIP.sha256" "$STAGE" "$AUDIT/all"
+if [ "$INSTALLER" = 1 ]; then
+    py installercheck "$ROOT" "$TAG" "$ASSETS" "${nsis[1]}"
+fi
 
 made_out=0
 if [ ! -e "$OUT_ABS" ]; then mkdir -p "$OUT_ABS"; made_out=1; fi
-py free "$OUT_ABS" "$ZIP" "$ZIP.sha256"
-py promote "$ASSETS" "$OUT_ABS" "$made_out" "$ZIP" "$ZIP.sha256"
-log "Done (the portable .zip only: no setup.exe, no signing, no upload)"
+py free "$OUT_ABS" "${outputs[@]}"
+py promote "$ASSETS" "$OUT_ABS" "$made_out" "${outputs[@]}"
+log "Done"

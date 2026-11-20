@@ -76,3 +76,19 @@ keeps only files whose sum matches. The build itself downloads nothing.
 `--dist` makes a build to hand out, with no path of the build machine in its
 executables. The result, in `build/pc/dist/xenogears-us-windows-x86_64` by
 default, holds `xenogears.exe`, `xenogears-enhanced.exe` and `SDL3.dll`.
+
+## Desktop release packages
+
+On a Linux x86-64 host, the release command uses bubblewrap, MinGW-w64,
+Meson, CMake, Ninja, `glslc` and the Vulkan headers. Docker is used to
+prepare the cached Ubuntu build environment and NSIS compiler.
+
+```bash
+bash build-release.sh --fetch-only --cache release-cache
+bash build-release.sh --discs bin --cache release-cache --version YYYY.MM.N --out release
+```
+
+The second command uses the US Disc 1 image and builds offline. It writes
+the Windows installer and ZIP, the Linux tarball and the Ubuntu amd64
+`.deb` once their payload audits pass. The tarball and Windows packages
+include both engines. The `.deb` includes Original.

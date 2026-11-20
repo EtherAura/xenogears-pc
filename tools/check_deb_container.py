@@ -62,7 +62,8 @@ BASE = "--platform=linux/amd64 ubuntu:26.04"
 # What the shipping build needs: compilers and dpkg-dev, cmake/cpack, ninja, ld/objcopy, file (CPack's
 # shlibdeps), Python, SDL3, Vulkan headers, glslc, glslang (with spirv-tools), dav1d.
 REQUIRED = ("build-essential", "cmake", "ninja-build", "dpkg-dev", "binutils", "file", "python3", "libsdl3-dev",
-            "libvulkan-dev", "glslc", "glslang-dev", "glslang-tools", "spirv-tools-dev", "libdav1d-dev")
+            "libvulkan-dev", "glslc", "glslang-dev", "glslang-tools", "spirv-tools-dev", "libdav1d-dev",
+            "python3-yaml", "nsis")
 # Names given for Ubuntu 26.04 (resolute) main and universe, amd64: nothing else may be installed.
 KNOWN = set(REQUIRED) | {"pkg-config", "spirv-tools"}
 ENTRYPOINT = ["python3", "-I", "-B", "/work/source/packaging/deb_ubuntu.py", "--source", "/work/source",
@@ -209,7 +210,7 @@ def mutations(text: str) -> list[tuple[str, str, str]]:
         ("download outside apt", text.replace("apt-get update;", "curl -fsSL example.invalid; apt-get update;"),
          "sources"),
         ("universe not checked", "\n".join(l for l in text.splitlines() if "]universe(" not in l), "components"),
-        ("a package outside the list", text.replace("libdav1d-dev;", "libdav1d-dev curl;"), "package"),
+        ("a package outside the list", text.replace("libdav1d-dev", "libdav1d-dev curl"), "package"),
         ("privileged run documented", text.replace("--network none", "--privileged --network none"), "private"),
         ("Docker socket mounted", text.replace("dst=/work/out", "dst=/work/out --mount type=bind,src=/var/run/"
                                                "docker.sock,dst=/var/run/docker.sock"), "private"),
