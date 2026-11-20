@@ -135,7 +135,9 @@ def wiring_problems(wf) -> list[str]:
     if len(ids) != len(set(ids)):
         p.append(f"ids: not unique {ids}")
     render = [i for i, s in enumerate(steps) if is_render(s)]
-    uploads = [i for i, s in enumerate(steps) if is_upload(s)]
+    # The legacy uploads; the draft route's step (id draft, last, checked by the source-release checks) is apart.
+    uploads = [i for i, s in enumerate(steps) if is_upload(s) and s.get("id") != "draft"]
+    last = len(steps) - 1 - (1 if steps and steps[-1].get("id") == "draft" else 0)
     if len(render) != 1:
         return p + [f"arch: {len(render)} steps run arch_assets.py, not one render step"]
     r = render[0]
@@ -148,8 +150,9 @@ def wiring_problems(wf) -> list[str]:
         p.append(f"arch: render script is {script_lines(rs_)}, not {RENDER_SCRIPT}")
     if [k for k in CONTROL if k in rs_]:
         p.append(f"arch: the render step has {[k for k in CONTROL if k in rs_]}")
-    if len(uploads) != 2 or uploads[-1] != len(steps) - 1:
-        p.append(f"arch upload: steps {uploads} upload, not the release upload then one PKGBUILD upload, last")
+    if len(uploads) != 2 or uploads[-1] != last:
+        p.append(f"arch upload: steps {uploads} upload, not the release upload then one PKGBUILD upload, last "
+                 "(before the draft route's step, if any)")
     else:
         a = steps[uploads[1]]
         lines = script_lines(a)
@@ -157,8 +160,13 @@ def wiring_problems(wf) -> list[str]:
             p.append(f"arch upload: the script is {lines}, not {' '.join(ARCH_UPLOAD)}")
         if a.get("env") != ARCH_UPLOAD_ENV:
             p.append(f"arch upload: env is {a.get('env')}, not {ARCH_UPLOAD_ENV}")
-        if [k for k in CONTROL if k in a]:
-            p.append(f"arch upload: the step has {[k for k in CONTROL if k in a]}")
+        # Its only allowed control: the legacy route's condition, when the workflow has the route.
+        has_route = any(s.get("id") == "route" for s in steps)
+        extra = [k for k in CONTROL if k in a and not (k == "if" and has_route and a[k] == rs.LEGACY_IF)]
+        if extra:
+            p.append(f"arch upload: the step has {extra}")
+        if has_route and a.get("if") != rs.LEGACY_IF:
+            p.append(f"arch upload: runs on {a.get('if')!r}, not the legacy route {rs.LEGACY_IF}")
     at = {kind: rs.find(steps, rs.KINDS[kind]) for kind in ("tag", "archive", "sbom-check")}
     if None in at.values() or not uploads:
         p.append("arch order: no tag, archive, SBOM check or upload step to order against")
@@ -223,6 +231,9 @@ def run_job(wf: dict, tree: Path, scratch: Path, tag: str, source: str = "releas
     ran, text = [], ""
     for s in steps:
         key = s.get("id") or s.get("name") or s.get("uses")
+        if not rs.condition(s, ctx):  # these runs take the legacy route: the draft step is skipped
+            ran.append((key, 0))
+            continue
         if inject is not None and is_render(s):
             inject(ctx)
         if "uses" in s:
@@ -447,7 +458,12 @@ ARCH_STEP: dict = {}
 
 def regression(wf: dict, tree: Path, scratch: Path) -> None:
     base = yaml.safe_load(rs.git("show", f"{BASELINE}:{WORKFLOW}"))
-    check(not rs.workflow_problems(base),
+    # The baseline predates the SBOM action's v0.24.3 pin (5ed00d3b) and the upload route: its pin is brought
+    # forward and it is held to the checks of its own time (no route), so only the Arch wiring is missing.
+    for s in base["jobs"]["source"]["steps"]:
+        if str(s.get("uses", "")).startswith("anchore/sbom-action@"):
+            s["uses"] = rs.SBOM_ACTION
+    check(not rs.workflow_problems(base, route=False),
           f"baseline {BASELINE}: passes the source-release checks (a failure below is the missing wiring)")
     problems = wiring_problems(base)
     check(any(p.startswith("arch: ") for p in problems), f"baseline {BASELINE}: caught here ({problems})")

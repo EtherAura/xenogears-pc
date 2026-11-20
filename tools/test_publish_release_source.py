@@ -51,7 +51,24 @@ Mode "public" (the default; nothing in it is skipped, a missing tool fails):
    own uploads left on, ...) are each caught; the candidate file is unchanged
    afterwards.
 
-Mode "overlay" runs 3 to 5 on the overlay file without assembling the tree; it is
+6. The upload route: dispatch inputs tag and upload_mode (an optional choice of
+   legacy and draft, default legacy); a route step after the tag reads only the
+   event name and the mode; the legacy uploads run only on route legacy; one
+   last draft step runs only on route draft with the job's token and four files,
+   calling only gh release view, upload and download, with no overwrite, create,
+   edit, publish or ignored failure. The whole job is run (each `if` evaluated)
+   in a synthetic tagged fixture with a stateful gh stand-in: published-release
+   events and default or legacy dispatches make exactly the legacy uploads, the
+   same calls as the pre-route workflow (PRE_DRAFT); an unknown mode stops at the
+   route; upload_mode draft adds exactly the four files to an integrator-style
+   draft with notes and another uploader's file, leaving those and the draft
+   state as they were; no release, a public release, a name already on the
+   draft, a failed upload, a release published meanwhile, or a wrong or missing
+   downloaded file each fail the draft step, with no fallback. Workflow
+   variants that overwrite, create, publish, fall back or carry on after a bad
+   check are each caught by those runs.
+
+Mode "overlay" runs 3 to 6 on the overlay file without assembling the tree; it is
 not the acceptance run and says so.
 
 Not checked here (they need GitHub): the real checkout, the attestation (its
@@ -65,6 +82,7 @@ import argparse
 import copy
 import hashlib
 import importlib.util
+import json
 import os
 import re
 import shlex
@@ -82,7 +100,7 @@ CANDIDATE = ROOT / "tools/publish/repo-port" / PUBLISHED
 THIS = Path(__file__).resolve()
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 ATTEST = "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8"
-SBOM_ACTION = "anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26"
+SBOM_ACTION = "anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c"  # v0.24.3 (the workflow's pin since 5ed00d3b)
 # Inputs confirmed in action.yml at that commit (tracker epic xg-4oq; the action may declare more, but
 # the workflow uses none outside this set); an undeclared one is ignored by the runner, with a warning.
 SBOM_INPUTS = {"path", "file", "format", "output-file", "artifact-name", "github-token", "syft-version",
@@ -94,6 +112,17 @@ JOB_PERMISSIONS = {"contents": "write", "id-token": "write", "attestations": "wr
 TAG_EXPR = "${{ github.event.release.tag_name || inputs.tag }}"
 UPLOAD = ["gh", "release", "upload", "$TAG", "$TARBALL", "$CHECKSUM", "$SBOM", "--repo", "$GITHUB_REPOSITORY",
           "--clobber"]
+# The upload route: published releases and default dispatches take the legacy upload, only an explicit
+# upload_mode draft takes the draft step (the last step).
+MODE_INPUT = {"required": False, "type": "choice", "options": ["legacy", "draft"], "default": "legacy"}
+ROUTE_ENV = {"EVENT": "${{ github.event_name }}", "MODE": "${{ inputs.upload_mode }}"}
+LEGACY_IF = "steps.route.outputs.route == 'legacy'"
+DRAFT_IF = "steps.route.outputs.route == 'draft'"
+DRAFT_ENV = {"GH_TOKEN": "${{ github.token }}", "TAG": "${{ steps.tag.outputs.tag }}",
+             "TARBALL": "${{ steps.archive.outputs.tarball }}", "CHECKSUM": "${{ steps.archive.outputs.checksum }}",
+             "SBOM": "${{ steps.sbom-source.outputs.sbom }}", "PKGBUILD": "${{ steps.arch.outputs.pkgbuild }}"}
+DRAFT_GH = {("release", "view"), ("release", "upload"), ("release", "download")}
+PRE_DRAFT = "5ed00d3b"  # the last commit whose workflow has only the legacy upload route
 TAG = "v2099.12.7"  # a scratch tag, in the scratch repository only
 VERSION = TAG[1:]
 NAME = f"xenogears-pc-{VERSION}"
@@ -125,8 +154,56 @@ def find(steps: list, pred) -> int | None:
     return next((i for i, s in enumerate(steps) if pred(s)), None)
 
 
-def workflow_problems(wf) -> list[str]:
-    """Every way the workflow differs from what the release needs (empty: none)."""
+def route_problems(on, steps: list, v: int, c: int) -> list[str]:
+    """The upload route: legacy for published releases and default dispatches, draft only when selected."""
+    p: list[str] = []
+    inputs = ((on.get("workflow_dispatch") or {}).get("inputs") or {}) if isinstance(on, dict) else {}
+    if set(inputs) != {"tag", "upload_mode"}:
+        p.append(f"dispatch: inputs {sorted(inputs)}, not tag and upload_mode")
+    tag_in = inputs.get("tag") or {}
+    if tag_in.get("required") is not True or tag_in.get("type") != "string":
+        p.append("dispatch: the tag input is not a required string")
+    mode = {k: v_ for k, v_ in (inputs.get("upload_mode") or {}).items() if k != "description"}
+    if mode != MODE_INPUT:
+        p.append(f"dispatch: upload_mode is {mode}, not {MODE_INPUT}")
+    r = find(steps, lambda s: s.get("id") == "route")
+    if r is None:
+        return p + ["route: no route step"]
+    if steps[r].get("env") != ROUTE_ENV:
+        p.append(f"route: env is {steps[r].get('env')}, not {ROUTE_ENV}")
+    if not v < r < c:
+        p.append("route: not chosen after the tag and before checkout")
+    uploads = [i for i, s in enumerate(steps) if "gh release upload" in (s.get("run") or "")]
+    draft = [i for i in uploads if steps[i].get("id") == "draft"]
+    if len(draft) != 1 or draft[0] != len(steps) - 1:
+        return p + [f"draft: steps {draft} are the draft step, not exactly one, last"]
+    for i, s in enumerate(steps):
+        label = s.get("name") or s.get("uses")
+        if s.get("continue-on-error") is not None and i in uploads + [r]:
+            p.append(f"route: step {label} has continue-on-error")
+        if i in uploads and i not in draft:
+            if s.get("if") != LEGACY_IF:
+                p.append(f"legacy: upload step {label} runs on {s.get('if')!r}, not {LEGACY_IF}")
+        elif i not in draft and s.get("if") is not None:
+            p.append(f"route: step {label} has a condition")
+    d = steps[draft[0]]
+    if d.get("if") != DRAFT_IF:
+        p.append(f"draft: the draft step runs on {d.get('if')!r}, not {DRAFT_IF}")
+    if d.get("env") != DRAFT_ENV:
+        p.append(f"draft: env is {d.get('env')}, not {DRAFT_ENV}")
+    run = d.get("run") or ""
+    calls = set(re.findall(r"(?:^|[\s;&|({])gh\s+([\w-]+)\s+([\w-]+)", run))
+    rest = re.sub(r"(?:^|(?<=[\s;&|({]))gh\s+release\s+(view|upload|download)\b", "", run)
+    if not calls or calls - DRAFT_GH or re.search(r"(?:^|[\s;&|({])gh\s", rest):
+        p.append(f"draft: runs gh other than release view, upload and download ({sorted(calls)})")
+    if re.search(r"--clobber|--draft|--skip-existing|\b(create|edit|delete|publish)\b|\|\||set \+e", run):
+        p.append("draft: the script may overwrite, create, edit or publish, or ignore a failure")
+    return p
+
+
+def workflow_problems(wf, route: bool = True) -> list[str]:
+    """Every way the workflow differs from what the release needs (empty: none). route=False: the checks of
+    the workflow before the upload route (an older baseline), without the route and draft checks."""
     p: list[str] = []
     if not isinstance(wf, dict):
         return ["workflow: not a mapping"]
@@ -215,6 +292,8 @@ def workflow_problems(wf) -> list[str]:
             "SBOM": "${{ steps.sbom-source.outputs.sbom }}"}
     if up.get("env") != want:
         p.append(f"upload: env is {up.get('env')}, not {want}")
+    if route:
+        p += route_problems(on, steps, v, c)
     return p
 
 
@@ -229,12 +308,33 @@ def resolve(value: str, ctx: dict) -> str:
                 got = ctx.get("release_tag", "")
             elif alt == "inputs.tag":
                 got = ctx.get("input_tag", "")
+            elif alt == "github.event_name":
+                got = event_of(ctx)
+            elif alt == "inputs.upload_mode":  # a dispatch gets the input's default; other events have no inputs
+                got = ctx.get("input_mode", "legacy" if event_of(ctx) == "workflow_dispatch" else "")
+            elif alt == "github.token":
+                got = ctx.get("token", "")
             else:
                 raise ValueError(f"expression {alt!r} is not evaluated locally")
             if got:
                 return got
         return ""
     return re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda m: one(m[1]), str(value))
+
+
+def event_of(ctx: dict) -> str:
+    return ctx.get("event") or ("release" if ctx.get("release_tag") else "workflow_dispatch")
+
+
+def condition(step: dict, ctx: dict) -> bool:
+    """A step's `if`, for the one form the workflow uses (an output compared with a word)."""
+    cond = step.get("if")
+    if cond is None:
+        return True
+    m = re.fullmatch(r"(?:\$\{\{\s*)?steps\.([\w-]+)\.outputs\.([\w-]+) == '([\w-]+)'(?:\s*\}\})?", str(cond).strip())
+    if not m:
+        raise ValueError(f"condition {cond!r} is not evaluated locally")
+    return ctx["steps"].get(m[1], {}).get(m[2], "") == m[3]
 
 
 def run_step(step: dict, ctx: dict, cwd: Path, scratch: Path) -> tuple[int, dict, str]:
@@ -244,6 +344,8 @@ def run_step(step: dict, ctx: dict, cwd: Path, scratch: Path) -> tuple[int, dict
     output.write_text("")
     env = {"PATH": os.environ["PATH"], "HOME": str(scratch), "LC_ALL": "C", "GITHUB_OUTPUT": str(output),
            "RUNNER_TEMP": str(ctx.get("runner_temp", scratch / "runner-temp-unset"))}
+    if "fakebin" in ctx:  # the job runs of the upload routes: a stand-in gh first on PATH
+        env.update(PATH=f"{ctx['fakebin']}{os.pathsep}{os.environ['PATH']}", GITHUB_REPOSITORY=ctx["repo"])
     env.update({k: resolve(v, ctx) for k, v in (step.get("env") or {}).items()})
     result = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", str(script)],
                             cwd=cwd, env=env, capture_output=True, text=True)
@@ -253,6 +355,7 @@ def run_step(step: dict, ctx: dict, cwd: Path, scratch: Path) -> tuple[int, dict
 
 KINDS = {
     "tag": lambda s: s.get("id") == "tag",
+    "route": lambda s: s.get("id") == "route",
     "checkout": lambda s: str(s.get("uses", "")).startswith("actions/checkout@"),
     "archive": lambda s: s.get("id") == "archive",
     "attest": lambda s: str(s.get("uses", "")).startswith("actions/attest-build-provenance@"),
@@ -385,7 +488,59 @@ MUTATIONS = [
      lambda w: step(w, "upload").update(run=step(w, "upload")["run"].replace(' "$SBOM"', ''))),
     ("upload's SBOM is the checksum", "upload: env",
      lambda w: step(w, "upload")["env"].update(SBOM="${{ steps.archive.outputs.checksum }}")),
+    # The upload route.
+    ("no route step", "route: no route step",
+     lambda w: w["jobs"]["source"]["steps"].remove(by_id(w, "route"))),
+    ("upload_mode defaults to draft", "dispatch: upload_mode",
+     lambda w: dispatch_inputs(w)["upload_mode"].update(default="draft")),
+    ("upload_mode a free string", "dispatch: upload_mode",
+     lambda w: dispatch_inputs(w)["upload_mode"].update(type="string")),
+    ("upload_mode required", "dispatch: upload_mode",
+     lambda w: dispatch_inputs(w)["upload_mode"].update(required=True)),
+    ("no upload_mode input", "dispatch: inputs",
+     lambda w: dispatch_inputs(w).pop("upload_mode")),
+    ("route reads a fixed mode", "route: env",
+     lambda w: by_id(w, "route")["env"].update(MODE="draft")),
+    ("route chosen after checkout", "route: not chosen",
+     lambda w: move_before(w, "archive", "route") or move_before(w, "checkout", "archive")),
+    ("legacy upload on every route", "legacy: upload step",
+     lambda w: step(w, "upload").pop("if")),
+    ("legacy upload on the draft route", "legacy: upload step",
+     lambda w: step(w, "upload").update({"if": DRAFT_IF})),
+    ("draft step on every route", "draft: the draft step runs",
+     lambda w: by_id(w, "draft").pop("if")),
+    ("draft step not last", "draft: steps",
+     lambda w: w["jobs"]["source"]["steps"].append({"name": "late", "run": "true\n"})),
+    ("draft upload overwrites", "draft: the script may",
+     lambda w: by_id(w, "draft").update(run=by_id(w, "draft")["run"].replace(
+         'upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY"',
+         'upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber'))),
+    ("draft step publishes the release", "draft: runs gh other",
+     lambda w: by_id(w, "draft").update(run=by_id(w, "draft")["run"] + 'gh release edit "$TAG" --draft=false\n')),
+    ("draft step creates a release", "draft: runs gh other",
+     lambda w: by_id(w, "draft").update(run='gh release create "$TAG" --draft\n' + by_id(w, "draft")["run"])),
+    ("draft step through gh api", "draft: runs gh other",
+     lambda w: by_id(w, "draft").update(run=by_id(w, "draft")["run"] + 'gh api -X PATCH "repos/x/releases/1"\n')),
+    ("draft check failure ignored", "draft: the script may",
+     lambda w: by_id(w, "draft").update(run=by_id(w, "draft")["run"].replace(
+         'sha256sum --strict -c -- "${names[1]}")', 'sha256sum --strict -c -- "${names[1]}" || true)'))),
+    ("draft step failure ignored", "route: step",
+     lambda w: by_id(w, "draft").update({"continue-on-error": True})),
+    ("draft step with a secret", "draft: env",
+     lambda w: by_id(w, "draft")["env"].update(GH_TOKEN="${{ secrets.RELEASE_TOKEN }}")),
+    ("draft step without the PKGBUILD", "draft: env",
+     lambda w: by_id(w, "draft")["env"].pop("PKGBUILD")),
+    ("another step on a condition", "route: step",
+     lambda w: step(w, "archive").update({"if": DRAFT_IF})),
 ]
+
+
+def by_id(w: dict, sid: str) -> dict:
+    return next(s for s in w["jobs"]["source"]["steps"] if s.get("id") == sid)
+
+
+def dispatch_inputs(w: dict) -> dict:
+    return w[True if True in w else "on"]["workflow_dispatch"]["inputs"]
 
 
 def check_mutations(wf: dict, scratch: Path) -> None:
@@ -402,6 +557,377 @@ def check_mutations(wf: dict, scratch: Path) -> None:
     problems = workflow_problems(yaml.safe_load(mutated.read_text()))
     check(text != mutated.read_text() and any("permissions: job" in p for p in problems),
           f"file mutation caught: id-token line removed ({problems})")
+
+
+# --- the upload routes, run as the runner runs them ----------------------------------------------
+
+REPO = "synthetic/fixture-repo"
+TOKEN = "synthetic-not-a-token"
+JOB_TAG = "v2097.03.1"  # a synthetic tag, in the synthetic fixture repository only
+JOB_NAME = f"xenogears-pc-{JOB_TAG[1:]}"
+NOTES = "Synthetic draft notes written by a stand-in integrator: must stay as they are.\n"
+OTHER_ASSET = f"{JOB_NAME}-windows-x64.zip"  # another uploader's file on the same draft
+OTHER_BYTES = b"synthetic stand-in for another uploader's asset, not a build\n"
+STAND_IN_SBOM = '{"bomFormat": "CycloneDX", "specVersion": "1.6", "metadata": {"component": ' \
+                '{"type": "application", "name": "synthetic test stand-in, not an SBOM"}}}\n'
+
+# A stateful stand-in for the GitHub CLI: releases and their assets live in a JSON file; it supports the
+# release view/upload/download/create/edit calls as gh does (a view or upload by tag finds a draft too; an
+# upload refuses an existing name unless --clobber; a download refuses an existing file), records every call,
+# and applies the injected faults. It reaches no network.
+FAKE_GH = r'''#!@PYTHON@ -I
+# Synthetic stand-in for gh (tools/test_publish_release_source.py): a local JSON state, no network.
+import fnmatch, json, os, sys
+STATE = @STATE@
+with open(STATE) as f:
+    st = json.load(f)
+argv = sys.argv[1:]
+st["calls"].append({"argv": argv, "token": os.environ.get("GH_TOKEN", "")})
+faults = st["faults"]
+
+def end(code, msg=""):
+    with open(STATE, "w") as f:
+        json.dump(st, f)
+    if msg:
+        sys.stderr.write(msg + "\n")
+    sys.exit(code)
+
+if len(argv) < 3 or argv[0] != "release":
+    end(1, "stand-in: only gh release subcommands")
+sub, rest = argv[1], argv[2:]
+opts, flags, pos, i = {}, set(), [], 0
+while i < len(rest):
+    a = rest[i]
+    if a in ("--repo", "--json", "--dir", "--pattern", "--notes", "--draft"):
+        if a == "--draft" and (i + 1 == len(rest) or rest[i + 1].startswith("--")):
+            flags.add(a); i += 1; continue
+        opts.setdefault(a, []).append(rest[i + 1]); i += 2
+    elif a.startswith("--draft="):
+        opts.setdefault("--draft", []).append(a.split("=", 1)[1]); i += 1
+    elif a in ("--clobber",):
+        flags.add(a); i += 1
+    elif a.startswith("-"):
+        end(1, "stand-in: unknown flag " + a)
+    else:
+        pos.append(a); i += 1
+if opts.get("--repo") != [@REPO@] or os.environ.get("GH_TOKEN") != @TOKEN@:
+    end(1, "stand-in: wrong repository or token")
+tag = pos[0] if pos else ""
+rel = st["releases"].get(tag)
+if sub == "create":
+    if rel is not None:
+        end(1, "a release with the same tag name already exists")
+    st["releases"][tag] = {"draft": "--draft" in flags, "body": "".join(opts.get("--notes", [])), "assets": {}}
+    end(0)
+if rel is None:
+    end(1, "release not found")
+if sub == "view":
+    fields = opts.get("--json", [""])[0].split(",")
+    full = {"tagName": tag, "isDraft": rel["draft"], "body": rel["body"],
+            "assets": [{"name": n, "size": len(bytes.fromhex(h))} for n, h in rel["assets"].items()]}
+    if not set(fields) <= set(full):
+        end(1, "stand-in: unknown field")
+    print(json.dumps({k: full[k] for k in fields}))
+    end(0)
+if sub == "edit":
+    if "--draft" in opts:
+        rel["draft"] = opts["--draft"][0] != "false"
+    end(0)
+if sub == "upload":
+    files = pos[1:]
+    names = [os.path.basename(p) for p in files]
+    if not all(os.path.isfile(p) for p in files):
+        end(1, "stand-in: a file to upload is missing")
+    if "--clobber" not in flags and set(names) & set(rel["assets"]):
+        end(1, "asset under the same name already exists: " + " ".join(sorted(set(names) & set(rel["assets"]))))
+    for n, p in zip(names, files):
+        if faults.get("upload_fails_after") == len(st["stored"]):
+            end(1, "stand-in: upload failed (injected)")
+        if n in rel["assets"]:
+            st["overwritten"].append(n)
+        with open(p, "rb") as f:
+            rel["assets"][n] = f.read().hex()
+        st["stored"].append(n)
+    if faults.get("publish_after_upload"):
+        rel["draft"] = False
+    end(0)
+if sub == "download":
+    d = opts.get("--dir", ["."])[0]
+    pats = opts.get("--pattern", ["*"])
+    hit = [n for n in rel["assets"] if any(fnmatch.fnmatchcase(n, p) for p in pats) and n not in faults.get("hide", [])]
+    if not hit:
+        end(1, "no assets match the file pattern")
+    os.makedirs(d, exist_ok=True)
+    for n in hit:
+        out = os.path.join(d, n)
+        if os.path.exists(out):
+            end(1, "stand-in: " + out + " already exists")
+        data = bytes.fromhex(rel["assets"][n])
+        if n in faults.get("corrupt", []):
+            data = data[:-1] + bytes([data[-1] ^ 1])
+        if n in faults.get("replace", {}):
+            data = faults["replace"][n].encode()
+        with open(out, "wb") as f:
+            f.write(data)
+    end(0)
+end(1, "stand-in: gh release " + sub + " is not supported")
+'''
+
+
+def route_fixture(scratch: Path) -> Path:
+    """A minimal synthetic public-layout repository (packaging/ from the overlay), tagged JOB_TAG."""
+    tree = scratch / "route-fixture"
+    shutil.rmtree(tree, ignore_errors=True)
+    (tree / "packaging").mkdir(parents=True)
+    for name in ("arch_assets.py", "PKGBUILD.in"):
+        shutil.copy2(CANDIDATE.parents[2] / "packaging" / name, tree / "packaging" / name)
+    (tree / "SYNTHETIC-TEST-FIXTURE.txt").write_text(
+        "Synthetic test input for tools/test_publish_release_source.py: not a release.\n")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_AUTHOR_NAME="scratch", GIT_AUTHOR_EMAIL="scratch@invalid", GIT_AUTHOR_DATE="@0 +0000",
+               GIT_COMMITTER_NAME="scratch", GIT_COMMITTER_EMAIL="scratch@invalid", GIT_COMMITTER_DATE="@0 +0000")
+    cfg = ["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "init.defaultBranch=main"]
+    git(*cfg, "init", "-q", cwd=tree, env=env)
+    git(*cfg, "add", "-A", ".", cwd=tree, env=env)
+    git(*cfg, "commit", "-q", "-m", "synthetic fixture", cwd=tree, env=env)
+    git(*cfg, "tag", "-a", "-m", "synthetic test tag, not a release", JOB_TAG, cwd=tree, env=env)
+    return tree
+
+
+def release(draft: bool, *extra: tuple[str, bytes]) -> dict:
+    return {"draft": draft, "body": NOTES, "assets": {OTHER_ASSET: OTHER_BYTES.hex(), **{n: b.hex() for n, b in extra}}}
+
+
+def run_route_job(wf: dict, tree: Path, scratch: Path, ctx_in: dict, releases: dict, faults: dict | None = None) -> dict:
+    """Every step in order, each `if` evaluated; uses-steps are not run (the SBOM action's output is a labelled
+    stand-in file); a failing step ends the job. gh is the stateful stand-in."""
+    box = scratch / "route-job"
+    shutil.rmtree(box, ignore_errors=True)
+    (box / "fakebin").mkdir(parents=True)
+    (box / "runner-temp").mkdir()
+    shutil.rmtree(tree / "dist", ignore_errors=True)
+    state = box / "gh-state.json"
+    state.write_text(json.dumps({"releases": copy.deepcopy(releases), "faults": faults or {}, "calls": [],
+                                 "stored": [], "overwritten": []}))
+    gh = box / "fakebin/gh"
+    gh.write_text(FAKE_GH.replace("@PYTHON@", sys.executable).replace("@STATE@", repr(str(state)))
+                  .replace("@REPO@", repr(REPO)).replace("@TOKEN@", repr(TOKEN)))
+    gh.chmod(0o755)
+    ctx = {"steps": {}, "runner_temp": box / "runner-temp", "fakebin": box / "fakebin", "repo": REPO,
+           "token": TOKEN, **ctx_in}
+    ran, log = [], ""
+    for s in wf["jobs"]["source"]["steps"]:
+        key = s.get("id") or s.get("name") or s.get("uses")
+        if not condition(s, ctx):
+            ran.append((key, "skipped"))
+            continue
+        if "uses" in s:
+            if str(s["uses"]).startswith("anchore/sbom-action@"):
+                (tree / resolve(s["with"]["output-file"], ctx)).write_text(STAND_IN_SBOM)
+            ran.append((key, 0))
+            continue
+        rc, outputs, log = run_step(s, ctx, tree, box)
+        if s.get("id"):
+            ctx["steps"][s["id"]] = outputs
+        ran.append((key, rc))
+        if rc != 0:
+            break
+    st = json.loads(state.read_text())
+    ok = len(ran) == len(wf["jobs"]["source"]["steps"]) and all(rc in (0, "skipped") for _, rc in ran)
+    return {"ok": ok, "ran": ran, "ctx": ctx, "state": st, "calls": [c["argv"] for c in st["calls"]],
+            "tokens": {c["token"] for c in st["calls"]}, "log": log.strip()}
+
+
+def job_files(res: dict, tree: Path) -> dict[str, Path]:
+    steps = res["ctx"]["steps"]
+    return {Path(p).name: (tree / p if not Path(p).is_absolute() else Path(p))
+            for p in (steps.get("archive", {}).get("tarball", ""), steps.get("archive", {}).get("checksum", ""),
+                      steps.get("sbom-source", {}).get("sbom", ""), steps.get("arch", {}).get("pkgbuild", "")) if p}
+
+
+def legacy_calls(res: dict) -> list:
+    pk = res["ctx"]["steps"].get("arch", {}).get("pkgbuild", "")
+    return [["release", "upload", JOB_TAG, f"dist/{JOB_NAME}.tar.gz", f"dist/{JOB_NAME}.tar.gz.sha256",
+             f"dist/{JOB_NAME}.cdx.json", "--repo", REPO, "--clobber"],
+            ["release", "upload", JOB_TAG, pk, "--repo", REPO, "--clobber"]]
+
+
+def untouched(res: dict, before: dict) -> list[str]:
+    """The draft path's invariants for every run: nothing overwritten, created, edited or published, and the
+    notes and the other uploader's file as they were."""
+    p, st = [], res["state"]
+    if st["overwritten"]:
+        p.append(f"overwrote {st['overwritten']}")
+    if any("--clobber" in c for c in res["calls"]):
+        p.append("a call with --clobber")
+    if any(c[:2] not in (["release", "view"], ["release", "upload"], ["release", "download"]) for c in res["calls"]):
+        p.append(f"a release call other than view, upload, download ({res['calls']})")
+    if set(st["releases"]) != set(before):
+        p.append(f"releases {sorted(st['releases'])}, not {sorted(before)}")
+    for tag, rel in before.items():
+        now = st["releases"].get(tag, {})
+        if now.get("body") != rel["body"]:
+            p.append(f"{tag}: notes changed")
+        for n, h in rel["assets"].items():
+            if now.get("assets", {}).get(n) != h:
+                p.append(f"{tag}: existing asset {n} changed or removed")
+    if res["tokens"] - {TOKEN}:
+        p.append("a call without the job's token")
+    return p
+
+
+def route_scenarios(wf: dict, tree: Path, scratch: Path) -> dict[str, list[str]]:
+    """Each scenario's problems (empty: as required). Legacy: published release and default dispatches upload
+    exactly as before. Draft: only an explicit upload_mode draft, onto an existing draft, adding only its files."""
+    out: dict[str, list[str]] = {}
+    dispatch = {"input_tag": JOB_TAG}
+    legacy = [("published release event", {"release_tag": JOB_TAG}),
+              ("dispatch, upload_mode at its default (legacy)", dict(dispatch)),
+              ("dispatch, upload_mode legacy given", dict(dispatch, input_mode="legacy")),
+              ("dispatch, upload_mode empty", dict(dispatch, input_mode="")),
+              ("published release event with a stray draft mode", {"release_tag": JOB_TAG, "input_mode": "draft"})]
+    for label, ctx in legacy:
+        res = run_route_job(wf, tree, scratch, ctx, {JOB_TAG: release(False)})
+        p = [] if res["ok"] else [f"job failed {res['ran'][-1:]} {res['log']}"]
+        if res["ctx"]["steps"].get("route") != {"route": "legacy"}:
+            p.append(f"route {res['ctx']['steps'].get('route')}")
+        if res["calls"] != legacy_calls(res):
+            p.append(f"calls {res['calls']}, not the legacy uploads {legacy_calls(res)}")
+        if dict(res["ran"]).get("draft") != "skipped":
+            p.append("the draft step ran")
+        out[f"legacy: {label}"] = p
+    for bad in ["Draft", "draft;touch CANARY", "$(touch CANARY)", "legacy\n"]:
+        res = run_route_job(wf, tree, scratch, dict(dispatch, input_mode=bad), {JOB_TAG: release(True)})
+        p = [] if (not res["ok"] and res["ran"][-1][0] == "route") else [f"ran {res['ran']}"]
+        if res["calls"] or list(tree.rglob("CANARY")) or list(scratch.rglob("CANARY")):
+            p.append(f"calls {res['calls']} or a canary")
+        out[f"unknown upload_mode {bad!r}: refused at the route, nothing uploaded or run"] = p
+
+    draft = dict(dispatch, input_mode="draft")
+    ok_before = {JOB_TAG: release(True)}
+    res = run_route_job(wf, tree, scratch, draft, ok_before)
+    files = job_files(res, tree)
+    names = list(files)
+    p = [] if res["ok"] else [f"job failed {res['ran'][-1:]} {res['log']}"]
+    p += untouched(res, ok_before)
+    if res["ctx"]["steps"].get("route") != {"route": "draft"}:
+        p.append(f"route {res['ctx']['steps'].get('route')}")
+    if any(rc != "skipped" for k, rc in res["ran"] if k in ("Attach the tarball, its checksum and its SBOM to the release",
+                                                           "Attach the Arch PKGBUILD to the release")):
+        p.append("a legacy upload step ran")
+    view = ["release", "view", JOB_TAG, "--repo", REPO, "--json", "tagName,isDraft,assets"]
+    upload = ["release", "upload", JOB_TAG, f"dist/{JOB_NAME}.tar.gz", f"dist/{JOB_NAME}.tar.gz.sha256",
+              f"dist/{JOB_NAME}.cdx.json", res["ctx"]["steps"].get("arch", {}).get("pkgbuild", ""), "--repo", REPO]
+    if res["calls"][:3] != [view, upload, view] or [c[:3] for c in res["calls"][3:]] != [
+            ["release", "download", JOB_TAG]] * 4:
+        p.append(f"calls {res['calls']}")
+    rel = res["state"]["releases"].get(JOB_TAG, {})
+    want = {OTHER_ASSET: OTHER_BYTES.hex(), **{n: f.read_bytes().hex() for n, f in files.items() if f.is_file()}}
+    if len(files) != 4 or names[3] != "PKGBUILD" or rel.get("assets") != want:
+        p.append(f"the draft holds {sorted(rel.get('assets', {}))}, not the other file and this job's four {names}")
+    if rel.get("draft") is not True:
+        p.append("the release is no longer a draft")
+    if res["ctx"]["steps"].get("draft") != {"uploaded": " ".join(names)}:
+        p.append(f"draft step output {res['ctx']['steps'].get('draft')}")
+    out["draft: an integrator's draft with notes and another file gets exactly this job's four files"] = p
+
+    pk_name = "PKGBUILD"
+    sidecar = f"{JOB_NAME}.tar.gz.sha256"
+    failing = [
+        ("no release for the tag", {"v2097.03.0": release(True)}, None, False),
+        ("a published (not draft) release", {JOB_TAG: release(False)}, None, False),
+        ("the draft already holds this job's PKGBUILD", {JOB_TAG: release(True, (pk_name, b"other bytes\n"))}, None, False),
+        ("the draft already holds this job's checksum", {JOB_TAG: release(True, (sidecar, b"0" * 64 + b"\n"))}, None, False),
+        ("the upload fails part-way", ok_before, {"upload_fails_after": 1}, True),
+        ("the release is published during the upload", ok_before, {"publish_after_upload": True}, True),
+        ("the downloaded tarball differs", ok_before, {"corrupt": [f"{JOB_NAME}.tar.gz"]}, True),
+        ("the downloaded checksum is of another tarball", ok_before,
+         {"replace": {sidecar: "1" * 64 + f"  {JOB_NAME}.tar.gz\n"}}, True),
+        ("the downloaded SBOM is missing", ok_before, {"hide": [f"{JOB_NAME}.cdx.json"]}, True),
+        ("the downloaded PKGBUILD differs", ok_before, {"corrupt": [pk_name]}, True),
+    ]
+    for label, before, faults, reaches_upload in failing:
+        res = run_route_job(wf, tree, scratch, draft, before, faults)
+        p = []
+        if res["ok"] or res["ran"][-1][0] != "draft" or res["ran"][-1][1] in (0, "skipped"):
+            p.append(f"the draft step did not fail the job ({res['ran'][-1:]})")
+        if "uploaded" in res["ctx"]["steps"].get("draft", {}):
+            p.append("the draft step reported success")
+        uploads = [c for c in res["calls"] if c[:2] == ["release", "upload"]]
+        if len(uploads) != (1 if reaches_upload else 0):
+            p.append(f"uploads {uploads}")
+        p += untouched(res, before)
+        if not reaches_upload and res["state"]["releases"] != before:
+            p.append("the release state changed before the upload was refused")
+        if (faults or {}).get("publish_after_upload") is None and before.get(JOB_TAG, {}).get("draft") is True \
+                and res["state"]["releases"][JOB_TAG]["draft"] is not True:
+            p.append("the draft was published")
+        out[f"draft fails: {label}"] = p
+    return out
+
+
+def check_routes(wf: dict, scratch: Path) -> None:
+    tree = route_fixture(scratch)
+    for label, problems in route_scenarios(wf, tree, scratch).items():
+        check(not problems, f"{label} ({problems or 'as required'})")
+
+    # Regression: the workflow before the route ran the same legacy job: the same calls, in the same order.
+    base = yaml.safe_load(git("show", f"{PRE_DRAFT}:{CANDIDATE.relative_to(ROOT).as_posix()}"))
+    check(not workflow_problems(base, route=False) and route_problems(base.get(True, base.get("on")),
+                                                                         base["jobs"]["source"]["steps"], 0, 1),
+          f"pre-route workflow {PRE_DRAFT}: passes the legacy checks and has no route")
+    for label, ctx in (("published release event", {"release_tag": JOB_TAG}),
+                       ("dispatch at the default", {"input_tag": JOB_TAG})):
+        old = run_route_job(base, tree, scratch, ctx, {JOB_TAG: release(False)})
+        new = run_route_job(wf, tree, scratch, ctx, {JOB_TAG: release(False)})
+        check(old["ok"] and new["ok"] and old["calls"] == new["calls"] == legacy_calls(new)
+              and old["state"]["releases"] == new["state"]["releases"],
+              f"legacy {label}: the same uploads and release state as {PRE_DRAFT} ({new['calls']})")
+
+    # The scenarios catch a draft step that overwrites, publishes, falls back or carries on after a bad check.
+    d = next(s for s in wf["jobs"]["source"]["steps"] if s.get("id") == "draft")
+    upload = 'gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY"'
+    before = 'python3 -I -c "$check" before "$TAG" "$state/before.json" "${names[@]}"'
+    after = 'python3 -I -c "$check" after "$TAG" "$state/after.json" "${names[@]}"'
+    verify = ['cmp -- "${files[$i]}" "$state/download/${names[$i]}"',
+              'sha256sum --strict -c -- "${names[1]}"', 'python3 -I -c "$check" files "$TAG" "$state/download" "${names[@]}"']
+    route = next(s for s in wf["jobs"]["source"]["steps"] if s.get("id") == "route")
+    behaviour = [
+        ("draft upload with --clobber and no name check", d, [(before, "true"), (upload, upload + " --clobber")],
+         "draft fails: the draft already holds this job's PKGBUILD"),
+        ("draft step publishes the draft afterwards", d,
+         [(upload, upload + '\n          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false')],
+         "draft: an integrator's draft"),
+        ("draft step creates the release when it is absent", d,
+         [('gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets > "$state/before.json"',
+           'gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft || true\n'
+           '          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets > "$state/before.json"')],
+         "draft fails: no release for the tag"),
+        ("draft step falls back to the legacy upload on a public release", d,
+         [(before, before + ' || { gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --clobber; exit 0; }')],
+         "draft fails: a published (not draft) release"),
+        ("draft step carries on after a checksum failure", d, [(v_, v_ + " || true") for v_ in verify],
+         "draft fails: the downloaded checksum is of another tarball"),
+        ("draft step skips the check after the upload", d, [(after, "true")],
+         "draft fails: the release is published during the upload"),
+        ("route sends published releases to the draft step", route,
+         [('if [[ "$EVENT" != workflow_dispatch ]]', 'if false')],
+         "legacy: published release event with a stray draft mode"),
+        ("route defaults to draft", route, [('elif [[ "$MODE" == legacy || -z "$MODE" ]]; then\n  route=legacy',
+                                             'elif [[ "$MODE" == legacy || -z "$MODE" ]]; then\n  route=draft')],
+         "legacy: dispatch, upload_mode at its default (legacy)"),
+    ]
+    for label, target, edits, scenario in behaviour:
+        bad = copy.deepcopy(wf)
+        s = next(x for x in bad["jobs"]["source"]["steps"] if x.get("id") == target.get("id"))
+        text = s["run"]
+        for old_, new_ in edits:
+            text = text.replace(old_, new_)
+        if not check(text != s["run"], f"behaviour mutation applies: {label}"):
+            continue
+        s["run"] = text
+        got = next((v_ for k_, v_ in route_scenarios(bad, tree, scratch).items() if k_.startswith(scenario)), None)
+        check(bool(got), f"behaviour mutation caught by '{scenario}': {label} ({got})")
 
 
 # --- the published tree --------------------------------------------------------------------------
@@ -632,6 +1158,7 @@ def main() -> int:
     check_tags(wf, scratch)
     if args.mode == "public":
         exercise(wf, tree, scratch)
+    check_routes(wf, scratch)
     check_mutations(wf, scratch)
     check(sha256(CANDIDATE) == candidate, "the candidate workflow is unchanged after the mutations")
     return report(args.mode)

@@ -7,6 +7,14 @@ name: Release source
 # attestation for the tarball (verify it with `gh attestation verify`), and the
 # Arch Linux PKGBUILD of that tarball (packaging/arch_assets.py).
 # Tags are CalVer, vYYYY.MM.N; anything else is refused before checkout.
+# Upload routes: a published release, and a dispatch that leaves upload_mode at
+# legacy, attach the files to the release as they always have (replacing
+# same-named files). Only a dispatch that selects upload_mode draft takes the
+# draft route: it needs an existing draft release for the tag (made, with its
+# notes, by the release integrator), adds this job's four files to it without
+# replacing any file, then downloads exactly those four and checks their names
+# and bytes and the checksum against the tarball. It never creates, edits or
+# publishes a release and leaves the notes and every other file as they are.
 on:
   release:
     types: [published]
@@ -16,6 +24,14 @@ on:
         description: "An existing release tag (vYYYY.MM.N) to attach the source to again"
         required: true
         type: string
+      upload_mode:
+        description: "legacy: attach to the release as before; draft: add the files to the existing draft for the tag, replacing nothing"
+        required: false
+        type: choice
+        options:
+          - legacy
+          - draft
+        default: legacy
 
 permissions: {}
 
@@ -49,6 +65,26 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # Any event but a dispatch is legacy, whatever the input says; a dispatch
+      # is draft only when draft is selected, and an unknown mode stops the job.
+      - name: Choose the upload route
+        id: route
+        env:
+          EVENT: ${{ github.event_name }}
+          MODE: ${{ inputs.upload_mode }}
+        run: |
+          if [[ "$EVENT" != workflow_dispatch ]]; then
+            route=legacy
+          elif [[ "$MODE" == draft ]]; then
+            route=draft
+          elif [[ "$MODE" == legacy || -z "$MODE" ]]; then
+            route=legacy
+          else
+            echo "::error::not an upload mode (legacy or draft): $(printf '%q' "$MODE")"
+            exit 1
+          fi
+          echo "route=$route" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -129,6 +165,7 @@ jobs:
           echo "pkgbuild=$dir/PKGBUILD" >> "$GITHUB_OUTPUT"
 
       - name: Attach the tarball, its checksum and its SBOM to the release
+        if: steps.route.outputs.route == 'legacy'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
@@ -139,9 +176,72 @@ jobs:
           gh release upload "$TAG" "$TARBALL" "$CHECKSUM" "$SBOM" --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Attach the Arch PKGBUILD to the release
+        if: steps.route.outputs.route == 'legacy'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
           PKGBUILD: ${{ steps.arch.outputs.pkgbuild }}
         run: |
           gh release upload "$TAG" "$PKGBUILD" --repo "$GITHUB_REPOSITORY" --clobber
+
+      # The draft route (upload_mode draft only). Any failure ends the job: there
+      # is no fallback to the legacy route, nothing is replaced, and the release
+      # is never created, edited or published here.
+      - name: Add the four files to the existing draft and check them
+        id: draft
+        if: steps.route.outputs.route == 'draft'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          TARBALL: ${{ steps.archive.outputs.tarball }}
+          CHECKSUM: ${{ steps.archive.outputs.checksum }}
+          SBOM: ${{ steps.sbom-source.outputs.sbom }}
+          PKGBUILD: ${{ steps.arch.outputs.pkgbuild }}
+        run: |
+          files=("$TARBALL" "$CHECKSUM" "$SBOM" "$PKGBUILD")
+          names=()
+          for f in "${files[@]}"; do
+            test -s "$f"
+            names+=("${f##*/}")
+          done
+          check='
+          import hashlib, json, os, sys
+          stage, tag, path, *names = sys.argv[1:]
+          if stage == "files":
+              got = sorted(os.listdir(path))
+              tarball = open(os.path.join(path, names[0]), "rb").read()
+              sidecar = open(os.path.join(path, names[1]), "rb").read()
+              want = (hashlib.sha256(tarball).hexdigest() + "  " + names[0] + "\n").encode()
+              problem = None if got == sorted(names) and sidecar == want else "the downloaded files are not exactly the four of this job, or the checksum is not of the tarball"
+          else:
+              rel = json.load(open(path))
+              have = [a.get("name") for a in rel.get("assets") or []]
+              if rel.get("tagName") != tag or rel.get("isDraft") is not True:
+                  problem = "not a draft release for this tag"
+              elif stage == "before" and set(names) & set(have):
+                  problem = "already holds a file of this job: " + " ".join(sorted(set(names) & set(have)))
+              elif stage == "after" and any(have.count(n) != 1 for n in names):
+                  problem = "does not hold each file of this job exactly once"
+              else:
+                  problem = None
+          if problem:
+              print("::error::" + tag + " (" + stage + "): " + problem)
+              sys.exit(1)
+          '
+          state="$RUNNER_TEMP/draft-release"
+          mkdir "$state" "$state/download"
+          # The draft must exist, and hold none of these names, before anything is sent.
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets > "$state/before.json"
+          python3 -I -c "$check" before "$TAG" "$state/before.json" "${names[@]}"
+          gh release upload "$TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,assets > "$state/after.json"
+          python3 -I -c "$check" after "$TAG" "$state/after.json" "${names[@]}"
+          for n in "${names[@]}"; do
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$state/download" --pattern "$n"
+          done
+          for i in "${!names[@]}"; do
+            cmp -- "${files[$i]}" "$state/download/${names[$i]}"
+          done
+          (cd "$state/download" && sha256sum --strict -c -- "${names[1]}")
+          python3 -I -c "$check" files "$TAG" "$state/download" "${names[@]}"
+          echo "uploaded=${names[*]}" >> "$GITHUB_OUTPUT"
