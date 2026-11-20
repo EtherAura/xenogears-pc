@@ -318,6 +318,19 @@ int main(int argc, char** argv) {
         CHECK(padGamepadInput(6) == SDL_GAMEPAD_BUTTON_NORTH); /* inherits customised default */
         padSetStickDeadzone(-10); CHECK(padStickDeadzone() == 0);
         padSetStickDeadzone(120); CHECK(padStickDeadzone() == 95);
+        /* The default mapping's reset: buttons, stick D-pad and deadzone,
+         * and the device profile just reset inherits the restored default.
+         * The clamp checks above saved every key of profile 0 explicitly,
+         * so reset it again to make it inherit. */
+        padResetGamepad();
+        CHECK(padGamepadInput(6) == SDL_GAMEPAD_BUTTON_NORTH && padStickDeadzone() == 50);
+        padSelectProfile(-1);
+        padSetStickDpad(0);
+        CHECK(!padStickDpad() && setting("pad_stick_dpad", "0"));
+        padResetGamepad();
+        CHECK(padGamepadInput(6) == SDL_GAMEPAD_BUTTON_WEST && padStickDpad() && padStickDeadzone() == 50);
+        padSelectProfile(0);
+        CHECK(padGamepadInput(6) == SDL_GAMEPAD_BUTTON_WEST);
     }
     notify(SDL_EVENT_GAMEPAD_REMOVED, again);
     notify(SDL_EVENT_GAMEPAD_REMOVED, xbox);
