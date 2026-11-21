@@ -36,6 +36,10 @@ The plan: what is zeroed and copied back, without the disc.
     python tools/pc_srcdata.py --write-plan PLAN.json ...   # from disc/<ver>/, as above, and writes it
     python tools/pc_srcdata.py --plan PLAN.json ...         # from PLAN.json; disc/ and bin/ unread
 
+--plan-only stops at the plan, before any link: with --write-plan once it is
+written, with --plan once it is checked against the objects (no linker needed,
+which is how tools/darwin_plans.py checks the macOS module plans on Linux).
+
 Finding the retail runs needs the module's file; the plan records what they
 were found to be, so a checkout without the disc links the same objects the same
 way: both routes give the same zeroing, symbols, partial link, OUT_C and
@@ -442,7 +446,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ld", default="ld")
     ap.add_argument("--objcopy", default="objcopy")
     ap.add_argument("--macho-exports", type=Path, help="link a Darwin arm64 module with these game exports")
-    ap.add_argument("--plan-only", action="store_true", help="stop after writing a checked plan")
+    ap.add_argument("--plan-only", action="store_true",
+                    help="stop at the plan, before linking: once --write-plan is written or --plan checked")
     route = ap.add_mutually_exclusive_group()
     route.add_argument("--plan", type=Path, help="take what to zero and copy from this file, not disc/<ver>/")
     route.add_argument("--write-plan", type=Path, help="write what is zeroed and copied (from disc/<ver>/) here")
@@ -450,8 +455,8 @@ def main(argv: list[str] | None = None) -> int:
     objdump = re.sub(r"objcopy(\.exe)?$", r"objdump\1", a.objcopy)
     if a.macho_exports:
         objdump = None
-    if a.plan_only and not a.write_plan:
-        ap.error("--plan-only requires --write-plan")
+    if a.plan_only and not (a.plan or a.write_plan):
+        ap.error("--plan-only requires --plan or --write-plan")
     off = os.environ.get("XG_SRCDATA") == "off"
     if off and (a.plan or a.write_plan):
         raise SystemExit("pc_srcdata: XG_SRCDATA=off strips nothing: no --plan or --write-plan with it")
@@ -468,6 +473,11 @@ def main(argv: list[str] | None = None) -> int:
                     "toolchain it was made with, or from your disc (which finds the runs again)."
                     if "stale plan" in str(e) else "")
             raise SystemExit(f"pc_srcdata: plan {a.plan}: {e}{hint}") from None
+        if a.plan_only:
+            cps = [cp for secs in strips for *_, sec_cps in secs for cp in sec_cps or []]
+            print(f"pc_srcdata {a.module}: plan fits these {len(a.objects)} objects "
+                  f"({sum(n for _, _, n in cps)} bytes in {len(cps)} copies)")
+            return 0
     else:
         strips, h, image = disc_strip(a, objdump, off)
         if a.write_plan:

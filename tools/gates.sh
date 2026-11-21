@@ -28,6 +28,11 @@
 #               through PSX_SCRATCH (include/common.h; tools/scratchpadcheck.py)
 #   xmodcheck   cross-module data references the PC link would split into
 #               separate copies (names differ between modules; per version)
+#   darwin-plans the macOS module check's committed plans (port/src/system/
+#               test/macos_modules/us-original) against field's and battle's
+#               objects cross-built for arm64 macOS (tools/darwin_plans.py;
+#               `write` rewrites a stale one from the disc): skipped without a
+#               clang that targets AArch64
 #   statevars   every writable static of the platform layer in $XG_TEST_BUILD
 #               is classified for save states (port/src/system/
 #               savestate_inventory.txt; tools/statecheck.py inventory):
@@ -164,6 +169,9 @@ for ver in us jp; do
             --tables $(find "port/link-tables/$ver" -type f | sort)
     fi
 done
+# The plans the public macOS workflow links field and battle from: a data change
+# there makes them stale, and only that run would see it.
+gate darwin-plans "$PY" tools/darwin_plans.py check
 
 # The default test build is the gates' own (the tests build the executable
 # too, and build/pc/release is the user's launcher).

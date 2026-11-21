@@ -18,6 +18,31 @@ PY=${PY:-.venv/bin/python}
 DRAWN=$($PY tools/glyph_batch.py status --dir "$B")
 echo "$DRAWN"
 [[ $DRAWN =~ :\ ([0-9]+)/([0-9]+)\ sheets ]] && [[ ${BASH_REMATCH[1]} == "${BASH_REMATCH[2]}" ]] || { echo "ship_glyphs: $NAME is not fully drawn" >&2; exit 1; }
+# a HUD batch (batch.json kind "hud", glyph_batch.py prep-hud: a translation's labels, xg-g0ra.4) goes into the HUD
+# pack's set for its language (cel-<scale>x/<version>/<set>) with tools/ui_cel_add_field_sprites.py, each sprite's
+# native and palette from the VRAM dump it was captured in; the build's ui-packs link is swapped like glyph-packs
+KIND=$($PY -c 'import json,sys; print(json.load(open(sys.argv[1])).get("kind", "glyphs"))' "$B/batch.json")
+if [[ $KIND == hud ]]; then
+    BASE=$(readlink -f build/pc/enhanced/ui-packs)
+    [[ -d $BASE ]] || { echo "ship_glyphs: no installed HUD library (build/pc/enhanced/ui-packs)" >&2; exit 1; }
+    N=1; while [[ -e $B-pack$N ]]; do N=$((N + 1)); done
+    OUT=$B-pack$N
+    SET=$($PY -c 'import json,sys; print(json.load(open(sys.argv[1]))["set"])' "$B/batch.json")
+    VERSION=$($PY -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$B/batch.json")
+    readarray -t NAMES < <(ls "$B/prepared/sheets" | sed -n 's/\.json$//p')
+    $PY tools/ui_cel_add_field_sprites.py --base "$BASE" --out "$OUT" --prepared "$B/prepared" --masters "$B/drawn" \
+        --version "$VERSION" --set "$SET" --flatten 6 "${NAMES[@]}" | tail -2
+    held=$( [[ -f $BASE/batches.txt ]] && cat "$BASE/batches.txt" || true )
+    printf '%s\n' $held "$NAME" > "$OUT/batches.txt"
+    if [[ $INSTALL == 0 ]]; then echo "ship_glyphs: built $OUT (not installed)"; exit 0; fi
+    for b in release enhanced release-jp enhanced-jp; do
+        L=build/pc/$b/ui-packs
+        [[ -L $L ]] || continue
+        ln -sfn "$(readlink -f "$OUT")" "$L.new" && mv -T "$L.new" "$L"
+        echo "ship_glyphs: $L -> $(readlink "$L")"
+    done
+    exit 0
+fi
 BASE=$(readlink -f build/pc/enhanced/glyph-packs)
 [[ -d $BASE ]] || { echo "ship_glyphs: no installed glyph library (build/pc/enhanced/glyph-packs)" >&2; exit 1; }
 N=1; while [[ -e $B-pack$N ]]; do N=$((N + 1)); done
@@ -25,8 +50,12 @@ OUT=$B-pack$N
 readarray -t FLAGS < <($PY -c 'import json,sys; [print(f) for f in json.load(open(sys.argv[1]))["pack"]]' "$B/batch.json")
 DISC=$($PY -c 'import json,sys; print(json.load(open(sys.argv[1]))["disc"])' "$B/batch.json")
 TITLE=$($PY -c 'import json,sys; print(json.load(open(sys.argv[1]))["title"])' "$B/batch.json")
+# a batch with glyphs no font holds (batch.json dump, dump_keys: a texture-discovery dump of the translation)
+DUMP=$($PY -c 'import json,sys; print(json.load(open(sys.argv[1])).get("dump", ""))' "$B/batch.json")
+DUMPKEYS=$($PY -c 'import json,sys; print(",".join(json.load(open(sys.argv[1])).get("dump_keys", [])))' "$B/batch.json")
+DUMPARGS=(); [[ -n $DUMP ]] && DUMPARGS=(--dump "$DUMP" --dump-keys "$DUMPKEYS")
 $PY tools/glyph_sheet_pack.py "$DISC" --prepared "$B/prepared" --masters "$B/drawn" --base "$BASE" --out "$OUT" \
-    --check "$OUT-check" --name "$TITLE" "${FLAGS[@]}"
+    --check "$OUT-check" --name "$TITLE" "${FLAGS[@]}" "${DUMPARGS[@]}"
 $PY - "$B" "$BASE" "$OUT" "$NAME" <<'PY'
 import json, sys
 from pathlib import Path
@@ -47,7 +76,7 @@ PY
 # the English counterparts were made with, and copied in where the library has no picture (xg-g0ra.3)
 if $PY -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("faithful_fill") else 1)' "$B/batch.json"; then
     rm -rf "$OUT-faithful"
-    $PY tools/glyph_art_pack.py "$OUT-faithful" --disc "$DISC" --faithful-cel | tail -1
+    $PY tools/glyph_art_pack.py "$OUT-faithful" --disc "$DISC" ${DUMP:+--dump "$DUMP"} --faithful-cel | tail -1
     $PY - "$OUT" "$OUT-faithful" <<'PY'
 import json, shutil, sys
 from pathlib import Path
@@ -64,6 +93,20 @@ print(f'ship_glyphs: {len(filled)} glyphs filled by the faithful method')
 PY
     rm -rf "$OUT-faithful"
 fi
+# batch.json `dump_nearest`: dumped glyphs too small to redraw (the Italian menu's 2x2 dot), copied at 8x nearest
+$PY - "$B/batch.json" "$OUT" <<'PY'
+import json, sys
+from pathlib import Path
+from PIL import Image
+meta, out = json.load(open(sys.argv[1])), Path(sys.argv[2])
+for key in meta.get('dump_nearest', []):
+    im = Image.open(Path(meta['dump']) / 'glyphs' / f'{key}.indices.png').convert('RGBA')
+    for v in ('SLUS-00664', 'SLPS-01160'):
+        target = out / v / 'glyphs' / f'{key}.indices.png'
+        if not target.exists():
+            im.resize((im.width * 8, im.height * 8), Image.Resampling.NEAREST).save(target)
+    print(f'ship_glyphs: {key} copied at 8x nearest')
+PY
 # a translation that prints proportionally (batch.json `proportional`: the discs whose dialogue fonts it prints from)
 # gets its glyphs' proportional crops cut from the redrawn cells (tools/glyph_crops.py, xg-g0ra.6)
 readarray -t PROP < <($PY -c 'import json,sys; [print(d) for d in json.load(open(sys.argv[1])).get("proportional", [])]' "$B/batch.json")

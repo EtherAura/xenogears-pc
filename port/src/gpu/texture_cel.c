@@ -184,7 +184,8 @@ static void kept(TextureRequest p,int x,int y,const CelSprite* s,const char* why
     logged[at]=k;++loggedCount;
     if(logMode)fprintf(stderr,"cel: native pixels kept: tpage %04x clut %04x uv %d,%d %dx%d (sprites.txt x %d y %d): %s%s\n",
             p.tpage,p.clut,p.u,p.v,p.w,p.h,x,y,why,s?s->path+strlen(root):"");
-    texturePackAudit("hud %04x %04x %d,%d %dx%d at %d,%d: %s%s",p.tpage,p.clut,p.u,p.v,p.w,p.h,x,y,why,s?s->path+strlen(root):"");
+    texturePackAudit("hud %04x %04x %d,%d %dx%d at %d,%d vblank %u: %s%s",p.tpage,p.clut,p.u,p.v,p.w,p.h,x,y,(unsigned)hwVSyncCount(),
+                     why,s?s->path+strlen(root):"");
 }
 /* The frame's counts move on at the first Cel sample of a new vblank. */
 static CelFrame* frame(void) {
