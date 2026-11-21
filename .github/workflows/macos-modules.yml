@@ -1,0 +1,38 @@
+name: macOS module reset
+
+on:
+  push:
+    branches: [main]
+    paths: &inputs
+      - .github/workflows/macos-modules.yml
+      - port/src/system/test/macos_modules/**
+      - port/src/system/memory.c
+      - port/src/system/*.h
+      - tools/pc_srcdata.py
+      - tools/pc_link.py
+      - tools/payload*.py
+  pull_request:
+    paths: *inputs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  module-reset:
+    name: Link and reset two modules on Apple Silicon
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Identify native host and toolchain
+        run: |
+          uname -sm
+          test "$(uname -sm)" = "Darwin arm64"
+          sw_vers
+          xcodebuild -version
+          xcrun clang --version
+      - name: Link, scan and execute disc-free fixture
+        run: python3 port/src/system/test/macos_modules/run.py
