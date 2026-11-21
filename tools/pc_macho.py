@@ -1,4 +1,5 @@
 """Darwin arm64 game-module objects. Only plain little-endian MH_OBJECT is accepted."""
+import hashlib
 import struct
 import subprocess
 from dataclasses import dataclass
@@ -115,7 +116,6 @@ class Object:
 
 def section_names(module):
     # Stable within the 16-byte Mach-O limit, independent of which modules are built together.
-    import hashlib
     suffix = hashlib.sha256(module.encode()).hexdigest()[:12]
     return "xgd" + suffix, "xgb" + suffix
 
@@ -124,7 +124,7 @@ def link(module, linker, objects, exports, output, tmp):
     data, bss = section_names(module)
     partial = Path(tmp) / "allocated.o"
     args = [linker, "-r", "-arch", "arm64"]
-    subprocess.run([*args, "-d", "-rename_section", "__DATA", "__data", "__DATA", data,
+    subprocess.run([*args, "-v", "-d", "-rename_section", "__DATA", "__data", "__DATA", data,
                     "-rename_section", "__DATA", "__common", "__DATA", bss,
                     "-rename_section", "__DATA", "__bss", "__DATA", bss, *objects, "-o", partial], check=True)
     # ld-classic exports all newly allocated commons in the first pass. Localize only afterwards.

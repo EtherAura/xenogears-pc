@@ -10,24 +10,7 @@ void portModulesInit(void);
 void portResetModule(const char *name);
 void portClearModuleBss(const char *name);
 
-typedef struct {
-    const char *name;
-    char *dataStart, *dataEnd, *bssStart, *bssEnd;
-} PortModule;
-
-#define BOUNDS(id, section) \
-    extern char id##Start[] __asm("section$start$__DATA$" #section); \
-    extern char id##End[] __asm("section$end$__DATA$" #section)
-BOUNDS(fieldData, xgd01);
-BOUNDS(fieldBss, xgb01);
-BOUNDS(battleData, xgd02);
-BOUNDS(battleBss, xgb02);
-
-PortModule portModules[] = {
-    {"field", fieldDataStart, fieldDataEnd, fieldBssStart, fieldBssEnd},
-    {"battle", battleDataStart, battleDataEnd, battleBssStart, battleBssEnd},
-};
-const int portModuleCount = 2;
+#include "bounds.inc"
 
 static void check(int ok, const char *what) {
     if (!ok) {

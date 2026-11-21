@@ -3,7 +3,6 @@
 import argparse
 import hashlib
 import platform
-import struct
 import subprocess
 import sys
 import tempfile
@@ -13,6 +12,8 @@ HERE = Path(__file__).resolve().parent
 SYSTEM = HERE.parents[1]
 sys.path.insert(0, str(HERE.parents[4] / "tools"))
 import payloadcheck
+import pc_link
+import pc_macho
 import pc_srcdata
 
 
@@ -22,40 +23,23 @@ def run(*args, capture=False):
 
 
 def strip_initializer(obj, image):
-    """Read section_64 and relocation_info from the single arm64 MH_OBJECT fixture."""
-    data = bytearray(obj.read_bytes())
-    magic, cpu, _, kind, count = struct.unpack_from("<5I", data)
-    if (magic, cpu, kind) != (0xfeedfacf, 0x100000c, 1):
-        raise ValueError("expected arm64 Mach-O object")
-    pos = 32
-    for _ in range(count):
-        cmd, size = struct.unpack_from("<II", data, pos)
-        if cmd == 0x19:  # LC_SEGMENT_64
-            nsects, = struct.unpack_from("<I", data, pos + 64)
-            for i in range(nsects):
-                header = pos + 72 + 80 * i
-                name, segment, _, length, offset, _, rel, nrel = struct.unpack_from("<16s16sQQIIII", data, header)
-                if (segment.rstrip(b"\0"), name.rstrip(b"\0")) != (b"__DATA", b"__data"):
-                    continue
-                if nrel != 1:
-                    raise ValueError("expected exactly one data relocation")
-                addr, flags = struct.unpack_from("<iI", data, rel)
-                # ARM64_RELOC_UNSIGNED, absolute, 8 bytes, following the first synthetic run.
-                if (addr, flags >> 28, (flags >> 24) & 7) != (24, 0, 6):
-                    raise ValueError("unexpected pointer relocation")
-                section = data[offset:offset + length]
-                keep = set(range(addr, addr + 8))
-                wanted = payloadcheck.windows({"fixture": image}, pc_srcdata.MIN)
-                copies = pc_srcdata.blank(section, keep, wanted, pc_srcdata.Source(image, []))
-                if copies != [(0, 0, 24), (32, 32, 24)]:
-                    raise ValueError(f"unexpected source-byte restore plan: {copies}")
-                if section[addr:addr + 8] != data[offset + addr:offset + addr + 8]:
-                    raise ValueError("strip changed pointer addend")
-                data[offset:offset + length] = section
-                obj.write_bytes(data)
-                return copies
-        pos += size
-    raise ValueError("fixture __DATA,__data missing")
+    """Exercise the production reader and writable-section rewrite around a live pointer."""
+    macho = pc_macho.Object(obj.read_bytes())
+    section = next(s for s in macho.sections if s.key == "__DATA,__data")
+    keep = macho.relocated(section.key)
+    if keep != set(range(24, 32)):
+        raise ValueError("expected an eight-byte relocation between the source runs")
+    raw = macho.data[section.offset:section.offset + section.size]
+    wanted = payloadcheck.windows({"fixture": image}, pc_srcdata.MIN)
+    copies = pc_srcdata.blank(raw, keep, wanted, pc_srcdata.Source(image, []))
+    if copies != [(0, 0, 24), (32, 32, 24)]:
+        raise ValueError(f"unexpected source-byte restore plan: {copies}")
+    if raw[24:32] != macho.data[section.offset + 24:section.offset + 32]:
+        raise ValueError("strip changed pointer addend")
+    macho.data[section.offset:section.offset + section.size] = raw
+    macho.mark_sources({section.key: "syntheticSource"})
+    obj.write_bytes(macho.data)
+    return copies
 
 
 def build(tmp, objects_only):
@@ -89,16 +73,8 @@ def build(tmp, objects_only):
             if not any(line.split()[-2:] == ["C", "_common"] for line in symbols):
                 raise ValueError(f"{obj.name} did not contribute tentative common storage")
         module = build_dir / "module.o"
-        data, bss = f"xgd{i:02}", f"xgb{i:02}"
-        # ld-classic always exports tentative definitions in the pass that allocates
-        # them. Apply the export list once those definitions are ordinary BSS symbols.
-        partial = build_dir / "allocated.o"
-        linker = ["xcrun", "ld-classic", "-r", "-arch", "arm64"]
-        run(*linker, "-v", "-d",
-            "-rename_section", "__DATA", "__data", "__DATA", data,
-            "-rename_section", "__DATA", "__common", "__DATA", bss,
-            "-rename_section", "__DATA", "__bss", "__DATA", bss, *inputs, "-o", partial)
-        run(*linker, "-exported_symbol", "_" + entry, partial, "-o", module)
+        ld = run("xcrun", "--find", "ld-classic", capture=True).strip()
+        pc_macho.link(entry.removesuffix("View"), ld, inputs, [entry], module, build_dir)
         run("nm", "-m", module)
         exports = {line.split()[-1] for line in run("nm", "-gU", module, capture=True).splitlines() if line.strip()}
         if exports != {"_" + entry}:
@@ -108,6 +84,7 @@ def build(tmp, objects_only):
 
     if objects_only:
         return
+    (tmp / "bounds.inc").write_text("\n".join(pc_link.module_bounds(["field", "battle"], True)))
     (tmp / "copies.inc").write_text("".join(copy_rows))
     source = tmp / "source.bin"
     source.write_bytes(b"".join(images.values()))

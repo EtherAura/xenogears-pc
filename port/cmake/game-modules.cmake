@@ -87,3 +87,9 @@ function(xg_link_module module)
         VERBATIM
     )
 endfunction()
+
+function(xg_darwin_linker)
+    execute_process(COMMAND xcrun --find ld-classic OUTPUT_VARIABLE linker
+        OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    set(XG_LD "${linker}" PARENT_SCOPE)
+endfunction()

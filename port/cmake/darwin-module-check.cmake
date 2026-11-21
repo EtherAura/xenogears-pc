@@ -18,7 +18,7 @@ add_custom_target(darwin_module_inputs DEPENDS game_field game_battle)
 if(CMAKE_CROSSCOMPILING)
     return() # Maintainer preparation only needs the input Mach-O objects.
 endif()
-find_program(XG_LD NAMES ld-classic REQUIRED)
+xg_darwin_linker()
 foreach(module field battle)
     configure_file("${XG_MODULE_METADATA}/${module}.c" "${XG_GEN_DIR}/${module}.c" COPYONLY)
     xg_link_module(${module})
