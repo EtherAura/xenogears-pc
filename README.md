@@ -15,6 +15,14 @@ Part of **-Project Exodus-**.
 
 [**Build and set up**](docs/building.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
 
+## Start your full Xenogears playthrough on PC
+
+Both discs are supported on Linux and Windows. We expect the main story to be playable from New Game through the credits, and v2026.11.18 fixes a known late-game freeze by default.
+
+Bring your own US or Japanese PlayStation disc images. If you reach the credits, we’d love to hear which platform and disc region you played.
+
+[**Download Xenogears PC**](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.18)
+
 <img src="docs/img/clip-readme.webp" alt="Animated comparison in the PC port: 4:3 at 30 fps, and 16:9 with motion smoothing at 60 fps" width="960" />
 </div>
 
@@ -24,7 +32,7 @@ Part of **-Project Exodus-**.
 | [**Gameplay**](docs/gameplay.md) | [**Extras**](docs/extras.md) |
 | ![A forest battle with optional speed settings](docs/img/gameplay.png) | ![Map viewer with a free camera](docs/img/extras.png) |
 
-**Bring your own US or Japanese discs.** The port reads game data from your images; none is included.
+The port reads game data from your images; none is included.
 The extras are optional, and default settings preserve the PlayStation presentation.
 GitHub CI covers checks that need no game data; full builds and retail checks run locally.
 
