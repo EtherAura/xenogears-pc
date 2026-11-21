@@ -28,6 +28,12 @@ Part of **-Project Exodus-**.
 The extras are optional, and default settings preserve the PlayStation presentation.
 GitHub CI covers checks that need no game data; full builds and retail checks run locally.
 
+## Platforms
+
+- **Linux x86-64 and Windows x64.** [Public downloads](https://github.com/EtherAura/xenogears-pc/releases/latest) are available.
+- **FreeBSD 15.1 amd64.** Native Original and Enhanced builds for US and Japanese discs booted in a VM with software Vulkan and local compatibility fixes. A public package is pending.
+- **Android.** The [APK build script](tools/build_android.sh) targets x86-64 and arm64. A signed APK ran in Remora on Android 17 x86-64. Physical arm64 testing and a public APK are pending.
+
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Discussions](https://github.com/EtherAura/xenogears-pc/discussions)
 
 <sub>Project work: GPL-3.0 or later; third-party libraries retain their licences. Xenogears © Square Enix. Unofficial and unaffiliated.</sub>
