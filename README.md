@@ -13,7 +13,7 @@ Built from the [matching decompilation](https://github.com/EtherAura/xenogears).
 Native Linux and Windows, with optional display, gameplay and presentation extras.
 Part of **-Project Exodus-**.
 
-[**Build and set up**](docs/building.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
+[**Website**](https://exodus.agartha.digital/) · [**Build and set up**](docs/building.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
 
 ## Start your full Xenogears playthrough on PC
 
