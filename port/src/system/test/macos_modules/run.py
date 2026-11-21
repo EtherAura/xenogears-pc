@@ -90,11 +90,16 @@ def build(tmp, objects_only):
                 raise ValueError(f"{obj.name} did not contribute tentative common storage")
         module = build_dir / "module.o"
         data, bss = f"xgd{i:02}", f"xgb{i:02}"
-        # Xcode's classic linker supports -r -d to allocate each module's common symbols.
-        run("xcrun", "ld-classic", "-v", "-r", "-arch", "arm64", "-d", "-exported_symbol", "_" + entry,
+        # ld-classic always exports tentative definitions in the pass that allocates
+        # them. Apply the export list once those definitions are ordinary BSS symbols.
+        partial = build_dir / "allocated.o"
+        linker = ["xcrun", "ld-classic", "-r", "-arch", "arm64"]
+        run(*linker, "-v", "-d",
             "-rename_section", "__DATA", "__data", "__DATA", data,
             "-rename_section", "__DATA", "__common", "__DATA", bss,
-            "-rename_section", "__DATA", "__bss", "__DATA", bss, *inputs, "-o", module)
+            "-rename_section", "__DATA", "__bss", "__DATA", bss, *inputs, "-o", partial)
+        run(*linker, "-exported_symbol", "_" + entry, partial, "-o", module)
+        run("nm", "-m", module)
         exports = {line.split()[-1] for line in run("nm", "-gU", module, capture=True).splitlines() if line.strip()}
         if exports != {"_" + entry}:
             raise ValueError(f"unexpected module exports: {sorted(exports)}")
