@@ -120,7 +120,7 @@ option(XG_SHARED "the game as libxenogears.so plus a launcher (the Android app's
 if(XG_SHARED AND WIN32)
     message(FATAL_ERROR "XG_SHARED: Linux (ELF) only")
 endif()
-if(XG_SHARED)
+if(XG_SHARED OR APPLE)
     set(XG_PIE ON)
 endif()
 if(XG_PIE)
@@ -140,6 +140,13 @@ set(XG_MODULES ${XG_MODULES_${XG_VERSION}})
 foreach(module IN LISTS XG_MODULES)
     set(XG_SOURCES_${module} ${XG_SOURCES_${XG_VERSION}_${module}})
 endforeach()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/game-modules.cmake")
+option(XG_DARWIN_MODULE_CHECK "Link the US Original field and battle modules without the presentation layer" OFF)
+if(XG_DARWIN_MODULE_CHECK)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/darwin-module-check.cmake")
+    return()
+endif()
 
 find_package(SDL3 REQUIRED CONFIG)
 
@@ -286,36 +293,6 @@ target_include_directories(gallery_scenetest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 target_compile_definitions(gallery_scenetest PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
 target_link_libraries(gallery_scenetest PRIVATE SDL3::SDL3)
 
-# Game code: gnu89 without system headers (it declares what it uses), and the
-# PS1 compiler's semantics where C leaves them open: unsigned char, wrapping
-# signed arithmetic, type punning, tentative definitions shared across files,
-# and explicit zero initialisers in .data, not .bss, as GCC 2.x places them
-# (the soft reset clears main's BSS and keeps its data, as the PS1's does).
-# One .data and one .bss per object, never a section per symbol (the Android
-# NDK's toolchain turns -fdata-sections on): the module link renames .data
-# and .bss into the module's own sections, which the overlay resets and save
-# states cover.
-set(XG_GAME_OPTIONS -std=gnu89 -nostdinc -fno-builtin -funsigned-char -fwrapv -fno-strict-aliasing -fcommon
-    -fno-zero-initialized-in-bss -fno-data-sections -fno-function-sections ${XG_PIC_OPTIONS})
-if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
-    list(APPEND XG_GAME_OPTIONS -fpermissive -w)
-else()
-    list(APPEND XG_GAME_OPTIONS -Wno-everything)
-endif()
-
-# Windows (MinGW, port/cmake/mingw-w64-x86_64.cmake): bitfields laid out as
-# GCC does elsewhere (as tools/pc_link.py's probes see them), not as MSVC
-# does; data addressed directly, not through .refptr indirection words
-# (nothing in game code comes from a DLL).
-set(XG_WIN32_LAYOUT_OPTIONS)
-if(WIN32)
-    set(XG_WIN32_LAYOUT_OPTIONS -mno-ms-bitfields)
-    list(APPEND XG_GAME_OPTIONS ${XG_WIN32_LAYOUT_OPTIONS} -mcmodel=small)
-    # kernel32's EnterCriticalSection is linked in by the C runtime: the
-    # PsyQ one takes another name (port/src/system/libapi.c).
-    list(APPEND XG_GAME_OPTIONS -DEnterCriticalSection=psxEnterCriticalSection)
-endif()
-
 # Gameplay tests drive real game C with synthetic state. xg_gameplay_code
 # compiles game files like the game; xg_gameplay_test links a test with the
 # gameplay and settings code and, off Windows, the GAME object libraries and
@@ -420,14 +397,8 @@ xg_gameplay_test(gameplay_portraittest SOURCES src/system/test/portraittest.c sr
     src/game/main/retailheap.c GAME gameplay_portrait_code HOST src/gpu/prim.c)
 target_compile_options(gameplay_portraittest PRIVATE -ffunction-sections -fdata-sections)
 
-# port/src/game/<module>/*.c: C versions of the game's hand-written assembly,
-# compiled like the game C and linked into that module.
 foreach(module IN LISTS XG_MODULES)
-    file(GLOB XG_PORT_GAME_${module} CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/game/${module}/*.c")
-    add_library(game_${module} OBJECT ${XG_SOURCES_${module}} ${XG_PORT_GAME_${module}})
-    target_include_directories(game_${module} PRIVATE "${XG_GAME_ROOT}/include")
-    target_compile_definitions(game_${module} PRIVATE PLATFORM_PC VERSION_${XG_VERSION} _LANGUAGE_C)
-    target_compile_options(game_${module} PRIVATE ${XG_GAME_OPTIONS})
+    xg_game_objects(${module})
 endforeach()
 
 # Field speed (xg-mrj.6, tools/test_field_speed.py): fieldspeed.c, battlespeed.c's
@@ -623,8 +594,13 @@ target_include_directories(ui_l10ntest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 target_compile_definitions(ui_l10ntest PRIVATE PLATFORM_PC)
 target_link_libraries(ui_l10ntest PRIVATE SDL3::SDL3)
 add_dependencies(ui_l10ntest ui_l10n)
-find_program(XG_LD NAMES ld REQUIRED)
-find_program(XG_OBJCOPY NAMES objcopy REQUIRED)
+if(APPLE)
+    find_program(XG_LD NAMES ld-classic REQUIRED)
+    set(XG_MODULE_FORMAT --darwin)
+else()
+    find_program(XG_LD NAMES ld REQUIRED)
+    find_program(XG_OBJCOPY NAMES objcopy REQUIRED)
+endif()
 # pc_link's layout probes (a cross build's toolchain file names the host gcc).
 if(NOT XG_PROBE_CC)
     set(XG_PROBE_CC "${CMAKE_C_COMPILER}")
@@ -648,9 +624,9 @@ endif()
 add_custom_command(
     OUTPUT ${XG_GEN_OUTPUTS}
     COMMAND Python3::Interpreter "${XG_ROOT}/tools/pc_link.py" --ver ${XG_VERSION_LOWER}
-            --cc "${XG_PROBE_CC}" --game-root "${XG_GAME_ROOT}" "${XG_GEN_DIR}" ${XG_ALL_OBJECTS}
+            ${XG_MODULE_FORMAT} --cc "${XG_PROBE_CC}" --game-root "${XG_GAME_ROOT}" "${XG_GEN_DIR}" ${XG_ALL_OBJECTS}
             --platform $<TARGET_OBJECTS:platform>
-    DEPENDS ${XG_ALL_OBJECTS} $<TARGET_OBJECTS:platform> "${XG_ROOT}/tools/pc_link.py" ${XG_PCLINK_INPUTS}
+    DEPENDS ${XG_ALL_OBJECTS} $<TARGET_OBJECTS:platform> "${XG_ROOT}/tools/pc_link.py" "${XG_ROOT}/tools/pc_macho.py" ${XG_PCLINK_INPUTS}
     WORKING_DIRECTORY "${XG_ROOT}"
     COMMENT "Generating stubs, data and export lists (tools/pc_link.py)"
     COMMAND_EXPAND_LISTS
@@ -660,36 +636,8 @@ add_custom_command(
 set(XG_MODULE_OBJECTS)
 set(XG_SRCDATA_SOURCES)
 foreach(module IN LISTS XG_MODULES)
-    add_library(gen_${module} OBJECT "${XG_GEN_DIR}/${module}.c")
-    target_compile_options(gen_${module} PRIVATE -w -fno-data-sections ${XG_PIC_OPTIONS})
+    xg_link_module(${module})
     set(out "${CMAKE_BINARY_DIR}/modules/${module}.o")
-    # Each module's data and BSS in sections of their own: the overlays are
-    # reset at each load, main's BSS at the soft reset (port/src/system/memory.c).
-    # Position-independent code (XG_PIE) puts initialised data that holds
-    # pointers in .data.rel* instead of .data: the module's data all the same.
-    set(rename --rename-section .data=xgdata_${module} --rename-section .bss=xgbss_${module})
-    foreach(rel .data.rel .data.rel.local .data.rel.ro .data.rel.ro.local)
-        list(APPEND rename --rename-section ${rel}=xgdata_${module})
-    endforeach()
-    # The partial link (ld -r) leaves the game C's own retail bytes (tables and
-    # strings as C initialisers) out: zeroed, and filled from the player's disc
-    # like the module data (tools/pc_srcdata.py: <module>.src.c has the copies).
-    set(srcdata "${XG_GEN_DIR}/${module}.src.c" "${XG_GEN_DIR}/${module}.srcsyms")
-    add_custom_command(
-        OUTPUT "${out}" ${srcdata}
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/modules"
-        COMMAND Python3::Interpreter "${XG_ROOT}/tools/pc_srcdata.py" --ver ${XG_VERSION_LOWER}
-                --ld "${XG_LD}" --objcopy "${XG_OBJCOPY}" ${module} "${out}.partial" ${srcdata}
-                $<TARGET_OBJECTS:gen_${module}> $<TARGET_OBJECTS:game_${module}>
-        COMMAND "${XG_OBJCOPY}" "--keep-global-symbols=${XG_GEN_DIR}/${module}.exports"
-                "--keep-global-symbols=${XG_GEN_DIR}/${module}.srcsyms" ${rename} "${out}.partial" "${out}"
-        DEPENDS $<TARGET_OBJECTS:game_${module}> $<TARGET_OBJECTS:gen_${module}> "${XG_GEN_DIR}/${module}.exports"
-                "${XG_ROOT}/tools/pc_srcdata.py" "${XG_ROOT}/tools/payloadcheck.py"
-        WORKING_DIRECTORY "${XG_ROOT}"
-        COMMENT "Linking module ${module}"
-        COMMAND_EXPAND_LISTS
-        VERBATIM
-    )
     list(APPEND XG_MODULE_OBJECTS "${out}")
     list(APPEND XG_SRCDATA_SOURCES "${XG_GEN_DIR}/${module}.src.c")
 endforeach()

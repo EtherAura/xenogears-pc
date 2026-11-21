@@ -6,6 +6,7 @@
  * alias at its member's PC offset. tools/pc_link.py would otherwise give every
  * name its own storage, and the two views would drift apart.
  */
+#include "../asmlabel.h"
 #include "common.h"
 #include "psyq.h"
 #include "field/field.h"
@@ -29,7 +30,7 @@ void* D_800B235C = 0;
 /* name = (char*)&block + offset. Emitted from a function only because
  * top-level asm takes no operands. */
 #define ALIAS_AT(name, block, offset) \
-    __asm__(".globl " #name "\n.set " #name ", " #block " + %c0" : : "i"(offset))
+    __asm__(".globl " XG_ASM_LABEL(name) "\n.set " XG_ASM_LABEL(name) ", " XG_ASM_LABEL(block) " + %c0" : : "i"(offset))
 #define OFFSET(block, member) __builtin_offsetof(__typeof__(block), member)
 #define ALIAS(name, block, member) ALIAS_AT(name, block, OFFSET(block, member))
 

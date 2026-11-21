@@ -90,6 +90,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import payloadcheck  # noqa: E402
 import pc_link  # noqa: E402
+import pc_macho  # noqa: E402
 
 MIN = 16  # payloadcheck's shortest run
 # Data sections that hold no initialised game data (unwind tables, constructor lists).
@@ -99,6 +100,8 @@ SKIP = re.compile(r"^\.(eh_frame|gcc_except_table|init_array|fini_array|ctors|dt
 def data_sections(objdump: str, obj: str) -> list[tuple[str, int, int]]:
     """(name, size, offset in the file) of the object's sections with contents that are data (ELF
     or COFF)."""
+    if objdump is None:
+        return pc_macho.Object(Path(obj).read_bytes()).data_sections()
     out = []
     text = subprocess.run([objdump, "-h", obj], capture_output=True, text=True, check=True).stdout
     for m in re.finditer(r"^\s*\d+\s+(\S+)\s+([0-9a-f]+)\s+[0-9a-f]+\s+[0-9a-f]+\s+([0-9a-f]+)\s[^\n]*\n"
@@ -111,6 +114,8 @@ def data_sections(objdump: str, obj: str) -> list[tuple[str, int, int]]:
 
 def relocated(objdump: str, obj: str, section: str) -> set[int]:
     """Offsets in the section whose bytes a relocation fills (or, in COFF, holds the addend of)."""
+    if objdump is None:
+        return pc_macho.Object(Path(obj).read_bytes()).relocated(section)
     out: set[int] = set()
     text = subprocess.run([objdump, "-r", "-j", section, obj], capture_output=True, text=True).stdout
     for m in re.finditer(r"^([0-9a-f]+)\s+(\S+)", text, re.M):
@@ -436,11 +441,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--ver", default="us", choices=["us", "jp"])
     ap.add_argument("--ld", default="ld")
     ap.add_argument("--objcopy", default="objcopy")
+    ap.add_argument("--macho-exports", type=Path, help="link a Darwin arm64 module with these game exports")
+    ap.add_argument("--plan-only", action="store_true", help="stop after writing a checked plan")
     route = ap.add_mutually_exclusive_group()
     route.add_argument("--plan", type=Path, help="take what to zero and copy from this file, not disc/<ver>/")
     route.add_argument("--write-plan", type=Path, help="write what is zeroed and copied (from disc/<ver>/) here")
     a = ap.parse_args(argv)
     objdump = re.sub(r"objcopy(\.exe)?$", r"objdump\1", a.objcopy)
+    if a.macho_exports:
+        objdump = None
+    if a.plan_only and not a.write_plan:
+        ap.error("--plan-only requires --write-plan")
     off = os.environ.get("XG_SRCDATA") == "off"
     if off and (a.plan or a.write_plan):
         raise SystemExit("pc_srcdata: XG_SRCDATA=off strips nothing: no --plan or --write-plan with it")
@@ -458,6 +469,8 @@ def main(argv: list[str] | None = None) -> int:
         strips, h, image = disc_strip(a, objdump, off)
         if a.write_plan:
             a.write_plan.write_text(plan_json(a, objdump, strips, h, image))
+            if a.plan_only:
+                return 0
 
     copies: list[tuple[str, int, int, int]] = []  # (symbol, offset, file offset, size)
     syms: list[str] = []
@@ -465,6 +478,7 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as tmp:
         for i, (obj, secs) in enumerate(zip(a.objects, strips)):
             update, rename = [], []
+            anchors = {}
             data = bytearray(Path(obj).read_bytes())
             for name, size, at_file, cps in secs:
                 if cps is None:
@@ -476,32 +490,42 @@ def main(argv: list[str] | None = None) -> int:
                 update.append(f"--add-symbol={sym}={name}:0,global")
                 rename.append(f"--rename-section={name}=xgdata_{a.module},alloc,load,data,contents")
                 syms.append(sym)
+                anchors[name] = sym
             if update:
                 copy = str(Path(tmp) / f"o{i}.o")
-                Path(copy).write_bytes(bytes(data))
-                subprocess.run([a.objcopy, *update, copy], check=True)
-                subprocess.run([a.objcopy, *rename, copy], check=True)
+                if a.macho_exports:
+                    macho = pc_macho.Object(data)
+                    macho.mark_sources(anchors)
+                    Path(copy).write_bytes(macho.data)
+                else:
+                    Path(copy).write_bytes(data)
+                    subprocess.run([a.objcopy, *update, copy], check=True)
+                    subprocess.run([a.objcopy, *rename, copy], check=True)
                 linked.append(copy)
             else:
                 linked.append(obj)
-        subprocess.run([a.ld, "-r", "-d", "-o", a.out_partial, *linked, a.gen_object], check=True)
-        # -d gives the module's tentative definitions (common symbols, -fcommon) their space in the
-        # partial link, before objcopy makes the module's names local: a local common is no
-        # definition (LLVM's lld keeps commons in -r and turned one into address 8: xg-mrj.3.6).
-        # A section per symbol (.data.<name>, .bss.<name>: -fdata-sections) would escape the rename into
-        # the module's own sections (port/CMakeLists.txt), so the overlay resets and save states.
-        headers = subprocess.run(["objdump", "-h", a.out_partial], capture_output=True, text=True).stdout
-        split = sorted({m.group(1) for m in re.finditer(r"^\s*\d+\s+(\.(?:data|bss|sdata|sbss)\.\S+)", headers, re.M)
-                        if not m.group(1).startswith(".data.rel")})
-        if split:
-            raise SystemExit(f"pc_srcdata: {a.out_partial} has sections per symbol ({', '.join(split[:5])}...): "
-                             "compile the game C with -fno-data-sections")
-        nm_out = subprocess.run(["nm", a.out_partial], capture_output=True, text=True).stdout
-        commons = [line.split()[-1] for line in nm_out.splitlines() if re.match(r"^\S*\s+C\s", line)]
-        if commons:
-            raise SystemExit(f"pc_srcdata: {a.ld} left {len(commons)} common symbols in {a.out_partial} "
-                             f"({', '.join(commons[:5])}...): link modules with a linker whose -r -d "
-                             "allocates them (GNU ld)")
+        if a.macho_exports:
+            pc_macho.link(a.module, a.ld, [*linked, a.gen_object], a.macho_exports.read_text().split() + syms,
+                          a.out_partial, tmp)
+        else:
+            subprocess.run([a.ld, "-r", "-d", "-o", a.out_partial, *linked, a.gen_object], check=True)
+            # -d gives the module's tentative definitions (common symbols, -fcommon) their space in the
+            # partial link, before objcopy makes the module's names local: a local common is no
+            # definition (LLVM's lld keeps commons in -r and turned one into address 8: xg-mrj.3.6).
+            # A section per symbol (.data.<name>, .bss.<name>: -fdata-sections) would escape the rename into
+            # the module's own sections (port/CMakeLists.txt), so the overlay resets and save states.
+            headers = subprocess.run(["objdump", "-h", a.out_partial], capture_output=True, text=True).stdout
+            split = sorted({m.group(1) for m in re.finditer(r"^\s*\d+\s+(\.(?:data|bss|sdata|sbss)\.\S+)", headers, re.M)
+                            if not m.group(1).startswith(".data.rel")})
+            if split:
+                raise SystemExit(f"pc_srcdata: {a.out_partial} has sections per symbol ({', '.join(split[:5])}...): "
+                                 "compile the game C with -fno-data-sections")
+            nm_out = subprocess.run(["nm", a.out_partial], capture_output=True, text=True).stdout
+            commons = [line.split()[-1] for line in nm_out.splitlines() if re.match(r"^\S*\s+C\s", line)]
+            if commons:
+                raise SystemExit(f"pc_srcdata: {a.ld} left {len(commons)} common symbols in {a.out_partial} "
+                                 f"({', '.join(commons[:5])}...): link modules with a linker whose -r -d "
+                                 "allocates them (GNU ld)")
 
     lines = [f"/* Generated by tools/pc_srcdata.py for {a.module}; do not edit. The game C's own retail",
              " * bytes, zeroed in the module's object: (place, offset in the module's file, size). */",

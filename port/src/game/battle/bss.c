@@ -9,6 +9,7 @@
  * also makes every sub-overlay (battle_loader, battle_event, battle_result,
  * battle_debug*) and main use the battle's copy.
  */
+#include "../asmlabel.h"
 #include "common.h"
 #include "psyq.h"
 #include "battle/battle.h"
@@ -25,7 +26,7 @@ typedef union {
 
 /* Defined, not tentative, so the aliases have a section to refer to; under
  * its own C name, as battle.h declares battleBssBlock with the head's type. */
-BattleBssBlock battleBssUnion __asm__("battleBssBlock") = { 0 };
+BattleBssBlock battleBssUnion __asm__(XG_ASM_LABEL(battleBssBlock)) = { 0 };
 
 /* pBattleEntities (battle .data): the address of battleEntities. */
 BattleBss_800CCCE8* pBattleEntities = &battleBssUnion.m0_tail.m8E38_entities;
@@ -36,7 +37,7 @@ sLoadedMechas* battleMechas[32] = { 0 };
 /* name = (char*)&block + offset. Emitted from a function only because
  * top-level asm takes no operands. */
 #define ALIAS_AT(name, block, offset) \
-    __asm__(".globl " #name "\n.set " #name ", " #block " + %c0" : : "i"(offset))
+    __asm__(".globl " XG_ASM_LABEL(name) "\n.set " XG_ASM_LABEL(name) ", " XG_ASM_LABEL(block) " + %c0" : : "i"(offset))
 #define HEAD(member) __builtin_offsetof(BattleBss_800C3EB0, member)
 #define ENTITIES HEAD(m8E38_entities)
 /* A PS1 offset into BattleBss_800CCCE8: the same up to m5F20_levelUpData (a

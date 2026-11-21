@@ -8,6 +8,15 @@ on:
       - port/src/system/test/macos_modules/**
       - port/src/system/memory.c
       - port/src/system/*.h
+      - port/CMakeLists.txt
+      - port/cmake/*module*.cmake
+      - src/field/**
+      - src/battle/**
+      - port/src/game/**
+      - include/**
+      - config/us/**
+      - tools/pc_macho.py
+      - tools/pc_sources.py
       - tools/pc_srcdata.py
       - tools/pc_link.py
       - tools/payload*.py
@@ -36,3 +45,14 @@ jobs:
           xcrun clang --version
       - name: Link, scan and execute disc-free fixture
         run: python3 port/src/system/test/macos_modules/run.py
+      - name: Link and reset US Original field and battle
+        run: |
+          python3 -m venv "$RUNNER_TEMP/xg-python"
+          source "$RUNNER_TEMP/xg-python/bin/activate"
+          python -m pip install --disable-pip-version-check PyYAML==6.0.3
+          python tools/pc_sources.py
+          build="$RUNNER_TEMP/xg-game-modules"
+          cmake -S port -B "$build" -G Ninja -DXG_DARWIN_MODULE_CHECK=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          cmake --build "$build" --target darwin_module_check
+          file "$build/darwin_module_check"
+          python port/src/system/test/macos_modules/game_check.py verify "$build"
