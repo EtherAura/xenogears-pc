@@ -37,6 +37,7 @@ int tilesHit(const TileSet* t, VRect r);
  * whether r is such, and the vertical blank that carries them over. */
 void vramOwnedDraw(VRect r);
 int vramCpuOwned(VRect r);
+void vramOwnedDeviceDefault(int on); /* vk.c: the chosen device's default (XG_CPU_OWNED wins) */
 void vramOwnedVBlank(void);
 void vramOwnedReset(void); /* none (a GPU reset) */
 

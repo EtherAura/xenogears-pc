@@ -1604,6 +1604,16 @@ static int createDevice(void) {
     orderedDefault = !vk.interlock && props.vendorID == 0x1010 && props.deviceID == 0x71061212;
 #endif
     hiresDeviceDefaults(orderedDefault);
+    /* The same GPU keeps CPU-owned tiles (vram.c) off by default: there a
+     * CPU-drawn primitive over the GPU's pixels waits for them (the queue
+     * flushed, about 10 ms in the app), and every tile so read becomes the
+     * CPU's, so an ordinary battle's menu spread its CPU drawing over the
+     * frame. Pixel 10 Pro XL, 2800-vblank battle: 28 and 31 vblanks late
+     * with them, 0 and 0 without; the New Game intro (its screen effect
+     * included) 2 and 0; field 13 0-2 and 0; the Gear battle 0 either way
+     * (xg-mrj.3.10.4). */
+    vramOwnedDeviceDefault(!orderedDefault);
+    if (orderedDefault) gpuLog("vulkan: CPU-owned tiles off on this GPU by default (XG_CPU_OWNED=1 keeps them)");
     gpuLog("vulkan: using %s, %s", props.deviceName,
            vk.interlock ? "fragment shader interlock"
                         : vk.tileImage ? "no interlock, tile image reads (batches split on overlap without the ordered fallback)"

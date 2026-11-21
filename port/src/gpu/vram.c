@@ -639,15 +639,24 @@ void vramResolveCpuWrite(VRect r) {
  * wave pieces (cacheShade, the same pixels as the GPU's: the frames compared
  * equal at 1x and 12x), the result uploaded, so the CPU copy stays exact
  * there and nothing is read back. Such a tile stays the CPU's for
- * OWNED_VBLANKS after its last read. XG_CPU_OWNED=0: the GPU draws them.
+ * OWNED_VBLANKS after its last read. XG_CPU_OWNED=0: the GPU draws them,
+ * =1: the CPU does; unset, the device decides (vramOwnedDeviceDefault).
  */
 #define OWNED_VBLANKS 8 /* the flashback's mesh comes back every 6 (each buffer every other frame), a battle's ClearImage every 4 */
 static struct {
     int on;          /* -1 not read yet */
+    int deviceOff;   /* vramOwnedDeviceDefault: off unless XG_CPU_OWNED says */
     uint32_t now;    /* vertical blanks */
     TileSet written; /* drawn since the last vertical blank */
     uint32_t read[TILES_Y][TILES_X]; /* when the CPU last read the tile after drawing it, now + 1 (0: never) */
 } owned = {.on = -1};
+
+/* vk.c, once it has chosen the device: whether its tiles are the CPU's by
+ * default (XG_CPU_OWNED decides when set). */
+void vramOwnedDeviceDefault(int on) {
+    owned.deviceOff = !on;
+    owned.on = -1;
+}
 
 void vramOwnedDraw(VRect r) {
     tilesAdd(&owned.written, r);
@@ -656,7 +665,7 @@ void vramOwnedDraw(VRect r) {
 int vramCpuOwned(VRect r) {
     if (owned.on < 0) {
         const char* e = getenv("XG_CPU_OWNED");
-        owned.on = !(e && *e == '0');
+        owned.on = e && *e ? *e != '0' : !owned.deviceOff;
     }
     if (!owned.on) return 0;
     for (int y = r.y0 >> TILE_SHIFT; y <= r.y1 >> TILE_SHIFT; y++)
