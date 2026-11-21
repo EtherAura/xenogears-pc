@@ -40,7 +40,7 @@ extern s32 worldmapStreamingReadErrorCount;
 extern s32 worldmapStreamingSectorHeader[3]; /* CdGetSector reads 3 words here; its first is the sector position (CdlLOC) */
 
 /* worldmap.cpp */
-extern sWorldmapRenderingStruct worldmapRenderingStructs[2];
+extern sWorldmapRenderingStruct worldmapRenderingStructs[2] PORT_ALIAS;
 extern void* worldmapFile2Buffer;
 extern u8 worldMapFarColor[3];
 extern u16 worldmapGroundCluts[0x40];                /* Noah: USHORT_ARRAY_8009ccb4 (ground CLUTs) */

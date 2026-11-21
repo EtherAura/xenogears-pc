@@ -17,7 +17,7 @@
 
 extern sWorldmapState* gWorldmapState;
 extern sWorldmapModel* worldmapModels;
-extern sWorldmapRenderingStruct worldmapRenderingStructs[2];
+extern sWorldmapRenderingStruct worldmapRenderingStructs[2] PORT_ALIAS;
 extern sWorldmapRenderingStruct* pCurrentWorldmapRenderingStruct;
 extern LoadingBatchCommand worldmapLoadingCommands[16];
 extern u8 worldMapFarColor[3];

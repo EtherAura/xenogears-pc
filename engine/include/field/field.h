@@ -395,7 +395,7 @@ typedef struct {
     /* 0x20 */ POLY_FT4 m20_poly[2];
 } FieldQuad; /* size 0x70 */
 
-extern FieldQuad fieldCompassVar2[25]; /* [0x15..0x18]: the shadow quads */
+extern FieldQuad fieldCompassVar2[25] PORT_ALIAS; /* [0x15..0x18]: the shadow quads */
 extern u16 compassData2[16];            /* compass CLUT row */
 
 /* Field globals 0x800AF880-0x800AFB56 (one aggregate, see above). */
@@ -663,7 +663,7 @@ extern s32 asyncPartyCharacterLoadingTable[3];
 extern s32 partyFieldActorIds[3];              /* Noah: partyToFieldEntityArrayMapping */
 void fadePaletteColors(s32 count, s32 level, u16* dst, u16* src);
 
-extern sFieldRenderContext fieldRenderContext[2];
+extern sFieldRenderContext fieldRenderContext[2] PORT_ALIAS;
 
 s32 getVariable(s32 index);
 void setVar(s32 index, s32 value);

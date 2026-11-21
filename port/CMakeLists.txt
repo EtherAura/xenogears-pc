@@ -623,8 +623,15 @@ target_include_directories(ui_l10ntest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
 target_compile_definitions(ui_l10ntest PRIVATE PLATFORM_PC)
 target_link_libraries(ui_l10ntest PRIVATE SDL3::SDL3)
 add_dependencies(ui_l10ntest ui_l10n)
-find_program(XG_LD NAMES ld REQUIRED)
-find_program(XG_OBJCOPY NAMES objcopy REQUIRED)
+if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
+    # GNU ld allocates COMMON symbols with -r -d. FreeBSD's base lld leaves them unresolved.
+    find_program(XG_LD NAMES ld.bfd REQUIRED)
+    get_filename_component(XG_BINUTILS_DIR "${XG_LD}" DIRECTORY)
+    find_program(XG_OBJCOPY NAMES objcopy HINTS "${XG_BINUTILS_DIR}" REQUIRED)
+else()
+    find_program(XG_LD NAMES ld REQUIRED)
+    find_program(XG_OBJCOPY NAMES objcopy REQUIRED)
+endif()
 # pc_link's layout probes (a cross build's toolchain file names the host gcc).
 if(NOT XG_PROBE_CC)
     set(XG_PROBE_CC "${CMAKE_C_COMPILER}")

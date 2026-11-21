@@ -2,8 +2,8 @@
 # Bootstrap the project-local toolchain. Needs no root: everything lands in
 # tools/toolchain (binaries), tools/toolchain-src (build scratch) and .venv.
 #
-# Host requirements: bash, curl, tar, make, a C compiler (gcc), cpp, python3,
-# ninja, git.
+# Host requirements: bash, curl, tar, GNU make, a C compiler, cpp, python3,
+# ninja, git. Install gmake on FreeBSD.
 #
 # Every download is pinned by sha256. The old PSX compilers are the exact
 # decompals/old-gcc builds whose cc1 hashes match the ones known to produce
@@ -19,6 +19,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TC="$ROOT/tools/toolchain"
 SRC="$ROOT/tools/toolchain-src"
 JOBS="$(nproc 2>/dev/null || echo 4)"
+HOST_OS="$(uname -s)"
+MAKE_BIN=make
+if [ "$HOST_OS" = FreeBSD ]; then
+    MAKE_BIN=gmake
+fi
 
 BINUTILS_VER=2.42
 BINUTILS_SHA256=f6e4d41fd5fc778b06b7891457b3620da5ecea1006c6a4a41ae998109f85a800
@@ -50,11 +55,12 @@ fetch() {
         curl -fL --retry 3 -o "$dest.part" "$url"
         mv "$dest.part" "$dest"
     fi
-    echo "$sha  $dest" | sha256sum --check --quiet || {
+    local checksum
+    if ! checksum="$(sha256sum < "$dest")" || [ "${checksum%% *}" != "$sha" ]; then
         echo "checksum mismatch for $dest" >&2
         rm -f "$dest"
         exit 1
-    }
+    fi
 }
 
 # stamp NAME VALUE: true if the step already completed with this exact value.
@@ -80,8 +86,8 @@ if ! stamp_ok binutils "$BINUTILS_VER"; then
             --target=mips-linux-gnu --prefix="$TC" \
             --disable-nls --disable-werror --disable-gdb --disable-gdbserver \
             --disable-gprof --disable-gprofng --disable-sim > configure.log 2>&1
-        make -j"$JOBS" > make.log 2>&1
-        make install > install.log 2>&1
+        "$MAKE_BIN" -j"$JOBS" > make.log 2>&1
+        "$MAKE_BIN" install > install.log 2>&1
     ) || { echo "binutils build failed; see $SRC/binutils-build/*.log" >&2; exit 1; }
     stamp_set binutils "$BINUTILS_VER"
 fi
@@ -124,6 +130,11 @@ if ! stamp_ok objdiff "$OBJDIFF_VER"; then
         "$SRC/objdiff-cli-$OBJDIFF_VER" "$OBJDIFF_SHA256"
     install -m 755 "$SRC/objdiff-cli-$OBJDIFF_VER" "$TC/bin/objdiff-cli"
     stamp_set objdiff "$OBJDIFF_VER"
+fi
+
+# The unbranded Linux ELF is kept intact in SRC for checksum verification.
+if [ "$HOST_OS" = FreeBSD ]; then
+    brandelf -t Linux "$TC/bin/objdiff-cli"
 fi
 
 # --- PSY-Q signatures -------------------------------------------------------

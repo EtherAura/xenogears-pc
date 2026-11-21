@@ -45,6 +45,8 @@ defaults:
 
 jobs:
   source:
+    # The FreeBSD package release already carries its checked source archive.
+    if: github.event_name != 'release' || !endsWith(github.event.release.tag_name, '-freebsd')
     name: source tarball, SBOM and provenance
     runs-on: ubuntu-24.04
     timeout-minutes: 15

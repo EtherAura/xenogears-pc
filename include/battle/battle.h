@@ -1447,7 +1447,7 @@ extern BattleBss_800D2DCC isBattleSlotFilled;        /* Noah: isBattleSlotFilled
 extern BattleSlotTicks battleSlotStatusVar0;
 extern sBattleScriptContext battleScriptContext[32];
 extern sBattleResultChar* battleResultCharWindows[3];
-extern sLoadedMechas* battleMechas[32];
+extern sLoadedMechas* battleMechas[32] PORT_ALIAS;
 extern u16 currentJumpAnimationBitMask;
 
 /* ---- functions called across battle files (the definitions' prototypes) ---- */

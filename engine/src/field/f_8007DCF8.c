@@ -14,7 +14,7 @@ extern s32 fieldMapNumber;
 extern DialogWindow gDialogWindows[4];      /* gDialogWindows */
 extern u16 g_padButtonForField;                  /* g_padButtonForField */
 
-extern DR_MODE gDialogDrModes[2][16];       /* gDialogDrModes */
+extern DR_MODE gDialogDrModes[2][16] PORT_ALIAS;       /* gDialogDrModes */
 extern RECT gDialogRects[16];             /* gDialogRects */
 extern s32 dialogWindowVar1[4];               /* dialogWindowVar1 */
 

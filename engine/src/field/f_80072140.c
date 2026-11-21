@@ -28,7 +28,7 @@ extern s16 compassCardinalPointsLocation[4][2];
 extern s16 compassArrowCurrentDirection;
 extern s16 compassArrowTargetDirection;
 extern s32 fieldCompassVar;
-extern DR_MODE gDialogDrModes[2][16];
+extern DR_MODE gDialogDrModes[2][16] PORT_ALIAS;
 void drawCompassArrowSegment(OTag* ot, FieldQuad* quad, MATRIX* m, s32 buf);
 void drawCompassLetters(OTag* ot, FieldQuad* quad, MATRIX* m, s32 buf);
 extern u16 padButtonForScriptsPad1;            /* Noah: padButtonForScripts[1].m0_buttons */

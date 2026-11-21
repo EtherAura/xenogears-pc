@@ -90,7 +90,7 @@ void freeWorldmapParticles(void);
 void freeWorldmapPolyFT4Array1(void);
 void freeWorldmapChunks(void);
 void freeWorldmapState(void);
-extern sWorldmapRenderingStruct worldmapRenderingStructs[2];
+extern sWorldmapRenderingStruct worldmapRenderingStructs[2] PORT_ALIAS;
 extern sWorldmapFile1Header* worldmapFile1Buffer;
 extern u16 worldmapMode15NextWorldmapModes[4]; /* mode 15's three positions and a pad */
 extern s32 worldmapExitToFieldVar0;

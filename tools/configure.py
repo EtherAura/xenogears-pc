@@ -308,7 +308,9 @@ def write_ninja(versions: list[str], modules: list[Module]) -> None:
         "  description = IMAGE $out",
         "",
         "rule check",
-        "  command = rm -f $out && echo '$sha1  $in' | sha1sum --quiet --check - && touch $out",
+        "  command = rm -f $out && echo '$sha1  $in' | "
+        + ("gsha1sum" if sys.platform.startswith("freebsd") else "sha1sum")
+        + " --quiet --check - && touch $out",
         "  description = CHECK $in",
         "",
         "rule cpp",

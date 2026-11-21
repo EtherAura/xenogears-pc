@@ -77,7 +77,7 @@ typedef struct {
 extern s32 g_frameOddOrEven;
 extern sFieldRenderContext* pCurrentFieldRenderingContext;
 extern FieldBss_800AF880 fieldSceneState;    /* camera block (eye, at, cameraTan) */
-extern DR_MODE gDialogDrModes[2][16];
+extern DR_MODE gDialogDrModes[2][16] PORT_ALIAS;
 extern s32 fieldTransitionMode;
 extern s32 fieldTransitionFadeInLength;
 extern s32 fieldTransitionInProgress;
@@ -123,7 +123,7 @@ extern u32* color15BitDest;
 extern s32 debugCameraDigitsAllocated;
 extern s32 debugCameraDigitsFrameCounter;
 extern s32 debugCameraDigitsCursorFrame;
-extern POLY_FT4* debugCameraDigitPolys[2];
+extern POLY_FT4* debugCameraDigitPolys[2] PORT_ALIAS;
 extern UVRect debugCameraDigitImages[117]; /* to debugCameraDigits */
 extern DebugDigitSetup debugCameraDigits[0x6D]; /* the overlay's 109 prims (to debugCameraDigitsAllocated) */
 /* particles */

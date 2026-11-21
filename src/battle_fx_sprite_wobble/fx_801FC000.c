@@ -9,7 +9,7 @@
 
 /* main */
 extern MATRIX currentRenderingMatrix;
-extern SVECTOR currentSpriteCharacterSize[4];
+extern SVECTOR currentSpriteCharacterSize[4] PORT_ALIAS;
 extern s32 gDepthDivider;          /* OT depth shift */
 extern OTag* characterRenderingOT;
 extern u8* shapeTransfertTableEnd;

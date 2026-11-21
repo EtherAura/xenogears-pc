@@ -127,4 +127,4 @@ pe library/SDL3/src/video/SDL_stb.c.obj:stbi__zlength_base 33 # stb image deflat
 # "bytes:<hex>" holds a run that lies within those bytes.
 bytes:206e6f7420696d706c656d656e746564     64  # LLVM libunwind's messages ("DW_OP_piece not implemented", "DWARF opcode not implemented"), linked into every NDK library: " not implemented" is coincidence
 bytes:0001000000020000000400000008000004000000050000000600000007000000  32  # clang builds (arm64 NEON): a merged vector constant pool (lane masks 0x100..0x800, lane indices 4..7) no single object holds: coincidence
-port/src/gpu/present.c                   64  # clang builds (arm64 NEON): the vectoriser's lane-index constant pools (u32 1,2,3,4,... and 16,17,18,...) beside present.c's code: coincidence
+port/src/gpu/present.c                   69  # Clang lane-index pools (arm64 NEON and FreeBSD amd64): five measured FreeBSD runs total 165 bytes including the shared 96-byte GPU allowance; all are renderer lane indices

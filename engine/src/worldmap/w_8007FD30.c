@@ -25,7 +25,7 @@ extern s32 worldmapExitVar2;
 extern s32 worldmapMatrixMode;
 extern void (*worldmapCloudsMoveCallback)(void); /* clouds callback */
 extern VECTOR worldmapPosition;
-extern sWorldmapRenderingStruct worldmapRenderingStructs[2];
+extern sWorldmapRenderingStruct worldmapRenderingStructs[2] PORT_ALIAS;
 extern sWorldmapFile1Header* worldmapFile1Buffer;
 extern SVECTOR worldmapRotation;
 extern s32 worldmapExitToFieldVar0;

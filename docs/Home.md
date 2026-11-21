@@ -16,6 +16,7 @@ like the PlayStation version.
 | page | what it covers |
 |---|---|
 | [Building](building.md) | What you need, the build steps, the first start, the Enhanced engine and the Windows build |
+| [Android installation](android.md) | APK checks, disc setup and installation options |
 | [Display](display.md) | Widescreen, higher resolutions and filters, smoothed motion, the performance overlay |
 | [Gameplay](gameplay.md) | Battle speed, battles, save states and rewind, controls and audio |
 | [Packs](packs.md) | Replacement textures, sprites, text and portraits: choosing, installing and making them |

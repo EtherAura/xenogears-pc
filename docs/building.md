@@ -17,6 +17,31 @@ be the release the build was made for.
 No root access is needed. `tools/setup.sh` puts the PS1 toolchain in
 `tools/toolchain` and the Python packages in `.venv`.
 
+### FreeBSD amd64
+
+FreeBSD 15.1 builds use Clang and the `binutils`, `cmake-core`, `ninja`,
+`sdl3`, `shaderc`, `vulkan-headers`, and `vulkan-loader` packages. Follow the
+matching build's FreeBSD setup for the pinned PS1 compiler and Python tools.
+Give CMake a fresh build directory so it finds GNU `ld.bfd` and `objcopy`
+for the relocatable game modules. The regular build targets below work
+with the same checked retail inputs.
+
+For a release package, build each region (`us` and `jp`) with both engines
+(`original` and `enhanced`) and set `-DXG_DIST=ON`. Name the four CMake
+directories `us-original`, `us-enhanced`, `jp-original` and
+`jp-enhanced`. Package them on FreeBSD with:
+
+```sh
+python3.12 packaging/freebsd_release.py --tag vYYYY.MM.N --build-root build/pc/freebsd-distribution --out dist
+```
+
+The packager audits all four executables and writes a pkg file with its
+SHA-256 checksum. On FreeBSD 15 amd64, install a downloaded package with
+`pkg install ./xenogears-pc-<version>-freebsd15-amd64.pkg` as root. Start
+with `xenogears-pc` for US discs or `xenogears-pc --jp` for Japanese discs.
+The package uses the system SDL3 and Vulkan loader. Install a Vulkan 1.3
+driver for your GPU and supply your own disc images.
+
 ## Steps
 
 ```bash

@@ -57,7 +57,7 @@ s32 addClamp255(s32 value, s32 delta);
 extern u8* shapeTransfertTableEnd;
 extern u8* shapeTransfertTableCurrentEntry;
 extern OTag* characterRenderingOT;
-extern SVECTOR currentSpriteCharacterSize[4];
+extern SVECTOR currentSpriteCharacterSize[4] PORT_ALIAS;
 extern MATRIX damageDisplayMatrix;
 
 extern sDamageDisplayPoly damageDisplayPolyTask2;

@@ -59,7 +59,7 @@ void worldmapDotInit(void);
 void moveWorldmapClouds(void);
 extern void (*worldmapCloudsMoveCallback)(void); /* the clouds' motion (worldmapMode0_update) */
 void SetFogNearFar(s32 a, s32 b, s32 h);
-extern sWorldmapRenderingStruct worldmapRenderingStructs[2];
+extern sWorldmapRenderingStruct worldmapRenderingStructs[2] PORT_ALIAS;
 extern sWorldmapRenderingStruct* pCurrentWorldmapRenderingStruct;
 extern MATRIX worldmapMainMatrix2;
 extern MATRIX D_8009BE4C;

@@ -100,7 +100,7 @@ extern s32 battlingMenuPad;
  * labels. */
 extern BattlingMenuItem battlingGear1MenuItems[2];
 extern BattlingMenuItem battlingGear2MenuItems[2];
-extern BattlingMenu battlingMenus[8]; /* [5] 0x800916D8, [6] 0x80091714, [7] 0x80091750 */
+extern BattlingMenu battlingMenus[8] PORT_ALIAS; /* [5] 0x800916D8, [6] 0x80091714, [7] 0x80091750 */
 extern BattlingStageColors battlingStageColorSets[3];
 extern BattlingGearEntry battlingGearEntries[49];
 extern POLY_FT4* battlingGlyphPolys[2];

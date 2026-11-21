@@ -29,6 +29,9 @@ typedef SOCKET NetHandle;
 #include <netinet/in.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#ifdef __FreeBSD__
+#include <sys/sysctl.h>
+#endif
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -197,8 +200,8 @@ void netLoopback(NetAddr* out, int v6, int port) {
         out->ip[15] = 1;
         out->port = (uint16_t)port;
     } else {
-        struct in_addr a;
-        a.s_addr = htonl(INADDR_LOOPBACK);
+        /* 127.0.0.1, also available when POSIX mode hides INADDR_LOOPBACK. */
+        struct in_addr a = { .s_addr = htonl(0x7f000001U) };
         fromV4(out, &a, port);
     }
 }
@@ -322,6 +325,11 @@ int netSelfPath(char* out, int size) {
 #elif defined(__APPLE__)
     uint32_t n = (uint32_t)size;
     return _NSGetExecutablePath(out, &n) == 0;
+#elif defined(__FreeBSD__)
+    const int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1 };
+    if (size <= 0) return 0;
+    size_t n = (size_t)size;
+    return sysctl(mib, 4, out, &n, NULL, 0) == 0 && n > 1;
 #else
     snprintf(out, (size_t)size, "/proc/self/exe");
     return 1;
