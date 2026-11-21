@@ -17,11 +17,11 @@ Part of **-Project Exodus-**.
 
 ## Start your full Xenogears playthrough on PC
 
-Both discs are supported on Linux and Windows. We expect the main story to be playable from New Game through the credits, and v2026.11.18 fixes a known late-game freeze by default.
+Both discs are supported on Linux and Windows. We expect the main story to be playable from New Game through the credits, and the current release fixes a known late-game freeze by default.
 
 Bring your own US or Japanese PlayStation disc images. If you reach the credits, we’d love to hear which platform and disc region you played.
 
-[**Download Xenogears PC**](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.18)
+[**Download Xenogears PC**](https://github.com/EtherAura/xenogears-pc/releases/latest)
 
 <img src="docs/img/clip-readme.webp" alt="Animated comparison in the PC port: 4:3 at 30 fps, and 16:9 with motion smoothing at 60 fps" width="960" />
 </div>
