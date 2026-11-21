@@ -9,9 +9,10 @@
 [![Tool checks](https://github.com/EtherAura/xenogears-pc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EtherAura/xenogears-pc/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/EtherAura/xenogears-pc/actions/workflows/codeql.yml/badge.svg)](https://github.com/EtherAura/xenogears-pc/actions/workflows/codeql.yml)
 [![GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
-![Linux and Windows](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-627eaa)
+![Linux, Windows and FreeBSD](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20FreeBSD-627eaa)
+[![Listed on Reversed with AI](https://reversedwithai.com/badge.svg)](https://reversedwithai.com/p/xenogears-native-pc-port-from-matching-decomp-claude)
 
-ビルドすると製品版と 1 バイト単位で一致する[マッチング逆コンパイル](https://github.com/EtherAura/xenogears)から作っています。Linux と Windows でネイティブに動き、画面、ゲームプレイ、演出の追加機能を好みで使えます。Android 版も開発中です。**-Project Exodus-** の一部です。
+ビルドすると製品版と 1 バイト単位で一致する[マッチング逆コンパイル](https://github.com/EtherAura/xenogears)から作っています。Linux、Windows、FreeBSD でネイティブに動き、画面、ゲームプレイ、演出の追加機能を好みで使えます。Android 版も開発中です。**-Project Exodus-** の一部です。
 
 [**ウェブサイト**](https://exodus.agartha.digital/) · [**ビルドとセットアップ**](docs/building-ja.md) · [**画面**](docs/display-ja.md) · [**パック**](docs/packs-ja.md) · [**ゲームプレイ**](docs/gameplay-ja.md) · [**おまけ**](docs/extras-ja.md)
 

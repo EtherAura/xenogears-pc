@@ -9,10 +9,11 @@ English | [日本語](README.ja.md)
 [![Tool checks](https://github.com/EtherAura/xenogears-pc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/EtherAura/xenogears-pc/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/EtherAura/xenogears-pc/actions/workflows/codeql.yml/badge.svg)](https://github.com/EtherAura/xenogears-pc/actions/workflows/codeql.yml)
 [![GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
-![Linux and Windows](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-627eaa)
+![Linux, Windows and FreeBSD](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20FreeBSD-627eaa)
+[![Listed on Reversed with AI](https://reversedwithai.com/badge.svg)](https://reversedwithai.com/p/xenogears-native-pc-port-from-matching-decomp-claude)
 
 Built from the [matching decompilation](https://github.com/EtherAura/xenogears).
-Native Linux and Windows, with optional display, gameplay and presentation extras.
+Native Linux, Windows and FreeBSD, with optional display, gameplay and presentation extras.
 An Android version is in development.
 Part of **-Project Exodus-**.
 
