@@ -7,6 +7,7 @@
  */
 #include "common.h"
 #include "psyq.h"
+#include "pc_camera.h"
 #include "pc_interpolation.h"
 #include "gte.h"
 #include "ot.h"
@@ -795,6 +796,8 @@ void renderWorldmapModels(void) {
     fieldPolyCount = 0;
     sp->mA0_origin.vx = sp->mA0_origin.vy = sp->mA0_origin.vz = 0;
     for (i = 0; i < worldmapNumModels; i++) {
+        /* The hull and its three submodels surround the bridge camera. */
+        if (pcFirstPersonActive() && worldMapGearMode >= 4 && i < 4) continue;
         if (worldmapModels[i].m0_hidden == 0) {
             sp->mF0_matrix = worldmapModels[i].m20_rotationMatrix;
             sp->mF0_matrix.t[0] = worldmapModels[i].m8_position.vx;
@@ -1129,6 +1132,19 @@ static void pcWm60SpriteStep(SpriteActorCore* actor) {
     }
 }
 
+static int firstPersonDrawSprite(s32 index) {
+    if (!pcFirstPersonActive() || worldMapGearMode >= 4 || index < 1 || index > 6) return 1;
+    s32 leader = gameState.m22B1_isOnGear[0] ? 4 : 1;
+    if (index == leader) return 0;
+    /* Followers sometimes share the leader's point at a field exit. Height
+     * and camera pitch must not bring those billboards across the lens. */
+    const VECTOR* feet = &gWorldmapState->m0_entries[leader].m28_position;
+    const VECTOR* pos = &gWorldmapState->m0_entries[index].m28_position;
+    VECTOR delta = {pos->vx - feet->vx, 0, pos->vz - feet->vz};
+    computeWormapSpritePosition(&delta);
+    return abs(delta.vx) > (32 << 12) || abs(delta.vz) > (32 << 12);
+}
+
 /* Noah worldmapDrawSpriteActors (worldmapTaskGround.cpp) */
 void worldmapDrawSpriteActors(void) {
     WorldmapSpriteScratch* sp = (WorldmapSpriteScratch*)PSX_SCRATCH(0x1F800000);
@@ -1164,7 +1180,8 @@ void worldmapDrawSpriteActors(void) {
     e = gWorldmapState->m0_entries;
     for (i = 0; i < 0x40; i++, e++) {
         if ((e->m24_hidden == 0) & (e->m4C_sprite != NULL) & (sp->m18_depths[i] < 0xB00)) {
-            renderSpriteActor(e->m4C_sprite, &pCurrentWorldmapRenderingStruct->m70_OT[sp->m18_depths[i] >> 4]);
+            if (firstPersonDrawSprite(i))
+                renderSpriteActor(e->m4C_sprite, &pCurrentWorldmapRenderingStruct->m70_OT[sp->m18_depths[i] >> 4]);
             if (pcWm60On()) {
                 continue; /* Enhanced, 60 Hz: the turn and the animation below, as the tick decided */
             }

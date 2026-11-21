@@ -12,6 +12,7 @@
 #include "psyq.h"
 #include "gte.h"
 #include "pc_geometry.h"
+#include "pc_wide.h"
 #include "pc_interpolation.h"
 
 #define SCRATCH ((u8*)PSX_SCRATCH(0x1F800000))
@@ -67,7 +68,7 @@ static void linkPrim(OTag* entry, void* prim, u32 len) {
     *(OTag*)prim = next | OT_LEN(len);
 }
 
-/* One ground triangle, V0-V2 loaded. 0: drawn; 1: dropped; -1: the GTE
+/* One ground triangle, V0-V2 loaded. 0: drawn; 1: dropped; 2: outside the native viewport; -1: the GTE
  * flagged an error, which drops the rest of the cell. */
 static s32 groundTri(POLY_FT3** pp, OTag* ot, u32 word, u32 uv0, u32 uv1, u32 uv2, u32 part) {
     POLY_FT3* p = *pp;
@@ -90,7 +91,7 @@ static s32 groundTri(POLY_FT3** pp, OTag* ot, u32 word, u32 uv0, u32 uv1, u32 uv
     gteSwc2(GTE_SXY1, &sxy1);
     gteSwc2(GTE_SXY2, &sxy2);
     if (!onScreen3(sxy0, sxy1, sxy2)) {
-        return 1;
+        return 2;
     }
     z = gteMfc2(GTE_SZ1);
     sz = gteMfc2(GTE_SZ2);
@@ -133,13 +134,100 @@ static s32 groundTri(POLY_FT3** pp, OTag* ot, u32 word, u32 uv0, u32 uv1, u32 uv
     return rescue ? 1 : 0;
 }
 
+/* At eye level a single 128-unit terrain square can cross the GTE's divide
+ * limit or cover the whole screen with all its corners outside. Clip those
+ * triangles in camera space, carrying the tile's texture coordinates. */
+typedef struct { double x, y, z, u, v; } GroundVertex;
+
+static int clipGroundPlane(const GroundVertex* in, int n, GroundVertex* out,
+                           double a, double b, double c, double d) {
+    const GroundVertex* prev = &in[n - 1];
+    double dp = a * prev->x + b * prev->y + c * prev->z + d;
+    int i, count = 0;
+    for (i = 0; i < n; i++) {
+        const GroundVertex* cur = &in[i];
+        double dc = a * cur->x + b * cur->y + c * cur->z + d;
+        if ((dp >= 0) != (dc >= 0)) {
+            double t = dp / (dp - dc);
+            GroundVertex* p = &out[count++];
+            p->x = prev->x + t * (cur->x - prev->x);
+            p->y = prev->y + t * (cur->y - prev->y);
+            p->z = prev->z + t * (cur->z - prev->z);
+            p->u = prev->u + t * (cur->u - prev->u);
+            p->v = prev->v + t * (cur->v - prev->v);
+        }
+        if (dc >= 0) out[count++] = *cur;
+        prev = cur;
+        dp = dc;
+    }
+    return count;
+}
+
+static void clippedGroundTri(POLY_FT3** pp, OTag* ot, u32 word, const SVECTOR* verts[3], const u32 uv[3]) {
+    const MATRIX* m = (const MATRIX*)(SCRATCH + 0x370);
+    GroundVertex poly[9], tmp[9];
+    int i, n;
+    double h = gteCfc2(26) & 0xffff;
+    double cx = (s32)gteCfc2(24) / 65536.0;
+    double cy = (s32)gteCfc2(25) / 65536.0;
+    for (i = 0; i < 3; i++) {
+        const SVECTOR* s = verts[i];
+        poly[i].x = ((m->m[0][0] * s->vx + m->m[0][1] * s->vy + m->m[0][2] * s->vz) >> 12) + m->t[0];
+        poly[i].y = ((m->m[1][0] * s->vx + m->m[1][1] * s->vy + m->m[1][2] * s->vz) >> 12) + m->t[1];
+        poly[i].z = ((m->m[2][0] * s->vx + m->m[2][1] * s->vy + m->m[2][2] * s->vz) >> 12) + m->t[2];
+        /* Share the native projected endpoints with adjacent unclipped faces. */
+        if (poly[i].z > h / 2) {
+            u32 xy = gteMfc2(GTE_SXY0 + i);
+            s16 x = (s16)xy, y = (s16)(xy >> 16);
+            if (x > -1024 && x < 1023) poly[i].x = (x + 0.001 - cx) * poly[i].z / h;
+            if (y > -1024 && y < 1023) poly[i].y = (y + 0.001 - cy) * poly[i].z / h;
+        }
+        poly[i].u = uv[i] & 255;
+        poly[i].v = uv[i] >> 8;
+    }
+    /* Only the near tiles need this path. Distant, off-screen tiles go through
+     * the ordinary 4:3 and widescreen culling passes. */
+    if (poly[0].z > h && poly[1].z > h && poly[2].z > h) return;
+    n = clipGroundPlane(poly, 3, tmp, 0, 0, 1, -12);
+    if (n) n = clipGroundPlane(tmp, n, poly, h, 0, cx + pcWideView + 32, 0);
+    if (n) n = clipGroundPlane(poly, n, tmp, -h, 0, 352 + pcWideView - cx, 0);
+    if (n) n = clipGroundPlane(tmp, n, poly, 0, h, cy + pcVerticalCull + 32, 0);
+    if (n) n = clipGroundPlane(poly, n, tmp, 0, -h, 248 + pcVerticalCull - cy, 0);
+    for (i = 0; i < n; i++) {
+        tmp[i].x = cx + h * tmp[i].x / tmp[i].z;
+        tmp[i].y = cy + h * tmp[i].y / tmp[i].z;
+    }
+    for (i = 1; i + 1 < n && renderWorldmapGroundVar1 < 0x7fe; i++) {
+        const GroundVertex* a = &tmp[0];
+        const GroundVertex* b = &tmp[i];
+        const GroundVertex* c = &tmp[i + 1];
+        int z;
+        POLY_FT3* p;
+        if ((b->x - a->x) * (c->y - a->y) <= (b->y - a->y) * (c->x - a->x)) continue;
+        z = (int)a->z;
+        if (b->z > z) z = (int)b->z;
+        if (c->z > z) z = (int)c->z;
+        p = (*pp)++;
+        p->x0 = (s16)a->x; p->y0 = (s16)a->y;
+        p->x1 = (s16)b->x; p->y1 = (s16)b->y;
+        p->x2 = (s16)c->x; p->y2 = (s16)c->y;
+        p->u0 = (u8)(a->u + 0.5); p->v0 = (u8)(a->v + 0.5);
+        p->u1 = (u8)(b->u + 0.5); p->v1 = (u8)(b->v + 0.5);
+        p->u2 = (u8)(c->u + 0.5); p->v2 = (u8)(c->v + 0.5);
+        p->tpage = *(u16*)(SCRATCH + 0x308 + ((word >> 8) & 7) * 2);
+        p->clut = *(u16*)(SCRATCH + 0x288 + ((word >> 5) & 0x40));
+        linkPrim(&ot[z >> 4], p, 7);
+        renderWorldmapGroundVar1++;
+    }
+}
+
 /* Draws the 8 x 8 cells of a ground block as two POLY_FT3 each. The 9 x 9
  * corner grid (SVECTOR, rows of 9) is at the start of the scratchpad; cell
  * words come in rows of 9 (the ninth is the next block's edge): bits 16-23
  * the UV origin, 13-14 the UV rotation, 15 which diagonal splits the cell,
  * 8-10 the texture page, 11 the CLUT set. Stops once 0x7FE primitives are
  * used (renderWorldmapGroundVar1). */
-void drawWorldmapGroundCellSub0(u32* cell, void* ot, void* prims) {
+static void drawGroundCells(u32* cell, void* ot, void* prims, int eyeLevel) {
     POLY_FT3* p = (POLY_FT3*)prims;
     SVECTOR* grid = (SVECTOR*)SCRATCH;
     u32 word;
@@ -189,16 +277,34 @@ void drawWorldmapGroundCellSub0(u32* cell, void* ot, void* prims) {
             gte_ldv2(&grid[9]);
             gte_ldv1(flip ? &grid[10] : &grid[1]);
             r = groundTri(&p, ot, word, uv[0], flip ? uv[3] : uv[1], uv[2], (groundBase ? (u32)(cell - groundBase) : 0) * 2);
-            if (r < 0) {
+            if (eyeLevel && (r < 0 || r == 2)) {
+                const SVECTOR* verts[] = {&grid[0], flip ? &grid[10] : &grid[1], &grid[9]};
+                const u32 tex[] = {uv[0], flip ? uv[3] : uv[1], uv[2]};
+                clippedGroundTri(&p, ot, word, verts, tex);
+                if (renderWorldmapGroundVar1 >= 0x7fe) return;
+            } else if (r < 0) {
                 continue;
             }
             /* Top right, bottom right, and the top left or bottom left corner. */
             gte_ldv0(&grid[1]);
             gte_ldv1(&grid[10]);
             gte_ldv2(flip ? &grid[0] : &grid[9]);
-            groundTri(&p, ot, word, uv[1], uv[3], flip ? uv[0] : uv[2], (groundBase ? (u32)(cell - groundBase) : 0) * 2 + 1);
+            r = groundTri(&p, ot, word, uv[1], uv[3], flip ? uv[0] : uv[2], (groundBase ? (u32)(cell - groundBase) : 0) * 2 + 1);
+            if (eyeLevel && (r < 0 || r == 2)) {
+                const SVECTOR* verts[] = {&grid[1], &grid[10], flip ? &grid[0] : &grid[9]};
+                const u32 tex[] = {uv[1], uv[3], flip ? uv[0] : uv[2]};
+                clippedGroundTri(&p, ot, word, verts, tex);
+            }
         }
     }
+}
+
+void drawWorldmapGroundCellSub0(u32* cell, void* ot, void* prims) {
+    drawGroundCells(cell, ot, prims, 0);
+}
+
+void pcFirstPersonGroundCells(u32* cell, void* ot, void* prims) {
+    drawGroundCells(cell, ot, prims, 1);
 }
 
 /* Draws count billboards (POLY_FT4 prepared by the caller) at the 8-byte

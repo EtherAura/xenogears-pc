@@ -68,7 +68,7 @@ struct XgMovie {
     int frameX, frameY;
     int width, height;
     int sinceFrame; /* vertical blanks since the last frame came */
-    char caption[2][3][512]; /* at `frame`: [track 1-2][sound level 0-2] (regionalCaptionWith: a copy, "" for none) */
+    char caption[REGIONAL_PACK_SUBTITLES][3][512]; /* at `frame`: [track - 1][sound level 0-2] (regionalCaptionWith: a copy, "" for none) */
     int identity[5];        /* the movie they were looked up for (regionalMovieIdentity) */
     int identified;
     int audible;
@@ -299,7 +299,7 @@ void xgMovieRun(XgMovie* m, int vsyncs, int audible) {
     }
     /* The player told this world's regional state of its movie and frame
      * (regionalMovieBegin, regionalMovieFrame), as it tells the game's. */
-    for (int track = 1; track <= 2; track++) {
+    for (int track = 1; track <= REGIONAL_PACK_SUBTITLES; track++) {
         for (int level = 0; level <= 2; level++) {
             const char* text = regionalCaptionWith(track, level);
             snprintf(m->caption[track - 1][level], sizeof m->caption[0][0], "%s", text != NULL ? text : "");
@@ -330,7 +330,7 @@ int xgMovieFrame(XgMovie* m, uint32_t* rgba, int* w, int* h) {
 }
 
 const char* xgMovieCaptionWith(const XgMovie* m, int track, int sounds) {
-    if (m == NULL || track < 1 || track > 2 || sounds < 0 || sounds > 2) return NULL;
+    if (m == NULL || track < 1 || track > REGIONAL_PACK_SUBTITLES || sounds < 0 || sounds > 2) return NULL;
     return m->caption[track - 1][sounds][0] ? m->caption[track - 1][sounds] : NULL;
 }
 

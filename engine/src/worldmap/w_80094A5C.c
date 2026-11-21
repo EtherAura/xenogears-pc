@@ -7,6 +7,7 @@
  */
 #include "common.h"
 #include "psyq.h"
+#include "pc_camera.h"
 #include "gte.h"
 #include "main/memory.h"
 #include "main/filesystem.h"
@@ -126,6 +127,7 @@ s32 finalizeLoadingWorldmapCell(void);
 s32 finalizeLoadingWorldmapCellFromPC(void);
 
 void drawWorldmapGroundCellSub0(u32* cell, void* ot, void* prims);
+void pcFirstPersonGroundCells(u32* cell, void* ot, void* prims);
 /* port/src/game/worldmap/ground.c: the chunk the ground cells drawn next belong to (smooth motion). */
 void pcWorldmapGroundChunk(s32 id, u32* base);
 
@@ -2196,5 +2198,6 @@ void drawWorldmapGroundCell(u32* cell, void* ot, POLY_FT3* prims, SVECTOR* start
         z -= 0x80;
         wave2 += 0x200;
     }
-    drawWorldmapGroundCellSub0(cell, ot, prims);
+    if (pcFirstPersonActive()) pcFirstPersonGroundCells(cell, ot, prims);
+    else drawWorldmapGroundCellSub0(cell, ot, prims);
 }

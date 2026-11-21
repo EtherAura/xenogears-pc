@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "spu_internal.h"
+#include "binaural.h"
 #include "../system/savestate.h"
 
 /* The sound driver writes key on at the start of its tick and key off at
@@ -248,7 +249,7 @@ static int bit(const uint16_t r[2], int i) {
 }
 
 /* One voice into the dry mix and the reverb input. */
-static void voice(int i, int32_t dry[2], int32_t wet[2]) {
+static inline int32_t voice(int i, int32_t dry[2], int32_t wet[2], int splitCenter) {
     int32_t x = spuVoiceSample(i);
     int32_t l = (x * spu.voices[i].volume[0].level) >> 15;
     int32_t r = (x * spu.voices[i].volume[1].level) >> 15;
@@ -260,6 +261,10 @@ static void voice(int i, int32_t dry[2], int32_t wet[2]) {
         wet[0] += l;
         wet[1] += r;
     }
+    /* Extract the shared amplitude per voice, before unrelated notes can
+     * cancel one another. Phase-inverted channels stay on their own sides. */
+    if (!splitCenter || (l ^ r) < 0) return 0;
+    return l < 0 ? (l > r ? l : r) : (l < r ? l : r);
 }
 
 /*
@@ -281,7 +286,7 @@ static void voice(int i, int32_t dry[2], int32_t wet[2]) {
  * ATTR bit 14 clear mutes the voices, not the CD input. `game` 0: no CD
  * input and no capture buffers (an SPU of the extras, port/src/extras).
  */
-static void mix(int16_t* out, int game) {
+static void mix(int16_t* out, int game, SpuHeadphones* phones, int enabled) {
     uint16_t cnt = spu.regs.m1AA_control;
     int32_t dry[2] = {0, 0};
     int32_t wet[2] = {0, 0};
@@ -289,8 +294,12 @@ static void mix(int16_t* out, int game) {
     int32_t rev[2];
 
     noiseClock();
-    for (int i = 0; i < 24; i++) {
-        voice(i, dry, wet);
+    if (phones) {
+        int32_t center = 0;
+        for (int i = 0; i < 24; i++) center += voice(i, dry, wet, 1);
+        spuBinauralMix(phones, enabled, dry, center);
+    } else {
+        for (int i = 0; i < 24; i++) voice(i, dry, wet, 0);
     }
     if (game) {
         spuCdNext(cd);
@@ -325,13 +334,9 @@ static void mix(int16_t* out, int game) {
     spu.clock++;
 }
 
-static void sampleClock(int16_t* out) {
-    mix(out, 1);
-}
-
 void spuRunBox(int16_t* out, uint32_t frames) {
     for (uint32_t n = 0; n < frames; n++) {
-        mix(out != NULL ? out + 2 * n : NULL, 0);
+        mix(out != NULL ? out + 2 * n : NULL, 0, NULL, 0);
     }
 }
 
@@ -339,9 +344,21 @@ int spuRun(int16_t* out, uint32_t frames) {
     int raised;
 
     for (uint32_t n = 0; n < frames; n++) {
-        sampleClock(out != NULL ? out + 2 * n : NULL);
+        mix(out != NULL ? out + 2 * n : NULL, 1, NULL, 0);
     }
     raised = spu.irqRaised;
+    spu.irqRaised = 0;
+    return raised;
+}
+
+int spuRunHeadphones(int16_t* out, uint32_t frames, SpuHeadphones* h, int enabled) {
+    for (uint32_t n = 0; n < frames; n++) {
+        if (!enabled && !h->blend) return spuRun(out, frames - n);
+        mix(out, 1, h, enabled);
+        if (!enabled && !h->blend) memset(h, 0, sizeof(*h));
+        if (out) out += 2;
+    }
+    int raised = spu.irqRaised;
     spu.irqRaised = 0;
     return raised;
 }

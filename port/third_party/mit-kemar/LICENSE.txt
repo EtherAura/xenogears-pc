@@ -1,0 +1,7 @@
+HRTF Measurements of a KEMAR Dummy-Head Microphone
+Bill Gardner and Keith Martin, MIT Media Laboratory.
+Copyright 1994 MIT Media Laboratory.
+
+The authors permit use without restrictions provided that Bill Gardner and
+Keith Martin are cited for research or commercial use of the measurements.
+Original archive and terms: https://sound.media.mit.edu/resources/KEMAR.html

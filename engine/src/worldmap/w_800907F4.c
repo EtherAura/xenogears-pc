@@ -1060,7 +1060,8 @@ void pcWm60CamCommit(void) {
 /* The yaw the controls turn the stick's direction by: on the frame between
  * the native frame's (the camera's half is still to come). */
 s32 pcWm60ControlYaw(void) {
-    return pcWm60OffTick() && pcWm60YawSplit ? pcWm60YawFull : worldmapRotation.vy;
+    s16 game = pcWm60OffTick() && pcWm60YawSplit ? pcWm60YawFull : worldmapRotation.vy;
+    return pcFirstPersonMovementHeading(game);
 }
 
 /* The camera's eye from its state (as the cases draw it), and the free camera's. */

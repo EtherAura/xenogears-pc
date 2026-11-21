@@ -220,6 +220,10 @@ static void tables(void) {
     CHECK(!gtTableParse(back, (int)sizeof(back), &tab)); /* an offset going back */
 }
 
+static void findTestPack(void* found, const char* id, const char* name) {
+    if (!strcmp(id, "test") && !strcmp(name, "Test pack")) *(int*)found = 1;
+}
+
 static void packs(const char* dir) {
     char pdir[4096], path[4096];
     snprintf(pdir, sizeof(pdir), "%s/packs", dir);
@@ -235,18 +239,32 @@ static void packs(const char* dir) {
     f = fopen(path, "wb");
     fputs("@@ field/1/14/1 w=30 h=3\nRiga uno\r\n<at>@ due<wait>\n@@ field/1/14/0 w=20 h=2\nZero\n", f);
     fclose(f);
+    snprintf(path, sizeof(path), "%s/test/movies.txt", pdir);
+    f = fopen(path, "wb");
+    fputs("@@ movie/US/1/2/00010\nFirst cue\n@@ movie/US/1/2/00020\n"
+          "@@ movie/JP/2/6/00030\nOther reel\n", f);
+    fclose(f);
     char why[300];
     GtPack* p = gtPackLoad("test", why, sizeof(why));
     CHECK(p != NULL && !strcmp(gtPackName(p), "Test pack") && !strcmp(gtPackRegion(p), "US"));
+    CHECK(gtPackHasMovies(p, 0) && gtPackHasMovies(p, 1));
+    CHECK(gtPackMovieCaption(p, 0, 1, 2, 9) == NULL);
+    CHECK(!strcmp(gtPackMovieCaption(p, 0, 1, 2, 10), "First cue"));
+    CHECK(!strcmp(gtPackMovieCaption(p, 0, 1, 2, 19), "First cue"));
+    CHECK(gtPackMovieCaption(p, 0, 1, 2, 20) == NULL);
+    CHECK(gtPackMovieCaption(p, 1, 1, 2, 19) == NULL);
+    CHECK(!strcmp(gtPackMovieCaption(p, 1, 2, 6, 30), "Other reel"));
     int w = 0, h = 0;
     const char* text = gtPackFind(p, "field/1/14/1", &w, &h);
     CHECK(text && !strcmp(text, "Riga uno\n<at>@ due<wait>") && w == 30 && h == 3);
     CHECK(gtPackFind(p, "field/1/14/0", NULL, NULL) && !strcmp(gtPackFind(p, "field/1/14/0", NULL, NULL), "Zero"));
     CHECK(gtPackFind(p, "field/1/14/2", NULL, NULL) == NULL);
-    char ids[4][64], names[4][128];
-    int listed = gtPackList(ids, names, 4), found = 0;
-    for (int i = 0; i < listed; i++) found |= !strcmp(ids[i], "test") && !strcmp(names[i], "Test pack");
+    int found = 0;
+    gtVisitPacks(findTestPack, &found);
     CHECK(found);
+    char ids[1][64], names[1][128];
+    CHECK(gtPackList(ids, names, 0) == 0);
+    CHECK(gtPackList(ids, names, 1) == 1);
     CHECK(gtPackLoad("../etc", why, sizeof(why)) == NULL);
     GtLayout layout;
     gtPackLayout(p, &layout); /* no opt-in: the game's look */
@@ -488,7 +506,7 @@ static void pictureSnapshots(void) {
  * members (the snapshot's fingerprints, the fitted sprite tables). Without
  * this release's Disc 2 image, Disc 2 is left out and Disc 1's pictures are
  * still exported (a Disc 2 reader falls back to them): the export succeeds. */
-static void pictureExport(const char* dir, const char* discPath) {
+static void pictureExport(const char* dir, const char* discPath, const char* atelierPath) {
     char why[512], out[4096], path[4096];
     GtImage* im = gtImageOpen(discPath, why, sizeof(why));
     if (im == NULL) return;
@@ -504,13 +522,33 @@ static void pictureExport(const char* dir, const char* discPath) {
         snprintf(path, sizeof(path), "%s/pictures/menu/1/1/3.member", out);
         CHECK(SDL_GetPathInfo(path, &info) && info.type == SDL_PATHTYPE_FILE);
     }
+    if (atelierPath) {
+        GtImage* fr = gtImageOpen(atelierPath, why, sizeof(why));
+        CHECK(fr && gtImageAtelierFrench(fr));
+        if (fr) {
+            snprintf(out, sizeof(out), "%s/picture-export-atelier", dir);
+            snprintf(path, sizeof(path), "%s/pictures/battle/common/1/1.member", out);
+            SDL_RemovePath(path);
+            CHECK(gtPictureExport(fr, NULL, out, 1) > 0);
+            int storedSize = 0, size = 0;
+            uint8_t* stored = gtImageMember(fr, 0x0C, 3, 1, &storedSize);
+            uint8_t* sprites = stored ? gtLzss(stored, storedSize + GT_MEMBER_SLACK, &size) : NULL;
+            size_t bytes = 0;
+            uint8_t* snapshot = SDL_LoadFile(path, &bytes);
+            CHECK(sprites && snapshot && bytes == 32 + (size_t)size && !memcmp(snapshot + 32, sprites, size));
+            SDL_free(snapshot);
+            free(sprites);
+            free(stored);
+            gtImageClose(fr);
+        }
+    }
     retailImages[0] = retailImages[1] = NULL;
     gtImageClose(im);
 }
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        fprintf(stderr, "usage: gametexttest DIR [US-DISC1 [JP-DISC1]]\n");
+        fprintf(stderr, "usage: gametexttest DIR [US-DISC1 [JP-DISC1 [ATELIER-DISC1]]]\n");
         return 2;
     }
     SDL_CreateDirectory(argv[1]);
@@ -521,8 +559,8 @@ int main(int argc, char** argv) {
     ownFont(argv[1]);
     proportionalPrint();
     pictureSnapshots();
-    for (int i = 2; i < argc; i++) roundTrip(argv[1], argv[i]); /* US disc 1, JP disc 1 */
-    if (argc > 2) pictureExport(argv[1], argv[2]);
+    for (int i = 2; i < argc && i <= 3; i++) roundTrip(argv[1], argv[i]); /* US disc 1, JP disc 1 */
+    if (argc > 2) pictureExport(argv[1], argv[2], argc > 4 ? argv[4] : NULL);
     snapshotCapacity();
     printf("gametexttest: %d checks, %d failed\n", checks, failed);
     return failed != 0;

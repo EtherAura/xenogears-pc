@@ -82,6 +82,7 @@
 #include "common.h"
 #include "gpu/gpu.h"
 #include "mouse.h"
+#include "pc_camera.h"
 #include "rumble.h"
 #include "pad.h"
 #include "savestate.h"
@@ -714,7 +715,15 @@ extern int diagnosticsHotkey(int scancode, int mod) __attribute__((weak));
 extern int battleSpeedKey(int scancode, int mod) __attribute__((weak));
 extern void battleSpeedPad(unsigned buttons) __attribute__((weak));
 
+static int keyBound(SDL_Scancode key);
 static void keyDown(SDL_Scancode key, SDL_Keymod mod) {
+#if XG_ENGINE_ENHANCED
+    if (key == SDL_SCANCODE_V && !replayScript.count &&
+        !(mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI)) && !keyBound(key) &&
+        pcFirstPersonToggle()) {
+        return;
+    }
+#endif
     if (diagnosticsHotkey != NULL && diagnosticsHotkey((int)key, (int)mod)) {
         return;
     }
@@ -1015,6 +1024,10 @@ static int keyBound(SDL_Scancode key) {
 }
 static void sampleCamera(int live, u16 held) {
     float turn = 0, tilt = 0, zoom = 0; int rc = 0;
+    int zoomHeld = held & BTN_L2;
+#if XG_ENGINE_ENHANCED
+    if (pcFirstPersonActive()) zoomHeld = 0;
+#endif
     if (live) {
         const bool* k = SDL_GetKeyboardState(NULL);
         if (k != NULL) {
@@ -1032,7 +1045,7 @@ static void sampleCamera(int live, u16 held) {
             if (x > dead || x < -dead) turn += (x - (x > 0 ? dead : -dead)) / (1 - dead);
             if (y > dead || y < -dead) {
                 float v = (y - (y > 0 ? dead : -dead)) / (1 - dead);
-                if (held & BTN_L2) zoom += v; else tilt -= v;
+                if (zoomHeld) zoom += v; else tilt -= v;
             }
             rc |= SDL_GetGamepadButton(gamepads[0], SDL_GAMEPAD_BUTTON_RIGHT_STICK);
         }
@@ -1040,6 +1053,12 @@ static void sampleCamera(int live, u16 held) {
     camIn.turn = turn < -1 ? -1 : turn > 1 ? 1 : turn;
     camIn.tilt = tilt < -1 ? -1 : tilt > 1 ? 1 : tilt;
     camIn.zoom = zoom < -1 ? -1 : zoom > 1 ? 1 : zoom;
+#if XG_ENGINE_ENHANCED
+    static int chordHeld;
+    int chord = (held & (BTN_L2 | BTN_L3)) == (BTN_L2 | BTN_L3);
+    if (live && !replayScript.count && chord && !chordHeld) pcFirstPersonToggle();
+    chordHeld = chord;
+#endif
     if (rc) camIn.recenter = 1;
 }
 void padCameraInput(float* turn, float* tilt, float* zoom, int* recenter) {
@@ -1268,6 +1287,9 @@ void padStateIo(XgState* s) {
     XG_STATE_VAR(s, actuator);
     XG_STATE_VAR(s, padStarted);
     if (xgStateLoading(s)) {
+#if XG_ENGINE_ENHANCED
+        pcFirstPersonEnd();
+#endif
         script.pos = 0; /* readScript catches up from the start */
         script2.pos = 0;
         replayScript.pos = 0;

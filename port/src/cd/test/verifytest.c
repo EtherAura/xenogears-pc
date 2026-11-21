@@ -1,5 +1,4 @@
-#include "cd/verify.h"
-#include "cd/cd.h"
+#include "cd/cd_internal.h"
 #include "system/settings.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -70,6 +69,14 @@ static int save(const char* path) {
     int ok = fwrite(image, 1, sizeof image, f) == sizeof image;
     return fclose(f) == 0 && ok;
 }
+static int textIndex(const char* path, CdImageInfo* info, char* why, size_t size) {
+    uint8_t table[CD_FILE_TABLE_BYTES], dirs[CD_DIRECTORY_BYTES];
+    CdDisc* disc = discOpen(path);
+    if (!disc) return 0;
+    int ok = cdReadImageIndex(disc, 1, info, table, dirs, why, size);
+    discClose(disc);
+    return ok;
+}
 int main(int argc, char** argv) {
     const char* dir = argc > 1 ? argv[1] : "build/pc/discverify-fixtures";
     CHECK(SDL_CreateDirectory(dir));
@@ -123,6 +130,17 @@ int main(int argc, char** argv) {
     put32(sector(24) + 3, 0x7FFFFFFF);
     CHECK(save(bad));
     CHECK(!cdVerifyImage(bad, &info[0], why, sizeof why) && strstr(why, "beyond"));
+    /* A regular file in slot 280 must still fit, even on a text source. */
+    fixture(1, 0);
+    memset(sector(24) + 7, 0, 7);
+    uint8_t* entry = sector(24) + 280 * 7;
+    entry[0] = 79;
+    put32(entry + 3, 2048);
+    memset(entry + 7, 255, 3);
+    CHECK(save(bad) && textIndex(bad, &info[0], why, sizeof why) && !info[0].atelierFrench);
+    f = fopen(bad, "wb");
+    CHECK(f && fwrite(image, 2352, 79, f) == 79 && fclose(f) == 0);
+    CHECK(!textIndex(bad, &info[0], why, sizeof why) && strstr(why, "beyond"));
     fixture(1, 0);
     sector(40)[120] = 2;
     CHECK(save(bad));
@@ -158,6 +176,11 @@ int main(int argc, char** argv) {
     CHECK(cdSwapSetOther("")); /* invalid automatically found images do not block one-disc use */
     CHECK(cdSwapPath(1) == NULL);
     CHECK(driveCalls == 0);
+    /* Optional compatibility check with player-provided Atelier 1.1 images. */
+    for (int i = 2; i < argc; i++) {
+        CHECK(textIndex(argv[i], &info[0], why, sizeof why) && info[0].atelierFrench);
+        CHECK(!cdVerifyImage(argv[i], &info[0], why, sizeof why) && strstr(why, "beyond"));
+    }
     printf("Disc verification: %d checks passed\n", checks);
     return 0;
 }

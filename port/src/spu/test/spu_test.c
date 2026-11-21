@@ -18,6 +18,7 @@
 #include <time.h>
 
 #include "spu/spu_internal.h"
+#include "spu/binaural.h"
 
 int xaDecodeSector(const uint8_t* raw, int16_t* lr, int* rate);
 
@@ -908,6 +909,78 @@ static void testZigzag(void) {
     mix[2] = 0x80;
 }
 
+/* Measured impulse peaks (MIT KEMAR, horizontal 0 and 60 degrees).
+ * A hard pan crosses to the far ear later, and reversing the pan mirrors
+ * the entire response. Centered sources feed both ears symmetrically. */
+static void testHeadphoneDirections(void) {
+    SpuHeadphones phones[3] = {0};
+    int peaks[3][2] = {{0}};
+    int times[3][2] = {{0}};
+    for (int dir = 0; dir < 3; dir++) phones[dir].blend = BINAURAL_FADE;
+    for (int n = 0; n <= BINAURAL_TAPS; n++) {
+        int impulse = n == 0 ? 32768 : 0;
+        int32_t lr[3][2] = {{impulse, 0}, {0, impulse}, {impulse, impulse}};
+        for (int dir = 0; dir < 3; dir++) {
+            spuBinauralMix(&phones[dir], 1, lr[dir], dir == 2 ? impulse : 0);
+            for (int ear = 0; ear < 2; ear++) {
+                int level = abs(lr[dir][ear]);
+                if (level > peaks[dir][ear]) {
+                    peaks[dir][ear] = level;
+                    times[dir][ear] = n;
+                }
+                if (n == BINAURAL_TAPS) EXPECT(level == 0);
+            }
+        }
+        EXPECT(lr[0][0] == lr[1][1] && lr[0][1] == lr[1][0]);
+        EXPECT(lr[2][0] == lr[2][1]);
+    }
+    EXPECT(times[0][0] == 13 && times[0][1] == 35 && times[2][0] == 22);
+    EXPECT(peaks[0][0] > peaks[0][1]);
+}
+
+/* One centered voice and two identical, oppositely panned voices have
+ * identical dry stereo. Only the latter belongs at the two side sources. */
+static void testHeadphoneVoiceSeparation(void) {
+    int16_t pcm[2][2][256];
+    for (int split = 0; split <= 1; split++) {
+        for (int phones = 0; phones <= 1; phones++) {
+            reset();
+            putConstBlock(0x2000, 3, 7);
+            for (int i = 0; i <= split; i++) {
+                setVoice(i, 0x2000, 0x1000, 0x00FF, 0x7F << 6);
+                regs.m0_voice[i].m0_volL = i == 0 ? 0x1000 : 0;
+                regs.m0_voice[i].m2_volR = i == split ? 0x1000 : 0;
+            }
+            regs.m180_mainVolL = regs.m182_mainVolR = 0x3fff;
+            keyOnMask(split ? 3 : 1);
+            if (phones) {
+                SpuHeadphones h = {.blend = BINAURAL_FADE};
+                spuRunHeadphones(pcm[split][phones], 128, &h, 1);
+            } else {
+                spuRun(pcm[split][phones], 128);
+            }
+        }
+    }
+    EXPECT(pcm[0][0][64] != 0);
+    EXPECT(memcmp(pcm[0][0], pcm[1][0], sizeof pcm[0][0]) == 0);
+    EXPECT(memcmp(pcm[0][1], pcm[1][1], sizeof pcm[0][1]) != 0);
+}
+
+static void testHeadphoneSwitch(void) {
+    SpuHeadphones h = {0};
+    int32_t impulse[2] = {8192, 0};
+    spuBinauralMix(&h, 1, impulse, 0);
+    EXPECT(h.blend == 1 && abs(impulse[0] - 8192) <= 64 && abs(impulse[1]) <= 64);
+    reset();
+    spuRunHeadphones(NULL, BINAURAL_FADE, &h, 1);
+    EXPECT(h.blend == BINAURAL_FADE);
+    spuRunHeadphones(NULL, BINAURAL_FADE - 1, &h, 0);
+    EXPECT(h.blend == 1);
+    spuRunHeadphones(NULL, 8, &h, 0);
+    SpuHeadphones empty = {0};
+    EXPECT(memcmp(&h, &empty, sizeof h) == 0);
+}
+
 static void benchmark(void) {
     reset();
     for (int i = 0; i < 24; i++) {
@@ -925,12 +998,21 @@ static void benchmark(void) {
     regs.m188_keyOn[1] = 0xFF;
     spuLatch(&regs);
     static int16_t out[2 * SPU_RATE];
+    static SpuState initial;
+    initial = spu;
     clock_t t0 = clock();
     for (int s = 0; s < 10; s++) {
         spuRun(out, SPU_RATE);
     }
     double secs = (double)(clock() - t0) / CLOCKS_PER_SEC;
     printf("benchmark: 10 s of 24 voices + reverb in %.3f s (%.1f%% of real time)\n", secs, secs * 10);
+    spu = initial;
+    SpuHeadphones h = {0};
+    t0 = clock();
+    for (int s = 0; s < 10; s++) spuRunHeadphones(out, SPU_RATE, &h, 1);
+    double headphoneSecs = (double)(clock() - t0) / CLOCKS_PER_SEC;
+    printf("headphones: %.3f s (%.1f percentage points of one core above stereo)\n",
+           headphoneSecs, (headphoneSecs - secs) * 10);
 }
 
 int main(void) {
@@ -954,6 +1036,9 @@ int main(void) {
     testXa();
     testZigzag();
     testCdImpulse();
+    testHeadphoneDirections();
+    testHeadphoneSwitch();
+    testHeadphoneVoiceSeparation();
     benchmark();
     printf("%d checks, %d failed\n", checks, failures);
     return failures != 0;

@@ -169,7 +169,7 @@ foreach(tool celgputest orderedgputest cpueffecttest highrefreshtest interpolati
     set(clock "${XG_GPU_DIR}/test/testclock.c")
     if(tool STREQUAL "highrefreshtest")
         set(clock "${XG_GPU_DIR}/../system/hw.c"
-            "${XG_GPU_DIR}/../spu/core.c" "${XG_GPU_DIR}/../spu/voice.c"
+            "${XG_GPU_DIR}/../spu/core.c" "${XG_GPU_DIR}/../spu/binaural.c" "${XG_GPU_DIR}/../spu/voice.c"
             "${XG_GPU_DIR}/../spu/reverb.c" "${XG_GPU_DIR}/../spu/tables.c"
             "${XG_GPU_DIR}/../spu/cdin.c")
     endif()

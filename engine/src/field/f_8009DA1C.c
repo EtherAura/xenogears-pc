@@ -2,6 +2,7 @@
 #include "common.h"
 #include "pc_retail_heap.h"
 #include "psyq.h"
+#include "pc_camera.h"
 #include "main/memory.h"
 #include "main/filesystem.h"
 #include "main/game_state.h"
@@ -646,7 +647,7 @@ void OP_UPDATE_CHARACTER(void) {
                 rotation = updateCharacterRotationOrder2[(padButtonForScripts >> 12) ^ 0xF];
             }
             if (!(rotation & 0x8000)) {
-                rotation = (rotation - camera2Tan) & 0xFFF;
+                rotation = (rotation - pcFirstPersonMovementHeading(camera2Tan)) & 0xFFF;
             }
             pCurrentFieldScriptActor->m104_rotation = rotation;
         } else {

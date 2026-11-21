@@ -4,12 +4,19 @@
 /* Shared by the files of port/src/cd. */
 
 #include "cd/cd.h"
+#include "cd/verify.h"
 
 #include <stdint.h>
 
 /* ---- disc.c: the image ---- */
 
 typedef struct CdDisc CdDisc;
+
+enum { CD_FILE_TABLE_BYTES = 32768, CD_DIRECTORY_BYTES = 2048 };
+/* Return the validated index from the open reader. A text source can contain
+ * recognized non-file data in otherwise unused slots. */
+int cdReadImageIndex(CdDisc* disc, int textSource, CdImageInfo* info, uint8_t table[CD_FILE_TABLE_BYTES],
+                     uint8_t dirs[CD_DIRECTORY_BYTES], char* why, size_t size);
 
 CdDisc* discOpen(const char* path);
 int discIsJapanese(CdDisc* disc);

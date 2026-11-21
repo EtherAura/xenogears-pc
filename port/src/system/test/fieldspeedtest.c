@@ -56,6 +56,7 @@ void spuSync(double now) { (void)now; }
 /* What the game shows (gpu/wide.c's pcWideSetMode and pcWideBlock). */
 static int kind = PC_WIDE_KERNEL;
 static unsigned wideBlocked;
+void pcFirstPersonEnd(void) {} /* the field also leaves its look mode on a transition */
 int pcWideGetMode(void) { return kind; }
 int pcWideSetMode(int k) {
     int old = kind;

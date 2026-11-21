@@ -8,7 +8,7 @@ mkdir -p "$OUT"
 CC=${CC:-cc}
 DEFS="-DPLATFORM_PC -DVERSION_US"
 $CC -g -O2 -std=gnu11 -Wall -Wextra -Wno-unused-parameter $DEFS -I"$ROOT/port/src" -I"$ROOT/port/src/cd" -I"$ROOT/include" \
-    "$ROOT/port/src/spu/core.c" "$ROOT/port/src/spu/voice.c" "$ROOT/port/src/spu/reverb.c" \
+    "$ROOT/port/src/spu/core.c" "$ROOT/port/src/spu/binaural.c" "$ROOT/port/src/spu/voice.c" "$ROOT/port/src/spu/reverb.c" \
     "$ROOT/port/src/spu/tables.c" "$ROOT/port/src/spu/cdin.c" "$ROOT/port/src/cd/xa.c" \
     "$ROOT/port/src/spu/test/spu_test.c" -lm -o "$OUT/spu_test"
 echo "$OUT/spu_test"

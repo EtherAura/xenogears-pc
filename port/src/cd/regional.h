@@ -33,8 +33,8 @@ int pcRegionalFieldMovieSound(int field, int stream);
  * and reverb through the normal field music loader; -1 preserves the cue. */
 int pcRegionalFieldMovieMusic(int field, int stream);
 /* Subtitles (F1 > Audio; settings.ini). Each applies only with a track on:
- *   cutscene_subtitles          0 off, 1 US dialogue, 2 Japanese translation
- *                               (a 3 or 4: 1 or 2 with all sounds)
+ *   cutscene_subtitles          0 off, 1 US dialogue, 2 Japanese translation, 5 text pack
+ *                               (legacy 3 or 4: track 1 or 2 with all sounds)
  *   cutscene_sound_captions     0 none, 1 voices ([screams]), 2 all sounds
  *   cutscene_lyrics             1: the songs' lyrics
  *   cutscene_invented_language  lines in the game's invented language:
@@ -45,7 +45,10 @@ int pcRegionalFieldMovieMusic(int field, int stream);
 /* The build carries the caption text (the local subtitles.inc: it
  * transcribes the game's dialogue, so public builds leave it out). */
 int regionalCaptionsAvailable(void);
-int regionalSubtitlesEnabled(void); /* the track, 0-2 */
+enum { REGIONAL_PACK_SUBTITLES = 3 };
+typedef const char* (*RegionalPackCaption)(int japanese, int disc, int clip, int frame);
+void regionalSetPackCaptionReader(RegionalPackCaption reader);
+int regionalSubtitlesEnabled(void); /* 0 off, 1 US, 2 Japanese translation, 3 active text pack */
 void regionalSetSubtitles(int track);
 int regionalSoundCaptions(void);
 void regionalSetSoundCaptions(int level);
@@ -55,7 +58,7 @@ int regionalInventedSpoken(void);
 void regionalSetInventedSpoken(int on);
 /* The caption at the current movie's frame for the settings; NULL: none. */
 const char* regionalSubtitle(void);
-/* The same for a track (1 US dialogue, 2 Japanese translation; else none)
+/* The same for a track (1 US dialogue, 2 Japanese translation, 3 text pack)
  * and sound level (0-2) chosen by the caller, e.g. the extras' movie viewer,
  * whose movie is its CD world's (cd.h cdWorldSwap carries this file's
  * state). regionalCaption: no sounds. Several captions at once come as one

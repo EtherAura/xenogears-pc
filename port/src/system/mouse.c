@@ -50,6 +50,9 @@
 
 #include "gpu/gpu.h"
 #include "mouse.h"
+#if XG_ENGINE_ENHANCED
+#include "pc_camera.h"
+#endif
 #include "pad.h"
 #include "savestate.h"
 #include "settings.h"
@@ -174,6 +177,20 @@ static int cameraMode(void) {
 }
 
 void mouseEvent(const SDL_Event* e) {
+#if XG_ENGINE_ENHANCED
+    if (pcFirstPersonActive()) {
+        if (e->type == SDL_EVENT_MOUSE_MOTION && (e->motion.state & SDL_BUTTON_RMASK)) {
+            m.rightDown = m.dragging = 0;
+            pcFirstPersonMouse(e->motion.xrel, e->motion.yrel);
+            return;
+        }
+        if ((e->type == SDL_EVENT_MOUSE_BUTTON_DOWN || e->type == SDL_EVENT_MOUSE_BUTTON_UP) &&
+            e->button.button == SDL_BUTTON_RIGHT) {
+            m.rightDown = m.dragging = 0;
+            return;
+        }
+    }
+#endif
     switch (e->type) {
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
         m.focusAt = e->window.timestamp;

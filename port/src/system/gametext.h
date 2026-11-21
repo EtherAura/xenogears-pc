@@ -58,6 +58,11 @@ void gameTextInit(void);                   /* read the settings (main.c, or on f
 int gameTextSource(int category);          /* GT_SOURCE_* */
 const char* gameTextPack(int category);    /* the pack's id for GT_SOURCE_PACK */
 void gameTextSetSource(int category, int source, const char* pack); /* and settings.ini */
+/* Apply one choice to every category, word pictures and movie subtitles. */
+void gameTextSetLanguage(int source, const char* pack);
+int gameTextLanguage(void); /* source, or -1 for a custom combination */
+int gameTextOtherDiscs(void); /* verified disc mask, refreshed when the selector opens */
+int gameTextPackHasMovies(void);
 const char* gameTextCategoryKey(int category); /* "dialogue", ... */
 const char* gameTextOtherRegion(void);     /* "JP" on the US build, "US" on the JP build */
 /* A line for F1: where the source's text comes from, or why it cannot. */
@@ -91,6 +96,7 @@ GtImage* gtImageOpen(const char* path, char* why, size_t size);
 void gtImageClose(GtImage* image);
 const char* gtImagePath(const GtImage* image);
 const char* gtImageRegion(const GtImage* image); /* "US" or "JP" */
+int gtImageAtelierFrench(const GtImage* image);
 int gtImageDisc(const GtImage* image);           /* 1 or 2 */
 uint8_t* gtImageFile(GtImage* image, int dir, int file, int* size); /* malloc'd; NULL: none */
 uint8_t* gtLzss(const uint8_t* src, int size, int* outSize);       /* malloc'd; NULL: no stream */
@@ -194,9 +200,14 @@ void gtKeyName(const GtKey* key, int disc, char* out, size_t size); /* "kernel/1
 
 /* <save folder>/packs (XG_PACK_DIR overrides; "none": no packs). */
 const char* gtPackDir(void);
+typedef void (*GtPackVisitor)(void* user, const char* id, const char* name);
+void gtVisitPacks(GtPackVisitor visit, void* user);
 int gtPackList(char ids[][64], char names[][128], int max);
 GtPack* gtPackLoad(const char* id, char* why, size_t size);
 const char* gtPackFind(const GtPack* pack, const char* key, int* w, int* h); /* its text, or NULL */
+void gtPackFree(GtPack* pack);
+int gtPackHasMovies(const GtPack* pack, int japanese);
+const char* gtPackMovieCaption(const GtPack* pack, int japanese, int disc, int clip, int frame);
 const char* gtPackName(const GtPack* pack);
 const char* gtPackId(const GtPack* pack);
 const char* gtPackRegion(const GtPack* pack);   /* whose tables its keys are: "US", "JP" */

@@ -40,6 +40,13 @@ int pcGameTextOn;
 
 static uint16_t rd16(const uint8_t* p) { return (uint16_t)(p[0] | p[1] << 8); }
 
+static uint64_t fnv(uint64_t h, const void* p, size_t n) {
+    const uint8_t* b = p;
+    while (n--) h = (h ^ *b++) * UINT64_C(1099511628211);
+    return h;
+}
+#define FNV_START UINT64_C(14695981039346656037)
+
 static const char* const categoryKeys[GT_CATEGORIES] = {"dialogue", "battle", "menus", "names"};
 
 /* ---- settings ---------------------------------------------------------------------------- */
@@ -68,15 +75,20 @@ static void parseSource(int c, const char* v) {
     else if (!strcmp(v, "image")) cfg.source[c] = GT_SOURCE_IMAGE;
     else if (!strncmp(v, "pack:", 5) && v[5] != '\0') {
         cfg.source[c] = GT_SOURCE_PACK;
-        snprintf(cfg.pack[c], sizeof(cfg.pack[c]), "%s", v + 5);
+        snprintf(cfg.pack[c], sizeof(cfg.pack[c]), "%.63s", v + 5);
     } else {
         fprintf(stderr, "gametext: text_%s=%s: no such source; the disc's text\n", categoryKeys[c], v);
     }
 }
 
+static const char* packMovieCaption(int japanese, int disc, int clip, int frame) {
+    return gtPackMovieCaption(gtCategoryPack(GT_DIALOGUE), japanese, disc, clip, frame);
+}
+
 void gameTextInit(void) {
     if (cfg.init) return;
     cfg.init = 1;
+    regionalSetPackCaptionReader(packMovieCaption);
     for (int c = 0; c < GT_CATEGORIES; c++) {
         char key[32], comment[200];
         snprintf(key, sizeof(key), "text_%s", categoryKeys[c]);
@@ -132,8 +144,9 @@ const char* gameTextOtherRegion(void) {
     return OTHER_REGION;
 }
 
-void gameTextSetSource(int c, int source, const char* pack) {
-    gameTextInit();
+static void releaseCategoryPack(int c);
+
+static void setSource(int c, int source, const char* pack) {
     if (c < 0 || c >= GT_CATEGORIES) return;
     char key[32], value[80];
     snprintf(key, sizeof(key), "text_%s", categoryKeys[c]);
@@ -144,9 +157,15 @@ void gameTextSetSource(int c, int source, const char* pack) {
     default: snprintf(value, sizeof(value), "disc"); break;
     }
     parseSource(c, value);
+    releaseCategoryPack(c);
     cfg.given[c] = cfg.kept[c] = 0;
     cfg.generation++;
     settingsSet(key, value);
+}
+
+void gameTextSetSource(int c, int source, const char* pack) {
+    gameTextInit();
+    setSource(c, source, pack);
     settingsSave();
     updateOn();
 }
@@ -162,15 +181,51 @@ int gameTextPictures(int c) {
     return c >= 0 && c < GT_CATEGORIES && gameTextHasPictures(c) && cfg.pictures[c];
 }
 
-void gameTextSetPictures(int c, int on) {
-    gameTextInit();
+static void setPictures(int c, int on) {
     if (c < 0 || c >= GT_CATEGORIES || !gameTextHasPictures(c)) return;
     char key[40];
     snprintf(key, sizeof(key), "text_%s_pictures", categoryKeys[c]);
     cfg.pictures[c] = !!on;
     cfg.generation++;
     settingsSetInt(key, cfg.pictures[c]);
+}
+
+void gameTextSetPictures(int c, int on) {
+    gameTextInit();
+    setPictures(c, on);
     settingsSave();
+}
+
+int gameTextPackHasMovies(void) {
+    gameTextInit();
+    return gtPackHasMovies(gtCategoryPack(GT_DIALOGUE), !strcmp(OTHER_REGION, "US"));
+}
+
+static int languageTrack(int source) {
+    if (source == GT_SOURCE_PACK && gameTextPackHasMovies()) return REGIONAL_PACK_SUBTITLES;
+    if (source == GT_SOURCE_OTHER && regionalCaptionsAvailable()) return !strcmp(OTHER_REGION, "JP") ? 2 : 1;
+    return 0;
+}
+
+void gameTextSetLanguage(int source, const char* pack) {
+    if (source < GT_SOURCE_DISC || source > GT_SOURCE_PACK || (source == GT_SOURCE_PACK && (!pack || !*pack))) return;
+    gameTextInit();
+    for (int c = 0; c < GT_CATEGORIES; c++) {
+        setSource(c, source, pack);
+        if (gameTextHasPictures(c)) setPictures(c, source != GT_SOURCE_DISC);
+    }
+    updateOn();
+    regionalSetSubtitles(languageTrack(source)); /* saves the whole selection together */
+}
+
+int gameTextLanguage(void) {
+    gameTextInit();
+    int source = cfg.source[GT_DIALOGUE];
+    for (int c = 0; c < GT_CATEGORIES; c++) {
+        if (cfg.source[c] != source || strcmp(cfg.pack[c], cfg.pack[GT_DIALOGUE])) return -1;
+        if (source != GT_SOURCE_DISC && gameTextHasPictures(c) && !cfg.pictures[c]) return -1;
+    }
+    return regionalSubtitlesEnabled() == languageTrack(source) ? source : -1;
 }
 
 unsigned gtGeneration(void) {
@@ -190,7 +245,7 @@ static struct {
     char why[2][300];
 } retail, sources[2]; /* SRC_OTHER, SRC_IMAGE */
 
-void gtForgetImage(void);
+static void forgetSource(int src);
 
 /* The sources that are images: the other release's discs, a text image (a
  * translation patch applied to the player's own image). */
@@ -333,6 +388,34 @@ static GtImage* sourceImage(int src, int d) {
     return src == SRC_IMAGE ? textImage(d) : otherImage(d);
 }
 
+/* Probe again when opening the selector. Refresh derived tables only if
+ * an image appeared or disappeared since the last use. */
+int gameTextOtherDiscs(void) {
+    int mask = 0, changed = 0;
+    for (int i = 0; i < 2; i++) {
+        GtImage* old = other.image[i];
+        int wasOpen = old != NULL, previouslyTried = other.tried[i];
+        CdImageInfo info;
+        char why[128];
+        if (old && (!cdVerifyImage(gtImagePath(old), &info, why, sizeof(why)) ||
+                    info.disc != i + 1 || strcmp(info.region, OTHER_REGION))) {
+            gtImageClose(old);
+            other.image[i] = NULL;
+            changed = 1;
+        }
+        if (!other.image[i]) other.tried[i] = 0;
+        if (otherImage(i + 1)) {
+            mask |= 1 << i;
+            if (previouslyTried && !wasOpen) changed = 1;
+        }
+    }
+    if (changed) {
+        cfg.generation++;
+        forgetSource(SRC_OTHER);
+    }
+    return mask;
+}
+
 int gtCurrentDisc(void) {
     return currentDisc();
 }
@@ -352,12 +435,13 @@ GtImage* gtCategoryImage(int c, int d) {
 void gameTextImageChanged(void) {
     cfg.generation++;
     for (int d = 0; d < 2; d++) {
-        /* the old image stays open: tables read from it may still be shown */
+        /* Tables and glyphs shown by the game own copies of their bytes. */
+        gtImageClose(sources[SRC_IMAGE].image[d]);
         sources[SRC_IMAGE].image[d] = NULL;
         sources[SRC_IMAGE].tried[d] = 0;
         sources[SRC_IMAGE].why[d][0] = '\0';
     }
-    gtForgetImage();
+    forgetSource(SRC_IMAGE);
 }
 
 /* ---- the source's fonts ------------------------------------------------------------------ */
@@ -369,6 +453,7 @@ static struct {
     struct {
         uint8_t* data; /* the source's 01/06 */
         int size, tried;
+        uint64_t fingerprint;
         GtFont font;
         int16_t* equiv; /* its glyphs in the running font */
     } src[2];
@@ -407,6 +492,7 @@ static int sourceFontReady(int src) {
             fonts.src[src].data = NULL;
             return 0;
         }
+        fonts.src[src].fingerprint = fnv(FNV_START, fonts.src[src].data, (size_t)fonts.src[src].size);
         gtBankSetFont(src == SRC_IMAGE ? GT_BANK_IMAGE : GT_BANK_OTHER, &fonts.src[src].font);
     }
     if (fonts.src[src].data == NULL) return 0;
@@ -426,6 +512,7 @@ typedef struct {
     GtTable table;
     uint64_t id;    /* the arena's key for its entries (its source and bytes) */
     uint8_t* wh;    /* a field's window sizes (in blob), else NULL */
+    GtLayout layout;
 } SourceTable;
 
 static int logOn = -1; /* XG_TEXT_LOG: each table asked about, each text made */
@@ -450,13 +537,6 @@ static ArenaText arenaTexts[ARENA_TEXTS];
 static uint32_t arenaUsed, arenaCount;
 static uint32_t arenaHash[ARENA_TEXTS * 2]; /* index + 1 by key (rebuilt after a load) */
 static int arenaFull;
-
-static uint64_t fnv(uint64_t h, const void* p, size_t n) {
-    const uint8_t* b = p;
-    while (n--) h = (h ^ *b++) * UINT64_C(1099511628211);
-    return h;
-}
-#define FNV_START UINT64_C(14695981039346656037)
 
 static void arenaHashAdd(uint32_t i) {
     uint32_t h = (uint32_t)(arenaTexts[i].key ^ arenaTexts[i].key >> 32) & (ARENA_TEXTS * 2 - 1);
@@ -522,7 +602,7 @@ static const ArenaText* arenaAt(const u8* p) {
     return found >= 0 && off < arenaTexts[found].at + arenaTexts[found].length ? &arenaTexts[found] : NULL;
 }
 
-static void sourceTableSet(SourceTable* s, int src, uint8_t* blob, int size) {
+static void sourceTableSet(SourceTable* s, int src, GtImage* image, uint8_t* blob, int size, int fieldWindow) {
     s->src = src;
     s->blob = blob;
     s->size = size;
@@ -532,6 +612,10 @@ static void sourceTableSet(SourceTable* s, int src, uint8_t* blob, int size) {
     }
     s->id = fnv(fnv(FNV_START, "source", 6), &src, sizeof(src));
     s->id = fnv(s->id, blob, (size_t)size);
+    if (gtImageAtelierFrench(image)) {
+        s->layout = (GtLayout){1, fieldWindow ? GT_WINDOWS_GROW : GT_WINDOWS_NATIVE, 2, 4};
+        s->id = fnv(s->id, &s->layout, sizeof(s->layout));
+    }
 }
 
 static u8* sourceText(SourceTable* s, int index, int category) {
@@ -539,18 +623,23 @@ static u8* sourceText(SourceTable* s, int index, int category) {
         if (category >= 0) cfg.kept[category]++;
         return NULL;
     }
-    uint64_t key = fnv(s->id, &index, sizeof(index));
+    int k = s->src;
+    if (!sourceFontReady(k)) {
+        if (category >= 0) cfg.kept[category]++;
+        return NULL;
+    }
+    /* Two patched images can share the text codes but draw different letters. */
+    uint64_t key = fnv(s->id, &fonts.src[k].fingerprint, sizeof(fonts.src[k].fingerprint));
+    key = fnv(key, &index, sizeof(index));
     u8* text = arenaFind(key);
     if (text == NULL) {
         int length;
         const uint8_t* src = gtTableEntry(&s->table, index, &length);
         uint8_t buf[4096];
-        int k = s->src;
-        int n = src && sourceFontReady(k) ? gtTranscode(src, length, &fonts.src[k].font, fonts.src[k].equiv,
-                                                       k == SRC_IMAGE ? GT_BANK_IMAGE : GT_BANK_OTHER,
-                                                       &fonts.running, buf, sizeof(buf))
-                                         : 0;
-        text = arenaAdd(key, buf, n, NULL);
+        int n = src ? gtTranscode(src, length, &fonts.src[k].font, fonts.src[k].equiv,
+                                  k == SRC_IMAGE ? GT_BANK_IMAGE : GT_BANK_OTHER, &fonts.running, buf, sizeof(buf))
+                    : 0;
+        text = arenaAdd(key, buf, n, &s->layout);
         if (logOn > 0) {
             fprintf(stderr, "gametext: entry %d: %d bytes ->", index, n);
             for (int k = 0; k < n && k < 48; k++) fprintf(stderr, " %02x", buf[k]);
@@ -669,7 +758,7 @@ static SourceTable* fieldSource(FieldText* f, int src) {
             free(blob);
             return NULL;
         }
-        sourceTableSet(&f->source[src], src, blob, size);
+        sourceTableSet(&f->source[src], src, o, blob, size, 1);
         if (f->source[src].table.count > 0) {
             f->source[src].wh = blob + 4 + 2 * f->source[src].table.count;
             f->state[src] = 1;
@@ -697,6 +786,18 @@ static struct {
     const GtPack* equivFor;
 } packs[GT_CATEGORIES];
 
+/* Game strings and glyphs are copied into the save-state arenas. Once no
+ * category uses this pack, only the source files and lookup tables go away. */
+static void releaseCategoryPack(int c) {
+    GtPack* previous = packs[c].pack;
+    if (previous && !strcmp(packs[c].id, cfg.pack[c])) return;
+    gtBankSetFont(GT_BANK_PACK + c, NULL);
+    free(packs[c].equiv);
+    memset(&packs[c], 0, sizeof(packs[c]));
+    for (int i = 0; i < GT_CATEGORIES; ++i) if (packs[i].pack == previous) return;
+    gtPackFree(previous);
+}
+
 static GtPack* categoryPack(int c);
 
 /* A pack's own font in the category's bank slot (GT_BANK_PACK + c) and its
@@ -717,8 +818,7 @@ static int packFontReady(int c) {
 
 static GtPack* categoryPack(int c) {
     if (strcmp(packs[c].id, cfg.pack[c])) {
-        /* another pack: the old one's texts stay (a window may still show one) */
-        packs[c].pack = NULL;
+        releaseCategoryPack(c);
         snprintf(packs[c].id, sizeof(packs[c].id), "%s", cfg.pack[c]);
         for (int o = 0; o < GT_CATEGORIES; o++) {
             if (o != c && packs[o].pack != NULL && !strcmp(packs[o].id, cfg.pack[c])) packs[c].pack = packs[o].pack;
@@ -1037,20 +1137,29 @@ static SourceTable* knownSource(KnownTable* k, int src) {
         int size;
         uint8_t* blob = o ? gtImageTable(o, &k->key, &size) : NULL;
         k->source[src] = calloc(1, sizeof(*k->source[src]));
-        if (k->source[src] != NULL) sourceTableSet(k->source[src], src, blob, size);
+        if (k->source[src] != NULL) sourceTableSet(k->source[src], src, o, blob, size, 0);
         else free(blob);
     }
     return k->source[src];
 }
 
 /* The text image was changed: what was read from the old one is not asked again. */
-void gtForgetImage(void) {
-    for (int i = 0; i < fieldCount; i++) fields[i].state[SRC_IMAGE] = 0;
-    for (int i = 0; i < knownCount; i++) known[i].tried[SRC_IMAGE] = 0;
-    fonts.src[SRC_IMAGE].tried = 0;
-    fonts.src[SRC_IMAGE].data = NULL; /* kept allocated: brought glyphs may still be on screen */
-    free(fonts.src[SRC_IMAGE].equiv);
-    fonts.src[SRC_IMAGE].equiv = NULL;
+static void forgetSource(int src) {
+    for (int i = 0; i < fieldCount; i++) {
+        free(fields[i].source[src].blob);
+        memset(&fields[i].source[src], 0, sizeof(fields[i].source[src]));
+        fields[i].state[src] = 0;
+    }
+    for (int i = 0; i < knownCount; i++) {
+        if (known[i].source[src]) free(known[i].source[src]->blob);
+        free(known[i].source[src]);
+        known[i].source[src] = NULL;
+        known[i].tried[src] = 0;
+    }
+    gtBankSetFont(src == SRC_IMAGE ? GT_BANK_IMAGE : GT_BANK_OTHER, NULL);
+    free(fonts.src[src].data);
+    free(fonts.src[src].equiv);
+    memset(&fonts.src[src], 0, sizeof(fonts.src[src]));
 }
 
 static int sourceOf(int category) {
@@ -1303,6 +1412,8 @@ u8* pcGameTextString(u8* table, s32 index) {
 }
 
 s32 pcGameTextWindowOverridesScript(u8* table, s32 index) {
+    if (cfg.source[GT_DIALOGUE] == GT_SOURCE_IMAGE)
+        return gtImageAtelierFrench(textImage(currentDisc())) && pcGameTextWindow(table, index, 0) >= 0;
     if (cfg.source[GT_DIALOGUE] != GT_SOURCE_PACK) return 0;
     GtPack* pack = categoryPack(GT_DIALOGUE);
     if (pack == NULL) return 0;
@@ -1315,45 +1426,47 @@ s32 pcGameTextWindowOverridesScript(u8* table, s32 index) {
 s32 pcGameTextWindow(u8* table, s32 index, s32 which) {
     if (cfg.source[GT_DIALOGUE] == GT_SOURCE_DISC) return -1;
     FieldText* f = currentField(table);
-    if (f == NULL) return -1;
+    if (f == NULL || index < 0 || index > rd16(table)) return -1;
+    GtLayout layout;
+    u8* codes;
+    int v;
+    int disc = table[rd16(table) * 2 + 6 + index * 2 + (which ? 1 : 0)];
     if (cfg.source[GT_DIALOGUE] == GT_SOURCE_OTHER || cfg.source[GT_DIALOGUE] == GT_SOURCE_IMAGE) {
         SourceTable* s = fieldSource(f, sourceOf(GT_DIALOGUE));
-        if (s == NULL || s->wh == NULL || index < 0 || index >= s->table.count) return -1;
+        if (s == NULL || s->wh == NULL || index >= s->table.count) return -1;
         /* only with its text: a text the source could not give keeps its size */
-        if (sourceText(s, index, -1) == NULL) return -1;
-        return s->wh[index * 2 + (which ? 1 : 0)];
-    }
-    if (cfg.source[GT_DIALOGUE] == GT_SOURCE_PACK) {
+        codes = sourceText(s, index, -1);
+        if (codes == NULL) return -1;
+        v = s->wh[index * 2 + (which ? 1 : 0)];
+        layout = s->layout;
+        if (layout.windows != GT_WINDOWS_GROW) return v;
+    } else if (cfg.source[GT_DIALOGUE] == GT_SOURCE_PACK) {
         char key[64];
         int w = 0, h = 0;
         snprintf(key, sizeof(key), "field/%d/%d/%d", f->disc, f->field, (int)index);
         const char* text = packFind(GT_DIALOGUE, key, &w, &h);
-        u8* codes = text != NULL ? packEncoded(GT_DIALOGUE, text, 1) : NULL;
-        if (codes == NULL || index < 0 || index > rd16(table)) return -1;
+        codes = text != NULL ? packEncoded(GT_DIALOGUE, text, 1) : NULL;
+        if (codes == NULL) return -1;
         GtPack* pack = categoryPack(GT_DIALOGUE);
-        GtLayout layout;
         gtPackLayout(pack, &layout);
-        int disc = table[rd16(table) * 2 + 6 + index * 2 + (which ? 1 : 0)];
-        int v = which ? h : w;
+        v = which ? h : w;
         if (v < 0 || v > 255) v = disc;
         if (layout.windows == GT_WINDOWS_SOURCE) return v;
         if (layout.windows == GT_WINDOWS_NATIVE) {
             /* the disc's size; a pack of the other release: that release's (as its disc gives) */
             return !SDL_strcasecmp(gtPackRegion(pack), OTHER_REGION) ? v : -1;
         }
-        if (layout.windows == GT_WINDOWS_GROW && v > 0) {
-            int need = which ? measuredLines(codes, &layout) : measuredWidth(codes, &layout);
-            if (need > v) v = need;
-        }
-        /* within the screen (55: the field places a window with a portrait,
-         * 17 units more, on screen) and the window's text memory (its lines'
-         * VRAM band: 7 lines); never below the disc's */
-        int limit = SDL_max(disc, which ? 7 : 55);
-        v = SDL_min(v, limit);
-        if (logOn > 0) fprintf(stderr, "gametext: window %s %d (disc %d)\n", which ? "height" : "width", v, disc);
-        return v;
+    } else {
+        return -1;
     }
-    return -1;
+    if (layout.windows == GT_WINDOWS_GROW && v > 0) {
+        int need = which ? measuredLines(codes, &layout) : measuredWidth(codes, &layout);
+        if (need > v) v = need;
+    }
+    /* 55 width units leave room for a portrait; the VRAM band holds 7 lines. */
+    v = SDL_min(v, SDL_max(disc, which ? 7 : 55));
+    if (logOn > 0) fprintf(stderr, "gametext: window %s %d (disc %d)\n", which ? "height" : "width", v, disc);
+    return v;
 }
 
 /* ---- export ------------------------------------------------------------------------------ */

@@ -32,17 +32,14 @@
 #define RAW_SECTOR 2352
 #define USER_OFFSET 24
 #define USER_SIZE 2048
-#define TABLE_LBA 0x18
-#define TABLE_SIZE 0x8000
-#define DIRS_LBA 0x28
 #define FILE_MAX (16 << 20)
 
 struct GtImage {
     CdDisc* disc;
     char path[4096];
     CdImageInfo info;
-    uint8_t table[TABLE_SIZE];
-    uint8_t dirs[USER_SIZE];
+    uint8_t table[CD_FILE_TABLE_BYTES];
+    uint8_t dirs[CD_DIRECTORY_BYTES];
 };
 
 static uint32_t le32(const uint8_t* p) {
@@ -64,18 +61,17 @@ static int readUser(GtImage* im, int lba, int sectors, uint8_t* out) {
 GtImage* gtImageOpen(const char* path, char* why, size_t size) {
     GtImage* im = calloc(1, sizeof(*im));
     if (im == NULL) return NULL;
-    if (path == NULL || !cdVerifyImage(path, &im->info, why, size)) {
+    im->disc = path && *path ? discOpen(path) : NULL;
+    if (!im->disc) {
+        if (size) snprintf(why, size, "%s", path && *path ? discLastError() : "Choose a text image.");
         free(im);
         return NULL;
     }
-    snprintf(im->path, sizeof(im->path), "%s", path);
-    im->disc = discOpen(path);
-    if (im->disc == NULL || !readUser(im, TABLE_LBA, TABLE_SIZE / USER_SIZE, im->table) ||
-        !readUser(im, DIRS_LBA, 1, im->dirs)) {
-        if (size) snprintf(why, size, "Cannot read %s's file table.", path);
+    if (!cdReadImageIndex(im->disc, 1, &im->info, im->table, im->dirs, why, size)) {
         gtImageClose(im);
         return NULL;
     }
+    snprintf(im->path, sizeof(im->path), "%s", path);
     return im;
 }
 
@@ -88,6 +84,7 @@ void gtImageClose(GtImage* im) {
 const char* gtImagePath(const GtImage* im) { return im ? im->path : ""; }
 const char* gtImageRegion(const GtImage* im) { return im ? im->info.region : ""; }
 int gtImageDisc(const GtImage* im) { return im ? im->info.disc : 0; }
+int gtImageAtelierFrench(const GtImage* im) { return im && im->info.atelierFrench; }
 
 /* File `file` (from 1) of directory `dir`, whole sectors (an LZSS stream may
  * run into the padding, as the game's loader reads it). */
@@ -97,7 +94,7 @@ uint8_t* gtImageFile(GtImage* im, int dir, int file, int* size) {
     unsigned base = le16(im->dirs + 2 * dir);
     if (base == 0 || base == 0xFFFF) return NULL;
     unsigned entry = base - 1 + (unsigned)file - 1;
-    if (entry >= TABLE_SIZE / 7) return NULL;
+    if (entry >= (unsigned)im->info.entries) return NULL;
     const uint8_t* e = im->table + entry * 7;
     unsigned lba = e[0] | e[1] << 8 | e[2] << 16;
     int32_t bytes = (int32_t)le32(e + 3);

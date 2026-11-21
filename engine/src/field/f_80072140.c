@@ -197,7 +197,7 @@ void uploadCharacterSprites(void);
 void execSpritesCallbacksList1(void);
 void execSpritesCallbacksList2(void);
 void OP_INIT_ENTITY_SCRIPT_sub0Sub9(SpriteActorCore* actor);
-void renderFieldCharacterSprites(OTag* ot, s32 oddOrEven);
+static void drawFieldSprites(OTag* ot, s32 oddOrEven, MATRIX* gameProjection);
 void renderCharShadows(OTag* ot, s32 oddOrEven);
 void exectueEntitiesUpdateFunction(void);
 void stepDialogWindows(void);
@@ -829,9 +829,23 @@ u32 stepInterpolateDirection(s32 cur, s32 target, s32 step) {
     return r;
 }
 
-void updateAllEntities(void) {
-    VECTOR eye;
-    VECTOR at;
+/* OP_UPDATE_CHARACTER hands movement to the player on the script tick. A
+ * dialogue, pending transition or menu takes ownership of the field again. */
+static int firstPersonPlayerControl(void) {
+    extern s32 playerCanRun, fieldTransitionInProgress, fieldBattleRequested, g_menuIdToOpen;
+    extern DialogWindow gDialogWindows[4];
+    s32 i;
+    if (!playerCanRun || fieldTransitionInProgress || fieldBattleRequested || g_menuIdToOpen != 0xff) return 0;
+    for (i = 0; i < 4; i++) {
+        if (gDialogWindows[i].m40E_state == 0) return 0;
+    }
+    return 1;
+}
+
+static int updateFieldEntitiesForView(MATRIX* gameCamera, MATRIX* gameProjection) {
+    VECTOR eye, at, lookEye, lookAt;
+    s16 spriteHeading;
+    int looking;
     s32 i;
     sFieldScriptEntity* se;
     s32 step;
@@ -869,7 +883,8 @@ void updateAllEntities(void) {
     at.vx += fieldSceneState.m60_cameraOffset.vx;
     at.vy += fieldSceneState.m60_cameraOffset.vy;
     at.vz += fieldSceneState.m60_cameraOffset.vz;
-    pcFieldCamera(&eye, &at); /* PC: optional camera override (XG_FREECAM prototype) */
+    looking = gameProjection && pcFirstPersonWanted() && pcFirstPersonView(&lookEye, &lookAt, &spriteHeading, firstPersonPlayerControl());
+    pcFieldCamera(&eye, &at);
     if (g_updateAllEntitiesSub2Var0 != 0) {
         lookAtDivided(&fieldSceneState.m110_cameraMatrix, &eye, &at, &fieldSceneState.m20_cameraUp);
         g_cameraMatrix2 = fieldSceneState.m110_cameraMatrix;
@@ -878,40 +893,48 @@ void updateAllEntities(void) {
         lookAtDivided(&g_cameraMatrix2, &eye, &at, &fieldSceneState.m20_cameraUp);
     }
     STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
+    if (looking) {
+        computeProjectionMatrix();
+        *gameCamera = fieldSceneState.m110_cameraMatrix;
+        *gameProjection = fieldSceneState.m1E4_projectionMatrix;
+        lookAtDivided(&fieldSceneState.m110_cameraMatrix, &lookEye, &lookAt, &fieldSceneState.m20_cameraUp);
+    } else {
+        spriteHeading = fieldSceneState.m10E_cameraTan;
+    }
     setProjectionMatrixForField();
     STACK_RESTORE();
     for (i = 0; i < g_totalActors; i++) {
         if ((fieldSceneState.m290_actorArray[i].m58_flags & 0xF40) && !(fieldSceneState.m290_actorArray[i].m58_flags & 0x20)) {
             se = fieldSceneState.m290_actorArray[i].m4C_scriptEntity;
             flags = se->m4_flags;
-            if (!(flags & 0x100000) && (flags & 0x600) != 0x200) {
-                if (!(se->m0_fieldScriptFlags & 0x8000)) {
-                    target = se->m14_currentTriangleFlag;
-                    if (!(target & 0x200000) || (step = 0x200, (se->m0_fieldScriptFlags & 0x1800))) {
-                        if (!(flags & 0x2000)) {
-                            step = se->m11E_rotationSpeed;
-                        } else {
-                            step = op9DVar1.m30_spriteTurnSpeed;
-                        }
-                        cur = se->m108_rotation3;
-                        target = se->m106_currentRotation;
+            if (flags & 0x100000) continue;
+            int onGameCamera = (flags & 0x600) != 0x200;
+            if (onGameCamera && !(se->m0_fieldScriptFlags & 0x8000)) {
+                target = se->m14_currentTriangleFlag;
+                if (!(target & 0x200000) || (step = 0x200, (se->m0_fieldScriptFlags & 0x1800))) {
+                    if (!(flags & 0x2000)) {
+                        step = se->m11E_rotationSpeed;
                     } else {
-                        target >>= 11;
-                        target -= 2;
-                        target &= 7;
-                        target <<= 9;
-                        cur = se->m108_rotation3;
+                        step = op9DVar1.m30_spriteTurnSpeed;
                     }
-                    se->m108_rotation3 = pcFieldTurn(i, cur, target, step); /* Enhanced: the native turn step over the two 60 Hz frames */
+                    cur = se->m108_rotation3;
+                    target = se->m106_currentRotation;
+                } else {
+                    target >>= 11;
+                    target -= 2;
+                    target &= 7;
+                    target <<= 9;
+                    cur = se->m108_rotation3;
                 }
-                if (renderCharsDisabled == 0) {
-                    if (!(se->m4_flags & 0x1000000)) {
-                        setSpriteActorAngle(fieldSceneState.m290_actorArray[i].m4_pVramSpriteSheet,
-                                      fieldSceneState.m10E_cameraTan + fieldSceneState.m290_actorArray[i].m4C_scriptEntity->m108_rotation3);
-                    } else {
-                        spriteActorSetDirection(fieldSceneState.m290_actorArray[i].m4_pVramSpriteSheet,
-                                                fieldSceneState.m290_actorArray[i].m4C_scriptEntity->m108_rotation3);
-                    }
+                se->m108_rotation3 = pcFieldTurn(i, cur, target, step); /* Enhanced: the native turn step over the two 60 Hz frames */
+            }
+            if (renderCharsDisabled == 0 && (onGameCamera || (looking && fieldSceneState.m290_actorArray[i].m4_pVramSpriteSheet))) {
+                if (!(se->m4_flags & 0x1000000)) {
+                    setSpriteActorAngle(fieldSceneState.m290_actorArray[i].m4_pVramSpriteSheet,
+                                  spriteHeading + fieldSceneState.m290_actorArray[i].m4C_scriptEntity->m108_rotation3);
+                } else {
+                    spriteActorSetDirection(fieldSceneState.m290_actorArray[i].m4_pVramSpriteSheet,
+                                            fieldSceneState.m290_actorArray[i].m4C_scriptEntity->m108_rotation3);
                 }
             }
         }
@@ -919,6 +942,12 @@ void updateAllEntities(void) {
     if (fieldDebugDisable == 0) {
         func_80281B00("MATRIX    ");
     }
+    return looking;
+}
+
+/* The map inspector also advances field scripts, without drawing a player view. */
+void updateAllEntities(void) {
+    updateFieldEntitiesForView(NULL, NULL);
 }
 
 void setupObjectRenderModes(void) {
@@ -1007,6 +1036,10 @@ void renderCompass(void) {
     s32 j;
     u8 stop;
 
+    /* The compass is a tilted 3D model. At eye level it would be edge-on;
+     * keep its game updates running while the player looks around. */
+    int drawCompass = !pcFirstPersonActive() && !op9DVar1.m4D_compassDisabled &&
+                      !g_updateAllEntitiesSub2Var0 && !fieldCompassVar;
     stop = fieldSceneState.m175_dollyStop;
     for (i = 0; i < 8; i++) {
         if (stop & compassData0[i]) {
@@ -1045,7 +1078,7 @@ void renderCompass(void) {
     MulMatrix2(&m200, &m168);
     m168.t[2] = 0x1000;
     CompMatrix(&m232, &m168, &m136);
-    if (op9DVar1.m4D_compassDisabled == 0 && g_updateAllEntitiesSub2Var0 == 0 && fieldCompassVar == 0) {
+    if (drawCompass) {
         for (i = 0x14; i < 0x15; i++) {
             drawCompassArrowSegment(pCurrentFieldRenderingContext->m80D4_uiOT, &fieldCompassVar2[i], &m136, g_frameOddOrEven);
         }
@@ -1066,7 +1099,7 @@ void renderCompass(void) {
     rot.vy = 0;
     rot.vz = 0;
     createRotationMatrix(&rot, &m104);
-    if (op9DVar1.m4D_compassDisabled == 0 && g_updateAllEntitiesSub2Var0 == 0 && fieldCompassVar == 0) {
+    if (drawCompass) {
         for (i = 0x10; i < 0x14; i++) {
             setIdentityMatrix(&m168);
             m168.t[0] = *compassCardinalPointsLocation[i - 0x10];
@@ -1180,6 +1213,7 @@ void updateFieldInputs(void) {
 }
 
 void renderObjects(void) {
+    s32 hiddenActor = pcFirstPersonActive() ? op9DVar1.mE8_playerControlledActor : -1;
     SVECTOR rot;
     VECTOR scale2;
     VECTOR scale1;
@@ -1306,7 +1340,7 @@ void renderObjects(void) {
             setAmbientColorFixed(fieldSceneState.m284_ambient[0], fieldSceneState.m284_ambient[1], fieldSceneState.m284_ambient[2]);
         }
         objectClippingMask = 0;
-        if (fieldSceneState.m290_actorArray[i].m58_flags & 0x20) {
+        if ((e->m58_flags & 0x20) || i == hiddenActor) {
             continue;
         }
         if ((e->m58_flags & 0x2000) && sub->m14_dynamicVertices != 0) {
@@ -1544,7 +1578,7 @@ static void pcFieldTasksPicture(void) {
     }
 }
 
-void renderChars(void) {
+static void renderChars(MATRIX* gameProjection) {
     s32 i;
 
     if (renderCharsDisabled != 1) {
@@ -1565,7 +1599,7 @@ void renderChars(void) {
             pcFieldTasksAfter();
         }
         pcFieldShiftBegin(1); /* Enhanced (xg-hbc.19.3) */
-        renderFieldCharacterSprites(pCurrentFieldRenderingContext->mCC_OT, g_frameOddOrEven);
+        drawFieldSprites(pCurrentFieldRenderingContext->mCC_OT, g_frameOddOrEven, gameProjection);
         pcFieldShiftEnd(1);
         if (pcFieldSubFrames() == 1) {
             for (i = 0; i < g_totalActors; i++) {
@@ -2084,6 +2118,8 @@ static void pcFieldPictureLog(void) {
 }
 
 void updateAndRenderField(void) {
+    MATRIX gameCamera, gameProjection;
+    int looking;
     RECT rect;
     s32 start;
     s32 now;
@@ -2098,7 +2134,7 @@ void updateAndRenderField(void) {
     fieldProfileTimestamp = VSync(1);
     start = VSync(-1);
     gtePrecisionBeginDraw();
-    updateAllEntities();
+    looking = updateFieldEntitiesForView(&gameCamera, &gameProjection);
     if (!pcFieldOffTick()) {
         /* Enhanced (xg-hbc.19.3): the actors' attached sounds (start, stop, volume and pan by
          * distance: updateCameraAt) once a native frame, from its state, not from a preview */
@@ -2116,7 +2152,7 @@ void updateAndRenderField(void) {
     pcFieldShiftBegin(0); /* Enhanced: scripted moves drawn through the tick (xg-hbc.19.3) */
     renderObjects();
     pcFieldShiftEnd(0);
-    renderChars();
+    renderChars(looking ? &gameProjection : NULL);
     updateParticles();
     if (fieldDebugDisable == 0) {
         func_80281450();
@@ -2138,6 +2174,13 @@ void updateAndRenderField(void) {
     addDialogWindowsToOT(pCurrentFieldRenderingContext->m80D4_uiOT, g_frameOddOrEven);
     pcGameplaySetDialogStepSkip(0);
     pcFieldPictureLog(); /* Enhanced oracle: the picture's values (XG_SWEEP_PICTURE) */
+    if (looking) {
+        /* The next script tick projects actors to place dialogue. Leave the game's
+         * view in all three matrices after the eye-level picture is submitted. */
+        fieldSceneState.m110_cameraMatrix = gameCamera;
+        fieldSceneState.m1E4_projectionMatrix = gameProjection;
+        if (renderCharsDisabled != 1) setCurrentRenderingMatrix(&gameProjection);
+    }
     if (pcFieldHeld) {
         /* Enhanced: a frame between's work takes no stepped-clock time
          * (pcFieldSubAdvance), its DrawOTag below included (released after the
@@ -2251,11 +2294,24 @@ void setSpriteColorIfNoFog(SpriteActorCore* actor, u8* rgb) {
     }
 }
 
+/* The map viewer supplies its own camera. */
 void renderFieldCharacterSprites(OTag* ot, s32 oddOrEven) {
+    drawFieldSprites(ot, oddOrEven, NULL);
+}
+
+static void projectFieldSprite(MATRIX* projection, MATRIX* actor, SVECTOR* point, s32* sxy, s32* p, s32* flag, s32* depth) {
+    MATRIX m;
+    gte_CompMatrix(projection, actor, &m);
+    gte_SetRotMatrix(&m);
+    gte_SetTransMatrix(&m);
+    gte_RotTransPers(point, sxy, p, flag, depth);
+}
+
+static void drawFieldSprites(OTag* ot, s32 oddOrEven, MATRIX* gameProjection) {
+    s32 hiddenActor = gameProjection ? op9DVar1.mE8_playerControlledActor : -1;
     SVECTOR v;
     SVECTOR pos;
     VECTOR scale;
-    MATRIX m;
     MATRIX unused; /* reserves 0x20 bytes of the frame */
     MATRIX rot;
     u8 color[4];
@@ -2291,10 +2347,11 @@ void renderFieldCharacterSprites(OTag* ot, s32 oddOrEven) {
             f4 = se->m4_flags;
             fieldSceneState.m290_actorArray[i].m2C_matrixBackup = fieldSceneState.m290_actorArray[i].mC_matrix;
             if (!(f4 & 0x2000)) {
-                gte_CompMatrix(&fieldSceneState.m1E4_projectionMatrix, &fieldSceneState.m290_actorArray[i].mC_matrix, &m);
-                gte_SetRotMatrix(&m);
-                gte_SetTransMatrix(&m);
-                gte_RotTransPers(&pos, &sxy, &p, &flag, &depth);
+                /* The off-screen flag gates NPC scripts, animation and dialogue. Base it
+                 * on the game camera even when the player is looking the other way. */
+                MATRIX* scriptedView = gameProjection ? gameProjection : &fieldSceneState.m1E4_projectionMatrix;
+                MATRIX* actor = &fieldSceneState.m290_actorArray[i].mC_matrix;
+                projectFieldSprite(scriptedView, actor, &pos, &sxy, &p, &flag, &depth);
                 y = sxy >> 16;
                 x = (s16)sxy;
                 /* With a wide picture, NPCs in its margins are on screen too
@@ -2305,6 +2362,8 @@ void renderFieldCharacterSprites(OTag* ot, s32 oddOrEven) {
                 } else {
                     se->m4_flags |= 0x200;
                 }
+                if (i == hiddenActor) continue;
+                if (gameProjection) projectFieldSprite(&fieldSceneState.m1E4_projectionMatrix, actor, &pos, &sxy, &p, &flag, &depth);
                 if (disableCharacterShadowsRendering != 0 || (flags & 0x20) || flag < 0) {
                     continue;
                 }
@@ -2394,7 +2453,7 @@ void renderFieldCharacterSprites(OTag* ot, s32 oddOrEven) {
                 } else {
                     loadedMechas[j]->m4A_flags |= 1;
                 }
-                if (!(flags & 0x20)) {
+                if (!(flags & 0x20) && i != hiddenActor) {
                     loadedMechas[j]->m34_visible = 1;
                 } else {
                     loadedMechas[j]->m34_visible = 0;
@@ -2418,6 +2477,7 @@ void renderFieldCharacterSprites(OTag* ot, s32 oddOrEven) {
 }
 
 void renderCharShadows(OTag* ot, s32 oddOrEven) {
+    s32 hiddenActor = pcFirstPersonActive() ? op9DVar1.mE8_playerControlledActor : -1;
     VECTOR z;
     VECTOR d;
     VECTOR c;
@@ -2438,6 +2498,7 @@ void renderCharShadows(OTag* ot, s32 oddOrEven) {
     proj = fieldSceneState.m1E4_projectionMatrix;
     if (disableCharacterShadowsRendering == 0) {
         for (i = 0; i < g_totalActors; i++) {
+            if (i == hiddenActor) continue;
             e = &fieldSceneState.m290_actorArray[i];
             if ((*(u32*)&e->m58_flags & 0x60) == 0x40) {
                 se = e->m4C_scriptEntity;

@@ -86,6 +86,7 @@ void SetFarColor(s32 r, s32 g, s32 b);
 void SetFogNearFar(s32 a, s32 b, s32 h);
 void getGamestate182C(VECTOR* v);
 void setupWorldmapMatrix1(SVECTOR* eye);
+void computeWormapSpritePosition(VECTOR* delta);
 void setupWorldmapMatrix2(sWorldmapCameraState* cam);
 void updateWorldmapParticleEmitters(void);
 void drawWorlmapPolyFT4Array1(void);
@@ -971,6 +972,23 @@ static void pcWm60Settle(void) {
 }
 
 /* worldmapMainLoop (US and JP: the waitWorldmapControllerReconnect block is #if !VERSION_JP) */
+/* The party's travel tasks are 1 (foot), 4 (Gear) and 7 (Yggdrasil).
+ * Their other substates run boarding, landing and story sequences. */
+static s32 firstPersonWorldLeader(void) {
+    if (currentWorldmapMode >= 8 || worldMapGearMode < 1 || worldMapGearMode > 7 ||
+        worldmapMatrixMode != 0 || worldmapFadeRunning || worldmapExitVar2 ||
+        worldmapEncounterTriggered || !continueWorldmapLoop) return -1;
+    if (worldMapGearMode >= 4) {
+        const sWorldmapStateEntry* ship = &gWorldmapState->m0_entries[7];
+        return !ship->m24_hidden && !ship->m4_request && ship->m20_subState >= 2 &&
+               ship->m20_subState <= 4 ? 7 : -1;
+    }
+    s32 index = gameState.m22B1_isOnGear[0] ? 4 : 1;
+    const sWorldmapStateEntry* e = &gWorldmapState->m0_entries[index];
+    return e->m4C_sprite && !e->m24_hidden && !e->m4_request &&
+           (e->m20_subState == 0 || e->m20_subState == 1) ? index : -1;
+}
+
 void worldmapMainLoop(void) {
     RECT rect;
     s32 i;
@@ -1058,6 +1076,13 @@ void worldmapMainLoop(void) {
                                   rs->m0_DrawEnv.clip.w, rs->m0_DrawEnv.clip.h);
         clearShapeTransfertTableEntry(worldmapOddOrEven);
         uploadCharacterSprites();
+        if (pcFirstPersonWanted()) {
+            s32 leader = firstPersonWorldLeader();
+            const sWorldmapStateEntry* e = leader < 0 ? NULL : &gWorldmapState->m0_entries[leader];
+            int flying = leader == 7 && e->m20_subState == 2;
+            int moving = (worldmapInput1_0 & 0xf000) || (flying && ((worldmapInput1_0 & 0x8c) || e->m60 || e->m5C));
+            pcFirstPersonWorldFrame(leader, e ? e->m48_direction : 0, moving, flying);
+        }
         if (pcWm60Active && tick) pcWm60TickStart();
         callAllWorlmapObjects();
         DrawSync(0);
@@ -1119,6 +1144,7 @@ void worldmapMainLoop(void) {
         if (decide) {
             if (worldmapFadeRunning == 0 && worldmapExitVar2 == 0 && continueWorldmapLoop != 0 && worldmapEncounterTriggered == 0 && (worldmapInput2_0 & 0x800)) {
                 pcWm60Settle();
+                pcFirstPersonEnd();
                 runWorldmapPause();
             }
 #if !VERSION_JP
@@ -1160,6 +1186,7 @@ void worldmapMainLoop(void) {
                 if (worldMapGearMode > 0) {
                     if (worldMapGearMode < 4) {
                         pcWm60Settle();
+                        pcFirstPersonEnd();
                         worldmapPrepareEnterMenu();
                         menuToEnter = 0;
                         useDebugMenuList = 0;
@@ -1201,6 +1228,7 @@ void worldmapMainLoop(void) {
         pcWm60DeferEnd();
         pcWm60Frame++;
     } while (continueWorldmapLoop != 0);
+    pcFirstPersonEnd();
     hwClockSettle();
     pcWm60Active = 0;
     ResetGraph(1);
@@ -1243,7 +1271,11 @@ s32 worldmap_taskGround_update(s32 index) {
     SVECTOR unused; /* retail frame keeps 8 unused bytes */
     void portWorldmapSweepRender(s32 frame, s32 tick);
     s32 offTick = pcWm60OffTick();
+    s32 leader = pcFirstPersonActive() ? firstPersonWorldLeader() : -1;
+    SVECTOR gameRotation;
+    sWorldmapCameraState gameCamera;
 
+    if (pcFirstPersonActive() && leader < 0) pcFirstPersonEnd();
     if (pcWm60On() && !offTick) {
         pcWm60CamCommit(); /* (the world camera's halves, if the camera task did not take them) */
     }
@@ -1254,7 +1286,27 @@ s32 worldmap_taskGround_update(s32 index) {
         pcWm60GroundTicked = 1;
     }
     pcWm60RenderBegin(); /* Enhanced, 60 Hz: the picture's values in (above) */
-    worldmapGroundMatrix();
+    if (leader >= 0) {
+        /* All scenery, including the horizon, uses this pose only while drawing.
+         * Sprite and terrain positions share a wrapping origin and reversed Z. */
+        const VECTOR* feet = &gWorldmapState->m0_entries[leader].m28_position;
+        VECTOR delta = {feet->vx - worldmapRadarPosition3.vx, 0, feet->vz - worldmapRadarPosition3.vz};
+        computeWormapSpritePosition(&delta);
+        gameRotation = worldmapRotation;
+        gameCamera = worldmapCameraVector;
+        pcFirstPersonWorldAngles(&worldmapRotation);
+        if (leader == 7 && gWorldmapState->m0_entries[leader].m20_subState == 2) {
+            worldmapRotation.vx -= gWorldmapState->m0_entries[leader].m70 >> 12;
+            worldmapRotation.vz = gameRotation.vz;
+        }
+        s32 height = leader == 1 ? 48 : 112;
+        worldmapCameraVector.m0_eye.vx = delta.vx >> 12;
+        worldmapCameraVector.m0_eye.vy = (feet->vy >> 12) - height;
+        worldmapCameraVector.m0_eye.vz = -(delta.vz >> 12);
+        setupWorldmapMatrix1(&worldmapCameraVector.m0_eye);
+    } else {
+        worldmapGroundMatrix();
+    }
     portWorldmapSweepRender(pcWm60Frame, !offTick); /* XG_SWEEP_LOG: the picture's values */
     if (!offTick) {
         if (pcWm60On()) pcWm60ParticlesBefore();
@@ -1283,6 +1335,11 @@ s32 worldmap_taskGround_update(s32 index) {
     drawWorldmapClouds();
     if (gameState.m1842_disableWorldmapMinimap == 0) {
         worldmapRenderMinimap();
+    }
+    if (leader >= 0) {
+        worldmapRotation = gameRotation;
+        worldmapCameraVector = gameCamera;
+        worldmapGroundMatrix();
     }
     pcWm60RenderEnd();
     return 1;

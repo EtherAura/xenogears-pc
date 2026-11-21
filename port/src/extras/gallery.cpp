@@ -18,7 +18,7 @@
 //   wait                   finish the scan now (blocks)
 //   movie <n>              select movie n of the list (and play it)
 //   pause, stop, seek <frame>
-//   subtitles <0|1|2>      the movies' captions: off, US dialogue, Japanese translation
+//   subtitles <0|1|2|3>    the movies' captions: off, US dialogue, Japanese translation, text pack
 //   sounds <0|1|2>         their sound captions: off, voices, all sounds
 //   caption                the caption drawn, its frame and the player's movie on stderr
 //   frame                  export the frame shown (PNG)
@@ -58,6 +58,7 @@
 extern "C" {
 #include "cd/cd.h"
 #include "cd/regional.h"
+#include "system/gametext.h"
 #include "disc.h"
 #include "files.h"
 #include "gallery.h"
@@ -592,12 +593,11 @@ std::string clock(int frames) {
 // one is chosen here, then that one for this session (as a viewer's Stock /
 // Enhanced), never written to settings.ini. Song lyrics and the invented
 // language follow the settings.
-const char* const subtitleNames[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation")};
+const char* const subtitleNames[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation"), N_("Text pack")};
 const char* const soundNames[] = {N_("Off"), N_("Voices"), N_("All sounds")};
 
 int subtitleTrack() {
-    if (S->subtitles < 0) S->subtitles = regionalSubtitlesEnabled();
-    return S->subtitles;
+    return S->subtitles < 0 ? regionalSubtitlesEnabled() : S->subtitles;
 }
 
 int soundLevel() {
@@ -619,7 +619,7 @@ void setSoundLevel(int level) {
 // focused view's bar, which flows its items itself). True when changed.
 bool labelledCombo(bool bar, const char* id, const char* label, const char* const* english, int count, int* value) {
     label = tr(label);
-    const char* names[3];
+    const char* names[4];
     float widest = 0;
     for (int i = 0; i < count; i++) {
         names[i] = tr(english[i]);
@@ -646,12 +646,17 @@ bool labelledCombo(bool bar, const char* id, const char* label, const char* cons
 // The choices: the track, then the sound captions (none in a build without
 // the caption text: cd/regional.h regionalCaptionsAvailable).
 void subtitleCombo(bool bar) {
-    if (!regionalCaptionsAvailable()) return;
+    bool builtin = regionalCaptionsAvailable() != 0, pack = gameTextPackHasMovies() != 0;
+    if (!builtin && !pack) return;
+    const char* packOnly[] = {subtitleNames[0], subtitleNames[REGIONAL_PACK_SUBTITLES]};
     int track = subtitleTrack(), level = soundLevel();
-    if (labelledCombo(bar, bar ? "##subtitlesbar" : "##subtitles", N_("Subtitles"), subtitleNames, 3, &track)) {
-        setSubtitleTrack(track);
+    if (!builtin) track = track == REGIONAL_PACK_SUBTITLES ? 1 : 0;
+    if (labelledCombo(bar, bar ? "##subtitlesbar" : "##subtitles", N_("Subtitles"),
+                      builtin ? subtitleNames : packOnly, builtin ? (pack ? 4 : 3) : 2, &track)) {
+        setSubtitleTrack(!builtin && track == 1 ? REGIONAL_PACK_SUBTITLES : track);
     }
-    if (labelledCombo(bar, bar ? "##soundsbar" : "##sounds", N_("Sound captions"), soundNames, 3, &level)) {
+    if (builtin && subtitleTrack() != REGIONAL_PACK_SUBTITLES &&
+        labelledCombo(bar, bar ? "##soundsbar" : "##sounds", N_("Sound captions"), soundNames, 3, &level)) {
         setSoundLevel(level);
     }
 }
@@ -1787,7 +1792,7 @@ bool command(const char* cmd, const char* arg) {
         return true;
     }
     if (!strcmp(cmd, "subtitles")) {
-        if (strlen(arg) != 1 || arg[0] < '0' || arg[0] > '2') return false;
+        if (strlen(arg) != 1 || arg[0] < '0' || arg[0] > '3') return false;
         setSubtitleTrack(atoi(arg));
         return true;
     }

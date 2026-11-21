@@ -70,6 +70,19 @@ Japanese controls in the US version (Circle confirms) or US controls in the
 Japanese version, key and gamepad bindings, mouse.
 F1 > Controls.
 
+In Enhanced development builds, turn on **First-person look** under
+**F1 → Controls → Camera and vibration**. In a field or while travelling the
+world map on foot, in a Gear or aboard the Yggdrasil, press **V**, or hold **L2** and click **L3**.
+Look with the right stick, **J/L** and **I/K**, or a right mouse drag.
+
+Turn on **Move in first-person view** to walk forward, back or sideways relative
+to where you look. In flight, the Yggdrasil keeps its usual steering and throttle,
+and the view follows the ship as it turns. With that option off, stand still to look and move to leave.
+Press the shortcut again to return to the previous view. Both options start off.
+Dialogue, scripted shots and fixed-view rooms use the game camera.
+
+**F1 > Audio > Sound > Binaural (headphones)** places instruments and panned sound effects across a frontal soundstage. Switch it on or off while playing to compare. Movie audio keeps its stereo mix.
+
 ![F1 > Audio](img/gameplay-audio.png)
 
 Battle voices and cutscene audio from your Japanese discs, in the US version.

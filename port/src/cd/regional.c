@@ -65,7 +65,7 @@ static const char* sourceKey(int disc) { return disc==1 ? "japanese_disc1" : "ja
 static void describe(void) {
     settingsDescribe("japanese_battle_voices","japanese_battle_voices: Japanese battle voices from your JP discs; applies after restart");
     settingsDescribe("japanese_cutscene_audio","japanese_cutscene_audio: Japanese XA audio with the current version's movie video");
-    settingsDescribe("cutscene_subtitles","cutscene_subtitles: 0 off, 1 US dialogue, 2 Japanese translation; dialogue font");
+    settingsDescribe("cutscene_subtitles","cutscene_subtitles: 0 off, 1 US dialogue, 2 Japanese translation, 5 active text pack");
     settingsDescribe("cutscene_sound_captions","cutscene_sound_captions: with subtitles, 0 no sounds, 1 voices ([screams]), 2 all sounds ([explosion] too)");
     settingsDescribe("cutscene_lyrics","cutscene_lyrics: with subtitles, 1 shows the songs' lyrics");
     settingsDescribe("cutscene_invented_language","cutscene_invented_language: lines in the game's invented language, 0 as the English script spells them, 1 as spoken (Japanese track)");
@@ -332,18 +332,29 @@ int regionalMovieIdentity(int out[5]) {
     out[0]=movie.japanese; out[1]=movie.disc; out[2]=movie.clip; out[3]=movie.baseLba; out[4]=movie.frame;
     return 1;
 }
-/* The subtitles' settings (regional.h). A cutscene_subtitles of 3 or 4 (the
- * "+ sounds" entries of) is track 1 or 2 with every sound. */
+/* The subtitle settings retain the original US and Japanese track numbers. */
 static int settingIn(const char* key, int fallback, int max) { int n=settingsInt(key,fallback); return n>=0 && n<=max ? n : 0; }
-int regionalSubtitlesEnabled(void) { int n=settingIn("cutscene_subtitles",0,4); return n>2 ? n-2 : n; }
-void regionalSetSubtitles(int track) { describe(); settingsSetInt("cutscene_subtitles",track>=0 && track<=2 ? track : 0); settingsSave(); }
+/* File values 3 and 4 already mean a built-in track with all sounds. */
+static int subtitleSetting(int track) { return track == REGIONAL_PACK_SUBTITLES ? 5 : track; }
+int regionalSubtitlesEnabled(void) {
+    int n = settingIn("cutscene_subtitles", 0, 5);
+    if (n == 5) return REGIONAL_PACK_SUBTITLES;
+    return n > 2 ? n - 2 : n;
+}
+void regionalSetSubtitles(int track) {
+    describe();
+    if (settingIn("cutscene_subtitles", 0, 4) > 2 && !settingsGet("cutscene_sound_captions"))
+        settingsSetInt("cutscene_sound_captions", 2);
+    settingsSetInt("cutscene_subtitles", track >= 0 && track <= REGIONAL_PACK_SUBTITLES ? subtitleSetting(track) : 0);
+    settingsSave();
+}
 int regionalSoundCaptions(void) {
     int legacy=settingIn("cutscene_subtitles",0,4)>2;
     return settingIn("cutscene_sound_captions",legacy ? 2 : 0,2);
 }
 void regionalSetSoundCaptions(int level) {
     describe(); settingsSetInt("cutscene_sound_captions",level>=0 && level<=2 ? level : 0);
-    settingsSetInt("cutscene_subtitles",regionalSubtitlesEnabled()); /* no 3/4 left to read as "all sounds" */
+    settingsSetInt("cutscene_subtitles",subtitleSetting(regionalSubtitlesEnabled())); /* no 3/4 left to read as "all sounds" */
     settingsSave();
 }
 int regionalLyrics(void) { return settingIn("cutscene_lyrics",0,1); }
@@ -382,10 +393,15 @@ static const char* cueAt(int which, int disc, int clip, int frame) {
     return NULL;
 }
 int regionalCaptionsAvailable(void) { return table(T_US).count>0; }
+static RegionalPackCaption packCaption;
+void regionalSetPackCaptionReader(RegionalPackCaption reader) { packCaption = reader; }
 const char* regionalSubtitle(void) { return regionalCaptionWith(regionalSubtitlesEnabled(),regionalSoundCaptions()); }
 const char* regionalCaption(int track) { return regionalCaptionWith(track,0); }
 const char* regionalCaptionWith(int track, int sounds) {
-    if (!movie.active || track<1 || track>2) return NULL;
+    if (!movie.active) return NULL;
+    if (track == REGIONAL_PACK_SUBTITLES)
+        return packCaption ? packCaption(movie.japanese, movie.disc, movie.clip, movie.frame) : NULL;
+    if (track < 1 || track > 2) return NULL;
     int clip=movie.clip, frame=movie.frame;
     /* The songs: JP movie 6 (its long reel) has a song of its own timing;
      * every other movie is looked up as the US numbering has it. */

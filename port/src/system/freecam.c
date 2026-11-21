@@ -51,6 +51,8 @@
 #include "pc_camera.h"
 #include "settings.h"
 #include "freecam_limits.h"
+#include "pc_wide.h"
+#include "gpu/gpu.h"
 
 extern FieldBss_800AF880 fieldSceneState;
 extern FieldBss_800B2184 op9DVar1;
@@ -238,6 +240,162 @@ static int sweepPose(uint32_t now, double* heading, double* pitch, double* zoom,
 static double clampd(double v, double lo, double hi) { return v < lo ? lo : v > hi ? hi : v; }
 static double wrap(double a) { while (a > M_PI) a -= 2 * M_PI; while (a < -M_PI) a += 2 * M_PI; return a; }
 
+/* The room review found no free camera in the sampled shots of these fields;
+ * the wide review also identified flat paintings, cockpits and map screens.
+ * This restriction applies only at eye level. */
+static int firstPersonFixedRoom(int field) {
+    static const short rooms[] = {4, 12, 14, 16, 23, 25, 26, 27, 28, 39, 81, 305, 306, 307, 514, 609, 677};
+    for (unsigned i = 0; i < sizeof(rooms) / sizeof(rooms[0]); i++)
+        if (rooms[i] == field) return 1;
+    return 0;
+}
+
+static struct {
+    int toggle, active, mode, navigation, field, actor;
+    double yaw, pitch, mouseX, mouseY;
+    uint32_t vblank;
+    s16 lastBearing;
+    VECTOR feet;
+} look;
+
+void pcFirstPersonEnd(void) {
+    look.active = look.toggle = 0;
+    look.mouseX = look.mouseY = 0;
+}
+int pcFirstPersonEnabled(void) { return settingsBool("first_person_look", 0); }
+
+int pcFirstPersonNavigation(void) { return settingsBool("first_person_navigation", 0); }
+void pcFirstPersonNavigationSet(int on) {
+    settingsSetInt("first_person_navigation", on != 0);
+    pcFirstPersonEnd();
+    settingsSave();
+}
+
+void pcFirstPersonSet(int on) {
+    settingsDescribe("first_person_look", "Allow first-person view in Enhanced fields and on the world map with V or L2 + L3");
+    settingsSetInt("first_person_look", on != 0);
+    if (!pcFirstPersonEnabled()) pcFirstPersonEnd();
+    settingsSave();
+}
+
+int pcFirstPersonToggle(void) {
+    int mode = pcWideGetMode();
+    if ((mode != PC_WIDE_FIELD && mode != PC_WIDE_WORLDMAP) || !pcFirstPersonEnabled()) return 0;
+    look.mode = mode;
+    look.toggle = 1;
+    return 1;
+}
+int pcFirstPersonWanted(void) { return look.toggle || look.active; }
+int pcFirstPersonActive(void) { return look.active; }
+void pcFirstPersonMouse(float dx, float dy) {
+    look.mouseX += dx;
+    look.mouseY += dy;
+}
+
+static void firstPersonBegin(int actor, s16 facing) {
+    look.active = 1;
+    look.actor = actor;
+    look.navigation = pcFirstPersonNavigation();
+    look.yaw = (facing & 0xfff) * (M_PI / 2048);
+    look.pitch = 0;
+    look.vblank = hwVSyncCount();
+}
+
+static void firstPersonAim(void) {
+    float turn, tilt, zoom;
+    int recenter;
+    padCameraInput(&turn, &tilt, &zoom, &recenter);
+    uint32_t now = hwVSyncCount();
+    double dt = fmin(now - look.vblank, 4) / 60.0;
+    look.vblank = now;
+    look.yaw = wrap(look.yaw + turn * TURN_SPEED * dt + look.mouseX * 0.004);
+    /* The world's sky gradient is a band above the horizon. Keep it covering
+     * the view even with the ship's pitch added as the player climbs. */
+    double up = look.mode == PC_WIDE_WORLDMAP ? M_PI / 9 : M_PI / 3;
+    look.pitch = clampd(look.pitch + tilt * TILT_SPEED * dt - look.mouseY * 0.004, -M_PI / 3, up);
+    look.mouseX = look.mouseY = 0;
+}
+
+static s16 firstPersonYaw(void) { return (s16)lround(look.yaw * (2048 / M_PI)); }
+
+s16 pcFirstPersonMovementHeading(s16 game) {
+    if (!look.active || !look.navigation) return game;
+    return look.mode == PC_WIDE_FIELD ? -firstPersonYaw() - 0x400 : firstPersonYaw() & 0xfff;
+}
+
+/* The world uses Y rotation for its compass bearing. Positive pitch raises the view. */
+void pcFirstPersonWorldFrame(int leader, s16 facing, int moving, int followBearing) {
+    if (!pcFirstPersonWanted()) return;
+    int toggle = look.toggle;
+    look.toggle = 0;
+    if (look.mode != PC_WIDE_WORLDMAP || (look.active && (toggle || look.actor != leader))) {
+        pcFirstPersonEnd();
+        return;
+    }
+    if (leader < 0 || (moving && !(look.active ? look.navigation : pcFirstPersonNavigation()))) {
+        if (toggle) presentShowNote(leader < 0 ? "First-person view needs player control on the world map" :
+                                                "First-person look needs a stationary player in control");
+        pcFirstPersonEnd();
+        return;
+    }
+    if (toggle) firstPersonBegin(leader, facing);
+    else if (followBearing) {
+        int delta = ((facing - look.lastBearing + 0x800) & 0xfff) - 0x800;
+        look.yaw = wrap(look.yaw + delta * (M_PI / 2048));
+    }
+    look.lastBearing = facing;
+    firstPersonAim();
+}
+
+void pcFirstPersonWorldAngles(SVECTOR* view) {
+    view->vx = (s16)lround(look.pitch * (2048 / M_PI));
+    view->vy = firstPersonYaw() & 0xfff;
+    view->vz = 0;
+}
+
+int pcFirstPersonView(VECTOR* eye, VECTOR* at, s16* spriteHeading, int playerControl) {
+    int field = fieldMapNumber & 0xfff, actor = op9DVar1.mE8_playerControlledActor;
+    int toggle = look.toggle;
+    look.toggle = 0;
+    if (toggle && look.active) { pcFirstPersonEnd(); return 0; }
+    if (toggle && firstPersonFixedRoom(field)) {
+        presentShowNote("First-person look unavailable in this room");
+        return 0;
+    }
+    sFieldScriptEntity* e = fieldSceneState.m290_actorArray && actor >= 0 && actor < g_totalActors
+                            ? fieldSceneState.m290_actorArray[actor].m4C_scriptEntity : NULL;
+    if (!playerControl || !playerCamera() || fieldSceneState.mBC_cameraInterpolationFlags ||
+        op9DVar1.m1BA_actorCameraTracked != actor || !e || !(e->m0_fieldScriptFlags & 0x4000) ||
+        (e->m0_fieldScriptFlags & 0x1800) || (look.active && (look.field != field || look.actor != actor)) ||
+        (!(look.active ? look.navigation : pcFirstPersonNavigation()) &&
+         ((padButtonForScripts & 0xf000) || e->m30_stepVector.vx || e->m30_stepVector.vz ||
+          (look.active && (e->m20_position.vx != look.feet.vx || e->m20_position.vy != look.feet.vy ||
+                           e->m20_position.vz != look.feet.vz))))) {
+        if (toggle) presentShowNote(pcFirstPersonNavigation() ? "First-person view needs player control of the field camera" :
+                                                               "First-person look needs a stationary player in control");
+        pcFirstPersonEnd();
+        return 0;
+    }
+    if (toggle) {
+        firstPersonBegin(actor, e->m108_rotation3);
+        look.field = field;
+        look.feet = e->m20_position;
+    }
+    firstPersonAim();
+    /* Field movement uses (cos(rotation), -sin(rotation)) in X/Z.
+     * The eye stays over the leader's walkmesh point,
+     * at eye height within their collision volume, even beside a wall. */
+    int height = e->m18_boundingVolume[1];
+    *eye = e->m20_position;
+    eye->vy -= (int32_t)(clampd(height > 0 ? height : 96, 1, 512) * 0.875 * 65536);
+    double distance = 256 * 65536.0;
+    at->vx = eye->vx + (int32_t)(cos(look.yaw) * cos(look.pitch) * distance);
+    at->vy = eye->vy - (int32_t)(sin(look.pitch) * distance);
+    at->vz = eye->vz - (int32_t)(sin(look.yaw) * cos(look.pitch) * distance);
+    *spriteHeading = (s16)(-firstPersonYaw() - 0x400);
+    return 1;
+}
+
 /* The room's usable pitch band (radians) for an eye heading (world, from the target) and zoom,
  * interpolated over the table's headings and zooms. A heading the room refuses counts as the
  * empty band (90, 0) degrees, so near one the band closes and the camera stops turning. A room
@@ -291,7 +449,7 @@ static int turnBand(double gHeading, double gPitch, double turn, double zoom, do
 int pcFreeCameraActive(void) {
     static int fade = -1;
     if (fade < 0) { const char* e = getenv("XG_FREECAM_FADE"); fade = !(e && *e == '0'); }
-    return fade && !sw.on && fc.blend > 0 &&
+    return !look.active && fade && !sw.on && fc.blend > 0 &&
            (fabs(fc.turn) > 0.03 || fabs(fc.pitch - fc.gamePitch) > 0.03 || fabs(fc.zoom - 1) > 0.02);
 }
 
@@ -331,6 +489,7 @@ void pcFieldCamera(VECTOR* eye, VECTOR* at) {
 
     float turn, tilt, zoom; int recenter;
     padCameraInput(&turn, &tilt, &zoom, &recenter);
+    if (look.active) { turn = tilt = zoom = 0; recenter = 0; }
     int free = playerCamera();
     if (fc.blend <= 0) {   /* the game's camera: the free one waits where it is */
         fc.turn = fc.forced ? fc.startTurn * M_PI / 180 : 0;
@@ -415,6 +574,7 @@ void pcWorldCameraFrame(void) {
         if (e && sscanf(e, "%lf,%lf", &t, &z) >= 1) { wc.tilt = t * M_PI / 180; wc.zoom = z; }
         start = 0;
     }
+    if (look.active) return;
     if (!pcFreeCameraEnabled()) { wc.tilt = 0; wc.zoom = 1; return; }
     padCameraInput(&turn, &tilt, &zoom, &recenter);
     if (recenter) wc.recentring = 1;

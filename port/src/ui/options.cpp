@@ -43,6 +43,10 @@ extern "C" {
 #include "system/fieldspeed.h"
 int pcFreeCameraEnabled(void); /* port/src/system/freecam.c */
 void pcFreeCameraSet(int on);
+int pcFirstPersonEnabled(void);
+void pcFirstPersonSet(int on);
+int pcFirstPersonNavigation(void);
+void pcFirstPersonNavigationSet(int on);
 int gvkDeviceIntegrated(void); /* port/src/gpu/vk.c: Auto's GPU budget is 8 ms by default there */
 }
 
@@ -301,6 +305,8 @@ std::vector<Spec>& table() {
         },
         100, nullptr)
         .unit = "%";
+    add("binaural_headphones", N_("Binaural (headphones)"), [](int) { return spuHeadphonesEnabled(); },
+        [](int, int v) { spuHeadphonesSet(v); }, 0);
     add("audio_latency", N_("Latency"), [](int) { return keyInt("audio_latency", 40); },
         [](int, int v) {
             settingsSetInt("audio_latency", v);
@@ -321,9 +327,9 @@ std::vector<Spec>& table() {
         [](int, int v) { regionalSetBattle(v); }, 0);
     add("japanese_cutscene_audio", N_("Cutscene audio"), [](int) { return regionalMovieEnabled(); },
         [](int, int v) { regionalSetMovie(v); }, 0);
-    static const char* const subtitles[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation")};
+    static const char* const subtitles[] = {N_("Off"), N_("US dialogue"), N_("Japanese translation"), N_("Text pack")};
     add("cutscene_subtitles", N_("Subtitles"), [](int) { return regionalSubtitlesEnabled(); },
-        [](int, int v) { regionalSetSubtitles(v); }, 0, subtitles, 3);
+        [](int, int v) { regionalSetSubtitles(v); }, 0, subtitles, 4);
     static const char* const soundCaptions[] = {N_("Off"), N_("Voices"), N_("All sounds")};
     add("cutscene_sound_captions", N_("Sound captions"), [](int) { return regionalSoundCaptions(); },
         [](int, int v) { regionalSetSoundCaptions(v); }, 0, soundCaptions, 3);
@@ -353,6 +359,10 @@ std::vector<Spec>& table() {
         [](int, int v) { keySet("mouse_camera", v); }, 0);
     add("free_camera", N_("Free camera in fields"), [](int) { return pcFreeCameraEnabled(); },
         [](int, int v) { pcFreeCameraSet(v); }, 0);
+    add("first_person_look", N_("First-person look"), [](int) { return pcFirstPersonEnabled(); },
+        [](int, int v) { pcFirstPersonSet(v); }, 0);
+    add("first_person_navigation", N_("First-person navigation"), [](int) { return pcFirstPersonNavigation(); },
+        [](int, int v) { pcFirstPersonNavigationSet(v); }, 0);
     static const char* const vibration[] = {N_("Off"), N_("The game's"), N_("Enhanced")};
     add("vibration", N_("Vibration"), [](int) { return rumbleMode(); },
         [](int, int v) {

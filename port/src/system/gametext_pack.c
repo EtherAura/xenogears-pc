@@ -295,10 +295,14 @@ static int exportPack(GtImage* images[2], const char* dir, const char* name, con
     }
     Buf ini = {0};
     printf_(&ini, "# A text pack made by the Xenogears PC port from your own discs: for your own use.\n");
+    int french = !strcmp(fontName, "pack") && gtImageAtelierFrench(any) &&
+                 (!images[1] || gtImageAtelierFrench(images[1]));
+    if (french) language = "fr";
     printf_(&ini, "name=%s\nlanguage=%s\nrelease=%s\nfont=%s\n", name, language, region, fontName);
     /* A text image's pack must retain its windows as well as its font.
      * Authored pack/grow modes separately opt out of script precedence. */
-    if (!strcmp(fontName, "pack")) printf_(&ini, "windows=source\n");
+    if (french) printf_(&ini, "print=proportional\nwindows=grow\n");
+    else if (!strcmp(fontName, "pack")) printf_(&ini, "windows=source\n");
     printf_(&ini, "# Opt-ins (without them the text prints as the game does; remove a # to use one):\n"
                   "#print=proportional\n#spacing=2\n#space=4\n#windows=pack\n#windows=grow\n");
     int ok = writeFile(dir, "pack.ini", &ini) && writeFile(dir, "field.txt", field);
@@ -587,6 +591,8 @@ struct GtPack {
     uint16_t* fontUni;
     PackEntry* entries;
     int count, cap;
+    unsigned movieRegions;
+    char* files[6]; /* entries point into these buffers */
 };
 
 const char* gtPackDir(void) {
@@ -800,7 +806,28 @@ GtPack* gtPackLoad(const char* id, char* why, size_t size) {
     for (int i = 0; i < 5; i++) {
         snprintf(path, sizeof(path), "%s/%s/%s", dir, id, files[i]);
         char* data = readAll(path, &n);
-        if (data != NULL) addEntries(p, data); /* the data stays: entries point into it */
+        p->files[i] = data;
+        if (data != NULL) addEntries(p, data);
+    }
+    snprintf(path, sizeof(path), "%s/%s/movies.txt", dir, id);
+    char* movies = readAll(path, &n);
+    p->files[5] = movies;
+    if (movies != NULL) {
+        int first = p->count;
+        addEntries(p, movies);
+        for (int i = first; i < p->count; i++) {
+            const char* key = p->entries[i].key;
+            int japanese = !strncmp(key, "movie/JP/", 9);
+            if (!japanese && strncmp(key, "movie/US/", 9)) continue;
+            const char* disc = key + 9;
+            if ((*disc != '1' && *disc != '2') || disc[1] != '/') continue;
+            const char* clip = disc + 2;
+            size_t digits = strspn(clip, "0123456789");
+            if (!digits || digits > 2 || clip[digits] != '/') continue;
+            const char* frame = clip + digits + 1;
+            if (strlen(frame) == 5 && strspn(frame, "0123456789") == 5 && p->entries[i].text[0])
+                p->movieRegions |= 1u << japanese;
+        }
     }
     if (p->count > 1) qsort(p->entries, (size_t)p->count, sizeof(*p->entries), byKey);
     snprintf(why, size, "%s: %d texts", p->name, p->count);
@@ -817,6 +844,40 @@ const char* gtPackFind(const GtPack* p, const char* key, int* w, int* h) {
     return e->text;
 }
 
+void gtPackFree(GtPack* p) {
+    if (p == NULL) return;
+    for (size_t i = 0; i < sizeof(p->files) / sizeof(p->files[0]); i++) free(p->files[i]);
+    free(p->entries);
+    free(p->fontData);
+    free(p->fontUni);
+    free(p);
+}
+
+int gtPackHasMovies(const GtPack* p, int japanese) {
+    return p != NULL && (p->movieRegions & (1u << !!japanese));
+}
+
+/* Five-digit frame numbers sort chronologically within the running reel.
+ * An empty cue ends the preceding caption. Seeking needs no playback cursor. */
+const char* gtPackMovieCaption(const GtPack* p, int japanese, int disc, int clip, int frame) {
+    if (!gtPackHasMovies(p, japanese) || frame < 1 || frame > 99999) return NULL;
+    char prefix[40], key[48];
+    snprintf(prefix, sizeof(prefix), "movie/%s/%d/%d/", japanese ? "JP" : "US", disc, clip);
+    snprintf(key, sizeof(key), "%s%05d", prefix, frame);
+    int lo = 0, hi = p->count;
+    while (lo < hi) {
+        int mid = lo + (hi - lo) / 2;
+        if (strcmp(p->entries[mid].key, key) <= 0) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo == 0) return NULL;
+    const PackEntry* e = &p->entries[lo - 1];
+    size_t n = strlen(prefix);
+    if (strncmp(e->key, prefix, n) || strlen(e->key + n) != 5 ||
+        strspn(e->key + n, "0123456789") != 5 || !e->text[0]) return NULL;
+    return e->text;
+}
+
 const char* gtPackName(const GtPack* p) { return p ? p->name : ""; }
 const char* gtPackId(const GtPack* p) { return p ? p->id : ""; }
 const char* gtPackRegion(const GtPack* p) { return p ? p->region : ""; }
@@ -826,29 +887,44 @@ void gtPackLayout(const GtPack* p, GtLayout* out) {
     else gtLayoutParse("", out);
 }
 
-int gtPackList(char ids[][64], char names[][128], int max) {
+void gtVisitPacks(GtPackVisitor visit, void* user) {
     const char* dir = gtPackDir();
-    if (dir == NULL) return 0;
-    int count = 0, n = 0;
+    if (dir == NULL) return;
+    int count = 0;
     char** list = SDL_GlobDirectory(dir, "*", 0, &count);
-    for (int i = 0; i < count && n < max; i++) {
-        char path[4096];
+    for (int i = 0; i < count; i++) {
+        const char* id = list[i];
+        if (strlen(id) >= 64 || strstr(id, "..") || strpbrk(id, "/\\")) continue;
+        char path[4096], name[128] = "";
         size_t size;
-        snprintf(path, sizeof(path), "%s/%s/pack.ini", dir, list[i]);
+        if (snprintf(path, sizeof(path), "%s/%s/pack.ini", dir, id) >= (int)sizeof(path)) continue;
         char* ini = readAll(path, &size);
-        if (ini == NULL || strlen(list[i]) >= 64) {
-            free(ini);
-            continue;
-        }
-        snprintf(ids[n], 64, "%s", list[i]);
-        names[n][0] = '\0';
-        iniValue(ini, "name", names[n], 128);
-        if (names[n][0] == '\0') snprintf(names[n], 128, "%s", list[i]);
+        if (ini == NULL) continue;
+        iniValue(ini, "name", name, sizeof(name));
+        visit(user, id, name[0] ? name : id);
         free(ini);
-        n++;
     }
     SDL_free(list);
-    return n;
+}
+
+typedef struct {
+    char (*ids)[64];
+    char (*names)[128];
+    int count, max;
+} PackList;
+
+static void listPack(void* user, const char* id, const char* name) {
+    PackList* list = user;
+    if (list->count >= list->max) return;
+    snprintf(list->ids[list->count], 64, "%s", id);
+    snprintf(list->names[list->count], 128, "%s", name);
+    list->count++;
+}
+
+int gtPackList(char ids[][64], char names[][128], int max) {
+    PackList list = {ids, names, 0, max};
+    gtVisitPacks(listPack, &list);
+    return list.count;
 }
 
 /* ---- encoding: pack text as the running font's codes ---------------------------------------- */

@@ -18,6 +18,7 @@
 #include "psyq.h"
 #include "gte.h"
 #include "field/field.h"
+#include "pc_camera.h"
 
 /* port/src/system/options.c (game code has no libc) */
 const char* portOption(const char* name);
@@ -169,12 +170,14 @@ extern s32 onlyUpdateDirector;
 /* A field on the opt-out list (port/src/gpu/wide_optout.txt) stays 4:3; called
  * as each field's data is set up (initFieldData). */
 void pcFieldWideScene(void) {
+    pcFirstPersonEnd();
     pcWideBlock(PC_WIDE_BLOCK_OPTOUT, pcWideOptOut(PC_WIDE_FIELD, fieldMapNumber & 0xFFF) != NULL);
 }
 
 /* The field mode starts or ends: nothing it blocks applies (the effect block
  * of src/field/f_800A55B8.c lives in the field's data, reset with it). */
 void pcFieldWideExit(void) {
+    pcFirstPersonEnd();
     pcWideBlock(PC_WIDE_BLOCK_OPTOUT | PC_WIDE_BLOCK_MOVIE | PC_WIDE_BLOCK_EFFECT, 0);
     fieldSpeedMovie(0); /* no movie plays across the mode's start or end */
 }
@@ -193,6 +196,7 @@ void pcFieldMovieBlock(s32 on) {
 
     /* Field speed holds 1x for every movie, the ones below that leave the
      * picture wide too: told before `on` becomes the wide picture's. */
+    if (on) pcFirstPersonEnd();
     fieldSpeedMovie(on);
     if (on && onlyUpdateDirector == 2) {
         on = 0;
@@ -284,6 +288,7 @@ void pcFieldOtShift(OTag* ot, uptr head, s32 dx) {
  * picture, so a field's opt-out does not hold while it shows. */
 void pcFieldWideMenu(s32 open) {
     if (open) {
+        pcFirstPersonEnd();
         pcWideBlock(PC_WIDE_BLOCK_OPTOUT, 0);
     } else {
         pcFieldWideScene();

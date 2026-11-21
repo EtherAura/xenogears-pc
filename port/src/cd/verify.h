@@ -4,6 +4,7 @@
 typedef struct {
     int disc, sectors, entries;
     char region[3], boot[32];
+    int atelierFrench; /* recognized text-source layout */
 } CdImageInfo;
 /* Read-only identity and file-table checks on an independently opened image.
  * Empty second paths are allowed. Neither function changes the drive/settings. */

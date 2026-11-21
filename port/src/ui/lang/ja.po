@@ -7230,3 +7230,79 @@ msgstr "スピン（クロック安定）"
 
 msgid "Sleep rests the game thread until its next event, so the CPU may clock down between frames. Spin keeps it busy-waiting: a steady CPU clock and vblanks delivered on time, with one core always busy and more power used."
 msgstr "スリープはゲームスレッドを次のイベントまで休ませるため、フレーム間にCPUのクロックが下がることがあります。スピンはビジーウェイトを続けます。CPUクロックが安定し、VBlankが時間どおりに届きますが、コアを1つ常に占有し、消費電力が増えます。"
+
+msgid "Interface language"
+msgstr "設定画面の言語"
+
+msgid "Individual text settings"
+msgstr "種類別のテキスト設定"
+
+msgid "Translation sources"
+msgstr "翻訳の読み込み元"
+
+msgid "Translation name"
+msgstr "翻訳名"
+
+msgid "Remember these images"
+msgstr "このディスクを登録"
+
+msgid "Saved to Language."
+msgstr "言語の一覧に登録しました。"
+
+msgid "Check the path for Disc %d."
+msgstr "ディスク%dのパスを確認してください。"
+
+msgid " (Disc 1 only)"
+msgstr "（ディスク1のみ）"
+
+msgid " (Disc 2 only)"
+msgstr "（ディスク2のみ）"
+
+msgid "Use the same name to update a saved pair. You can also save a single disc."
+msgstr "同じ名前で登録するとディスクの組み合わせを更新できます。ディスク1枚でも登録できます。"
+
+msgid "Changes dialogue, menus, names, battle labels and movie subtitles together. Reopen the game menu or enter a new battle to refresh its labels."
+msgstr "会話、メニュー、名前、戦闘表示、ムービー字幕をまとめて切り替えます。表示は次にメニューを開いたときや戦闘を始めたときに更新されます。"
+
+msgid "This source has no separate movie subtitle track."
+msgstr "この読み込み元にはムービー用の字幕がありません。"
+
+msgid "Movie subtitles use the English translation of the Japanese dialogue."
+msgstr "ムービーの字幕には日本語の台詞の英訳を使います。"
+
+msgid "Text pack"
+msgstr "テキストパック"
+
+msgid "Text pack uses the movie captions supplied by the active dialogue pack."
+msgstr "テキストパックを選ぶと、現在の会話用パックに含まれるムービー字幕を使います。"
+
+msgid "Choose a text pack with movie captions to subtitle cutscenes in this build."
+msgstr "このビルドでムービーに字幕を表示するには、字幕を含むテキストパックを選んでください。"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "First-person look"
+msgstr "一人称視点"
+
+msgid "Allow first-person look in fields and on the world map"
+msgstr "フィールドとワールドマップで一人称視点を使う"
+
+msgid "Press V or hold L2 and click L3 to enter or leave. Look with the right stick, I/J/K/L, or a right mouse drag."
+msgstr "V キー、または L2 を押しながら L3 を押すと視点が切り替わります。右スティック、I/J/K/L キー、またはマウスの右ドラッグで見回せます。"
+
+msgid "First-person navigation"
+msgstr "一人称視点での移動"
+
+msgid "Move in first-person view"
+msgstr "一人称視点のまま移動する"
+
+msgid "With first-person look enabled, move relative to the view. When navigation is off, moving leaves first-person view."
+msgstr "一人称視点が有効なとき、視線を基準に前後左右に移動できます。この設定がオフのときは、移動すると元の視点に戻ります。"
+
+msgid "Binaural (headphones)"
+msgstr "バイノーラル（ヘッドホン）"
+
+msgid "Hear instruments and sound effects across a front soundstage on stereo headphones. Movie audio keeps its original mix."
+msgstr "ステレオヘッドホンで、楽器や効果音が前方の異なる方向から聞こえます。ムービーの音声は元のミックスで再生されます。"
+
+msgid "Binaural headphone measurements"
+msgstr "バイノーラル用の音響測定データ"

@@ -6,6 +6,8 @@
 /* The settings menu paused the game (1) or resumed it (0): the sound fades
  * out, and back in with the first frames after. */
 void spuOutputPause(int on);
+int spuHeadphonesEnabled(void);
+void spuHeadphonesSet(int on);
 int spuOutputDryPushes(void); /* pushes that found the device's queue empty */
 int spuOutputCuts(void);      /* lossy cuts so far (a queue over the limit dropped, an arrival trimmed) */
 int spuOutputStarved(void);   /* device requests the queue could not fill so far (underruns) */

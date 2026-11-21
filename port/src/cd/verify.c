@@ -1,5 +1,6 @@
 #include "verify.h"
 #include "cd_internal.h"
+#include <SDL3/SDL_stdinc.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
@@ -66,17 +67,29 @@ int discIsJapanese(CdDisc* d) {
     char name[32];
     return d && boot(d,name) && !strncmp(name,"SLPS_011.",9);
 }
-int cdVerifyImage(const char* path, CdImageInfo* info, char* why, size_t size) {
+/* Measured on Atelier 1.1 standard and undub outputs. Identify the entire
+ * file and directory index and its sector count before masking any slots. */
+static int atelierIndex(const CdImageInfo* info, const uint8_t* table, const uint8_t* dirs) {
+    static const struct { int disc, sectors; uint32_t fileCrc, dirCrc; } editions[] = {
+        {1, 305574, 0xbef7a4d9, 0xcb8f1e5b}, {2, 292750, 0x7b4c00ea, 0xcc6fd9e9},
+        {1, 305760, 0x0e7474d5, 0xcb8f1e5b}, {2, 292936, 0x5a4771c6, 0xcc6fd9e9},
+    };
+    if (strcmp(info->region, "US")) return 0;
+    for (size_t i = 0; i < SDL_arraysize(editions); i++) {
+        if (info->disc == editions[i].disc && info->sectors == editions[i].sectors &&
+            SDL_crc32(0, table, CD_FILE_TABLE_BYTES) == editions[i].fileCrc &&
+            SDL_crc32(0, dirs, CD_DIRECTORY_BYTES) == editions[i].dirCrc) return 1;
+    }
+    return 0;
+}
+
+int cdReadImageIndex(CdDisc* d, int textSource, CdImageInfo* info, uint8_t table[CD_FILE_TABLE_BYTES],
+                     uint8_t dirs[CD_DIRECTORY_BYTES], char* why, size_t size) {
     if (size)
         why[0] = 0;
     memset(info, 0, sizeof(*info));
-    if (!path || !*path)
-        return error(why, size, "Choose a Xenogears .cue image (or a raw 2352-byte .bin).");
-    CdDisc* d = discOpen(path);
-    if (!d)
-        return error(why, size, discLastError());
     CdImageInfo found = {0};
-    uint8_t id[2048], dirs[2048], table[32768];
+    uint8_t id[2048];
     const char* problem = NULL;
     found.sectors = discSectorCount(d);
     if (!user(d, 23, id) || memcmp(id, "DS0", 3) || (id[3] != '1' && id[3] != '2') || memcmp(id + 4, "_XENOGEARS", 10))
@@ -102,8 +115,13 @@ int cdVerifyImage(const char* path, CdImageInfo* info, char* why, size_t size) {
     if (!problem && !user(d, 40, dirs))
         problem = "Cannot read the Xenogears directory table.";
     if (!problem) {
+        if (textSource && atelierIndex(&found, table, dirs)) {
+            /* The patch occupies retail-empty entries 280 through 381. */
+            memset(table + 280 * 7, 0, 102 * 7);
+            found.atelierFrench = 1;
+        }
         int count = 0;
-        for (; count < 32768 / 7; count++) {
+        for (; count < CD_FILE_TABLE_BYTES / 7; count++) {
             const uint8_t* e = table + count * 7;
             unsigned sector = e[0] | (unsigned)e[1] << 8 | (unsigned)e[2] << 16;
             if (sector == 0xFFFFFF)
@@ -117,7 +135,7 @@ int cdVerifyImage(const char* path, CdImageInfo* info, char* why, size_t size) {
         }
         found.entries = count;
         if (!problem &&
-            (count == 0 || count == 32768 / 7 || u16(dirs) == 0xFFFF || u16(dirs + 120) != (unsigned)found.disc))
+            (count == 0 || count == CD_FILE_TABLE_BYTES / 7 || u16(dirs) == 0xFFFF || u16(dirs + 120) != (unsigned)found.disc))
             problem = "Invalid Xenogears file/directory table or disc-number mismatch.";
         for (int i = 0; !problem && i < 60; i++) {
             unsigned entry = u16(dirs + 2 * i);
@@ -125,11 +143,21 @@ int cdVerifyImage(const char* path, CdImageInfo* info, char* why, size_t size) {
                 problem = "A directory points outside the Xenogears file table.";
         }
     }
-    discClose(d);
     if (problem)
         return error(why, size, problem);
     *info = found;
     return 1;
+}
+int cdVerifyImage(const char* path, CdImageInfo* info, char* why, size_t size) {
+    memset(info, 0, sizeof(*info));
+    if (!path || !*path)
+        return error(why, size, "Choose a Xenogears .cue image (or a raw 2352-byte .bin).");
+    CdDisc* d = discOpen(path);
+    if (!d) return error(why, size, discLastError());
+    uint8_t table[CD_FILE_TABLE_BYTES], dirs[CD_DIRECTORY_BYTES];
+    int ok = cdReadImageIndex(d, 0, info, table, dirs, why, size);
+    discClose(d);
+    return ok;
 }
 int cdVerifyPair(const char* first, const char* other, const char* region, CdImageInfo info[2], char* why,
                  size_t size) {

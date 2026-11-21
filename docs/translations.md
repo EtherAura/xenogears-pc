@@ -4,6 +4,32 @@ The US download plays in English. Start the game from your original US
 discs and select a translation as its text source. Italian and Spanish can
 use patched images directly. French setup depends on your build.
 
+## Development builds with the Language selector
+
+Open **F1 → System → Language and text → Language**. Choose the disc
+language, the other region if its discs were found, a saved image pair, or
+an installed text pack. This applies to dialogue, battles, names, menus and
+their picture labels. The choice is saved immediately. Open a new dialogue,
+reopen the menu or start a new battle to see the change.
+
+To register patched images, open **Translation sources → Text images**, enter
+their paths and a translation name, then choose **Remember these images**.
+You can keep several named pairs. A single usable disc is labelled in the
+list. **Individual text settings** lets you mix sources and shows **Custom**
+in the selector. **Interface language** under **This menu** changes F1 and
+Extras.
+
+For **Atelier Français 1.1**, enter the original CUEs or BINs from the
+patcher’s `Patched` or `Undub_patched` folder. Name the pair, choose
+**Remember these images**, then select that name under **Language**. The
+development build reads the French text, font and battle wheel directly. The download
+of v2026.11.17 uses the personal-pack instructions below.
+
+A pack can supply its own movie captions. For image patches the port keeps
+the original movie video, including any text already in that video. The
+selector turns separate subtitles off when the source has no track.
+Japanese voices and movie audio are still set under **F1 → Audio**.
+
 ## Set up a translation in v2026.11.17
 
 For a translation that works directly from patched images, such as Italian or Spanish, follow these steps. French uses the pack setup below.

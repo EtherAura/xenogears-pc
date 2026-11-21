@@ -6,6 +6,20 @@
 #include "common.h"
 #include "psyq.h"
 void pcFieldCamera(VECTOR* eye, VECTOR* at);
+/* Enhanced first-person view. Only navigation changes the heading used for movement. */
+int pcFirstPersonEnabled(void);
+void pcFirstPersonSet(int on);
+int pcFirstPersonNavigation(void);
+void pcFirstPersonNavigationSet(int on);
+s16 pcFirstPersonMovementHeading(s16 game);
+void pcFirstPersonWorldFrame(int leader, s16 facing, int moving, int followBearing);
+void pcFirstPersonWorldAngles(SVECTOR* view);
+int pcFirstPersonToggle(void); /* returns whether the shortcut was handled */
+void pcFirstPersonEnd(void);
+int pcFirstPersonWanted(void);
+int pcFirstPersonActive(void);
+void pcFirstPersonMouse(float dx, float dy);
+int pcFirstPersonView(VECTOR* eye, VECTOR* at, s16* spriteHeading, int playerControl);
 int pcFreeCameraEnabled(void);  /* settings.ini free_camera (or XG_FREECAM) */
 void pcFreeCameraSet(int on);
 /* Whether the free camera shows this frame (its blend with the game's camera above zero). */

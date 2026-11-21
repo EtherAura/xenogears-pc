@@ -6,6 +6,10 @@
 #include <vulkan/vulkan.h>
 extern "C" int pcFreeCameraEnabled(void); /* port/src/system/freecam.c */
 extern "C" void pcFreeCameraSet(int on);
+extern "C" int pcFirstPersonEnabled(void);
+extern "C" void pcFirstPersonSet(int on);
+extern "C" int pcFirstPersonNavigation(void);
+extern "C" void pcFirstPersonNavigationSet(int on);
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -48,6 +52,7 @@ extern "C" {
 #include "system/settings.h"
 #include "system/system.h"
 #include "system/gameplay.h"
+#include "system/gametext.h"
 #include "system/hw.h"
 #include "system/speedup.h"
 #include "system/battlespeed.h"
@@ -1444,6 +1449,13 @@ void audioSection() {
         overrideNote("volume");
     }
 
+    if (row("Binaural (headphones)", "binaural_headphones")) {
+        bool on = spuHeadphonesEnabled() != 0;
+        if (checkbox("Binaural (headphones)", &on)) spuHeadphonesSet(on);
+        hint("%s", tr("Hear instruments and sound effects across a front soundstage on stereo headphones. Movie audio keeps its original mix."));
+        overrideNote("binaural_headphones");
+    }
+
     if (row("Latency", "audio_latency")) {
         audioSlider("##latency", "audio_latency", 40, 10, 250);
         hint("How far ahead the sound is queued for the device: lower answers sooner, higher is safer if the sound "
@@ -1467,15 +1479,19 @@ void audioSection() {
     }
     bool captionText = regionalCaptionsAvailable() != 0;
     if (row("Subtitles", "cutscene_subtitles")) {
-        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation"};
+        bool packText = gameTextPackHasMovies() != 0;
+        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation", "Text pack"};
         int captions = regionalSubtitlesEnabled();
-        ImGui::BeginDisabled(!captionText);
-        int captionChoice = choice("subtitles", subtitleTracks, 3, captions);
+        if (!captionText) subtitleTracks[1] = "Text pack";
+        int shown = !captionText && captions == REGIONAL_PACK_SUBTITLES ? 1 : captions;
+        ImGui::BeginDisabled(!captionText && !packText && !captions);
+        int count = captionText ? (packText ? 4 : 3) : (packText ? 2 : 1);
+        int picked = choice("subtitles", subtitleTracks, count, shown);
         ImGui::EndDisabled();
-        if (captionText && captionChoice != captions) regionalSetSubtitles(captionChoice);
-        if (captionText) hint("Independent of audio language. Uses the in-game dialogue font.");
-        else hint("This build has no caption text: the captions transcribe the game's dialogue, so public builds "
-                  "leave them out.");
+        if (picked != shown) regionalSetSubtitles(!captionText && picked == 1 ? REGIONAL_PACK_SUBTITLES : picked);
+        if (packText) hint("Text pack uses the movie captions supplied by the active dialogue pack.");
+        else if (captionText) hint("Independent of audio language. Uses the in-game dialogue font.");
+        else hint("Choose a text pack with movie captions to subtitle cutscenes in this build.");
         overrideNote("cutscene_subtitles");
     }
     if (captionText && row("Sound captions", "cutscene_sound_captions")) {
@@ -1853,6 +1869,20 @@ void controlsSection() {
                       "the stick up or down to zoom (keyboard: J/L turn, I/K tilt, U/O zoom). R3 or Home returns to the "
                       "game's view. Scenes and rooms with a fixed camera keep the game's."));
         overrideNote("free_camera");
+    }
+
+    if (row("First-person look", "first_person_look", opt::ENHANCED)) {
+        bool on = pcFirstPersonEnabled() != 0;
+        if (checkbox("Allow first-person look in fields and on the world map", &on)) pcFirstPersonSet(on);
+        hint("%s", tr("Press V or hold L2 and click L3 to enter or leave. Look with the right stick, I/J/K/L, or a right mouse drag."));
+        overrideNote("first_person_look");
+    }
+
+    if (row("First-person navigation", "first_person_navigation", opt::ENHANCED)) {
+        bool on = pcFirstPersonNavigation() != 0;
+        if (checkbox("Move in first-person view", &on)) pcFirstPersonNavigationSet(on);
+        hint("%s", tr("With first-person look enabled, move relative to the view. When navigation is off, moving leaves first-person view."));
+        overrideNote("first_person_navigation");
     }
 
     if (row("Vibration", "vibration vibration_strength")) {
@@ -2669,7 +2699,7 @@ bool acceptSetup() {
 // The menu's and the extras' language (l10n.h), each name in its own
 // language (never translated).
 void languageRow() {
-    if (!row("Language", "ui_language")) return;
+    if (!row("Interface language", "ui_language")) return;
     int count = l10nLanguageCount(), now = l10nLanguage();
     ImGui::PushID("ui_language");
     for (int i = 0; i < count; i++) {
@@ -2783,6 +2813,9 @@ void aboutRows(); // System's About group (below)
 
 void systemSection() {
     opt::beginPage("system", SYSTEM);
+    opt::group(N_("Language and text"));
+    gameTextRows();
+
     // ---- one choice for many settings
     opt::group(N_("Presets"));
     opt::presetRows(); // options.cpp
@@ -2867,11 +2900,8 @@ void systemSection() {
         overrideNote("disc_swap");
     }
 
-    opt::group(N_("Language and text"));
-    languageRow();
-    gameTextRows(); // gametext.cpp
-
     opt::group(N_("This menu"));
+    languageRow();
     menuLookRows();
 
     opt::group(N_("Advanced"), opt::COLLAPSED);
@@ -2973,6 +3003,12 @@ void aboutRows() {
             reflow(xgLicenseSdl, sdlText, sizeof(sdlText));
             reflow(xgLicenseImgui, imguiText, sizeof(imguiText));
             reflow(xgLicenseJukeboxFont, fontText, sizeof(fontText));
+        }
+        markBlock();
+        if (ImGui::CollapsingHeader(tr("Binaural headphone measurements"))) {
+            ImGui::TextWrapped("%s", "HRTF Measurements of a KEMAR Dummy-Head Microphone, Bill Gardner and Keith Martin. "
+                                "Copyright 1994 MIT Media Laboratory. Use is permitted with attribution to the authors. "
+                                "https://sound.media.mit.edu/resources/KEMAR.html");
         }
         markBlock();
         if (ImGui::CollapsingHeader(tr("SDL 3 (zlib licence)"))) {

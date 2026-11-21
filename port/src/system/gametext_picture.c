@@ -466,6 +466,13 @@ static uint8_t* fittedSprites(const uint8_t* disc, int discSize, const uint8_t* 
                               const WordRect* a, int na, const WordRect* b, int nb, int* outSize) {
     uint32_t n = discSize >= 8 ? rd32(disc) : 0, m = srcSize >= 8 ? rd32(src) : 0;
     if (n == 0 || n > 4096 || 4 + 2 * n > (uint32_t)discSize || m > 4096 || 4 + 2 * m > (uint32_t)srcSize) return NULL;
+    /* Atelier 1.1 uses the US battle sprite IDs on both discs. Its wheel
+     * spells new words with existing atlas glyphs, so pixel equality cannot
+     * decide which layout to use. Identify the two data tables themselves:
+     * the pack helper can read them through a normalized image file table. */
+    int atelierBattle = discSize == 45032 && srcSize == 42120 &&
+            gtSpriteFingerprint(disc, discSize) == UINT64_C(0xd346070744937f43) &&
+            gtSpriteFingerprint(src, srcSize) == UINT64_C(0x0a47aa88894a4f19);
     uint8_t* out = malloc(65536);
     if (out == NULL) return NULL;
     uint32_t o = 4 + 2 * n;
@@ -478,7 +485,7 @@ static uint8_t* fittedSprites(const uint8_t* disc, int discSize, const uint8_t* 
         const uint8_t* rec = dr;
         int length = dl;
         if (sl > 0 && (dl != sl || memcmp(dr, sr, (size_t)dl)) &&
-            !(sameRegions(sr, sl, a, na, b, nb) && (dl == 0 || sameRegions(dr, dl, a, na, b, nb)))) {
+            (atelierBattle || !sameRegions(sr, sl, a, na, b, nb) || (dl && !sameRegions(dr, dl, a, na, b, nb)))) {
             rec = sr, length = sl, taken++;
         }
         if (rec == NULL || o + (uint32_t)length > 65535) {

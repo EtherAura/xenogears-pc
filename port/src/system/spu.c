@@ -27,6 +27,9 @@
 #include "common.h"
 #include "psyq/libspu.h"
 #include "spu/spu.h"
+#include "spu/binaural.h"
+#include "spu/output.h"
+#include "settings.h"
 #include "system.h"
 #include "cputime.h"
 #include "savestate.h"
@@ -54,6 +57,23 @@ static s32 spuEvent;
 /* Where the samples go: the audio device (the game's), or a world's sink
  * (world.h), or nowhere; runSpu 0: a world that only keeps time. */
 static int toDevice = 1;
+static SpuHeadphones headphones; /* only the live device uses this history */
+static int binauralEnabled = -1;
+
+int spuHeadphonesEnabled(void) {
+    if (binauralEnabled < 0) {
+        settingsDescribe("binaural_headphones", "binaural_headphones: spatialize panned voices for headphones (default off)");
+        binauralEnabled = settingsBool("binaural_headphones", 0);
+    }
+    return binauralEnabled;
+}
+
+void spuHeadphonesSet(int on) {
+    settingsSetInt("binaural_headphones", on != 0);
+    binauralEnabled = settingsBool("binaural_headphones", 0);
+    settingsSave();
+}
+
 static void (*sink)(void* user, const int16_t* frames, uint32_t count);
 static void* sinkUser;
 static int runSpu = 1;
@@ -126,7 +146,10 @@ void spuSync(double now) {
         while (n > 0 && runSpu) {
             uint32_t frames = n > CHUNK ? CHUNK : (uint32_t)n;
             CPU_TIME_BEGIN(CPU_SPU);
-            irq |= spuRun(buffer, frames);
+            if (toDevice && !sink && (spuHeadphonesEnabled() || headphones.blend))
+                irq |= spuRunHeadphones(buffer, frames, &headphones, binauralEnabled);
+            else
+                irq |= spuRun(buffer, frames);
             CPU_TIME_END(CPU_SPU);
             if (sink != NULL) {
                 sink(sinkUser, buffer, frames);
@@ -294,6 +317,7 @@ void spuWorldPowerOn(void) {
     powerOn();
     spuSync(hwNow());
     spuReset(REGS);
+    if (toDevice && !sink) memset(&headphones, 0, sizeof headphones);
     REGS->m1AC_transferCtrl = 4;
     for (int i = 0; i < 24; i++) {
         REGS->m0_voice[i].m4_pitch = 0x3FFF;
@@ -642,6 +666,11 @@ void spuRegsPutBack(void) {
 }
 
 void spuStateIo(XgState* s) {
+    XG_STATE_VAR(s, headphones);
+    /* A saved fade-out continues sample for sample. Loading an enabled mix
+     * after switching the preference off resumes ordinary stereo immediately. */
+    if (xgStateLoading(s) && headphones.enabled && !spuHeadphonesEnabled())
+        memset(&headphones, 0, sizeof headphones);
     XG_STATE_VAR(s, portSpuRegisters);
     XG_STATE_VAR(s, powered);
     XG_STATE_VAR(s, lastSample);

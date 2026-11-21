@@ -120,6 +120,10 @@ static int endingBanksCheck(CdDisc* jp, const uint8_t* t, const uint16_t* dirs,
  }
  return 0;
 }
+static const char* testPackCaption(int japanese, int disc, int clip, int frame) {
+ return !japanese && disc == 1 && clip == 2 && frame == 17 ? "A pack cue" : NULL;
+}
+
 int main(int argc, char** argv) {
  if(argc!=5 && argc!=6) return 2; /* US1 US2 JP1 JP2 [audio bits] */
  int mode=argc==6?atoi(argv[5]):3, missing=mode==4, battleOn=missing?1:mode&1, movieOn=missing?1:(mode>>1)&1;
@@ -143,6 +147,21 @@ int main(int argc, char** argv) {
   uint8_t t[32768],j[32768]; uint16_t dirs[61],jd[61];
   CHECK(tables(current,t,dirs) && tables(jp,j,jd));
   CHECK(endingBanksCheck(jp,t,dirs,j,jd)==0);
+  if (disc == 1) {
+   regionalSetPackCaptionReader(testPackCaption);
+   regionalSetSubtitles(REGIONAL_PACK_SUBTITLES);
+   CHECK(settingsInt("cutscene_subtitles",0)==5);
+   regionalSetSoundCaptions(1);
+   CHECK(regionalSubtitlesEnabled()==REGIONAL_PACK_SUBTITLES);
+   regionalMovieBegin(lbaAt(t,dirs[0x19]+2));
+   regionalMovieFrame(17);
+   const char* cue=regionalSubtitle(); CHECK(cue && !strcmp(cue,"A pack cue"));
+   regionalMovieFrame(18); CHECK(!regionalSubtitle());
+   regionalMovieEnd();
+   regionalSetPackCaptionReader(NULL);
+   settingsUnset("cutscene_sound_captions");
+   regionalSetSubtitles(1);
+  }
   if (missing) {
    CHECK(pcRegionalFile(dirs[0x2d]-1+0x11,t,dirs,NULL)==0);
    CHECK(strstr(regionalSourceStatus(disc),"ready")==NULL);

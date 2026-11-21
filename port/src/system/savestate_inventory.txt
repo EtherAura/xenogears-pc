@@ -516,6 +516,8 @@ system/savestate.c * host save states
 system/settings.c * host settings
 system/slowdown.c * host the slowdown replay (states refused while it runs)
 system/speedup.c * host the Speedup setting's cached value (settings)
+system/spu.c binauralEnabled host headphone preference from settings
+system/spu.c headphones state
 system/spu.c irqCallback state
 system/spu.c keptRegs derived scratch inside one picture between of the 60 Hz Battling (between.c), never across a load
 system/spu.c lastReport host the samples' destination, logging
