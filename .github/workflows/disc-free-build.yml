@@ -1,0 +1,86 @@
+name: Build without a disc
+
+# Builds the Linux executables from the link tables the checkout carries
+# (port/link-tables), in the release's own builder (packaging/deb_ubuntu.Dockerfile:
+# the base image by digest, its packages from one snapshot of Ubuntu's archive),
+# with no disc anywhere: bash build-release.sh without --discs.
+#
+# The tables hold addresses, sizes, offsets and hashes, never the game's bytes,
+# and the executables still read the player's own disc at every start. With the
+# tables is the SHA-256 of each executable a disc-backed build of the same
+# sources made, after its payload audit; --reproduce fails the job unless this
+# build gives those bytes. A passing run on a release's tag therefore shows that
+# anyone can rebuild that release's Linux executables, byte for byte.
+#
+# The tables fit one state of the sources and are made again for a release, so
+# this runs on request, for the branch or tag chosen, not on every push. Clear
+# "reproduce" to build a tree whose tables were made for other sources: the
+# executables are then built and their sums shown, with nothing to compare.
+on:
+  workflow_dispatch:
+    inputs:
+      reproduce:
+        description: "Fail unless each executable is the one the tables record"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  linux:
+    name: Linux executables from the link tables
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The build runs in the builder's root filesystem under bubblewrap, with
+      # no network. Ubuntu 24.04 allows unprivileged user namespaces only to
+      # programs with an AppArmor profile, and bubblewrap has none there.
+      - name: Install bubblewrap
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends bubblewrap
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Refuse a checkout that holds game data
+        run: |
+          test ! -e disc && test ! -e bin && test ! -e asm
+
+      # The version only names the output folder: a release's tag, else the default.
+      - name: Build both engines and compare them with the recorded executables
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          REPRODUCE: ${{ inputs.reproduce }}
+        run: |
+          options=()
+          if [[ "$REF_TYPE" == tag && "$REF_NAME" =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)$ ]]; then
+            options+=(--version "$REF_NAME")
+          fi
+          if [[ "$REPRODUCE" == true ]]; then
+            options+=(--reproduce)
+          fi
+          bash build-release.sh --out "$RUNNER_TEMP/out" "${options[@]}" | tee "$RUNNER_TEMP/build.log"
+
+      - name: Summarize
+        run: |
+          {
+            echo '### Linux executables built with no disc'
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP"/out/*.sha256
+            grep -E '^bin/' "$RUNNER_TEMP/build.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

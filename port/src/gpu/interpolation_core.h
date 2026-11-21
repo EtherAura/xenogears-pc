@@ -61,6 +61,11 @@ typedef struct {
     uint32_t vertexCapacity, drawCapacity, pixelCapacity;
     int cleared, valid;
     const char* rejection; /* first capture failure; host diagnostics only */
+    /* A registered scene (scene.c) ended after `sceneEnd` vertices and was
+     * blurred by `dof`: a picture between does the same at that point. */
+    int sceneBlur;
+    uint32_t sceneEnd;
+    DofParams dof;
 } InterpFrame;
 
 /* Actual 8-bit UV/window texel bounds, in the owned capture image. */

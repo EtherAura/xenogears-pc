@@ -76,7 +76,8 @@ jobs:
       - name: Tool tests
         run: |
           rc=0
-          for t in beetle build_release interpolation_coverage payloadcheck pc_link port_tests retail_heap statecheck; do
+          for t in beetle build_release interpolation_coverage link_tables_metadata payloadcheck pc_link \
+                   pc_link_asmfree_metadata port_tests retail_heap statecheck; do
             echo "::group::tools/test_$t.py"
             python3 "tools/test_$t.py" || rc=1
             echo "::endgroup::"

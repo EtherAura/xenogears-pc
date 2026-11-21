@@ -156,6 +156,8 @@ void interpFrameClear(InterpFrame* f) {
     f->viewSet = 0;
     f->valid = 1;
     f->rejection = NULL;
+    f->sceneBlur = 0;
+    f->sceneEnd = 0;
 }
 
 void interpFrameReject(InterpFrame* f, const char* reason) {
@@ -503,6 +505,9 @@ int interpFrameVertices(const InterpFrame* a, const InterpFrame* b, double alpha
             v->x += (float)(alpha * (next->x - v->x));
             v->y += (float)(alpha * (next->y - v->y));
             v->w += (float)(alpha * (next->w - v->w));
+            /* The scene's depth (HiVertex.z) moves with the vertex; markers stay. */
+            if (SCENE_Z_IS_DEPTH(v->z) && SCENE_Z_IS_DEPTH(next->z) && (v->z < 0) == (next->z < 0))
+                v->z += (float)(alpha * (next->z - v->z));
             if (x->kind == PC_INTERP_TRANSITION) {
                 v->r += (float)(alpha * (next->r - v->r));
                 v->g += (float)(alpha * (next->g - v->g));

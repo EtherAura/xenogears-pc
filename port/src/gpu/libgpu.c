@@ -142,6 +142,7 @@ static void onUsr1(int sig) {
  * game sends, as tools/redux_gputrace.lua writes them ("O w..." per DrawOTag,
  * "P w..." per DrawPrim, words in hex; "L", "M", "C", "D", "S" per
  * LoadImage, MoveImage, ClearImage, PutDrawEnv, PutDispEnv), so a PC run can be diffed with a Redux trace;
+ * "T x y w h" per StoreImage (the port's own: gpureplay reads the rectangle back as the game did);
  * gpuTraceNote adds marker lines (the field sweep's frames). With
  * XG_GPU_TRACE_VBLANKS=1 also "V n" at each vblank (what was issued between
  * two vblanks: work/menu60 tells a picture the game did not draw again from
@@ -195,6 +196,11 @@ static void logVBlank(void) {
            st.recoveries);
 }
 
+#ifdef __ANDROID__
+/* port/src/system/android.c (weak: the test programs have no app). */
+void androidPerfVBlank(void) __attribute__((weak));
+#endif
+
 static void vblank(void) {
     gtePrecisionNewFrame();
     g.vblanks++;
@@ -202,6 +208,9 @@ static void vblank(void) {
         fprintf(traceFile, "V %u\n", g.vblanks);
     }
     cpuTimingVBlank(g.vblanks);
+#ifdef __ANDROID__
+    if (androidPerfVBlank != NULL) androidPerfVBlank(); /* the game thread's work, for the phone's governor */
+#endif
     vramStampClock(g.vblanks);
     textureDumpVBlank(g.vblanks);
     gp0ProbeVBlank(g.vblanks);
@@ -648,9 +657,13 @@ static void walk(const OTag* p) {
     if (traceOut() != NULL) {
         fputc('O', traceFile);
     }
+    /* A scene registered for this walk (scene.c, pcSceneDepth): its tags give
+     * the packets their depth, and the tag after it ends it. */
+    if (sceneWalkOn) sceneWalkBegin();
     while (p != NULL) {
         OTag tag = *p;
         int len = (int)(tag >> 56);
+        if (sceneWalkOn) sceneWalkTag(p);
         if (len != 0) {
             const WidePacket* wp = widePacket(p);
             if (traceFile != NULL && nativePacket(wp)) {
@@ -673,6 +686,7 @@ static void walk(const OTag* p) {
             break;
         }
     }
+    if (sceneWalkOn) sceneWalkEnd();
     if (traceFile != NULL) {
         fputc('\n', traceFile);
     }
@@ -1078,6 +1092,9 @@ s32 StoreImage(RECT* rect, u32* data) {
     if (capture != NULL) {
         capture->store(capture->user, rect->x, rect->y, rect->w, rect->h, (uint16_t*)data);
         return 0;
+    }
+    if (traceOut() != NULL) {
+        fprintf(traceFile, "T %d %d %d %d\n", rect->x, rect->y, rect->w, rect->h);
     }
     gp0ClearCache(); /* retail _drs emits GP0(01h) before the read */
     VPiece pieces[4];

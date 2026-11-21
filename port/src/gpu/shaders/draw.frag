@@ -10,6 +10,18 @@
 // instead of VRAM; texels still come from VRAM, except 15-bit ones the
 // primitive takes from a screen capture or frame buffer (vWideTex), which
 // come from the wide target.
+//
+// Built with TILE_IMAGE (VK_EXT_shader_tile_image, tile-based GPUs without
+// interlock): VRAM is the pass's colour attachment, the pixel's own value is
+// read from tile memory, which the extension orders by primitive, and the
+// result is the colour output. Texels still come from the storage image: a
+// batch never reads what it writes (gp0.c batchAdd).
+
+#ifdef TILE_IMAGE
+#extension GL_EXT_shader_tile_image : require
+layout(location = 0) tileImageEXT uattachmentEXT tilePixel;
+layout(location = 0) out uint outPixel;
+#endif
 
 #ifdef INTERLOCK
 #extension GL_ARB_fragment_shader_interlock : require
@@ -227,6 +239,27 @@ void main() {
     if(write) {
         uint flags=orderedFlags(mode,semi,semiMode,maskOut!=0u)|ORD_QUANT5;
         orderedAppend(p,(mode&DRAW_FILL)!=0u?fill:pack5(uvec3(front)),flags);
+    }
+#elif defined(TILE_IMAGE)
+    // A fragment that writes nothing must leave the attachment alone, and
+    // tile memory is read only by the fragments that are kept.
+    if (write) {
+        uint dst = colorAttachmentReadEXT(tilePixel).r;
+        if ((mode & DRAW_CHECK_MASK) != 0u && (dst & 0x8000u) != 0u) {
+            discard;
+        } else {
+            uint color;
+            if ((mode & DRAW_FILL) != 0u) {
+                color = fill;
+            } else if (semi) {
+                color = pack5(blend5(semiMode, unpack5(dst), front));
+            } else {
+                color = pack5(uvec3(front));
+            }
+            outPixel = color | maskOut;
+        }
+    } else {
+        discard;
     }
 #else
     BEGIN_ORDERED();

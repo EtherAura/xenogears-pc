@@ -72,9 +72,8 @@ static int configureSet(const char* id,char* path,size_t pathBytes,char* message
     if (!strcmp(id,PORTRAIT_TEXTURE_PACK)) { SDL_strlcpy(message,"The texture pack's pictures",messageBytes); return 0; }
     int found=0; for(int i=1;i<count;++i) if(!strcmp(id,sets[i].id)) found=1;
     if (!found) { SDL_strlcpy(message,"Selected set unavailable; using originals",messageBytes); return 0; }
-    snprintf(path,pathBytes,"%s/%s/%s",root,id,texturePackVersion());
-    SDL_PathInfo info;
-    if (!SDL_GetPathInfo(path,&info) || info.type!=SDL_PATHTYPE_DIRECTORY) {
+    char set[sizeof(root)+64]; snprintf(set,sizeof(set),"%s/%s",root,id);
+    if (!texturePackVersionDir(set,path,pathBytes)) {
         SDL_strlcpy(message,"Regional set unavailable; using originals",messageBytes); return 0;
     }
     SDL_strlcpy(message,"Ready; missing pictures use originals",messageBytes); return 1;

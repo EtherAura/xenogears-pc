@@ -41,7 +41,8 @@ typedef struct {
     int u, v;
     int r, g, b;
     float preciseX, preciseY, depth;
-    int precise;
+    int precise; /* preciseX/Y are set; depth too. Without it depth is the GTE's view depth when
+                  * the scene's depth image asked for it alone (subpixel geometry off), else 0 */
     int fallback;   /* poseVertex: no subpixel projection; preciseX/Y hold the integer position */
 } PVertex;
 
@@ -111,6 +112,11 @@ static struct {
     WideDraw wd;
     const WidePacket* pkt;
     uint32_t wideTex;
+    /* The scene's depth image (scene.c, gp0SceneDepth): while sceneOn, the
+     * copy's vertices carry a depth: their own where the GTE gave one, else
+     * sceneZ, the depth of the ordering-table slot being drawn. */
+    int sceneOn;
+    float sceneZ;
     /* Complete face canvas for the current polygon, before raster clipping.
      * Upload history is bounded and can forget an otherwise unchanged face. */
     TextureRequest portraitSource;
@@ -824,6 +830,37 @@ static void hiVertex(HiVertex* o, float x, float y, float u, float v, float r, f
                 : gp.replayed ? ((uint32_t)(gp.wd.edgeX0 - gp.wd.shift) & 0xFFFFu) | (uint32_t)(gp.wd.edgeX1 - gp.wd.shift) << 16 : 0;
     o->rasterShift = !gp.wide && gp.replayed
         ? ((uint32_t)(gp.wd.shift + (gp.pkt != NULL ? gp.pkt->dx : 0)) & 0xFFFFu) | (uint32_t)gp.wd.shiftY << 16 : 0;
+    /* A picture sampled as 15-bit texels (a frame buffer an effect redraws,
+     * an uploaded picture) is kept in focus: a frame is never blurred twice. */
+    o->z = !gp.sceneOn ? SCENE_Z_NONE
+         : (mode & DRAW_TEXTURED) && ((tex >> 7) & 3) >= 2 && gp.sceneZ != SCENE_Z_NONE ? SCENE_Z_SHARP : gp.sceneZ;
+    /* A sprite's pixels are marked as a figure's (negative depth). */
+    if (SCENE_Z_IS_DEPTH(o->z) && gp.pkt != NULL && gp.pkt->classified && gp.pkt->texClass == PC_TEX_SPRITE) o->z = -o->z;
+}
+
+/* The vertex's own view depth in place of its slot's, where the GTE gave one. */
+static void sceneVertexZ(HiVertex* o, const PVertex* p) {
+    if (!SCENE_Z_IS_DEPTH(o->z) || p->depth <= 0) return;
+    o->z = o->z < 0 ? -p->depth : p->depth;
+}
+
+void gp0SceneDepth(int on, float z) {
+    gp.sceneOn = on;
+    gp.sceneZ = on ? z : SCENE_Z_NONE;
+}
+
+int gp0SceneOn(void) { return gp.sceneOn; }
+
+int gp0SceneRects(VRect* narrow, VRect* wide, int inset[2]) {
+    if (gp.clipX1 < gp.clipX0 || gp.clipY1 < gp.clipY0 || gp.clipX0 < 0 || gp.clipY0 < 0 ||
+        gp.clipX1 >= VRAM_W || gp.clipY1 >= VRAM_H) return 0;
+    *narrow = (VRect){gp.clipX0, gp.clipY0, gp.clipX1, gp.clipY1};
+    WideDraw wd;
+    if (!wideActive() || !wideDrawTarget(gp.clipX0, gp.clipY0, gp.clipX1, gp.clipY1, &wd)) return 1;
+    *wide = (VRect){wd.clipX0, wd.clipY0, wd.clipX1, wd.clipY1};
+    inset[0] = wd.edgeX0 - wd.clipX0;
+    inset[1] = wd.edgeY0 - wd.clipY0;
+    return 2;
 }
 
 /* Own both the native sampled range and the enhanced projected pose. Native
@@ -840,6 +877,7 @@ static void recordCapturedTriangle(const PVertex* a,const PVertex* b,const PVert
         hiVertex(&owned[k],precise?p->preciseX:(float)p->x,precise?p->preciseY:(float)p->y,
             (float)p->u,(float)p->v,(float)p->r,(float)p->g,(float)p->b,mode,tex,lo,hi);
         if(precise&&hiresPerspective())owned[k].w=p->depth/4096.0f;
+        sceneVertexZ(&owned[k],p);
     }
     interpolationDraw(owned,3,PC_TEX_HUD,gp.wide,gp.wideShift,gp.wideShiftY,piece);
 }
@@ -939,6 +977,7 @@ static void recordPolygon(const PVertex* v, int count, uint32_t mode, uint32_t t
                  (float)p->u, (float)p->v, (float)p->r, (float)p->g, (float)p->b, mode, tex,
                  lo, hi);
         if (p->precise && hiresPerspective()) out[k].w = p->depth / 4096.0f;
+        sceneVertexZ(&out[k], p);
         if (precision) {
             out[k].x = preciseSnap(projected[index[k]].x) + (float)(gp.offX + gp.wideShift);
             out[k].y = preciseSnap(projected[index[k]].y) + (float)(gp.offY + gp.wideShiftY);
@@ -1126,10 +1165,22 @@ static void hiTriangle(const PVertex* a, const PVertex* b, const PVertex* c, uin
                  (float)p[i]->g, (float)p[i]->b, mode, tex, uvMin, uvMax);
         if (probeSolid) { o[i].r = o[i].g = o[i].b = 248; }
         if (p[i]->precise && hiresPerspective()) o[i].w = p[i]->depth / 4096.0f;
+        sceneVertexZ(&o[i], p[i]);
     }
 
     HiVertex sealed[21];
     int n = seal ? hiSeal(o, sealed, perimeter, 2) : 0;
+    if (n > 3 && gp.sceneOn && SCENE_Z_IS_DEPTH(o[0].z) && o[0].z > 0 && o[1].z > 0 && o[2].z > 0) {
+        /* The fringe's depth: the face's plane carried on (1/z is linear on screen). */
+        double area = (double)(o[1].x - o[0].x) * (o[2].y - o[0].y) - (double)(o[2].x - o[0].x) * (o[1].y - o[0].y);
+        for (int k = 3; k < n; k++) {
+            double dx = sealed[k].x - o[0].x, dy = sealed[k].y - o[0].y;
+            double l1 = (dx * (o[2].y - o[0].y) - dy * (o[2].x - o[0].x)) / area;
+            double l2 = ((o[1].x - o[0].x) * dy - (o[1].y - o[0].y) * dx) / area;
+            double inv = (1 - l1 - l2) / o[0].z + l1 / o[1].z + l2 / o[2].z;
+            if (inv > 0 && isfinite(inv)) sealed[k].z = (float)(1 / inv);
+        }
+    }
     hiEmit(n ? sealed : o, n ? n : 3);
 }
 
@@ -2116,6 +2167,15 @@ static int plainHiReplay(void) {
     return gp.replayed && !gp.wide && gvkHiScale() != 0;
 }
 
+/* Whether a primitive in this box is drawn on the CPU (vram.c: the tiles the
+ * CPU reads after the frame drew them, and the whole draw area once the
+ * frame's draws were read back several times). */
+static int cpuOwned(VRect box) {
+    VRect area = {gp.clipX0, gp.clipY0, gp.clipX1, gp.clipY1};
+    if (clipToVram(&area)) vramOwnedArea(area);
+    return vramCpuOwned(box);
+}
+
 /* 0 ordinary GPU path, 1 cached spans, 2 resolved draw, 3 native wave drawn. */
 static int cacheRaster(const SelfDraw* s, const ReadSet* reads, int* ints) {
     if (gp.wide) return 0;
@@ -2127,7 +2187,7 @@ static int cacheRaster(const SelfDraw* s, const ReadSet* reads, int* ints) {
      * samples their framebuffer. Enhanced draws retain the original path.
      * The same for tiles the CPU reads after the frame drew them
      * (vramCpuOwned). */
-    int cpuWave = !feedback && ((s->tri && interpolationWavePacket()) || interpolationWaveFrame() || (!gp.wide && vramCpuOwned(s->box)));
+    int cpuWave = !feedback && ((s->tri && interpolationWavePacket()) || interpolationWaveFrame() || (!gp.wide && cpuOwned(s->box)));
     if (feedback) interpolationReject("texture-feedback");
     for (int i = 0; i < reads->n; i++) vramSyncRect(reads->r[i]);
     if (feedback || cpuWave) {
@@ -2440,7 +2500,7 @@ static void triangle(const PVertex* a, const PVertex* b, const PVertex* c, uint3
      * including the integer walker's clamp near the diagonal at >1x. */
     recordCapturedTriangle(a,b,c,mode,tex,uvMin,uvMax,perimeter,hi);
     int cached = 0;
-    if (!(mode & DRAW_TEXTURED) && !gp.wide && (interpolationWaveFrame() || vramCpuOwned(box))) {
+    if (!(mode & DRAW_TEXTURED) && !gp.wide && (interpolationWaveFrame() || cpuOwned(box))) {
         vramKeepWrite(box); /* a picture between's keep (vram.c): shaded on the CPU, into its copy */
         vramSyncRect(box);
         const PVertex* tri[3] = {a, b, c};
@@ -2537,7 +2597,7 @@ static void widePolygonSides(PVertex* v, int n, int textured, uint32_t mode, uin
         return;
     }
     /* Screen-space stretching has no projected geometry correspondence. */
-    for (int k = 0; k < n; k++) v[k].precise = 0;
+    for (int k = 0; k < n; k++) { v[k].precise = 0; v[k].depth = 0; }
     if (textured || (gp.pkt != NULL && (gp.pkt->flags & PC_WIDE_EXTEND))) {
         for (int k = 0; k < n; k++) {
             v[k].x = v[k].x == mn ? gp.wd.clipX0 : v[k].x == mx ? gp.wd.clipX1 + 1 : v[k].x;
@@ -2590,7 +2650,7 @@ static void verticalPolygonBands(PVertex* v, int n, int textured, uint32_t mode,
     if (gp.wd.clipY0 < tl->y) {
         q[0] = q[2] = *tl; q[1] = q[3] = *tr;
         q[0].y = q[1].y = gp.wd.clipY0;
-        for (int k = 0; k < 4; k++) q[k].precise = 0;
+        for (int k = 0; k < 4; k++) { q[k].precise = 0; q[k].depth = 0; }
         widePolygonSides(q, 4, 0, mode, tpage, clut, 4);
         recordPolygon(q, 4, mode, tpage | clut << 16, NULL, 3);
         triangle(&q[1], &q[2], &q[3], mode, tpage, clut, 6);
@@ -2599,7 +2659,7 @@ static void verticalPolygonBands(PVertex* v, int n, int textured, uint32_t mode,
     if (gp.wd.clipY1 + 1 > bl->y) {
         q[0] = q[2] = *bl; q[1] = q[3] = *br;
         q[2].y = q[3].y = gp.wd.clipY1 + 1;
-        for (int k = 0; k < 4; k++) q[k].precise = 0;
+        for (int k = 0; k < 4; k++) { q[k].precise = 0; q[k].depth = 0; }
         widePolygonSides(q, 4, 0, mode, tpage, clut, 6);
         recordPolygon(q, 4, mode, tpage | clut << 16, NULL, 4);
         triangle(&q[1], &q[2], &q[3], mode, tpage, clut, 6);
@@ -2631,6 +2691,7 @@ static int poseVertex(const void* addr, PVertex* out) {
     /* Without the subpixel projection (the precision table holds two vblanks;
      * a slow host frame outlasts it) the integer position stands in. */
     out->fallback = 1; out->preciseX = (float)out->x; out->preciseY = (float)out->y;
+    out->depth = 0; /* a pose takes its slot's depth (sceneVertexZ) */
     if (!hiresPrecision() || !gtePrecisionLookup(addr, raw, &pr)) return 0;
     if (out->x != (s16)raw + gp.offX + gp.wideShift || out->y != (s16)(raw >> 16) + gp.offY + gp.wideShiftY) return 0;
     out->fallback = 0;
@@ -2935,8 +2996,10 @@ static void polygon(void) {
     for (int k = 0; k < n; k++) {
         decodeXY(&v[k], raw_[k]);
         v[k].precise = 0;
+        v[k].depth = 0;
     }
-    if (gvkHiScale() != 0 && hiresPrecision()) {
+    int subpixel = hiresPrecision();
+    if (gvkHiScale() != 0 && (subpixel || gp.sceneOn)) {
         GtePrecise precise[4];
         int complete = 1;
         for (int k = 0; k < n; k++) {
@@ -2952,10 +3015,13 @@ static void polygon(void) {
         }
         if (complete) {
             for (int k = 0; k < n; k++) {
+                /* The depth alone when subpixel geometry is off: the scene's
+                 * depth image needs it, the vertices stay where they are. */
+                v[k].depth = (float)precise[k].z;
+                if (!subpixel) continue;
                 v[k].precise = 1;
                 v[k].preciseX = preciseSnap(precise[k].x) + (float)(gp.offX + gp.wideShift);
                 v[k].preciseY = preciseSnap(precise[k].y) + (float)(gp.offY + gp.wideShiftY);
-                v[k].depth = (float)precise[k].z;
             }
         }
     }
@@ -3058,7 +3124,7 @@ static void rectangle(int x, int y, int w, int h, int u0, int v0, const PVertex*
             for (int k=0;k<4;++k) {
                 q[k].x=x+(k&1)*w; q[k].y=y+(k>>1)*h;
                 q[k].u=to.u+(k&1)*to.w; q[k].v=to.v+(k>>1)*to.h;
-                q[k].precise=0;
+                q[k].precise = 0; q[k].depth = 0;
             }
             cacheClut(to.tpage,to.clut);
             recordPolygon(q, 4, mode, to.tpage | (uint32_t)to.clut << 16, NULL, piece);
@@ -3146,7 +3212,7 @@ static void rectangle(int x, int y, int w, int h, int u0, int v0, const PVertex*
     probe(mode & DRAW_FILL ? "fill" : "rectangle", x, y, x + w - 1, y + h - 1);
     VRect ownedBox = wr;
     if (!gp.wide && !(mode & (DRAW_TEXTURED | DRAW_FILL)) &&
-        (interpolationWaveFrame() || (clipToVram(&ownedBox) && vramCpuOwned(ownedBox)))) {
+        (interpolationWaveFrame() || (clipToVram(&ownedBox) && cpuOwned(ownedBox)))) {
         VRect box=wr;
         if (box.x0<gp.clipX0) box.x0=gp.clipX0;
         if (box.y0<gp.clipY0) box.y0=gp.clipY0;

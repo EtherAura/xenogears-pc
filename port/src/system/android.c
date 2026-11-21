@@ -298,4 +298,134 @@ const char* androidActivityText(const char* method, char* out, size_t size) {
     return out;
 }
 
+/* ---- performance hints (ADPF) ----------------------------------------------------------
+ *
+ * The game thread sleeps most of every vblank, so the phone's governor keeps
+ * its core at a low clock and a Gear battle's frame then takes several times
+ * the vblank it has (measured on an arm64 test phone: the prime core at 0.8 of
+ * 3.8 GHz while the thread used half of every vblank). Android's performance
+ * hint session (android/performance_hint.h, API 33) is the system's way to be
+ * told: the thread's work per vblank and the time it should take, from which
+ * the power HAL raises or lowers that thread's clock floor. The work reported
+ * is the thread's CPU time since the last vblank.
+ *
+ * performance_hints in settings.ini: off (default), on. XG_PERF_HINT_MS: the
+ * target per vblank in ms (default 4); XG_PERF_HINT_LOG=1: a line a second
+ * (the core, its clock, the mean and worst work reported), with or without
+ * the session. Off by default: on that phone, at 4 ms, the session raised the
+ * mean clock of a Gear battle from 1.4 to 2.5 GHz but held the fields at
+ * 2.3-2.7 GHz as well (their work is about 4 ms a vblank), and past its
+ * opening transition no vblank of the battle was late without it once its
+ * draws took one pass (vk.c drawTile).
+ * libandroid.so's functions are looked up at run time: nothing to link, and
+ * a system without them is left as it was. */
+
+#include <dlfcn.h>
+#include <sys/syscall.h>
+#include <time.h>
+
+typedef struct APerformanceHintManager APerformanceHintManager;
+typedef struct APerformanceHintSession APerformanceHintSession;
+
+static struct {
+    int state; /* 0 not tried, 1 reporting, -1 off or unavailable */
+    int log;
+    pid_t tid;
+    APerformanceHintSession* session;
+    int (*report)(APerformanceHintSession*, int64_t);
+    uint64_t lastCpu;
+    /* XG_PERF_HINT_LOG */
+    uint32_t vblanks, count;
+    uint64_t sum, worst;
+} perf;
+
+static uint64_t perfThreadCpu(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) return 0;
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+static void perfStart(void) {
+    perf.state = -1;
+    const char* log = getenv("XG_PERF_HINT_LOG");
+    perf.log = log != NULL && log[0] == '1';
+    settingsDescribe("performance_hints",
+                     "performance_hints: off (default) or on (tells Android how long the game thread's work takes each "
+                     "vblank, so the phone raises its clock when a scene needs it; uses more battery)");
+    if (!settingsBool("performance_hints", 0)) {
+        if (perf.log) fprintf(stderr, "android: performance hints off (performance_hints)\n");
+        perf.state = perf.log ? 2 : -1; /* 2: no session, the log's line only */
+        perf.tid = gettid();
+        perf.lastCpu = perfThreadCpu();
+        return;
+    }
+    void* lib = dlopen("libandroid.so", RTLD_NOW);
+    if (lib == NULL) return;
+    APerformanceHintManager* (*getManager)(void) = (APerformanceHintManager * (*)(void)) dlsym(lib, "APerformanceHint_getManager");
+    APerformanceHintSession* (*createSession)(APerformanceHintManager*, const int32_t*, size_t, int64_t) =
+        (APerformanceHintSession * (*)(APerformanceHintManager*, const int32_t*, size_t, int64_t))
+            dlsym(lib, "APerformanceHint_createSession");
+    perf.report = (int (*)(APerformanceHintSession*, int64_t))dlsym(lib, "APerformanceHint_reportActualWorkDuration");
+    if (getManager == NULL || createSession == NULL || perf.report == NULL) {
+        fprintf(stderr, "android: no performance hint API in libandroid.so\n");
+        return;
+    }
+    APerformanceHintManager* manager = getManager();
+    if (manager == NULL) {
+        fprintf(stderr, "android: performance hints are not supported on this device\n");
+        return;
+    }
+    double ms = 4.0;
+    const char* e = getenv("XG_PERF_HINT_MS");
+    if (e != NULL && e[0] != '\0') ms = atof(e);
+    if (ms < 0.5) ms = 0.5;
+    if (ms > 16.0) ms = 16.0;
+    int32_t tid = (int32_t)gettid();
+    perf.session = createSession(manager, &tid, 1, (int64_t)(ms * 1e6));
+    if (perf.session == NULL) {
+        fprintf(stderr, "android: performance hint session not made\n");
+        return;
+    }
+    perf.tid = tid;
+    perf.lastCpu = perfThreadCpu();
+    perf.state = 1;
+    fprintf(stderr, "android: performance hints: game thread %d, %.1f ms of work per vblank asked for\n", (int)tid, ms);
+}
+
+/* Once per vblank, on the thread that delivers it (libgpu.c). */
+void androidPerfVBlank(void) {
+    if (perf.state < 0) return;
+    if (perf.state == 0) {
+        perfStart();
+        return;
+    }
+    if (gettid() != perf.tid) return; /* another thread's clock (a sandboxed world) */
+    uint64_t cpu = perfThreadCpu();
+    uint64_t work = cpu > perf.lastCpu ? cpu - perf.lastCpu : 1;
+    perf.lastCpu = cpu;
+    if (perf.state == 1) perf.report(perf.session, (int64_t)work);
+    if (perf.log) {
+        perf.sum += work;
+        perf.worst = work > perf.worst ? work : perf.worst;
+        perf.count++;
+        if (++perf.vblanks % 60 == 0) {
+            unsigned core = 0;
+            syscall(SYS_getcpu, &core, NULL, NULL);
+            char path[96];
+            long khz = 0;
+            snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%u/cpufreq/scaling_cur_freq", core);
+            FILE* f = fopen(path, "r");
+            if (f != NULL) {
+                if (fscanf(f, "%ld", &khz) != 1) khz = 0;
+                fclose(f);
+            }
+            fprintf(stderr, "perfhint: vb %u core %u at %ld kHz, work mean %.3f worst %.3f ms\n", perf.vblanks, core, khz,
+                    (double)perf.sum / perf.count * 1e-6, (double)perf.worst * 1e-6);
+            perf.sum = perf.worst = 0;
+            perf.count = 0;
+        }
+    }
+}
+
+
 #endif

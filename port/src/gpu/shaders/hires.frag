@@ -83,7 +83,25 @@ layout(push_constant) uniform Hi {
     ivec2 wideSize;
     ivec2 ditherOrigin;
     int coarse; // the block size the COARSE build uses (2); the layout's field, unread
+#ifdef DEPTH
+    ivec2 depthOrigin; // the depth image's pixel (0, 0) in the target (hi-res pixels)
+    ivec2 depthSize;   // its size
+#endif
 } pc;
+
+#ifdef DEPTH
+// The scene's depth image (scene.c, vk.c gvkSceneBegin): for each pixel of
+// the frame being drawn, the view depth of what replaced it last, in 1/16
+// units, with DEPTH_FIGURE when that was a sprite; DEPTH_SHARP a picture
+// kept in focus; DEPTH_FAR nothing drawn yet.
+// Built with DEPTH only while a registered scene is drawn: without it this
+// shader is the one it always was.
+layout(set = 1, binding = 0, r32ui) uniform coherent uimage2D sceneDepth;
+layout(location = 14) noperspective in float vInvZ;
+const uint DEPTH_SHARP = 0u;
+const uint DEPTH_FAR = 0xFFFFFFFFu;
+const uint DEPTH_FIGURE = 0x40000000u;
+#endif
 
 layout(location = 0) in vec2 vUV;
 layout(location = 1) noperspective in vec3 vColor;
@@ -534,6 +552,17 @@ void main() {
             if ((mode & (DRAW_SURFACE | DRAW_FRINGE)) != 0u) coverage = COVERED;
             else if (resolved || (mode & DRAW_FILL) != 0u) coverage = 0u;
             imageStore(DST, pp, uvec4(color | maskOut | coverage));
+#ifdef DEPTH
+            // A fragment that replaces the pixel owns its depth; one that
+            // blends (semi) or only smooths a text edge leaves it.
+            ivec2 dp = pp - pc.depthOrigin;
+            if (vInvZ != 0.0 && !semi && textCover >= 1.0 &&
+                all(greaterThanEqual(dp, ivec2(0))) && all(lessThan(dp, pc.depthSize))) {
+                uint z = vInvZ > 1.5 ? DEPTH_SHARP
+                       : uint(clamp(16.0 / abs(vInvZ) + 0.5, 1.0, 1.0e9)) | (vInvZ < 0.0 ? DEPTH_FIGURE : 0u);
+                imageStore(sceneDepth, dp, uvec4(z));
+            }
+#endif
         }
     }
     END_ORDERED();

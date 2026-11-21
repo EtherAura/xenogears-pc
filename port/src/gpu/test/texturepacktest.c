@@ -366,7 +366,27 @@ int main(int argc, char** argv) {
         texturePackStats(&stats); CHECK(stats.posePreloads==0);
         CHECK(texturePoseGet(villager[0]) && texturePoseGet(scene[0]));
         texturePackStats(&stats); CHECK(stats.poseSync==2 && stats.posePreloads==0 && stats.posePartsSeen==0);
+        /* a library made from the other disc (xg-j9m.13): with no folder of this disc's version the other's
+         * is read, its poses keyed by texture content as on either release */
+        char own[3400], other[3400]; snprintf(own,sizeof(own),"%s/%s",sprites,texturePackVersion());
+        snprintf(other,sizeof(other),"%s/%s",sprites,strcmp(texturePackVersion(),"SLUS-00664")?"SLUS-00664":"SLPS-01160");
+        CHECK(SDL_RenamePath(own,other)); texturePackReload(); CHECK(textureSpriteCelEnabled());
+        pose=texturePoseGet(villager[0]); CHECK(pose && pose->w==4 && pose->indices[0]==3);
+        CHECK(SDL_RenamePath(other,own));
         settingsSet("sprite_preload","1"); settingsSet("sprite_packs","none"); texturePackReload();
+    }
+    /* The texture library likewise: only the other disc's folder, then it; with both, this disc's. */
+    {
+        char lib[3400], own[3400], other[3400]; snprintf(lib,sizeof(lib),"%s/other-disc",argv[1]);
+        snprintf(own,sizeof(own),"%s/%s",lib,texturePackVersion());
+        snprintf(other,sizeof(other),"%s/%s",lib,strcmp(texturePackVersion(),"SLUS-00664")?"SLUS-00664":"SLPS-01160");
+        DecodedTexture o={0}; o.request=(TextureRequest){0,0,0,0,0,4,4,0,0}; o.texelKey=0x51ab;
+        uint8_t image[8*8*4]; memset(image,255,sizeof(image));
+        CHECK(SDL_CreateDirectory(lib) && packDir(lib) && packPng(lib,&o,0,8,8,image) && SDL_RenamePath(own,other));
+        texturePackSetRoot(lib); CHECK(texturePackEnabled());
+        CHECK(texturePackSample(&o,o.request,0,&s) && s.scale==2);
+        CHECK(packDir(lib)); texturePackReload(); CHECK(texturePackEnabled() && !texturePackSample(&o,o.request,0,&s));
+        texturePackSetRoot(argv[1]); CHECK(texturePackEnabled());
     }
     /* Eight 4 MiB PNGs fill the budget; more evict actual pixel storage. */
     uint8_t* large=malloc(1024*1024*4); CHECK(large); memset(large,255,1024*1024*4);

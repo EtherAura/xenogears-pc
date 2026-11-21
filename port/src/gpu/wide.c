@@ -209,6 +209,7 @@ static int verticalFor(const GpuDisplay* d) {
 }
 
 int wideActive(void) { return wd.m != 0 || verticalFor(&wd.disp); }
+int wideBlockReasons(void) { return (int)wd.block; }
 
 /* A new margin now (a mode or block change takes effect at once, so the
  * new screen's first frame is drawn with it). */

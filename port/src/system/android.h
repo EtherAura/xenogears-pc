@@ -38,6 +38,9 @@ int androidRemovePack(const char* library, const char* name);
 void androidUpdateCheck(SDL_Window* window);
 /* XgActivity's String method() into out ("" when there is none). */
 const char* androidActivityText(const char* method, char* out, size_t size);
+/* Once per vblank on the game thread: its work since the last one, reported to
+ * Android's performance hint session (performance_hints; android.c). */
+void androidPerfVBlank(void);
 #endif
 
 #ifdef __cplusplus

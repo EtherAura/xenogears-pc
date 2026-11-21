@@ -203,6 +203,7 @@ int presentAspect(int* w, int* h);
 /* The hi-res copy (hires.c): upscale= and upscale_color= in settings.ini,
  * written at once, applied from the next picture. */
 int gpuOrderedFallback(void);
+int gpuOrderedFallbackDefault(void);
 void gpuSetOrderedFallback(int on);
 const char* gpuOrderedStatus(void);
 int hiresUpscale(void);          /* 1 exact (default), 0 auto, 2..12 */
@@ -225,6 +226,14 @@ int hiresCpuEffects(void);
 void hiresSetCpuEffects(int on);
 int hiresSeamGuard(void);
 void hiresSetSeamGuard(int on);
+/* scene.c: depth of field in fields (the Enhanced engine; settings
+ * depth_of_field=off|subtle|medium|strong, depth_of_field_focus=
+ * narrow|normal|wide). sceneDofStatus: why it is not showing, or NULL. */
+int sceneDof(void);              /* 0 off (default), 1 subtle, 2 medium, 3 strong */
+void sceneSetDof(int level);
+int sceneDofFocus(void);         /* 0 narrow, 1 normal (default), 2 wide */
+void sceneSetDofFocus(int range);
+const char* sceneDofStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class
  * (PC_TEX_* in pc_wide.h). Nearest is the default for every class. */
@@ -296,6 +305,12 @@ int texturePackPreloadPending(void);
 void texturePackPoseCache(size_t* bytes, size_t* peak, size_t* limit);
 const char* texturePackRoot(void);
 const char* texturePackVersion(void);
+/* A library's version folder, <root>/<texturePackVersion()>, written to out; with only the other disc's
+ * folder there, that one: texture, sprite, glyph and portrait pictures are keyed by texture content, and
+ * the two releases share most of it (every field, sprite and portrait), so a library made from either
+ * disc draws on both, and what one release has alone stays native. 0 when neither folder exists. Cel HUD
+ * sets (by VRAM position) and movies (by stream) keep their own disc's folder. */
+int texturePackVersionDir(const char* root, char* out, size_t size);
 void texturePackSetRoot(const char* root);
 void texturePackReload(void);
 void texturePackStats(TexturePackStats* out);

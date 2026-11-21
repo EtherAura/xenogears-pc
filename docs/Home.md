@@ -4,7 +4,8 @@ English | [日本語](Home-ja.md)
 
 Part of -Project Exodus-, an unofficial Xenogears preservation effort.
 
-Xenogears running natively on Linux and Windows. It is built from the
+Xenogears running natively on Linux and Windows, with an Android version in
+development. It is built from the
 [matching decompilation](https://github.com/EtherAura/xenogears), so the game
 logic is the original code, compiled for the PC. Bring your own US or Japanese
 discs: nothing from the game is included, and the port reads its data from your

@@ -94,3 +94,36 @@ The second command uses the US Disc 1 image and builds offline. It writes
 the Windows installer and ZIP, the Linux tarball and the Ubuntu amd64
 `.deb` once their payload audits pass. The tarball and Windows packages
 include both engines. The `.deb` includes Original.
+
+## Building without a disc
+
+A checkout can also build the Linux executables on a machine that has no
+disc:
+
+```bash
+bash build-release.sh --out release
+```
+
+It needs bubblewrap, and Docker once to prepare the cached build environment
+(with network access); the build itself runs offline. It links from the
+tables in `port/link-tables`, which hold addresses, sizes, offsets and hashes
+of the game's data and never its bytes. The executables are the same either
+way: they read the game from your own disc at every start.
+
+The tables are made for one state of the sources, by a build that had the
+disc, with the compilers of the release's build environment
+(`packaging/deb_ubuntu.Dockerfile`: a base image named by digest and one
+snapshot of Ubuntu's archive). With them is the SHA-256 of each executable
+that build made and audited. When your checkout has the same sources, the
+command fails unless it made the same bytes; `--reproduce` also fails when
+the sources are not the tables'. Nothing is packaged, because the packages'
+payload audit needs the disc images, and the Windows executables are not
+built this way yet.
+
+A plain CMake build uses the tables too when the checkout has no `asm/`
+folder (`-DXG_LINK_FROM=tables` asks for them). They fit the build
+environment's compiler: with another one the build stops at a stale source
+data plan wherever that compiler lays an object's data out differently.
+
+With the disc, `--write-tables DIR` on the release command also writes fresh
+tables into `DIR` once the audits pass.

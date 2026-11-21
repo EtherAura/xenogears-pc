@@ -841,6 +841,33 @@ void displaySection() {
         overrideNote("upscale_color");
     }
 
+    // The first piece of the HD-2D-style look (port/src/gpu/scene.c): the
+    // Enhanced engine's fields only.
+    if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
+        // "Subtle", not "Light": the catalogs have no contexts and "Light" is the model viewer's lamp.
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneDof();
+        int chosen = listChoice("##depth_of_field", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetDof(chosen);
+        hint("In fields, scenery behind and in front of the party softens. Characters, dialogue, portraits and the "
+             "HUD stay sharp, and the PS1 picture itself is not changed. Off by default.");
+        if (sceneDofStatus() != nullptr) hint("Not shown now: %s.", tr(sceneDofStatus()));
+        overrideNote("depth_of_field");
+    }
+    if (row("Focus range", "depth_of_field_focus", opt::ENHANCED)) {
+        static const char* const ranges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
+        ImGui::BeginDisabled(sceneDof() == 0);
+        int range = sceneDofFocus();
+        int chosen = listChoice("##depth_of_field_focus", ranges, IM_COUNTOF(ranges), range);
+        ImGui::EndDisabled();
+        if (chosen != range) sceneSetDofFocus(chosen);
+        hint("How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far "
+             "behind or close to the camera.");
+        overrideNote("depth_of_field_focus");
+    }
+
     if (row("Filter", "present_filter")) {
         static const char* const filters[] = {"Nearest", "Linear", "Sharp", "Bicubic", "xBR (edges)"};
         static const char* const filterHints[] = {
@@ -991,7 +1018,8 @@ void displaySection() {
     if (row("GPU ordering", "gpu_ordered_batches")) {
         bool ordered = gpuOrderedFallback();
         if (checkbox("Exact ordered fallback", &ordered)) gpuSetOrderedFallback(ordered);
-        hint("May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. Off by default.");
+        hint("May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. "
+             "Enabled by default on the Android PowerVR DXT-48-1536.");
         hint("%s", gpuOrderedStatus());
         overrideNote("gpu_ordered_batches");
     }

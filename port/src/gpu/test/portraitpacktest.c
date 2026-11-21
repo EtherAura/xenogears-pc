@@ -59,7 +59,9 @@ static int catalog(int argc,char** argv) {
 }
 int main(int argc,char** argv) {
     if(argc>1 && !strcmp(argv[1],"--catalog")) return catalog(argc,argv);
-    CHECK(argc>=3); CHECK(testSetEnv("XG_SETTINGS",argv[2])==0); CHECK(SDL_Init(0));
+    CHECK(argc>=3); CHECK(testSetEnv("XG_SETTINGS",argv[2])==0);
+    CHECK(testSetEnv("XG_TEXTURE_PACK","none")==0); /* not the texture library installed beside the executable */
+    CHECK(SDL_Init(0));
     if(argc>3) {
         CHECK(!strcmp(portraitPackRoot(),argv[1])); CHECK(!strcmp(portraitPackSelected(),"amber"));
         CHECK(portraitPackEnabled()); CHECK(!texturePackEnabled());

@@ -7306,3 +7306,33 @@ msgstr "ステレオヘッドホンで、楽器や効果音が前方の異なる
 
 msgid "Binaural headphone measurements"
 msgstr "バイノーラル用の音響測定データ"
+
+msgid "Depth of field"
+msgstr "被写界深度"
+
+msgid "Subtle"
+msgstr "弱"
+
+msgid "Medium"
+msgstr "中"
+
+msgid "Strong"
+msgstr "強"
+
+msgid "In fields, scenery behind and in front of the party softens. Characters, dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by default."
+msgstr "フィールドで、パーティーより奥と手前の背景がやわらかくぼけます。キャラクター、会話、顔グラフィック、HUDはくっきりしたままで、PS1の画像そのものは変わりません。初期設定はオフです。"
+
+msgid "Not shown now: %s."
+msgstr "現在は表示されていません: %s。"
+
+msgid "Focus range"
+msgstr "ピントの合う範囲"
+
+msgid "Narrow"
+msgstr "狭い"
+
+msgid "Wide"
+msgstr "広い"
+
+msgid "How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far behind or close to the camera."
+msgstr "パーティーの周りでピントが合う奥行きの広さです。「狭い」ほど多くの背景がぼけ、「広い」ではずっと奥かカメラのすぐ近くだけがぼけます。"

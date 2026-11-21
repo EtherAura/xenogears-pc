@@ -158,6 +158,11 @@ for ver in us jp; do
     gate "argorder-$ver" "$PY" tools/argorder.py --ver "$ver"
     gate "cuttables-$ver" "$PY" tools/cuttables.py --ver "$ver"
     gate "xmodcheck-$ver" "$PY" tools/xmodcheck.py --ver "$ver"
+    # The committed link tables (what a checkout without a disc links from): no run of retail bytes.
+    if [ -d "port/link-tables/$ver" ]; then
+        gate "link-tables-$ver" "$PY" tools/check_link_tables.py --ver "$ver" \
+            --tables $(find "port/link-tables/$ver" -type f | sort)
+    fi
 done
 
 # The default test build is the gates' own (the tests build the executable

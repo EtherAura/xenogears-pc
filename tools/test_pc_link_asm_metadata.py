@@ -52,10 +52,15 @@ def expected(ver: str) -> dict:
     return {"main": {"deltas": [md], "spans": [[0x80020000 + d, 0x80020014 + d], [0x80030000 + d, 0x80030008 + d]],
                      "ends": [], "refs": [[0x80020000 + d, "D_asm_tail", 4]],
                      "labels": [["D_asm_head", 0x80020000 + d], ["D_asm_numeric", 0x80020010 + d],
-                                ["D_asm_tail", 0x80030000 + d]]},
+                                ["D_asm_tail", 0x80030000 + d]], "zero": [], "nonzero": []},
             "ovl": {"deltas": [od], "spans": [[0x80100400 + d, 0x80100404 + d], [0x80100800 + d, 0x8010080A + d]],
                     "ends": [0x8010080A + d], "refs": [[0x80100400 + d, "D_blob", 4]],
-                    "labels": [["D_ovl_tab", 0x80100400 + d], ["D_blob", 0x80100800 + d]]}}
+                    "labels": [["D_ovl_tab", 0x80100400 + d], ["D_blob", 0x80100800 + d]], "zero": [], "nonzero": []}}
+
+
+def first(doc: dict) -> int:
+    """The first address main's data fills."""
+    return doc["modules"]["main"]["spans"][0][0]
 
 
 class Tree(unittest.TestCase):
@@ -115,7 +120,7 @@ class Producer(Tree):
         other = "jp" if self.ver == "us" else "us"
         for change, what in [
                 (lambda d: d.pop("boot"), "want keys"), (lambda d: d.update(extra=1), "want keys"),
-                (lambda d: d.update(format="other"), "format"), (lambda d: d.update(version=2), "format"),
+                (lambda d: d.update(format="other"), "format"), (lambda d: d.update(version=1), "format"),
                 (lambda d: d.update(version=True), "format"), (lambda d: d.update(region=other), "region"),
                 (lambda d: d.update(boot="OTHER.00"), "region"), (lambda d: d["modules"].pop("ovl"), "modules"),
                 (lambda d: d["modules"].update(extra=d["modules"]["main"]), "modules"),
@@ -140,7 +145,20 @@ class Producer(Tree):
                 (lambda d: d["modules"]["main"]["labels"].append(["D_asm_head", 0x80020000]), "labels"),
                 (lambda d: d["modules"]["main"]["labels"][0].__setitem__(1, -1), "labels"),
                 (lambda d: d["modules"]["main"]["labels"][0].__setitem__(0, "AB\"CD"), "labels"),
-                (lambda d: d["modules"]["main"]["labels"].append("D_x"), "labels")]:
+                (lambda d: d["modules"]["main"]["labels"].append("D_x"), "labels"),
+                (lambda d: d["modules"]["main"].pop("zero"), "want keys"),
+                (lambda d: d["modules"]["main"].update(nonzero=None), "not a list"),
+                (lambda d: d["modules"]["main"]["zero"].append([first(d), 0]), "zero answers"),
+                (lambda d: d["modules"]["main"]["zero"].append([first(d), True]), "zero answers"),
+                (lambda d: d["modules"]["main"]["zero"].append([first(d) - 1, 2]), "zero answers"),
+                (lambda d: d["modules"]["main"]["zero"].append([first(d), 0x1000]), "zero answers"),
+                (lambda d: d["modules"]["main"]["zero"].extend([[first(d), 4], [first(d), 4]]), "zero answers"),
+                (lambda d: d["modules"]["main"]["nonzero"].extend([[first(d) + 4, 4], [first(d), 4]]), "nonzero answers"),
+                (lambda d: d["modules"]["main"]["nonzero"].append([first(d), 4, 0]), "nonzero answers"),
+                (lambda d: (d["modules"]["main"]["zero"].append([first(d), 8]),
+                            d["modules"]["main"]["nonzero"].append([first(d) + 4, 4])), "not zero inside"),
+                (lambda d: (d["modules"]["main"]["zero"].append([first(d), 8]),
+                            d["modules"]["main"]["nonzero"].append([first(d), 8])), "not zero inside")]:
             d = self.doc()
             change(d)
             with self.subTest(what=what):
@@ -166,7 +184,7 @@ class Cli(Tree):
         self.assertEqual(self.outputs("write"), self.outputs("orig"))
         self.assertEqual(layout.read_bytes(), again.read_bytes())
         doc = json.loads(layout.read_text())
-        self.assertEqual(doc, {"format": "xenogears-pc-link-asm-layout", "version": 1, "region": self.ver,
+        self.assertEqual(doc, {"format": "xenogears-pc-link-asm-layout", "version": 2, "region": self.ver,
                                "boot": BOOT[self.ver], "modules": expected(self.ver)})
         self.assertNotIn("layout.json", self.outputs("write"))
 

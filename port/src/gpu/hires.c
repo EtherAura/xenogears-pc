@@ -87,7 +87,7 @@ static struct {
     int upscale; /* 0 auto, 1 exact, 2..12 */
     int lastUpscale; /* the upscaled choice Shift+F4 goes back to (0 auto) */
     int color;   /* HIRES_COLOR_* */
-    int orderedFallback;
+    int orderedFallback, orderedFallbackDefault;
     int precision, perspective, seamGuard, cpuEffects, slivers;
     int coarseLarge; /* upscale_large=half: large batches at N/2 (vk.c drawHiBatch; the Enhanced engine only) */
     int effectScale, effectMargin, effectExpanded, effectWidth, effectShifted;
@@ -126,7 +126,8 @@ static void load(void) {
         return;
     }
     hr.loaded = 1;
-    settingsDescribe("gpu_ordered_batches", "gpu_ordered_batches: exact ordered GPU fallback on devices without fragment interlock, 0 off (default), 1 on; bounded 20 MiB arena");
+    settingsDescribe("gpu_ordered_batches", "gpu_ordered_batches: exact ordered GPU fallback on devices without fragment interlock; "
+                                         "default on for Android PowerVR DXT-48-1536, off otherwise; bounded 20 MiB arena");
     hr.orderedFallback=settingsBool("gpu_ordered_batches",0);
     settingsDescribe("upscale_cpu_effects", "upscale_cpu_effects: keep rendered detail through the Gear arena pause blur above 1x, 0 off (default), 1 on");
     hr.cpuEffects = settingsBool("upscale_cpu_effects", 0);
@@ -166,7 +167,7 @@ static void load(void) {
         }
     }
     hr.precision = settingsBool("geometry_precision", hr.upscale != 1);
-    gtePrecisionEnable(hr.precision || interpolationEnabled());
+    gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
     s = settingsGet("upscale_color");
     hr.color = HIRES_COLOR_TRUE;
     for (int i = 0; s != NULL && i < COLOR_MODES; i++) {
@@ -196,6 +197,7 @@ static void load(void) {
 /* ---- the settings menu (gpu.h) ------------------------------------------------- */
 
 int gpuOrderedFallback(void) {load();return hr.orderedFallback;}
+int gpuOrderedFallbackDefault(void) { return hr.orderedFallbackDefault; }
 void gpuSetOrderedFallback(int on) {
     load();on=!!on;
     if(hr.orderedFallback==on)return;
@@ -213,9 +215,11 @@ int hiresGpuBudget(void) { load(); return hr.gpuMs; }
  * the hi-res copy of a Gear battle costs 9.4 ms per vblank at 12x, 3.8 at 4x,
  * 1.7 at 2x; an 8 ms budget settled it at 6x with the native rate kept. A
  * discrete GPU holds 12x everywhere, so it keeps the budget off. */
-void hiresDeviceDefaults(void) {
+void hiresDeviceDefaults(int orderedFallbackDefault) {
     load();
     if (hr.gpuMsDefault && hr.gpuMs == 0 && gvkDeviceIntegrated() > 0) hr.gpuMs = HI_AUTO_BUDGET_INTEGRATED;
+    hr.orderedFallbackDefault = orderedFallbackDefault;
+    hr.orderedFallback = settingsBool("gpu_ordered_batches", orderedFallbackDefault);
 }
 void hiresGpuTimePause(void) {
     hr.timingActive = 0;
@@ -243,7 +247,7 @@ void hiresSetUpscale(int v) {
     autoResolutionReset(&hr.automatic, 0);
     if (settingsGet("geometry_precision") == NULL) {
         hr.precision = v != 1;
-        gtePrecisionEnable(hr.precision || interpolationEnabled());
+        gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
     }
     hr.failedAt = 0;
     char text[8];
@@ -346,6 +350,12 @@ void pcHiresBattlingBlur(const void* rect) {
 }
 
 int hiresPrecision(void) { load(); return hr.precision; }
+/* The GTE's table of what it projected (its view depths too): subpixel
+ * geometry, smooth motion and the scene's depth image (scene.c) each need it. */
+void hiresPrecisionTable(void) {
+    load();
+    gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
+}
 int hiresPerspective(void) { load(); return hr.perspective; }
 int hiresSeamGuard(void) { load(); return hr.seamGuard; }
 int hiresSlivers(void) { load(); return hr.slivers; }
@@ -364,7 +374,7 @@ void hiresSetSeamGuard(int on) {
 void hiresSetPrecision(int on) {
     load();
     hr.precision = on != 0;
-    gtePrecisionEnable(hr.precision || interpolationEnabled());
+    gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
     settingsSetInt("geometry_precision", hr.precision);
     settingsSave();
 }
@@ -385,8 +395,11 @@ static double bytesAt(int n, int cols) {
 
 /* The N wanted for display d in a target of W x H pixels (0: none). */
 static int wanted(const GpuDisplay* d, int W, int H) {
+    /* The copy at 1x: subpixel geometry draws into it, and so does the
+     * depth of field (scene.c), which has no other picture to work on. */
+    int copyAt1 = hr.precision || sceneWantsCopy();
     if (hr.upscale == 1) {
-        return hr.precision ? 1 : 0;
+        return copyAt1 ? 1 : 0;
     }
     int n = hr.upscale;
     if (n == 0) {
@@ -420,7 +433,7 @@ static int wanted(const GpuDisplay* d, int W, int H) {
                       (hr.failedAt != 0 && n >= hr.failedAt))) {
         n--;
     }
-    return n >= 2 ? n : hr.precision ? 1 : 0;
+    return n >= 2 ? n : copyAt1 ? 1 : 0;
 }
 
 void hiresVBlank(const GpuDisplay* d, int W, int H) {
@@ -456,7 +469,7 @@ void hiresVBlank(const GpuDisplay* d, int W, int H) {
         }
         if (ceiling > hr.automatic.limit) {
             int n = hr.automatic.limit;
-            want = n > 1 ? n : hr.precision ? 1 : 0;
+            want = n > 1 ? n : hr.precision || sceneWantsCopy() ? 1 : 0;
         }
     }
     if (want != now && hr.upscale == 0 && now != 0 && want != 0) {

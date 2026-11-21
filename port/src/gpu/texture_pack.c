@@ -163,6 +163,15 @@ const char* texturePackVersion(void) {
     return "SLUS-00664";
 #endif
 }
+static int isDirectory(const char* path) { SDL_PathInfo info; return SDL_GetPathInfo(path,&info) && info.type==SDL_PATHTYPE_DIRECTORY; }
+int texturePackVersionDir(const char* root, char* out, size_t size) {
+    snprintf(out,size,"%s/%s",root,texturePackVersion());
+    if (isDirectory(out)) return 1;
+    char other[PATH_BYTES+32];
+    snprintf(other,sizeof(other),"%s/%s",root,strcmp(texturePackVersion(),"SLUS-00664")?"SLUS-00664":"SLPS-01160");
+    if (!isDirectory(other) || strlen(other)>=size) return 0;
+    memcpy(out,other,strlen(other)+1); return 1;
+}
 static uint32_t keyHash(uint64_t texel, uint64_t palette, int indexed, int w, int h) {
     uint64_t k = texel ^ (palette * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)indexed << 61) ^ ((uint64_t)w << 20) ^ (uint64_t)h;
     k ^= k >> 29; k *= 0xBF58476D1CE4E5B9ull; k ^= k >> 32;
@@ -545,9 +554,8 @@ void texturePackReload(void) {
         else if (s) fprintf(stderr,"texture pack: root path too long\n");
         else { /* beside this or the other engine's executable, as the sprite and glyph libraries */
             char packRoot[PATH_BYTES]; enginePackDir("texture-packs",packRoot,sizeof(packRoot));
-            SDL_PathInfo info; char version[PATH_BYTES+16];
-            snprintf(version,sizeof(version),"%s/%s",packRoot,texturePackVersion());
-            if (SDL_GetPathInfo(version,&info) && info.type==SDL_PATHTYPE_DIRECTORY && strlen(packRoot)<sizeof(root)) snprintf(root,sizeof(root),"%s",packRoot);
+            char version[PATH_BYTES+32];
+            if (texturePackVersionDir(packRoot,version,sizeof(version)) && strlen(packRoot)<sizeof(root)) snprintf(root,sizeof(root),"%s",packRoot);
         }
     }
     loaderStop();   /* its finished loads would name entries dropped here */
@@ -567,19 +575,16 @@ void texturePackReload(void) {
     settingsDescribe("glyph_packs","HD lettering library; default glyph-packs beside the executable; none keeps native glyphs");
     const char* glyphRoot=settingsGet("glyph_packs");
     glyphDir[0]=0;
-    if(!glyphRoot){char glyphRootDir[PATH_BYTES];enginePackDir("glyph-packs",glyphRootDir,sizeof(glyphRootDir));snprintf(glyphDir,sizeof(glyphDir),"%s/%s",glyphRootDir,texturePackVersion());}
+    if(!glyphRoot){char glyphRootDir[PATH_BYTES];enginePackDir("glyph-packs",glyphRootDir,sizeof(glyphRootDir));texturePackVersionDir(glyphRootDir,glyphDir,sizeof(glyphDir));}
     if(glyphDir[0])fprintf(stderr,"glyph packs: %s\n",glyphDir);
-    else if(strlen(glyphRoot)<PATH_BYTES && SDL_strcasecmp(glyphRoot,"none"))snprintf(glyphDir,sizeof(glyphDir),"%s/%s",glyphRoot,texturePackVersion());
-    SDL_PathInfo glyphInfo;
-    if(glyphDir[0] && (!SDL_GetPathInfo(glyphDir,&glyphInfo) || glyphInfo.type!=SDL_PATHTYPE_DIRECTORY))glyphDir[0]=0;
+    else if(strlen(glyphRoot)<PATH_BYTES && SDL_strcasecmp(glyphRoot,"none"))texturePackVersionDir(glyphRoot,glyphDir,sizeof(glyphDir));
+    if(glyphDir[0] && !isDirectory(glyphDir))glyphDir[0]=0;
     settingsDescribe("sprite_packs","Field sprite cel library (Sprites -> Cel 8x); default sprite-packs beside the executable; none keeps native sprites");
     const char* spriteSetting=settingsGet("sprite_packs");
     spriteDir[0]=spriteRoot[0]=0; spriteIndexFree();
     if(!spriteSetting)enginePackDir("sprite-packs",spriteRoot,sizeof(spriteRoot));
     else if(strlen(spriteSetting)<PATH_BYTES && SDL_strcasecmp(spriteSetting,"none"))snprintf(spriteRoot,sizeof(spriteRoot),"%s",spriteSetting);
-    if(spriteRoot[0])snprintf(spriteDir,sizeof(spriteDir),"%s/%s",spriteRoot,texturePackVersion());
-    SDL_PathInfo spriteInfo;
-    if(spriteDir[0] && (!SDL_GetPathInfo(spriteDir,&spriteInfo) || spriteInfo.type!=SDL_PATHTYPE_DIRECTORY))spriteDir[0]=spriteRoot[0]=0;
+    if(spriteRoot[0] && !texturePackVersionDir(spriteRoot,spriteDir,sizeof(spriteDir)))spriteDir[0]=spriteRoot[0]=0;
     settingsDescribe("sprite_preload","Sprite pack room preload: a field's NPC cels and poses and the party's poses decode in the background as it loads (1, default) or at their first draw (0)");
     const char* preload=settingsGet("sprite_preload");
     spritePreloadOn=!(preload && !strcmp(preload,"0"));
@@ -598,9 +603,7 @@ void texturePackReload(void) {
     if (!root[0] || !SDL_strcasecmp(root,"none")) {
         snprintf(stats.message,sizeof(stats.message),"Disabled"); return;
     }
-    snprintf(dir,sizeof(dir),"%s/%s",root,texturePackVersion());
-    SDL_PathInfo info;
-    if (!SDL_GetPathInfo(dir,&info) || info.type != SDL_PATHTYPE_DIRECTORY) {
+    if (!texturePackVersionDir(root,dir,sizeof(dir))) {
         snprintf(stats.message,sizeof(stats.message),"Version directory unavailable; using original textures");
         fprintf(stderr,"texture pack: %s: %s\n",dir,stats.message); return;
     }

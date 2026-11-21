@@ -1,0 +1,211 @@
+#version 450
+
+// Depth of field over one frame of the hi-res copy (port/src/gpu/scene.c,
+// vk.c gvkSceneEnd; docs/PORT_HD2D.md). Written from the thin-lens circle of
+// confusion and a separable Gaussian; no other project's code.
+//
+// Inputs: the copy's frame (8:8:8 colour in bits 0-23, the mask and coverage
+// bits above, which pass through untouched) and the scene's depth image
+// (hires.frag DEPTH: view depth in 1/16 units per pixel, bit 30 set for a
+// figure (a sprite), 0 a picture kept in focus, all ones nothing drawn).
+//
+// Each pixel's blur radius comes from its depth alone (amount()), in PS1
+// pixels, so the result does not depend on N. The blurred layers are made on
+// the PS1's own pixel grid (a blurred picture holds no more; the cost then
+// hardly grows with N) and laid back over the copy pixel by pixel:
+//   0  prefilter: each PS1 pixel averages samples of the copy under it into
+//      two layers, premultiplied by how much each sample belongs there: the
+//      far layer (behind the focus) and the near layer (in front of it); the
+//      layers' radii go to `amounts`;
+//   1, 2  the far layer blurred across and down. A pixel gathers within its
+//      own radius, and only from neighbours whose own blur reaches it, so a
+//      sharp sprite puts no halo into the soft background around it;
+//   3, 4  the near layer spread across and down by each sample's own radius,
+//      so what is in front of the focus softens outward over what is behind;
+//   5  composite at the copy's resolution: the pixel, the far layer by the
+//      pixel's own far amount, then the near layer over both by its spread
+//      coverage. A pixel neither layer touches is not written at all: the
+//      focus range stays bit for bit what was drawn. The same layers serve
+//      both copies of a frame drawn wide: the copy of VRAM reads them at
+//      `layer`, where its frame lies inside the wide one.
+// Colours are blurred as light (the squared 8-bit value), so a bright texel
+// does not sink into dark neighbours.
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0, r32ui) uniform uimage2D color;
+layout(set = 0, binding = 1, r32ui) uniform readonly uimage2D depth;
+layout(set = 0, binding = 2, rgba16f) uniform image2D farLayer;
+layout(set = 0, binding = 3, rgba16f) uniform image2D nearLayer;
+layout(set = 0, binding = 4, rgba16f) uniform image2D amounts; // r: far radius, g: near radius, PS1 pixels
+layout(set = 0, binding = 5, rgba16f) uniform image2D temp;
+layout(set = 0, binding = 6, rgba16f) uniform image2D temp2;   // r: the near radius carried through pass 3
+// The finished layers again, read with bilinear filtering by the composite.
+layout(set = 0, binding = 7) uniform sampler2D farBlurred;
+layout(set = 0, binding = 8) uniform sampler2D nearBlurred;
+
+layout(push_constant) uniform Dof {
+    int pass;
+    int n;         // the copy's pixels per PS1 pixel
+    int taps;      // prefilter samples per PS1 pixel, each way (at most n)
+    int flags;     // DEBUG: the amounts as colours instead of the blur (INVERT: on white); FIGURES: sprites stay in focus
+    ivec2 origin;  // the frame's first pixel in `color`
+    ivec2 size;    // the frame, in the copy's pixels (the depth image's used size)
+    ivec2 work;    // the layers' used size (the frame they were made from, PS1 pixels)
+    ivec2 layer;   // this frame's first PS1 pixel in the layers
+    float focus;   // the focus, in the depth image's units
+    float band;    // the focus range, in relative depth
+    float gain;    // radius per unit of relative depth beyond it (as a share of `radius`)
+    float radius;  // the largest radius, PS1 pixels
+} pc;
+
+const uint DEPTH_SHARP = 0u;
+const uint DEPTH_FAR = 0xFFFFFFFFu;
+const uint DEPTH_FIGURE = 0x40000000u;
+const int DEBUG = 1, FIGURES = 2, INVERT = 4;
+// The largest radius (4 PS1 pixels), plus one.
+const int MAX_TAPS = 5;
+
+// The blur radius in PS1 pixels: positive behind the focus, negative in front.
+// Behind the focus the relative depth is the thin lens's, 1 - focus / z: 0 at
+// the focus, 1 at infinity. In front the lens's own measure has no bound (a
+// figure a step nearer than the party would lose its face), so the same
+// shape is mirrored there: z / focus - 1, -1 at the eye.
+float amount(uint z) {
+    if (z == DEPTH_SHARP) return 0.0;
+    if (z != DEPTH_FAR && (z & DEPTH_FIGURE) != 0u && (pc.flags & FIGURES) != 0) return 0.0;
+    float d = float(z & ~DEPTH_FIGURE);
+    float u = z == DEPTH_FAR ? 1.0 : d >= pc.focus ? 1.0 - pc.focus / d : d / pc.focus - 1.0;
+    float a = clamp((abs(u) - pc.band) * pc.gain, 0.0, 1.0) * pc.radius;
+    return u < 0.0 ? -a : a;
+}
+
+vec3 light(uint word) {
+    vec3 c = vec3(float(word & 255u), float((word >> 8) & 255u), float((word >> 16) & 255u)) / 255.0;
+    return c * c;
+}
+
+ivec2 inside(ivec2 t) { return clamp(t, ivec2(0), pc.work - 1); }
+
+void prefilter(ivec2 t) {
+    vec4 far = vec4(0.0), near = vec4(0.0);
+    float farRadius = 0.0, nearRadius = 0.0, count = 0.0;
+    for (int y = 0; y < pc.taps; y++) for (int x = 0; x < pc.taps; x++) {
+        // Evenly through the pixel's block of the copy.
+        ivec2 l = t * pc.n + (ivec2(x, y) * 2 + 1) * pc.n / (2 * pc.taps);
+        if (l.x >= pc.size.x || l.y >= pc.size.y) continue;
+        vec3 c = light(imageLoad(color, pc.origin + l).r);
+        float a = amount(imageLoad(depth, l).r);
+        // A sample belongs wholly to a layer once its radius is a PS1 pixel.
+        float wf = clamp(a, 0.0, 1.0), wn = clamp(-a, 0.0, 1.0);
+        far += vec4(c, 1.0) * wf;
+        near += vec4(c, 1.0) * wn;
+        farRadius += a * wf;
+        nearRadius += -a * wn;
+        count += 1.0;
+    }
+    count = max(count, 1.0);
+    imageStore(amounts, t, vec4(far.a > 0.0 ? farRadius / far.a : 0.0, near.a > 0.0 ? nearRadius / near.a : 0.0, 0.0, 0.0));
+    imageStore(farLayer, t, far / count);
+    imageStore(nearLayer, t, near / count);
+}
+
+// The far layer along one axis. A pixel with no far blur of its own still
+// gathers a pixel and a half around it, so the layer has the background's
+// colour just under the edge of a sharp object, and the composite's bilinear
+// read beside that edge never finds an empty pixel.
+void farBlur(ivec2 t, ivec2 axis, bool second) {
+    float r = max(imageLoad(amounts, t).r, 1.5);
+    float sigma = r * 0.5;
+    int taps = min(int(ceil(r)), MAX_TAPS);
+    vec4 sum = vec4(0.0);
+    float total = 0.0;
+    for (int d = -taps; d <= taps; d++) {
+        ivec2 q = inside(t + axis * d);
+        float g = exp(-float(d * d) / (2.0 * sigma * sigma));
+        // Only what blurs far enough itself to reach this pixel.
+        float cover = clamp(imageLoad(amounts, q).r - abs(float(d)) + 1.0, 0.0, 1.0);
+        vec4 s = second ? imageLoad(temp, q) : imageLoad(farLayer, q);
+        sum += s * (g * cover);
+        total += g;
+    }
+    if (second) imageStore(farLayer, t, sum / total);
+    else imageStore(temp, t, sum / total);
+}
+
+// The near layer along one axis: each sample spread by its own radius.
+void nearBlur(ivec2 t, ivec2 axis, bool second) {
+    int taps = min(int(ceil(pc.radius)) + 1, MAX_TAPS);
+    vec4 sum = vec4(0.0);
+    float carried = 0.0;
+    for (int d = -taps; d <= taps; d++) {
+        ivec2 q = inside(t + axis * d);
+        vec4 s = second ? imageLoad(temp, q) : imageLoad(nearLayer, q);
+        if (s.a <= 0.0) continue;
+        float r = second ? imageLoad(temp2, q).r / s.a : imageLoad(amounts, q).g;
+        float sigma = max(r, 0.5) * 0.5;
+        float g = exp(-float(d * d) / (2.0 * sigma * sigma)) / max(sigma * 2.5066283, 1.0);
+        sum += s * g;
+        carried += r * s.a * g;
+    }
+    if (second) {
+        imageStore(nearLayer, t, sum);
+    } else {
+        imageStore(temp, t, sum);
+        imageStore(temp2, t, vec4(carried, 0.0, 0.0, 0.0));
+    }
+}
+
+void composite(ivec2 l) {
+    float a = amount(imageLoad(depth, l).r);
+    // The layers at this pixel: its place on the PS1 grid, kept inside the
+    // part of the images this frame made (they may be larger).
+    vec2 at = (vec2(l) + 0.5) / float(pc.n) + vec2(pc.layer);
+    vec2 uv = clamp(at, vec2(0.5), vec2(pc.work) - 0.5) / vec2(textureSize(nearBlurred, 0));
+    vec4 near = textureLod(nearBlurred, uv, 0.0);
+    // Twice the spread coverage: the whole blurred colour at the outline,
+    // fading outside it, and no sharp copy of the object left under its edge.
+    float mixNear = near.a > 1.0e-4 ? clamp(near.a * 2.0, 0.0, 1.0) : 0.0;
+    if (a <= 0.0 && mixNear <= 0.0 && (pc.flags & DEBUG) == 0) return;
+    ivec2 p = pc.origin + l;
+    uint word = imageLoad(color, p).r;
+    vec3 c = light(word);
+    if ((pc.flags & DEBUG) != 0) {
+        float grey = 0.04 + sqrt(dot(c, vec3(0.299, 0.587, 0.114))) * 0.45;
+        vec3 shown = vec3(grey) + vec3(max(a, 0.0), 0.0, max(-a, 0.0)) / max(pc.radius, 1.0e-3) * 0.55;
+        shown.g += mixNear * (a >= 0.0 ? 0.3 : 0.0); // where the near layer spreads over the rest
+        // The same on white: a pixel that is the same over the dark and the
+        // bright scene does not depend on the scene at all (opaque UI), where
+        // a blended one can only clamp to the same value over one of them.
+        if ((pc.flags & INVERT) != 0) shown = 1.0 - shown;
+        uvec3 o = uvec3(clamp(shown, 0.0, 1.0) * 255.0 + 0.5);
+        // Never the pixel's own colour: what the scene drew can then be told,
+        // pixel by pixel, from what was drawn after it (the UI).
+        uint packed = o.r | o.g << 8 | o.b << 16;
+        if (packed == (word & 0xFFFFFFu)) packed ^= 0x010000u;
+        imageStore(color, p, uvec4((word & 0xFF000000u) | packed));
+        return;
+    }
+    if (a > 0.0) {
+        vec4 far = textureLod(farBlurred, uv, 0.0);
+        if (far.a > 1.0e-4) c = mix(c, far.rgb / far.a, clamp(a, 0.0, 1.0));
+        else if (mixNear <= 0.0) return;
+    }
+    if (mixNear > 0.0) c = mix(c, near.rgb / near.a, mixNear);
+    uvec3 o = uvec3(clamp(sqrt(max(c, 0.0)), 0.0, 1.0) * 255.0 + 0.5);
+    imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
+}
+
+void main() {
+    ivec2 t = ivec2(gl_GlobalInvocationID.xy);
+    if (pc.pass == 5) {
+        if (t.x < pc.size.x && t.y < pc.size.y) composite(t);
+        return;
+    }
+    if (t.x >= pc.work.x || t.y >= pc.work.y) return;
+    if (pc.pass == 0) prefilter(t);
+    else if (pc.pass == 1) farBlur(t, ivec2(1, 0), false);
+    else if (pc.pass == 2) farBlur(t, ivec2(0, 1), true);
+    else if (pc.pass == 3) nearBlur(t, ivec2(1, 0), false);
+    else nearBlur(t, ivec2(0, 1), true);
+}

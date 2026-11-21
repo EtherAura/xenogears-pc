@@ -65,3 +65,11 @@ void pcTextImageUploaded(const void* data, int bytes) {
     (void)data;
     (void)bytes;
 }
+
+#ifdef __ANDROID__
+/* The test programs run from a shell on the device, without the app: its
+ * packs folder (port/src/system/android.c) is the working directory. */
+const char* androidPacksRoot(void) {
+    return ".";
+}
+#endif

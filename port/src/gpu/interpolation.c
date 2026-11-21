@@ -194,7 +194,7 @@ void interpolationReset(void) {
     for (int i = 0; i < INTERP_FRAMES; i++) ip.frames[i].serial = 0;
     interpTimelineReset(&ip.timeline);
     ip.status = interpolationEnabled() ? "Waiting for compatible field frames" : "Original presentation";
-    gtePrecisionEnable(interpolationEnabled() || hiresPrecision());
+    gtePrecisionEnable(interpolationEnabled() || hiresPrecision() || sceneWantsCopy());
 }
 void interpolationSetEnabled(int enabled) {
     load(); ip.enabled = enabled != 0;
@@ -269,6 +269,16 @@ int interpolationRecording(int wide) {
     if (!interpolationCapturing()) return 0;
     InterpFrame* f = &ip.frames[ip.building];
     return f->cleared && viewport(f) && f->wide == wide;
+}
+/* scene.c: the registered scene ended at this point of the snapshot, blurred
+ * by `blur` (NULL: not). A picture between replays the draws up to here with
+ * their depth, blurs, and replays the rest (vk.c interpolationRender). */
+void interpolationSceneEnd(const DofParams* blur) {
+    if (ip.building < 0) return;
+    InterpFrame* f = &ip.frames[ip.building];
+    f->sceneEnd = f->vertexCount;
+    f->sceneBlur = blur != NULL && (blur->radius > 0 || blur->debug);
+    if (blur != NULL) f->dof = *blur;
 }
 void pcInterpolationFrameEnd(void) {
     if (ip.building < 0) return;

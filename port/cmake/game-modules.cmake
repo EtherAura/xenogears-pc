@@ -54,13 +54,21 @@ function(xg_link_module module)
     # pointers in .data.rel* instead of .data: the module's data all the same.
     set(format)
     set(finish)
+    set(plan_input)
+    set(plan_output)
+    # A checkout without the disc takes what to zero from the module's plan
+    # (XG_MODULE_PLAN_DIR: port/link-tables or a test's own); a disc-backed
+    # build can write the plan it found (XG_WRITE_TABLES_DIR).
+    if(XG_MODULE_PLAN_DIR)
+        list(APPEND format --plan "${XG_MODULE_PLAN_DIR}/${module}.json")
+        set(plan_input "${XG_MODULE_PLAN_DIR}/${module}.json")
+    elseif(XG_WRITE_TABLES_DIR)
+        list(APPEND format --write-plan "${XG_WRITE_TABLES_DIR}/srcdata/${module}.json")
+        set(plan_output BYPRODUCTS "${XG_WRITE_TABLES_DIR}/srcdata/${module}.json")
+    endif()
     if(APPLE)
         set(partial "${out}")
         list(APPEND format --macho-exports "${XG_MODULE_METADATA}/${module}.exports")
-        if(XG_MODULE_PLAN_DIR)
-            list(APPEND format --plan "${XG_MODULE_PLAN_DIR}/${module}.json")
-            set(plan_input "${XG_MODULE_PLAN_DIR}/${module}.json")
-        endif()
     else()
         set(partial "${out}.partial")
         list(APPEND format --objcopy "${XG_OBJCOPY}")
@@ -82,6 +90,7 @@ function(xg_link_module module)
                 --ld "${XG_LD}" ${format} ${module} "${partial}" ${srcdata}
                 $<TARGET_OBJECTS:gen_${module}> $<TARGET_OBJECTS:game_${module}>
         ${finish}
+        ${plan_output}
         DEPENDS $<TARGET_OBJECTS:game_${module}> $<TARGET_OBJECTS:gen_${module}> "${XG_MODULE_METADATA}/${module}.exports"
                 "${XG_ROOT}/tools/pc_srcdata.py" "${XG_ROOT}/tools/pc_macho.py" "${XG_ROOT}/tools/payloadcheck.py" ${plan_input}
         WORKING_DIRECTORY "${XG_ROOT}"

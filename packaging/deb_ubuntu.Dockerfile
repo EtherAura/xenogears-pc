@@ -41,13 +41,25 @@
 # added and no suite replaced). A run downloads, installs, starts and uploads
 # nothing, which --network none above enforces.
 #
+# The same compiler for everyone. The base image is named by its digest and
+# every package but one comes from one snapshot of Ubuntu's archive (apt's own
+# --snapshot, served by Ubuntu's snapshot service for the sources the base
+# image lists), so an image built from this recipe next year holds the
+# compilers, linker and libraries it holds now. The exception is
+# ca-certificates, installed first from the current archive: the snapshot
+# service speaks only TLS and the base image trusts no authority yet. The link
+# tables in port/link-tables are made with this image's compilers and fit
+# their objects (port/CMakeLists.txt XG_LINK_FROM): after a change to the
+# digest, the snapshot or the package list, make the tables again from a disc
+# (build-release.sh --write-tables).
+#
 # Limits: this recipe is not tested by building or running it; that the image
 # builds, that its dpkg-shlibdeps gives the release's Depends, and that the
 # package installs and starts on a clean Ubuntu 26.04 or Debian are not shown
 # by tools/check_deb_container.py, which checks only this text and the run
 # command's argument passing.
 
-FROM --platform=linux/amd64 ubuntu:26.04
+FROM --platform=linux/amd64 ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db
 
 # Main: build-essential (gcc, g++, make, libc6-dev, dpkg-dev), cmake (with
 # cpack), dpkg-dev (dpkg-shlibdeps), binutils (ld, objcopy), file (used by
@@ -62,7 +74,10 @@ RUN set -eu; \
     grep -Eq '^Components:.*[[:space:]]main([[:space:]]|$)' /etc/apt/sources.list.d/ubuntu.sources; \
     grep -Eq '^Components:.*[[:space:]]universe([[:space:]]|$)' /etc/apt/sources.list.d/ubuntu.sources; \
     apt-get update; \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates; \
+    rm -rf /var/lib/apt/lists/*; \
+    apt-get update --snapshot=20261120T000000Z -o APT::Update::Error-Mode=any; \
+    DEBIAN_FRONTEND=noninteractive apt-get install --snapshot=20261120T000000Z -y --no-install-recommends \
         build-essential cmake ninja-build dpkg-dev binutils file python3 python3-yaml \
         libsdl3-dev libvulkan-dev glslc glslang-dev glslang-tools spirv-tools-dev libdav1d-dev nsis; \
     rm -rf /var/lib/apt/lists/*; \

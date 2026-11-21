@@ -63,6 +63,16 @@ Movies can have a filter and a shader of their own. Smooth (built in)
 softens the movies' block edges. F1 > Display > Movies, Movie shader.
 Shader takes a RetroArch `.slangp` or `.slang` preset for the whole picture.
 
+## Depth of field
+
+In fields, scenery behind and in front of the party softens, while the
+characters, dialogue, portraits and the HUD stay sharp. It is the first
+piece of an HD-2D-style look, and it changes only how the picture is shown:
+the game still works with its own. The Enhanced engine only
+(F1 > System > Engine).
+F1 > Display > Depth of field (Off, Subtle, Medium, Strong) and Focus range
+(Narrow, Normal, Wide: how deep the sharp range around the party is).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -92,6 +102,8 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Resolution | 1x |
 | Colour | True colour |
 | Filter | Nearest |
+| Depth of field | Off |
+| Focus range | Normal |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

@@ -15,6 +15,9 @@
 #include <string.h>
 
 #include "common.h"
+#ifdef bzero /* bionic's is a macro; psyq.h declares the function */
+#undef bzero
+#endif
 #include "psyq.h"
 #include "gpu/gpu.h"
 #include "gpu/gpu_internal.h"
@@ -1656,7 +1659,11 @@ static void testSync(void) {
 int main(int argc, char** argv) {
     SDL_setenv_unsafe("XG_SPEEDUP", "1", 1);
     const char* out = argc > 1 ? argv[1] : ".";
+#ifdef __ANDROID__ /* from a shell on the device there is no activity for SDL to start with */
+    if (0) {
+#else
     if (!SDL_Init(SDL_INIT_VIDEO)) {
+#endif
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }

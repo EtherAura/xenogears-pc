@@ -14,6 +14,17 @@
  * compared with Redux's screenshot (shot_<marker>.bin) too; the first N
  * mismatching ones are written as <marker>_screen_ours.png / _redux.png.
  * Exits non-zero if any snapshot or screenshot differs.
+ *
+ * A trace the port wrote itself (XG_GPU_TRACE with XG_GPU_TRACE_VBLANKS=1) has no
+ * snapshots: it replays a game run's GPU work on another device. For those:
+ *   --bench          time each vblank's GPU-layer calls (parsing left out) and
+ *                    print the mean, percentiles and the vblanks over a frame
+ *   --pace           with --bench: deliver the vblanks at the NTSC rate, as the
+ *                    game does, and count those more than a frame late
+ *   --from N         with --bench: statistics from vblank N on (default 180)
+ *   --times FILE     with --bench: a line per vblank (number, ms, lateness ms)
+ *   --hash-every N   read VRAM back every N vblanks and print its FNV-1a hash
+ *                    (two devices or two renderers drew the same pixels)
  */
 
 #define _GNU_SOURCE
@@ -23,6 +34,9 @@
 #include <string.h>
 
 #include "common.h"
+#ifdef bzero /* bionic's is a macro; psyq.h declares the function */
+#undef bzero
+#endif
 #include "psyq.h"
 #include "gpu/gpu_internal.h"
 
@@ -204,10 +218,22 @@ static char* parseDrawEnv(char* s, DRAWENV* env) {
 int main(int argc, char** argv) {
     const char* dir = NULL;
     const char* out = ".";
+    const char* timesPath = NULL;
     int resync = 1;
     int images = 5;
+    int bench = 0, pace = 0, benchFrom = 180, hashEvery = 0;
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--no-resync") == 0) {
+        if (strcmp(argv[i], "--bench") == 0) {
+            bench = 1;
+        } else if (strcmp(argv[i], "--pace") == 0) {
+            pace = 1;
+        } else if (strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
+            benchFrom = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--times") == 0 && i + 1 < argc) {
+            timesPath = argv[++i];
+        } else if (strcmp(argv[i], "--hash-every") == 0 && i + 1 < argc) {
+            hashEvery = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--no-resync") == 0) {
             resync = 0;
         } else if (strcmp(argv[i], "--verbose") == 0 && i + 1 < argc) {
             verbose = atoi(argv[++i]);
@@ -245,12 +271,58 @@ int main(int argc, char** argv) {
     int shotsCompared = 0, shotsBad = 0, shotImages = 0;
     loadShots(dir);
     long total = 0;
+    /* --bench: the time inside the GPU layer's calls since the last vblank. */
+    uint64_t spent = 0, began = 0, paceStart = 0;
+    double* frameMs = NULL;
+    size_t frames = 0, frameCap = 0;
+    int vblanks = 0, late = 0;
+    double lateWorst = 0;
+    FILE* times = bench && timesPath != NULL ? fopen(timesPath, "w") : NULL;
+    static uint16_t hashed[VRAM_H][VRAM_W];
+#define TIMED(call) do { began = SDL_GetTicksNS(); call; spent += SDL_GetTicksNS() - began; } while (0)
     while (getline(&line, &cap, f) > 0) {
         char kind = line[0];
         char* rest = line + 1;
         if (kind == 'V') {
             int marker = atoi(rest);
-            gpuVBlank();
+            if (bench) {
+                TIMED(gpuVBlank());
+                vblanks++;
+                double lateMs = 0;
+                if (pace) {
+                    /* The game's clock: vblank n is due n NTSC fields after the
+                     * first; early ones wait, late ones are counted (hw.c). */
+                    uint64_t now = SDL_GetTicksNS();
+                    if (paceStart == 0) paceStart = now;
+                    uint64_t due = paceStart + (uint64_t)((double)(vblanks - 1) * 1e9 / 59.94);
+                    if (now < due) SDL_DelayPrecise(due - now);
+                    else lateMs = (double)(now - due) * 1e-6;
+                }
+                double ms = (double)spent * 1e-6;
+                spent = 0;
+                if (times != NULL) fprintf(times, "%d %.3f %.3f\n", marker, ms, lateMs);
+                if (vblanks > benchFrom) {
+                    if (frames == frameCap) {
+                        frameCap = frameCap ? frameCap * 2 : 4096;
+                        frameMs = realloc(frameMs, frameCap * sizeof(*frameMs));
+                    }
+                    frameMs[frames++] = ms;
+                    late += lateMs > 1000.0 / 59.94;
+                    lateWorst = lateMs > lateWorst ? lateMs : lateWorst;
+                }
+            } else {
+                gpuVBlank();
+            }
+            if (hashEvery > 0 && marker % hashEvery == 0) {
+                gpuReadVram(&hashed[0][0]);
+                uint64_t h = UINT64_C(14695981039346656037);
+                const uint8_t* bytes = (const uint8_t*)hashed;
+                for (size_t i = 0; i < sizeof(hashed); i++) {
+                    h ^= bytes[i];
+                    h *= UINT64_C(1099511628211);
+                }
+                printf("vram %d %016llx\n", marker, (unsigned long long)h);
+            }
             if (getenv("XG_GP0_PROBE") != NULL) {
                 fprintf(stderr, "V %d display (%d,%d)\n", marker, gpuDisplay()->x, gpuDisplay()->y);
             }
@@ -318,7 +390,14 @@ int main(int argc, char** argv) {
             free(ref);
         } else if (kind == 'O' || kind == 'P') {
             size_t n = parseWords(rest);
-            gp0Write(words, (int)n);
+            TIMED(gp0Write(words, (int)n));
+        } else if (kind == 'T') {
+            /* The port's own trace: a StoreImage (the game read VRAM back). */
+            int x, y, w, h;
+            if (sscanf(rest, "%d %d %d %d", &x, &y, &w, &h) == 4 && w > 0 && h > 0 && w <= VRAM_W && h <= VRAM_H) {
+                RECT r = {(s16)x, (s16)y, (s16)w, (s16)h};
+                TIMED(StoreImage(&r, (u32*)&hashed[0][0]));
+            }
         } else if (kind == 'E') {
             DRAWENV env;
             char* p = parseDrawEnv(rest, &env);
@@ -334,22 +413,22 @@ int main(int argc, char** argv) {
             size_t n = parseWords(rest + used);
             RECT r = {(s16)x, (s16)y, (s16)w, (s16)h};
             if (n > 0) {
-                LoadImage(&r, words);
+                TIMED(LoadImage(&r, words));
             }
         } else if (kind == 'M') {
             int x, y, w, h, dx, dy;
             sscanf(rest, "%d %d %d %d %d %d", &x, &y, &w, &h, &dx, &dy);
             RECT r = {(s16)x, (s16)y, (s16)w, (s16)h};
-            MoveImage(&r, dx, dy);
+            TIMED(MoveImage(&r, dx, dy));
         } else if (kind == 'C') {
             int x, y, w, h, r_, g, b;
             sscanf(rest, "%d %d %d %d %d %d %d", &x, &y, &w, &h, &r_, &g, &b);
             RECT r = {(s16)x, (s16)y, (s16)w, (s16)h};
-            ClearImage(&r, r_, g, b);
+            TIMED(ClearImage(&r, r_, g, b));
         } else if (kind == 'D') {
             DRAWENV env;
             parseDrawEnv(rest, &env);
-            PutDrawEnv(&env);
+            TIMED(PutDrawEnv(&env));
         } else if (kind == 'S') {
             int v[10] = {0};
             sscanf(rest, "%d %d %d %d %d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6], &v[7],
@@ -375,6 +454,32 @@ int main(int argc, char** argv) {
     }
     free(line);
     fclose(f);
+    if (times != NULL) fclose(times);
+    if (bench && frames > 0) {
+        double sum = 0, worst = 0;
+        int over = 0;
+        for (size_t i = 0; i < frames; i++) {
+            sum += frameMs[i];
+            worst = frameMs[i] > worst ? frameMs[i] : worst;
+            over += frameMs[i] > 1000.0 / 59.94;
+        }
+        /* percentiles: a selection sort of the tail is enough for a few thousand vblanks */
+        for (size_t i = 0; i < frames; i++) {
+            for (size_t j = i + 1; j < frames; j++) {
+                if (frameMs[j] < frameMs[i]) {
+                    double t = frameMs[i];
+                    frameMs[i] = frameMs[j];
+                    frameMs[j] = t;
+                }
+            }
+        }
+        printf("bench: %zu vblanks from %d: mean %.3f ms, p50 %.3f, p90 %.3f, p99 %.3f, worst %.3f; %d over a frame",
+               frames, benchFrom, sum / (double)frames, frameMs[frames / 2], frameMs[frames * 9 / 10],
+               frameMs[frames * 99 / 100], worst, over);
+        if (pace) printf("; paced: %d more than a frame late, worst %.3f ms", late, lateWorst);
+        printf("\n");
+    }
+    free(frameMs);
     printf("%d VRAM snapshots compared, %d differ, %ld pixels in all\n", snapshots, bad, total);
     printf("%d screens compared, %d differ\n", shotsCompared, shotsBad);
     gpuShutdown();

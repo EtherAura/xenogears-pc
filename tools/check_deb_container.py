@@ -58,14 +58,16 @@ PACKAGING = ROOT / "tools/publish/repo-port/packaging"
 RECIPE = PACKAGING / "deb_ubuntu.Dockerfile"
 HELPERS = ("deb_ubuntu.py", "deb_build.py", "deb_assets.py")
 SOURCE_INPUTS = ("port/CMakeLists.txt", "port/cmake/deb.cmake", "tools/pc_link.py")
-BASE = "--platform=linux/amd64 ubuntu:26.04"
+BASE = ("--platform=linux/amd64 ubuntu:26.04"
+        "@sha256:d66b366dac61b575bee2aef07e9c26e8070096fbe84a3d4d3eb0da069b5d76db")
+SNAPSHOT = "--snapshot=20261120T000000Z"  # every package but ca-certificates: Ubuntu's archive as it was then
 # What the shipping build needs: compilers and dpkg-dev, cmake/cpack, ninja, ld/objcopy, file (CPack's
 # shlibdeps), Python, SDL3, Vulkan headers, glslc, glslang (with spirv-tools), dav1d.
 REQUIRED = ("build-essential", "cmake", "ninja-build", "dpkg-dev", "binutils", "file", "python3", "libsdl3-dev",
             "libvulkan-dev", "glslc", "glslang-dev", "glslang-tools", "spirv-tools-dev", "libdav1d-dev",
             "python3-yaml", "nsis")
 # Names given for Ubuntu 26.04 (resolute) main and universe, amd64: nothing else may be installed.
-KNOWN = set(REQUIRED) | {"pkg-config", "spirv-tools"}
+KNOWN = set(REQUIRED) | {"pkg-config", "spirv-tools", "ca-certificates"}
 ENTRYPOINT = ["python3", "-I", "-B", "/work/source/packaging/deb_ubuntu.py", "--source", "/work/source",
               "--build-dir", "/work/build", "--out-dir", "/work/out"]
 MOUNTS = ("/work/source", "/work/build", "/work/out")
@@ -122,6 +124,21 @@ def problems(text: str) -> dict[str, str]:
         found["tool"] = f"one apt-get install with every required package ({len(installs)} found; missing {missing})"
     if extra := sorted(set(packages) - KNOWN):
         found["package"] = f"packages outside the given Ubuntu 26.04 main/universe list: {extra}"
+    # One archive snapshot for every package but ca-certificates (which the snapshot service's TLS needs first):
+    # the moving archive's lists are removed before the snapshot's are read, and a failed read is an error.
+    parts = [part.strip() for command in installs for part in command.split(";")]
+    updates = [i for i, part in enumerate(parts) if part.startswith("apt-get update")]
+    moving = [part for part in parts if "apt-get install" in part and SNAPSHOT not in part]
+    pinned = [i for i, part in enumerate(parts) if "apt-get install" in part and SNAPSHOT in part]
+    cleared = [i for i, part in enumerate(parts) if part == "rm -rf /var/lib/apt/lists/*"]
+    if (len(updates) != 2 or SNAPSHOT in parts[updates[0]] or SNAPSHOT not in parts[updates[1]]
+            or "-o APT::Update::Error-Mode=any" not in parts[updates[1]] or len(pinned) != 1
+            or not any(updates[0] < i < updates[1] for i in cleared) or not updates[1] < pinned[0]
+            or any(part.split("apt-get install", 1)[1].split()[-1:] != ["ca-certificates"]
+                   or len([w for w in part.split("apt-get install", 1)[1].split() if not w.startswith("-")]) != 1
+                   for part in moving)):
+        found["pin"] = (f"every package but ca-certificates must come from the archive snapshot {SNAPSHOT}, its lists "
+                        "read with errors fatal after the moving archive's are removed")
     for word in ("main", "universe"):
         if not any(f"]{word}([" in r and "grep -Eq" in r and "/etc/apt/sources.list.d/ubuntu.sources" in r for r in runs):
             found["components"] = f"the base image's sources are not checked for {word}"
@@ -185,6 +202,15 @@ def mutations(text: str) -> list[tuple[str, str, str]]:
         ("wrong architecture", text.replace("linux/amd64 ubuntu", "linux/arm64 ubuntu"), "base"),
         ("no platform pin", text.replace("FROM --platform=linux/amd64 ", "FROM "), "base"),
         ("a second stage", text + "FROM ubuntu:26.04\n", "base"),
+        ("base without its digest", re.sub(r"@sha256:[0-9a-f]{64}", "", text), "base"),
+        ("another base digest", re.sub(r"@sha256:[0-9a-f]{8}", "@sha256:00000000", text), "base"),
+        ("packages from the moving archive", text.replace(f"apt-get install {SNAPSHOT} ", "apt-get install "), "pin"),
+        ("another snapshot for the packages", text.replace(f"apt-get install {SNAPSHOT}", f"apt-get install {SNAPSHOT[:-2]}1Z"), "pin"),
+        ("a failed snapshot read ignored", text.replace(" -o APT::Update::Error-Mode=any", ""), "pin"),
+        ("the moving archive's lists kept", text.replace("rm -rf /var/lib/apt/lists/*; \\\n    apt-get update --snapshot",
+                                                         "apt-get update --snapshot"), "pin"),
+        ("a compiler from the moving archive", text.replace("--no-install-recommends ca-certificates;",
+                                                            "--no-install-recommends gcc-15 ca-certificates;"), "pin"),
         ("final user root", text + "USER root\n", "user"),
         ("final user uid 0", text.replace(user_line, "USER 0:0\n"), "user"),
         ("no USER", text.replace(user_line, ""), "user"),

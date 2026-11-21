@@ -8,7 +8,11 @@
  * primitive order per pixel; without it gp0.c ends a batch whenever a
  * primitive overlaps one already in it. The optional ordered fallback
  * instead collects bounded per-pixel operations and resolves them in compute,
- * preserving the existing rasterizer and integer pixel arithmetic.
+ * preserving the existing rasterizer and integer pixel arithmetic. On a
+ * tile-based GPU with VK_EXT_shader_tile_image the native draws of that
+ * fallback take one render pass per batch instead (drawTile): VRAM is the
+ * pass's colour attachment and each fragment reads its own pixel from tile
+ * memory, which the extension orders by primitive.
  *
  * Commands are recorded into one of two frame contexts and handed to the
  * queue at vertical blank (with the present pass), at a readback, or when a
@@ -199,6 +203,9 @@ static const uint32_t draw_ordered_vertSpv[] =
 static const uint32_t draw_ordered_fragSpv[] =
 #include "draw_ordered.frag.spv.inc"
     ;
+static const uint32_t draw_tile_fragSpv[] =
+#include "draw_tile.frag.spv.inc"
+    ;
 static const uint32_t draw_wide_ordered_vertSpv[] =
 #include "draw_wide_ordered.vert.spv.inc"
     ;
@@ -220,6 +227,46 @@ static const uint32_t hires_wide_ordered_fragSpv[] =
 static const uint32_t ordered_compSpv[] =
 #include "ordered.comp.spv.inc"
     ;
+/* The scene's depth image and the depth of field (scene.c): made on first use. */
+static const uint32_t hiresDepthVertSpv[] =
+#include "hires_depth.vert.spv.inc"
+    ;
+static const uint32_t hiresWideDepthVertSpv[] =
+#include "hires_wide_depth.vert.spv.inc"
+    ;
+static const uint32_t hiresCoarseDepthVertSpv[] =
+#include "hires_coarse_depth.vert.spv.inc"
+    ;
+static const uint32_t hiresWideCoarseDepthVertSpv[] =
+#include "hires_wide_coarse_depth.vert.spv.inc"
+    ;
+static const uint32_t hiresDepthFragSpv[] =
+#include "hires_depth.frag.spv.inc"
+    ;
+static const uint32_t hiresDepthInterlockFragSpv[] =
+#include "hires_depth_interlock.frag.spv.inc"
+    ;
+static const uint32_t hiresWideDepthFragSpv[] =
+#include "hires_wide_depth.frag.spv.inc"
+    ;
+static const uint32_t hiresWideDepthInterlockFragSpv[] =
+#include "hires_wide_depth_interlock.frag.spv.inc"
+    ;
+static const uint32_t hiresCoarseDepthFragSpv[] =
+#include "hires_coarse_depth.frag.spv.inc"
+    ;
+static const uint32_t hiresCoarseDepthInterlockFragSpv[] =
+#include "hires_coarse_depth_interlock.frag.spv.inc"
+    ;
+static const uint32_t hiresWideCoarseDepthFragSpv[] =
+#include "hires_wide_coarse_depth.frag.spv.inc"
+    ;
+static const uint32_t hiresWideCoarseDepthInterlockFragSpv[] =
+#include "hires_wide_coarse_depth_interlock.frag.spv.inc"
+    ;
+static const uint32_t dofCompSpv[] =
+#include "dof.comp.spv.inc"
+    ;
 
 /* ---- function pointers ---------------------------------------------------- */
 
@@ -233,6 +280,7 @@ static const uint32_t ordered_compSpv[] =
     X(vkDestroyInstance)                        \
     X(vkEnumeratePhysicalDevices)               \
     X(vkGetPhysicalDeviceProperties)            \
+    X(vkGetPhysicalDeviceProperties2)           \
     X(vkGetPhysicalDeviceFeatures2)             \
     X(vkGetPhysicalDeviceQueueFamilyProperties) \
     X(vkGetPhysicalDeviceMemoryProperties)      \
@@ -343,7 +391,7 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 #define MAX_SWAPCHAIN_IMAGES 8
 
 /* XG_GPU_TIMING=1: GPU time per kind of pass, from timestamp queries. */
-enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_KINDS };
+enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_KINDS };
 #define GT_QUERIES 4096
 
 typedef struct {
@@ -409,6 +457,10 @@ typedef struct {
     size_t resStageUsed;
     VkBufferCopy* resCopies;
     int resCopyCount, resCopyCap;
+    /* The scene's depth and blur (scene.c): this context's sets for each
+     * target (SCENE_*), and the views last written into them. */
+    VkDescriptorSet sceneDepthSet[3], sceneDofSet[3];
+    VkImageView sceneViews[3][7];
 } FrameCtx;
 
 static struct {
@@ -490,6 +542,28 @@ static struct {
     VkPipeline interpolationWidePipeline;
     VkPipeline hiWidePipeline;
     VkPipeline hiUtilPipeline, capturePipeline;
+    /* The scene's depth image and the depth of field (scene.c): nothing here
+     * exists until a scene first asks (sceneMake). Targets: SCENE_NARROW the
+     * copy of VRAM, SCENE_WIDE of the wide target, SCENE_REPLAY smooth
+     * motion's private canvas. */
+    struct {
+        int state;   /* 0 not tried, 1 made, -1 cannot */
+        int active;  /* the copy's batches write depth (gvkSceneBegin .. gvkSceneEnd) */
+        int targets; /* 1: the copy of VRAM; 2: the wide target's too */
+        VRect rect[3];             /* each target's frame, 1x */
+        VkImage depth[3]; VkDeviceMemory depthMemory[3]; VkImageView depthView[3];
+        int depthW[3], depthH[3];  /* hi-res pixels allocated */
+        VkImage work[5]; VkDeviceMemory workMemory[5]; VkImageView workView[5];
+        int workW, workH;
+        /* [wide][coarse][unordered] */
+        VkPipeline draw[2][2][2];
+        int insetX, insetY;        /* the copy of VRAM's frame inside the wide one, 1x */
+        VkSampler sampler;
+        VkPipeline dof;
+        VkPipelineLayout dofLayout;
+        VkDescriptorSetLayout dofSetLayout;
+        VkDescriptorPool pool;
+    } scene;
     uint32_t hiCount, hiWideCount;
     /* finishBatch's independence tests: pending vertices already examined
      * and whether one of them depends on native VRAM. Reset with the counts. */
@@ -638,6 +712,15 @@ static struct {
     VkDeviceMemory orderedNodesMemory, orderedHeadsMemory;
     VkPipeline orderedDraw, orderedWide, orderedHi, orderedHiWide, orderedResolve;
     uint64_t orderedPasses;
+    /* VK_EXT_shader_tile_image: the device has it (and no interlock), and the
+     * native pass that uses it (drawTile), made with the ordered fallback. */
+    int tileImage;
+    VkPipeline tileDraw;
+    uint64_t tilePasses;
+    float tileBox[4]; /* the batch's vertices so far: x0, y0, x1, y1 (tileNote) */
+    int tileWhole;    /* one of them was not finite: the pass covers all of VRAM */
+    /* Counts for XG_VK_STATS=1: a line per vblank, one per readback, the totals at exit. */
+    uint64_t statBatches, statSubmits, statReadbacks, statLast[5];
     int resState; /* 0 not made yet, 1 made, -1 could not be */
     uint64_t resUploads, resUploadBytes;
     int copySkipped; /* the last collected copy-path picture found no free image */
@@ -648,6 +731,7 @@ static struct {
         int fullBarriers, presentSync, directPresent, serialReplay;
         int interpolationOrdered, interpolationLog, allInterlock, immediateResolve, interpolationSpill;
         int hiresStats; /* XG_HIRES_STATS=1: a line per hi-res pass (gtHarvest) */
+        int stats;      /* XG_VK_STATS=1: a line per vblank (batches, passes, submissions, readbacks), per readback, and the totals */
     } env;
 } vk;
 
@@ -863,7 +947,7 @@ static void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
  * uploads (copy) and the present pass (present). At exit, the run's mean and
  * worst vblank. XG_GPU_TIMING=summary: only that. */
 
-static const char* const gtNames[GT_KINDS] = {"draw", "wide", "hires", "hiwide", "hiutil", "copy", "present"};
+static const char* const gtNames[GT_KINDS] = {"draw", "wide", "hires", "hiwide", "hiutil", "copy", "present", "dof"};
 
 static struct {
     int on;       /* 1: a line per vblank; 2: the summary only */
@@ -1361,7 +1445,6 @@ static int createDevice(void) {
     vk.physical = pds[best];
     free(pds);
     vk.queueFamily = bestChoice.family;
-    hiresDeviceDefaults(); /* the Auto GPU budget's default depends on the device's kind */
     vk.interlock = bestChoice.interlock && !envFlag("XG_VK_NO_INTERLOCK");
     vkGetPhysicalDeviceMemoryProperties(vk.physical, &vk.memProps);
     vk.memoryBudget = vkGetPhysicalDeviceMemoryProperties2 != NULL && !envFlag("XG_VK_NO_MEMORY_BUDGET") &&
@@ -1382,6 +1465,39 @@ static int createDevice(void) {
     f13.dynamicRendering = VK_TRUE;
     f13.synchronization2 = VK_TRUE;
     f13.pNext = vk.interlock ? &il : NULL;
+    /* Without interlock, a tile-based GPU can still order a pixel's reads
+     * and writes by primitive: VK_EXT_shader_tile_image reads the colour
+     * attachment from tile memory. Taken only where the driver says those
+     * coherent reads are native (shaderTileImageCoherentReadAccelerated;
+     * XG_VK_TILE_IMAGE=1 takes them anyway) and VRAM's format can be an
+     * attachment. XG_VK_NO_TILE_IMAGE=1 leaves it. */
+    VkPhysicalDeviceShaderTileImageFeaturesEXT tile = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TILE_IMAGE_FEATURES_EXT};
+    vk.tileImage = 0;
+    if (!vk.interlock && !envFlag("XG_VK_NO_TILE_IMAGE") && vkGetPhysicalDeviceProperties2 != NULL &&
+        hasDeviceExtension(vk.physical, VK_EXT_SHADER_TILE_IMAGE_EXTENSION_NAME)) {
+        VkPhysicalDeviceVulkan13Features have13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+        have13.pNext = &tile;
+        VkPhysicalDeviceFeatures2 query = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &have13};
+        vkGetPhysicalDeviceFeatures2(vk.physical, &query);
+        VkPhysicalDeviceShaderTileImagePropertiesEXT tp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_TILE_IMAGE_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &tp};
+        vkGetPhysicalDeviceProperties2(vk.physical, &p2);
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(vk.physical, VK_FORMAT_R16_UINT, &fp);
+        /* The shader's discard is SPIR-V 1.6's demotion to a helper invocation. */
+        vk.tileImage = tile.shaderTileImageColorReadAccess && have13.shaderDemoteToHelperInvocation &&
+                       (tp.shaderTileImageCoherentReadAccelerated || envFlag("XG_VK_TILE_IMAGE")) &&
+                       (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT) != 0;
+        tile.pNext = NULL;
+        tile.shaderTileImageDepthReadAccess = tile.shaderTileImageStencilReadAccess = VK_FALSE;
+        if (vk.tileImage) {
+            f13.shaderDemoteToHelperInvocation = VK_TRUE;
+            tile.pNext = (void*)f13.pNext;
+            f13.pNext = &tile;
+        }
+    }
     VkPhysicalDeviceFeatures2 f2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     f2.pNext = &f13;
     f2.features.fragmentStoresAndAtomics = VK_TRUE;
@@ -1406,6 +1522,9 @@ static int createDevice(void) {
     }
     if (vk.interlock) {
         exts[extCount++] = VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME;
+    }
+    if (vk.tileImage) {
+        exts[extCount++] = VK_EXT_SHADER_TILE_IMAGE_EXTENSION_NAME;
     }
     if (vk.memoryBudget) {
         exts[extCount++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;
@@ -1461,8 +1580,17 @@ static int createDevice(void) {
     }
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(vk.physical, &props);
+    int orderedDefault = 0;
+#ifdef __ANDROID__
+    /* PowerVR DXT-48-1536: batching overlapping draws through the
+     * ordered fallback avoids the stalls measured with split batches. */
+    orderedDefault = !vk.interlock && props.vendorID == 0x1010 && props.deviceID == 0x71061212;
+#endif
+    hiresDeviceDefaults(orderedDefault);
     gpuLog("vulkan: using %s, %s", props.deviceName,
-           vk.interlock ? "fragment shader interlock" : "no interlock (batches split on overlap)");
+           vk.interlock ? "fragment shader interlock"
+                        : vk.tileImage ? "no interlock, tile image reads (batches split on overlap without the ordered fallback)"
+                                       : "no interlock (batches split on overlap)");
     vk.limits = props.limits;
     const char* timing = getenv("XG_GPU_TIMING");
     { /* Cap timing can be enabled later in F1, independently of diagnostics. */
@@ -1652,6 +1780,9 @@ static void createSet(FrameCtx* f) {
 
 static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int draw,
                                  VkFormat colorFormat) {
+    /* 7: the native draw with VRAM as its colour attachment (drawTile), optional like 3. */
+    int attached = draw == 0 || draw == 7;
+    if(draw==7)draw=3;
     int optional = draw >= 3;
     if(optional)draw-=2;
     VkShaderModule vm = shaderModule(vs, vsSize);
@@ -1702,14 +1833,14 @@ static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32
     att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
                          VK_COLOR_COMPONENT_A_BIT;
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    cb.attachmentCount = draw ? 0 : 1;
+    cb.attachmentCount = attached ? 1 : 0;
     cb.pAttachments = &att;
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
     ds.dynamicStateCount = 2;
     ds.pDynamicStates = dyn;
     VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    ri.colorAttachmentCount = draw ? 0 : 1;
+    ri.colorAttachmentCount = attached ? 1 : 0;
     ri.pColorAttachmentFormats = &colorFormat;
 
     VkGraphicsPipelineCreateInfo gi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
@@ -1739,6 +1870,8 @@ static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32
 /* The hi-res copy's pipelines: its triangles (HiVertex; vertices 1, 2 for
  * the wide target's pass with its wide fields), or one pass of
  * hires_util.frag (vertices 0: no vertex input). */
+/* createHiPipeline for the scene depth builds: HiVertex.z as well. */
+static int hiPipelineDepth;
 static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices) {
     int optional = vertices >= 3;
     if(optional)vertices-=2;
@@ -1753,7 +1886,7 @@ static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint
     stages[1].module = fm;
     stages[1].pName = "main";
     VkVertexInputBindingDescription binding = {0, sizeof(HiVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    VkVertexInputAttributeDescription attrs[15] = {
+    VkVertexInputAttributeDescription attrs[16] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(HiVertex, x)},
         {1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(HiVertex, u)},
         {2, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(HiVertex, r)},
@@ -1769,12 +1902,13 @@ static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint
         {12, 0, VK_FORMAT_R32_SFLOAT, offsetof(HiVertex, w)},
         {13, 0, VK_FORMAT_R32G32B32A32_UINT, offsetof(HiVertex, sample)},
         {14, 0, VK_FORMAT_R32_UINT, offsetof(HiVertex, rasterShift)},
+        {15, 0, VK_FORMAT_R32_SFLOAT, offsetof(HiVertex, z)},
     };
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     if (vertices) {
         vi.vertexBindingDescriptionCount = 1;
         vi.pVertexBindingDescriptions = &binding;
-        vi.vertexAttributeDescriptionCount = 15;
+        vi.vertexAttributeDescriptionCount = hiPipelineDepth ? 16 : 15;
         vi.pVertexAttributeDescriptions = attrs;
     }
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -2632,6 +2766,59 @@ static void drawOrdered(FrameCtx* f,const void* src,size_t stride,VkDeviceSize o
     }
 }
 
+/* The native batch in one render pass (VK_EXT_shader_tile_image): VRAM is
+ * the colour attachment, loaded and stored, and draw_tile.frag reads each
+ * pixel from tile memory in primitive order, so overlapping primitives need
+ * neither a batch each nor the per-pixel lists. The batch's texels come from
+ * the same image as a storage image: gp0.c never lets a batch read what it
+ * writes. The pass covers the vertices' box only (tileNote, kept as they are
+ * added: the vertex buffer is not read back), so a small batch does not load
+ * and store all of VRAM. */
+static void tileNote(const GpuVertex* v, int n) {
+    if (vk.tileDraw == VK_NULL_HANDLE) return;
+    for (int i = 0; i < n; i++) {
+        if (!isfinite(v[i].x) || !isfinite(v[i].y)) vk.tileWhole = 1;
+        vk.tileBox[0] = fminf(vk.tileBox[0], v[i].x);
+        vk.tileBox[1] = fminf(vk.tileBox[1], v[i].y);
+        vk.tileBox[2] = fmaxf(vk.tileBox[2], v[i].x);
+        vk.tileBox[3] = fmaxf(vk.tileBox[3], v[i].y);
+    }
+}
+
+static void drawTile(FrameCtx* f, uint32_t first, uint32_t count) {
+    int x0 = 0, y0 = 0, x1 = VRAM_W, y1 = VRAM_H;
+    if (!vk.tileWhole) {
+        /* A pixel past each edge for the rasteriser's rounding, as orderedBounds. */
+        x0 = (int)fmaxf(0, fminf((float)VRAM_W, floorf(vk.tileBox[0]) - 1));
+        y0 = (int)fmaxf(0, fminf((float)VRAM_H, floorf(vk.tileBox[1]) - 1));
+        x1 = (int)fmaxf(0, fminf((float)VRAM_W, ceilf(vk.tileBox[2]) + 2));
+        y1 = (int)fmaxf(0, fminf((float)VRAM_H, ceilf(vk.tileBox[3]) + 2));
+    }
+    if (x1 <= x0 || y1 <= y0) return;
+    VkCommandBuffer cmd = f->cmd;
+    VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    color.imageView = vk.vramView;
+    color.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
+    ri.renderArea = (VkRect2D){{x0, y0}, {(uint32_t)(x1 - x0), (uint32_t)(y1 - y0)}};
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &color;
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.tileDraw);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipelineLayout, 0, 1, &f->set, 0, NULL);
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &f->vertices.buffer, &offset);
+    VkViewport viewport = {0, 0, (float)VRAM_W, (float)VRAM_H, 0, 1};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &ri.renderArea);
+    vkCmdDraw(cmd, count, 1, first, 0);
+    vkCmdEndRendering(cmd);
+    vk.tilePasses++;
+}
+
 static void drawWideBatch(FrameCtx* f) {
     rasterBarrier(f->cmd);
     int q = gtStart(f->cmd, GT_WIDE);
@@ -2716,7 +2903,10 @@ static void finishBatch(int nativeOnly) {
     if (count) {
         barrierIfNeeded(f->cmd);
         int query=gtStart(f->cmd,GT_DRAW);
-        if(vk.orderedEnabled) {
+        vk.statBatches++;
+        if(vk.orderedEnabled && vk.tileDraw) {
+            drawTile(f,vk.batchFirst,count);
+        } else if(vk.orderedEnabled) {
             drawOrdered(f,f->vertices.map+vk.batchFirst*sizeof(GpuVertex),sizeof(GpuVertex),0,vk.batchFirst,count,1,VRAM_W,VRAM_H,0,NULL,0);
         } else {
             VkRenderingInfo ri={.sType=VK_STRUCTURE_TYPE_RENDERING_INFO,
@@ -2748,6 +2938,7 @@ static void beginBatch(void) {
     recording();
     vk.batchFirst=(uint32_t)(frame()->vertexUsed/sizeof(GpuVertex));
     vk.rendering=1;
+    vk.tileBox[0]=(float)VRAM_W;vk.tileBox[1]=(float)VRAM_H;vk.tileBox[2]=vk.tileBox[3]=0;vk.tileWhole=0;
 }
 
 /* Hand the current context to the queue (signalling its fence) and move on. */
@@ -2773,6 +2964,7 @@ static void submitFrame(const VkSemaphore* wait, const VkSemaphore* signal) {
     si.signalSemaphoreCount = signal != NULL;
     si.pSignalSemaphores = signal;
     VK_CHECK(vkQueueSubmit(vk.queue, 1, &si, f->fence));
+    vk.statSubmits++;
     f->recording = 0;
     f->submitted = 1;
     vk.cur = (vk.cur + 1) % FRAMES;
@@ -2855,8 +3047,8 @@ static void resIdle(void) {
 }
 
 static void orderedDestroy(void) {
-    VkPipeline* pipelines[5]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve};
-    for(int i=0;i<5;i++) {
+    VkPipeline* pipelines[6]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw};
+    for(int i=0;i<6;i++) {
         if(*pipelines[i])vkDestroyPipeline(vk.device,*pipelines[i],NULL);
         *pipelines[i]=VK_NULL_HANDLE;
     }
@@ -2905,6 +3097,10 @@ static int orderedMake(void) {
     vk.orderedHi=createHiPipeline(hires_ordered_vertSpv,sizeof(hires_ordered_vertSpv),hires_ordered_fragSpv,sizeof(hires_ordered_fragSpv),3);
     vk.orderedHiWide=createHiPipeline(hires_wide_ordered_vertSpv,sizeof(hires_wide_ordered_vertSpv),hires_wide_ordered_fragSpv,sizeof(hires_wide_ordered_fragSpv),4);
     if(!vk.orderedDraw||!vk.orderedWide||!vk.orderedHi||!vk.orderedHiWide)goto fail;
+    /* The native draws' single pass where the device reads tile memory;
+     * the other targets keep the lists. Without it they all do. */
+    if(vk.tileImage&&!vk.tileDraw)
+        vk.tileDraw=createPipeline(drawVertSpv,sizeof(drawVertSpv),draw_tile_fragSpv,sizeof(draw_tile_fragSpv),7,VK_FORMAT_R16_UINT);
     VkShaderModule module=shaderModule(ordered_compSpv,sizeof(ordered_compSpv));
     VkComputePipelineCreateInfo ci={.sType=VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     ci.stage=(VkPipelineShaderStageCreateInfo){.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_COMPUTE_BIT,.module=module,.pName="main"};
@@ -2915,7 +3111,8 @@ static int orderedMake(void) {
     VkCommandBuffer commands=recording();
     fullBarrier(commands);vkCmdFillBuffer(commands,vk.orderedNodes,4,4,0);fullBarrier(commands);
     vk.orderedState=1;
-    gpuLog("vulkan: exact ordered fallback ready (%u operations, %.1f MiB)",vk.orderedCapacity,(double)(bytes+vk.orderedCapacity*4)/(1<<20));
+    gpuLog("vulkan: exact ordered fallback ready (%u operations, %.1f MiB)%s",vk.orderedCapacity,(double)(bytes+vk.orderedCapacity*4)/(1<<20),
+           vk.tileDraw?"; native draws in one tile image pass per batch":"");
     return 1;
 fail:
     orderedDestroy();return 0;
@@ -2940,6 +3137,7 @@ int gvkOrderedWrites(void) {return vk.interlock||vk.orderedEnabled;}
 const char* gpuOrderedStatus(void) {
     if(!vk.device)return "Renderer has not started.";
     if(vk.interlock)return "Hardware ordered rendering is active.";
+    if(vk.orderedEnabled&&vk.tileDraw)return "Exact ordered fallback is active: tile image passes for the native picture.";
     if(vk.orderedEnabled)return "Exact ordered fallback is active.";
     if(vk.orderedState<0)return "Ordered fallback is unavailable; exact split batches are active.";
     return "Exact split batches are active.";
@@ -3138,6 +3336,7 @@ void gvkDraw(const GpuVertex* v, int n) {
         beginBatch();
     }
     FrameCtx* f = frame();
+    tileNote(v, n);
     memcpy(f->vertices.map + f->vertexUsed, v, bytes);
     f->vertexUsed += bytes;
 }
@@ -3162,6 +3361,7 @@ void gvkDrawSpans(GpuVertex* v, int n, const int32_t* spans, int ints) {
     for (int i = 0; i < n; i++) {
         v[i].span = base;
     }
+    tileNote(v, n);
     memcpy(f->vertices.map + f->vertexUsed, v, bytes);
     f->vertexUsed += bytes;
 }
@@ -3688,6 +3888,10 @@ typedef struct {
     int32_t wideW, wideH;
     int32_t ditherX, ditherY; /* owned replay origin, in 1x target pixels */
     int32_t coarse; /* 2: each fragment a 2x2 block (hiBatchCoarse); 0 or 1: a pixel */
+    /* Read by the DEPTH builds only (hires.frag): the scene depth image's
+     * pixel (0, 0) in the target and its size, hi-res pixels. */
+    int32_t pad;
+    int32_t depthX, depthY, depthW, depthH;
 } HiDrawConstants;
 
 typedef struct {
@@ -3744,6 +3948,18 @@ static void interpolationSets(void) {
 
 static int interpolationImages(int w, int h, int n, int wide, int capture, int fw, int fh, int mw, int mh);
 static void idleDevice(void);
+/* The scene's depth image and the depth of field (scene.c; further down):
+ * their targets, and what a picture between needs of them. */
+enum { SCENE_NARROW, SCENE_WIDE, SCENE_REPLAY, SCENE_TARGETS };
+static int sceneMake(void);
+static int sceneDepthImage(int t, int w, int h);
+static int sceneWorkImages(int w, int h);
+static void sceneSets(FrameCtx* f, int t);
+static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                            int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const DofParams* p);
+/* A picture between's scene draws (interpolationRender): the depth builds'
+ * set 1, the replay canvas's depth image; VK_NULL_HANDLE otherwise. */
+static VkDescriptorSet interpolationDepthSet;
 static void interpolationPassClip(VkCommandBuffer cmd, VkDescriptorSet set, VkPipeline pipeline,
                               const void* constants, int bytes, int w, int h, uint32_t first, uint32_t count, const InterpFrame* replay, const VRect* clip) {
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
@@ -3751,10 +3967,11 @@ static void interpolationPassClip(VkCommandBuffer cmd, VkDescriptorSet set, VkPi
     vkCmdBeginRendering(cmd, &ri);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     VkDescriptorSet sets[2] = {set, vk.effectSet};
+    if (interpolationDepthSet != VK_NULL_HANDLE) sets[1] = interpolationDepthSet;
     /* The utility shader declares its source in set 1 even for a native
      * replicate pass. Bind it explicitly, rather than inherit an old draw. */
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.hiLayout, 0,
-                            pipeline == vk.hiUtilPipeline ? 2 : 1, sets, 0, NULL);
+                            pipeline == vk.hiUtilPipeline || interpolationDepthSet != VK_NULL_HANDLE ? 2 : 1, sets, 0, NULL);
     VkViewport viewport = {0, 0, (float)w, (float)h, 0, 1};
     if (replay && (replay->capture || replay->frozen)) {
         const HiDrawConstants* c = constants;
@@ -4347,6 +4564,28 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 interpolationReport("native","capture-source-bounds",vblank,alpha); return 0;
             }
         }
+        /* A scene blurred by its depth (scene.c): the picture between gets the
+         * same, at the same point of the replay. Only a plain snapshot
+         * (no captures, frozen sources or copies); the rest show the native
+         * picture, which has its blur. The images first: making them can
+         * hand the frame over, which must not happen once the replay is
+         * being recorded. */
+        int blurAt = -1;
+        DofParams blur = f->dof;
+        if (f->sceneBlur) {
+            int plain = !f->capture && !f->frozen && !f->opCount && vk.hiN != 0 && !vk.orderedEnabled &&
+                        f->sceneEnd <= (uint32_t)count;
+            for (int i = 0; plain && i < count; i += 3)
+                if (vk.interpolationVertices[i].sample[3] & (INTERP_SAMPLE_CAPTURE | INTERP_SAMPLE_EVOLVING | INTERP_SAMPLE_NATIVE_CACHE)) plain = 0;
+            if (!plain || !sceneMake() ||
+                !sceneDepthImage(SCENE_REPLAY, vk.interpolationCanvasW * vk.interpolationN, vk.interpolationCanvasH * vk.interpolationN) ||
+                !sceneWorkImages(f->viewW, f->viewH)) {
+                interpolationReport("native", "depth-of-field-replay", vblank, alpha); return 0;
+            }
+            blurAt = (int)f->sceneEnd;
+            const InterpFrame* next = interpolationFrame(after);
+            if (next->sceneBlur) blur.focus += (float)(alpha * (next->dof.focus - blur.focus));
+        }
         if (!vk.interpolationSpans) vk.interpolationSpans = malloc(SPAN_BYTES);
         if (!vk.interpolationSpans) return 0;
         uint32_t spanCount = 0;
@@ -4412,10 +4651,15 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         uint32_t r = (rgb&255u)>>3, g = (rgb>>8&255u)>>3, b = (rgb>>16&255u)>>3;
         VkClearColorValue clear = {.uint32={(r<<3|r>>2)|(g<<3|g>>2)<<8|(b<<3|b>>2)<<16,0,0,0}};
         vkCmdClearColorImage(cmd,vk.interpolationImage[slot],VK_IMAGE_LAYOUT_GENERAL,&clear,1,&colorRange);
+        if (blurAt >= 0) {
+            VkClearColorValue nothing = {.uint32 = {0xFFFFFFFFu, 0, 0, 0}}; /* dof.comp DEPTH_FAR */
+            vkCmdClearColorImage(cmd, vk.scene.depth[SCENE_REPLAY], VK_IMAGE_LAYOUT_GENERAL, &nothing, 1, &colorRange);
+            sceneSets(ctx, SCENE_REPLAY);
+        }
         interpolationBarrier(cmd);
         vkCmdBindVertexBuffers(cmd,0,1,&ctx->vertices.buffer,&offset);
         HiDrawConstants c = {vk.interpolationN,vk.hiN?vk.hiColor:HIRES_COLOR_DITHER_1X,
-                            vk.interpolationCanvasW*vk.interpolationN,vk.interpolationCanvasH*vk.interpolationN,0,0,f->viewX,f->viewY,1};
+                            vk.interpolationCanvasW*vk.interpolationN,vk.interpolationCanvasH*vk.interpolationN,0,0,f->viewX,f->viewY,1,0,0,0,0,0};
         int canvasW = c.targetW, canvasH = c.targetH;
         if (f->capture || f->frozen) {
             c.targetW = (f->wide?(vk.hiN?vk.hiWideW:WIDE_W):VRAM_W)*vk.interpolationN;
@@ -4491,9 +4735,26 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 interpolationBarrier(cmd); first += 3;
             } else {
                 uint32_t end = first+3, limit = operation < f->opCount ? f->ops[operation].vertex : (uint32_t)count;
+                /* The scene's triangles store their depth too, up to where it
+                 * ended; there the canvas is blurred, and the rest (the UI)
+                 * is drawn over it as in the native frame. */
+                int inScene = blurAt >= 0 && first < (uint32_t)blurAt;
+                if (inScene && limit > (uint32_t)blurAt) limit = (uint32_t)blurAt;
                 if (vk.interlock) while (end < limit && (nativePrefix || !(vk.interpolationVertices[end].sample[3]&(INTERP_SAMPLE_EVOLVING|INTERP_SAMPLE_NATIVE_CACHE)))) end += 3;
-                interpolationPass(cmd,ctx->interpolationSet[f->wide?INTERP_FRAMES+1:slot],f->wide?vk.hiWidePipeline:vk.hiDrawPipeline,&c,sizeof(c),canvasW,canvasH,first,end-first,f);
+                VkPipeline pipeline = f->wide?vk.hiWidePipeline:vk.hiDrawPipeline;
+                if (inScene) {
+                    pipeline = vk.scene.draw[f->wide != 0][0][0];
+                    interpolationDepthSet = ctx->sceneDepthSet[SCENE_REPLAY];
+                    c.depthX = c.depthY = 0; c.depthW = canvasW; c.depthH = canvasH;
+                }
+                interpolationPass(cmd,ctx->interpolationSet[f->wide?INTERP_FRAMES+1:slot],pipeline,&c,sizeof(c),canvasW,canvasH,first,end-first,f);
+                interpolationDepthSet = VK_NULL_HANDLE;
                 interpolationBarrier(cmd); first = end;
+                if (inScene && first >= (uint32_t)blurAt) {
+                    sceneBlurRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &blur);
+                    interpolationBarrier(cmd);
+                    vkCmdBindVertexBuffers(cmd,0,1,&ctx->vertices.buffer,&offset);
+                }
             }
         }
         vk.needBarrier = 1;
@@ -4525,6 +4786,9 @@ static void idleDevice(void) {
     vkDeviceWaitIdle(vk.device);
     for (int i = 0; i < FRAMES; i++) {
         vk.frames[i].submitted = 0;
+        /* Images may be replaced after this wait. A driver can reuse the
+         * numeric value of a destroyed image view. */
+        if (vk.scene.state > 0) memset(vk.frames[i].sceneViews, 0, sizeof(vk.frames[i].sceneViews));
         if (vk.hiSetsStale & (1u << i)) writeHiSet(&vk.frames[i]);
     }
     vk.hiSetsStale = 0;
@@ -5058,6 +5322,350 @@ static int hiScratchFor(int w, int h) {
     return ok;
 }
 
+/* ---- the scene's depth image and the depth of field (scene.c) --------------------
+ *
+ * Between gvkSceneBegin and gvkSceneEnd the copy's batches are drawn by the
+ * DEPTH builds of hires.vert/frag, which also store each replaced pixel's
+ * view depth in a depth image of the frame's size (set 1; one per target).
+ * gvkSceneEnd blurs the frame by it (shaders/dof.comp): the blurred layers
+ * are made once, on the PS1's pixel grid, from the widest target, and laid
+ * over each target at its own resolution.
+ * Everything is made at the first scene; without one, none of it exists and
+ * the copy's passes are the ones they always were. */
+
+typedef struct {
+    int32_t pass, n, taps, debug;
+    int32_t originX, originY, sizeW, sizeH;
+    int32_t workW, workH;
+    int32_t layerX, layerY;
+    float focus, band, gain, radius;
+} DofConstants;
+
+static void sceneDestroy(void) {
+    if (vk.device == VK_NULL_HANDLE) return;
+    for (int w = 0; w < 2; w++) for (int c = 0; c < 2; c++) for (int u = 0; u < 2; u++) {
+        if (vk.scene.draw[w][c][u]) vkDestroyPipeline(vk.device, vk.scene.draw[w][c][u], NULL);
+        vk.scene.draw[w][c][u] = VK_NULL_HANDLE;
+    }
+    if (vk.scene.dof) vkDestroyPipeline(vk.device, vk.scene.dof, NULL);
+    if (vk.scene.dofLayout) vkDestroyPipelineLayout(vk.device, vk.scene.dofLayout, NULL);
+    if (vk.scene.pool) vkDestroyDescriptorPool(vk.device, vk.scene.pool, NULL);
+    if (vk.scene.dofSetLayout) vkDestroyDescriptorSetLayout(vk.device, vk.scene.dofSetLayout, NULL);
+    if (vk.scene.sampler) vkDestroySampler(vk.device, vk.scene.sampler, NULL);
+    vk.scene.sampler = VK_NULL_HANDLE;
+    vk.scene.dof = VK_NULL_HANDLE; vk.scene.dofLayout = VK_NULL_HANDLE;
+    vk.scene.pool = VK_NULL_HANDLE; vk.scene.dofSetLayout = VK_NULL_HANDLE;
+    for (int t = 0; t < SCENE_TARGETS; t++) {
+        destroyImage(&vk.scene.depth[t], &vk.scene.depthMemory[t], &vk.scene.depthView[t]);
+        vk.scene.depthW[t] = vk.scene.depthH[t] = 0;
+    }
+    for (int i = 0; i < 5; i++) destroyImage(&vk.scene.work[i], &vk.scene.workMemory[i], &vk.scene.workView[i]);
+    vk.scene.workW = vk.scene.workH = 0;
+    for (int k = 0; k < FRAMES; k++) memset(vk.frames[k].sceneViews, 0, sizeof(vk.frames[k].sceneViews));
+    vk.scene.active = 0;
+}
+
+/* The pipelines, layouts and sets, once; 0 when the device cannot. */
+static int sceneMake(void) {
+    if (vk.scene.state) return vk.scene.state > 0;
+    vk.scene.state = -1;
+    uint32_t families = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(vk.physical, &families, NULL);
+    VkQueueFamilyProperties* props = calloc(families ? families : 1, sizeof(*props));
+    if (!props) return 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(vk.physical, &families, props);
+    int compute = vk.queueFamily < families && (props[vk.queueFamily].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
+    free(props);
+    VkFormatProperties fp;
+    vkGetPhysicalDeviceFormatProperties(vk.physical, VK_FORMAT_R16G16B16A16_SFLOAT, &fp);
+    VkFormatFeatureFlags needs = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
+                                 VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    if (!compute || (fp.optimalTilingFeatures & needs) != needs || envFlag("XG_SCENE_TEST_FAIL")) {
+        gpuLog("scene: depth of field needs a compute queue and 16-bit float storage images: not available");
+        return 0;
+    }
+    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+    si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    if (vkCreateSampler(vk.device, &si, NULL, &vk.scene.sampler) != VK_SUCCESS) goto fail;
+    VkDescriptorSetLayoutBinding b[9];
+    for (uint32_t i = 0; i < 9; i++)
+        b[i] = (VkDescriptorSetLayoutBinding){i, i < 7 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                              1, VK_SHADER_STAGE_COMPUTE_BIT, NULL};
+    VkDescriptorSetLayoutCreateInfo li = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    li.bindingCount = 9; li.pBindings = b;
+    if (vkCreateDescriptorSetLayout(vk.device, &li, NULL, &vk.scene.dofSetLayout) != VK_SUCCESS) goto fail;
+    VkPushConstantRange range = {VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DofConstants)};
+    VkPipelineLayoutCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    pi.setLayoutCount = 1; pi.pSetLayouts = &vk.scene.dofSetLayout;
+    pi.pushConstantRangeCount = 1; pi.pPushConstantRanges = &range;
+    if (vkCreatePipelineLayout(vk.device, &pi, NULL, &vk.scene.dofLayout) != VK_SUCCESS) goto fail;
+    VkShaderModule module = shaderModule(dofCompSpv, sizeof(dofCompSpv));
+    VkComputePipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    ci.stage = (VkPipelineShaderStageCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                 .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main"};
+    ci.layout = vk.scene.dofLayout;
+    VkResult result = vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &vk.scene.dof);
+    vkDestroyShaderModule(vk.device, module, NULL);
+    if (result != VK_SUCCESS) goto fail;
+    VkDescriptorPoolSize size[2] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES * SCENE_TARGETS * 8},
+                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES * SCENE_TARGETS * 2}};
+    VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    dpi.maxSets = FRAMES * SCENE_TARGETS * 2; dpi.poolSizeCount = 2; dpi.pPoolSizes = size;
+    if (vkCreateDescriptorPool(vk.device, &dpi, NULL, &vk.scene.pool) != VK_SUCCESS) goto fail;
+    for (int k = 0; k < FRAMES; k++) for (int t = 0; t < SCENE_TARGETS; t++) {
+        VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        ai.descriptorPool = vk.scene.pool; ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &vk.scene.dofSetLayout;
+        if (vkAllocateDescriptorSets(vk.device, &ai, &vk.frames[k].sceneDofSet[t]) != VK_SUCCESS) goto fail;
+        ai.pSetLayouts = &vk.movieSetLayout; /* hiLayout's set 1: one storage image */
+        if (vkAllocateDescriptorSets(vk.device, &ai, &vk.frames[k].sceneDepthSet[t]) != VK_SUCCESS) goto fail;
+        memset(vk.frames[k].sceneViews[t], 0, sizeof(vk.frames[k].sceneViews[t]));
+    }
+    /* [wide][coarse][unordered]: as the copy's own eight pipelines (gvkInit). */
+#define SCENE_PIPELINE(w, c, u, vs, fsLocked, fsPlain) \
+    vk.scene.draw[w][c][u] = createHiPipeline(vs, sizeof(vs), !(u) && vk.interlock ? fsLocked : fsPlain, \
+        !(u) && vk.interlock ? sizeof(fsLocked) : sizeof(fsPlain), (w) ? 4 : 3)
+    hiPipelineDepth = 1;
+    SCENE_PIPELINE(0, 0, 0, hiresDepthVertSpv, hiresDepthInterlockFragSpv, hiresDepthFragSpv);
+    SCENE_PIPELINE(0, 0, 1, hiresDepthVertSpv, hiresDepthInterlockFragSpv, hiresDepthFragSpv);
+    SCENE_PIPELINE(1, 0, 0, hiresWideDepthVertSpv, hiresWideDepthInterlockFragSpv, hiresWideDepthFragSpv);
+    SCENE_PIPELINE(1, 0, 1, hiresWideDepthVertSpv, hiresWideDepthInterlockFragSpv, hiresWideDepthFragSpv);
+    SCENE_PIPELINE(0, 1, 0, hiresCoarseDepthVertSpv, hiresCoarseDepthInterlockFragSpv, hiresCoarseDepthFragSpv);
+    SCENE_PIPELINE(0, 1, 1, hiresCoarseDepthVertSpv, hiresCoarseDepthInterlockFragSpv, hiresCoarseDepthFragSpv);
+    SCENE_PIPELINE(1, 1, 0, hiresWideCoarseDepthVertSpv, hiresWideCoarseDepthInterlockFragSpv, hiresWideCoarseDepthFragSpv);
+    SCENE_PIPELINE(1, 1, 1, hiresWideCoarseDepthVertSpv, hiresWideCoarseDepthInterlockFragSpv, hiresWideCoarseDepthFragSpv);
+    hiPipelineDepth = 0;
+#undef SCENE_PIPELINE
+    for (int w = 0; w < 2; w++) for (int c = 0; c < 2; c++) for (int u = 0; u < 2; u++)
+        if (!vk.scene.draw[w][c][u]) goto fail;
+    vk.scene.state = 1;
+    gpuLog("scene: depth image and depth of field ready");
+    return 1;
+fail:
+    hiPipelineDepth = 0;
+    sceneDestroy();
+    gpuLog("scene: depth of field could not be set up on this device");
+    return 0;
+}
+
+/* Target t's depth image, at least w x h hi-res pixels. */
+static int sceneDepthImage(int t, int w, int h) {
+    if (vk.scene.depth[t] != VK_NULL_HANDLE && vk.scene.depthW[t] >= w && vk.scene.depthH[t] >= h) return 1;
+    w = w > vk.scene.depthW[t] ? w : vk.scene.depthW[t];
+    h = h > vk.scene.depthH[t] ? h : vk.scene.depthH[t];
+    idleDevice();
+    destroyImage(&vk.scene.depth[t], &vk.scene.depthMemory[t], &vk.scene.depthView[t]);
+    vk.scene.depthW[t] = vk.scene.depthH[t] = 0;
+    /* On the device, else in system memory the device can use (as the copy
+     * itself under pressure): slower, and the picture is the same. */
+    if (!createImage32(&vk.scene.depth[t], &vk.scene.depthMemory[t], &vk.scene.depthView[t], w, h) &&
+        !createImage32Memory(&vk.scene.depth[t], &vk.scene.depthMemory[t], &vk.scene.depthView[t], w, h, 1)) {
+        gpuWarnOnce("scenedepth", "scene: no room for a %dx%d depth image: no depth of field while that lasts", w, h);
+        return 0;
+    }
+    vk.scene.depthW[t] = w; vk.scene.depthH[t] = h;
+    toGeneral(recording(), vk.scene.depth[t]);
+    vk.needBarrier = 1;
+    return 1;
+}
+
+/* The blur's five working images (16-bit float), at least w x h. */
+static int sceneWorkImages(int w, int h) {
+    if (vk.scene.work[0] != VK_NULL_HANDLE && vk.scene.workW >= w && vk.scene.workH >= h) return 1;
+    w = w > vk.scene.workW ? w : vk.scene.workW;
+    h = h > vk.scene.workH ? h : vk.scene.workH;
+    idleDevice();
+    for (int i = 0; i < 5; i++) destroyImage(&vk.scene.work[i], &vk.scene.workMemory[i], &vk.scene.workView[i]);
+    vk.scene.workW = vk.scene.workH = 0;
+    for (int i = 0; i < 5; i++) {
+        VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ii.imageType = VK_IMAGE_TYPE_2D; ii.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        ii.extent = (VkExtent3D){(uint32_t)w, (uint32_t)h, 1};
+        ii.mipLevels = 1; ii.arrayLayers = 1; ii.samples = VK_SAMPLE_COUNT_1_BIT;
+        ii.tiling = VK_IMAGE_TILING_OPTIMAL; ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE; ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        int ok = (uint32_t)w <= vk.limits.maxImageDimension2D && (uint32_t)h <= vk.limits.maxImageDimension2D &&
+                 vkCreateImage(vk.device, &ii, NULL, &vk.scene.work[i]) == VK_SUCCESS;
+        if (ok) {
+            VkMemoryRequirements req;
+            vkGetImageMemoryRequirements(vk.device, vk.scene.work[i], &req);
+            VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+            ai.allocationSize = req.size;
+            ai.memoryTypeIndex = findMemory(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+            ok = vkAllocateMemory(vk.device, &ai, NULL, &vk.scene.workMemory[i]) == VK_SUCCESS;
+            /* A full device: any other memory the image can live in (system
+             * memory, as the copy itself takes then), rather than frames
+             * without their blur among frames with it. */
+            for (uint32_t m = 0; !ok && m < vk.memProps.memoryTypeCount; m++) {
+                if (!(req.memoryTypeBits & (1u << m)) ||
+                    (vk.memProps.memoryTypes[m].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) continue;
+                ai.memoryTypeIndex = m;
+                ok = vkAllocateMemory(vk.device, &ai, NULL, &vk.scene.workMemory[i]) == VK_SUCCESS;
+            }
+            if (!ok) vk.scene.workMemory[i] = VK_NULL_HANDLE;
+            if (ok) ok = vkBindImageMemory(vk.device, vk.scene.work[i], vk.scene.workMemory[i], 0) == VK_SUCCESS;
+            if (ok) {
+                VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+                vi.image = vk.scene.work[i]; vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                vi.format = VK_FORMAT_R16G16B16A16_SFLOAT; vi.subresourceRange = colorRange;
+                ok = vkCreateImageView(vk.device, &vi, NULL, &vk.scene.workView[i]) == VK_SUCCESS;
+                if (!ok) vk.scene.workView[i] = VK_NULL_HANDLE;
+            }
+        } else {
+            vk.scene.work[i] = VK_NULL_HANDLE;
+        }
+        if (!ok) {
+            for (int k = 0; k <= i; k++) destroyImage(&vk.scene.work[k], &vk.scene.workMemory[k], &vk.scene.workView[k]);
+            gpuWarnOnce("scenework", "scene: no room for the %dx%d blur images: no depth of field", w, h);
+            return 0;
+        }
+    }
+    /* A failed allocation can now release the entire partial set. Record
+     * layout transitions only after all five images and views exist. */
+    for (int i = 0; i < 5; i++) toGeneral(recording(), vk.scene.work[i]);
+    vk.scene.workW = w; vk.scene.workH = h;
+    vk.needBarrier = 1;
+    return 1;
+}
+
+/* Context f's sets for target t name the images as they are now. A view
+ * changes only after the device went idle or the context was handed over
+ * (sceneDepthImage, sceneWorkImages, the copy's own images), so a set is
+ * never rewritten under a command buffer that bound it. */
+static void sceneSets(FrameCtx* f, int t) {
+    VkImageView color = t == SCENE_NARROW ? vk.hiVramView : t == SCENE_WIDE ? vk.hiWideView : vk.interpolationView[INTERP_FRAMES];
+    VkImageView want[7] = {color, vk.scene.depthView[t], vk.scene.workView[0], vk.scene.workView[1],
+                           vk.scene.workView[2], vk.scene.workView[3], vk.scene.workView[4]};
+    for (int i = 0; i < 7; i++) if (want[i] == VK_NULL_HANDLE) want[i] = vk.dummy32View;
+    if (memcmp(want, f->sceneViews[t], sizeof(want)) == 0) return;
+    VkDescriptorImageInfo ii[10];
+    VkWriteDescriptorSet w[10];
+    for (int i = 0; i < 9; i++) {
+        /* 7, 8: the far and near layers again, filtered (dof.comp's composite). */
+        ii[i] = (VkDescriptorImageInfo){i < 7 ? VK_NULL_HANDLE : vk.scene.sampler, want[i < 7 ? i : i - 5], VK_IMAGE_LAYOUT_GENERAL};
+        w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w[i].dstSet = f->sceneDofSet[t]; w[i].dstBinding = (uint32_t)i; w[i].descriptorCount = 1;
+        w[i].descriptorType = i < 7 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w[i].pImageInfo = &ii[i];
+    }
+    ii[9] = ii[1];
+    w[9] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    w[9].dstSet = f->sceneDepthSet[t]; w[9].dstBinding = 0; w[9].descriptorCount = 1;
+    w[9].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; w[9].pImageInfo = &ii[9];
+    /* Without the working images yet, only the depth set is used (the draws). */
+    int have = vk.scene.workView[0] != VK_NULL_HANDLE;
+    vkUpdateDescriptorSets(vk.device, have ? 10 : 1, have ? w : &w[9], 0, NULL);
+    memcpy(f->sceneViews[t], want, sizeof(want));
+}
+
+int gvkSceneActive(void) { return vk.scene.active; }
+
+int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY) {
+    vk.scene.active = 0;
+    if (vk.device == VK_NULL_HANDLE || vk.hiN == 0 || vk.orderedEnabled || !sceneMake()) return 0;
+    endBatch();
+    int n = vk.hiN;
+    if (!sceneDepthImage(SCENE_NARROW, (narrow.x1 - narrow.x0 + 1) * n, (narrow.y1 - narrow.y0 + 1) * n)) return 0;
+    vk.scene.rect[SCENE_NARROW] = narrow;
+    vk.scene.targets = 1;
+    if (wide != NULL && vk.hiWide != VK_NULL_HANDLE) {
+        hiWideRows(wide->y1 + 1); /* under memory pressure growth can turn upscaling off */
+        if (vk.hiN != n) return 0;
+        if (vk.hiWide != VK_NULL_HANDLE) {
+            /* Both copies or neither: the game can capture either, and they
+             * must show the same picture. */
+            if (!sceneDepthImage(SCENE_WIDE, (wide->x1 - wide->x0 + 1) * n, (wide->y1 - wide->y0 + 1) * n)) return 0;
+            vk.scene.rect[SCENE_WIDE] = *wide;
+            vk.scene.insetX = insetX; vk.scene.insetY = insetY;
+            vk.scene.targets = 2;
+        }
+    }
+    if (vk.hiN != n) return 0;
+    VkCommandBuffer cmd = recording();
+    rasterBarrier(cmd);
+    VkClearColorValue nothing = {.uint32 = {0xFFFFFFFFu, 0, 0, 0}}; /* dof.comp DEPTH_FAR */
+    for (int t = 0; t < vk.scene.targets; t++)
+        vkCmdClearColorImage(cmd, vk.scene.depth[t], VK_IMAGE_LAYOUT_GENERAL, &nothing, 1, &colorRange);
+    vk.needBarrier = 1;
+    vk.scene.active = 1;
+    return 1;
+}
+
+/* dof.comp's passes for a frame. `primary` is the target the blurred layers
+ * are made from, its frame (x, y, w, h) 1x pixels of its colour image, at n
+ * hi-res pixels each; the layers are then laid over it, and over `second`
+ * (or -1), whose frame (sx, sy, sw, sh) starts at (layerX, layerY) of the
+ * primary's. Each target's depth image starts at its frame's corner. */
+static void sceneBlur(int primary, int x, int y, int w, int h, int second, int sx, int sy, int sw, int sh,
+                      int layerX, int layerY, int n, const DofParams* p) {
+    if (w <= 0 || h <= 0 || n <= 0) return;
+    if (!sceneWorkImages(w, h)) return;
+    if (primary != SCENE_REPLAY && vk.hiN != n) return;
+    cpuResolveFlush();
+    endBatch();
+    VkCommandBuffer cmd = recording();
+    FrameCtx* ctx = frame();
+    sceneSets(ctx, primary);
+    if (second >= 0) sceneSets(ctx, second);
+    sceneBlurRecord(cmd, ctx, primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p);
+}
+
+/* The passes alone, into a command buffer being recorded: the images exist
+ * (sceneWorkImages for w x h) and ctx's sets name them (sceneSets). */
+static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                            int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const DofParams* p) {
+    rasterBarrier(cmd);
+    vk.needBarrier = 0;
+    int q = gtStart(cmd, GT_DOF);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.dof);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.dofLayout, 0, 1, &ctx->sceneDofSet[primary], 0, NULL);
+    /* The prefilter's samples per PS1 pixel: all of them up to 3x, nine beyond. */
+    DofConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->figures ? 2 : 0) | (p->debug == 2 ? 4 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
+                      p->focus * 16.0f, p->band, p->gain, p->radius};
+    for (int pass = 0; pass < 6; pass++) {
+        c.pass = pass;
+        vkCmdPushConstants(cmd, vk.scene.dofLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+        int gw = pass == 5 ? w * n : w, gh = pass == 5 ? h * n : h;
+        vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
+        rasterBarrier(cmd);
+    }
+    if (second >= 0 && sw > 0 && sh > 0) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.dofLayout, 0, 1, &ctx->sceneDofSet[second], 0, NULL);
+        c.pass = 5;
+        c.originX = sx * n; c.originY = sy * n; c.sizeW = sw * n; c.sizeH = sh * n;
+        c.layerX = layerX; c.layerY = layerY;
+        vkCmdPushConstants(cmd, vk.scene.dofLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+        vkCmdDispatch(cmd, (uint32_t)(sw * n + 7) / 8, (uint32_t)(sh * n + 7) / 8, 1);
+        rasterBarrier(cmd);
+    }
+    gtStop(cmd, q);
+    vk.needBarrier = 1;
+}
+
+void gvkSceneEnd(const DofParams* p) {
+    if (!vk.scene.active) return;
+    endBatch(); /* the scene's batches, with their depth */
+    vk.scene.active = 0;
+    if (p == NULL || vk.hiN == 0 || (p->radius <= 0 && !p->debug)) return;
+    VRect a = vk.scene.rect[SCENE_NARROW];
+    int aw = a.x1 - a.x0 + 1, ah = a.y1 - a.y0 + 1;
+    if (vk.scene.targets == 2 && vk.hiWide != VK_NULL_HANDLE) {
+        /* Inside what the copy holds: the wide target's copy is only as wide
+         * as the columns used so far. */
+        VRect r = vk.scene.rect[SCENE_WIDE];
+        int w = r.x1 - r.x0 + 1, h = r.y1 - r.y0 + 1;
+        if (r.x0 + w > vk.hiWideW) w = vk.hiWideW - r.x0;
+        if (r.y0 + h > vk.hiWideH) h = vk.hiWideH - r.y0;
+        if (w > 0 && h > 0) {
+            sceneBlur(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY, vk.hiN, p);
+            return;
+        }
+    }
+    sceneBlur(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, p);
+}
+
 void gvkHiEffectReset(void) { vk.hiEffectValid = 0; }
 
 /* Retain the narrow and wide captures side by side. Lazy, bounded storage:
@@ -5481,6 +6089,10 @@ static void drawHiBatch(FrameCtx* f, int wide) {
     if (n == 0 || tw == 0 || count == 0) {
         return;
     }
+    /* A registered scene's batches also store depth (scene.c): the wide
+     * target's only when it has a depth image of its own. */
+    int sceneDepth = vk.scene.active && !vk.orderedEnabled && (!wide || vk.scene.targets == 2);
+    if (sceneDepth) sceneSets(f, wide ? SCENE_WIDE : SCENE_NARROW);
     /* This pass reads the native VRAM and the copies written by the
      * preceding passes, including when there was no wide draw. */
     rasterBarrier(f->cmd);
@@ -5489,7 +6101,7 @@ static void drawHiBatch(FrameCtx* f, int wide) {
         VkDeviceSize offset=f->vertexUsed;
         for (uint32_t i = 0; i < count; i++) ((HiVertex*)src)[i].rasterShift = 0; /* the ordered list rasterises in place */
         memcpy(f->vertices.map+offset,src,(size_t)count*sizeof(HiVertex));
-        HiDrawConstants c={n,vk.hiColor,tw,th,vk.hiWideW*n,WIDE_H*n,0,0,1};
+        HiDrawConstants c={n,vk.hiColor,tw,th,vk.hiWideW*n,WIDE_H*n,0,0,1,0,0,0,0,0};
         drawOrdered(f,src,sizeof(HiVertex),offset,0,count,n,tw,th,wide?3:2,&c,sizeof(c));
         f->vertexUsed+=(size_t)count*sizeof(HiVertex);
         f->vertexUsed=(f->vertexUsed+sizeof(GpuVertex)-1)/sizeof(GpuVertex)*sizeof(GpuVertex);
@@ -5533,6 +6145,8 @@ static void drawHiBatch(FrameCtx* f, int wide) {
                                     : (disjoint ? vk.hiCoarseUnorderedPipeline : vk.hiCoarsePipeline);
         else pipeline = wide ? (disjoint ? vk.interpolationWidePipeline : vk.hiWidePipeline)
                              : (disjoint ? vk.hiUnorderedPipeline : vk.hiDrawPipeline);
+        /* A registered scene (scene.c): the same pass also stores depth. */
+        if (sceneDepth) pipeline = vk.scene.draw[wide][cs > 1][disjoint];
         if (vk.env.hiresStats && q >= 0) {
             /* The pass's 1x pixel area: the sum of its triangles' areas (a
              * fill-rate measure; the scissor is the clip rectangle, not the
@@ -5555,6 +6169,8 @@ static void drawHiBatch(FrameCtx* f, int wide) {
         }
         vkCmdBindPipeline(f->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline);
         vkCmdBindDescriptorSets(f->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.hiLayout, 0, 1, &f->set, 0, NULL);
+        if (sceneDepth)
+            vkCmdBindDescriptorSets(f->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.hiLayout, 1, 1, &f->sceneDepthSet[wide], 0, NULL);
         /* One viewport for both copies, a power of two: the vertex shader's
          * NDC and the device's viewport transform are then exact, and with
          * the clip-space position (NDC x w) and the division identical the
@@ -5573,7 +6189,12 @@ static void drawHiBatch(FrameCtx* f, int wide) {
         }
         vkCmdSetViewport(f->cmd, 0, 1, &viewport);
         vkCmdSetScissor(f->cmd, 0, 1, &scissor);
-        HiDrawConstants c = {n, vk.hiColor, vw, vh, vk.hiWideW * n, WIDE_H * n, 0, 0, cs};
+        HiDrawConstants c = {n, vk.hiColor, vw, vh, vk.hiWideW * n, WIDE_H * n, 0, 0, cs, 0, 0, 0, 0, 0};
+        if (sceneDepth) {
+            VRect r = vk.scene.rect[wide];
+            c.depthX = r.x0 * n; c.depthY = r.y0 * n;
+            c.depthW = (r.x1 - r.x0 + 1) * n; c.depthH = (r.y1 - r.y0 + 1) * n;
+        }
         vkCmdPushConstants(f->cmd, vk.hiLayout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(c), &c);
         vkCmdDraw(f->cmd, run, 1, first, 0);
         vkCmdEndRendering(f->cmd);
@@ -5829,8 +6450,12 @@ int gvkInterpolationRead(uint32_t* dst, int x, int y, int w, int h) {
 
 
 void gvkReadback(VRect r, uint16_t* dst, int pitch) {
-    vramFlushCpuWrites((VRect){0,0,VRAM_W-1,VRAM_H-1});
+    /* Only uploads inside the copied rectangle can affect this read.
+     * Keep distant CPU-owned tiles queued for the draw that consumes them. */
+    vramFlushCpuWrites(r);
     endBatch();
+    vk.statReadbacks++;
+    if (vk.env.stats) gpuLog("vkstat: readback %d,%d %dx%d", r.x0, r.y0, r.x1 - r.x0 + 1, r.y1 - r.y0 + 1);
     VkCommandBuffer cmd = recording();
     barrierIfNeeded(cmd);
     VkBufferImageCopy c = {0};
@@ -6924,6 +7549,14 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
     if (vk.device == VK_NULL_HANDLE) return;
     vramFlushCpuWrites((VRect){0,0,VRAM_W-1,VRAM_H-1});
     endBatch();
+    if (vk.env.stats) {
+        uint64_t now[5] = {vk.statBatches, vk.orderedPasses, vk.tilePasses, vk.statSubmits, vk.statReadbacks};
+        gpuLog("vkstat: vb %u batches %llu ordered %llu tile %llu submits %llu readbacks %llu", vblank,
+               (unsigned long long)(now[0] - vk.statLast[0]), (unsigned long long)(now[1] - vk.statLast[1]),
+               (unsigned long long)(now[2] - vk.statLast[2]), (unsigned long long)(now[3] - vk.statLast[3]),
+               (unsigned long long)(now[4] - vk.statLast[4]));
+        memcpy(vk.statLast, now, sizeof(now));
+    }
     hostPresent.nativeFrames++;
     /* Battle speed: the game frames between two shown ones are drawn (into
      * VRAM, as every frame) and submitted, but no swapchain image is
@@ -7203,6 +7836,7 @@ int gvkInit(void* sdlWindow) {
     vk.env.interpolationLog = getenv("XG_INTERPOLATION_LOG") != NULL;
     vk.env.allInterlock = getenv("XG_TEST_ALL_INTERLOCK") != NULL;
     vk.env.hiresStats = getenv("XG_HIRES_STATS") != NULL && atoi(getenv("XG_HIRES_STATS")) > 0;
+    vk.env.stats = envFlag("XG_VK_STATS");
     vk.env.immediateResolve = getenv("XG_TEST_IMMEDIATE_RESOLVE") != NULL;
     vk.env.interpolationSpill = envFlag("XG_TEST_INTERPOLATION_SPILL");
     int headless = envFlag("XG_HEADLESS") || sdlWindow == NULL;
@@ -7229,7 +7863,8 @@ int gvkInit(void* sdlWindow) {
     }
 
     createVramImage(&vk.vram, &vk.vramMemory,
-                    VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+                    VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                        (vk.tileImage ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0));
     createVramImage(&vk.scratch, &vk.scratchMemory,
                     VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
     VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -7285,6 +7920,10 @@ int gvkInit(void* sdlWindow) {
     vk.hiUtilPipeline =
         createHiPipeline(presentVertSpv, sizeof(presentVertSpv), hiresUtilFragSpv, sizeof(hiresUtilFragSpv), 0);
     createFrames();
+    /* The depth of field's pipelines now when the option is on, rather than
+     * at the first field frame (seconds of shader compiling on some drivers);
+     * turned on later, they are made then. Off: nothing. */
+    if (sceneWantsCopy()) sceneMake();
 
     /* VRAM starts out zero, like the CPU copy. */
     VkCommandBuffer cmd = recording();
@@ -7387,6 +8026,9 @@ void gvkShutdown(void) {
         vkDestroySemaphore(vk.device, f->acquired, NULL);
     }
     if(vk.orderedPasses)gpuLog("vulkan: ordered fallback %llu bounded passes",(unsigned long long)vk.orderedPasses);
+    if(vk.tilePasses)gpuLog("vulkan: %llu tile image passes",(unsigned long long)vk.tilePasses);
+    if(vk.env.stats)gpuLog("vulkan: %llu native batches, %llu submissions, %llu readbacks",(unsigned long long)vk.statBatches,
+           (unsigned long long)vk.statSubmits,(unsigned long long)vk.statReadbacks);
     orderedDestroy();
     gtSummary();
     if (interpolationEnabled()) gpuLog("interpolation: %llu pictures, %llu intermediate geometry pictures",
@@ -7452,6 +8094,8 @@ void gvkShutdown(void) {
     vkDestroyPipeline(vk.device, vk.hiWideCoarseUnorderedPipeline, NULL);
     vkDestroyPipeline(vk.device, vk.hiUtilPipeline, NULL);
     vkDestroyPipeline(vk.device, vk.capturePipeline, NULL);
+    sceneDestroy();
+    vk.scene.state = 0;
     vkDestroyPipelineLayout(vk.device, vk.hiLayout, NULL);
     destroyImage(&vk.hiVram, &vk.hiVramMemory, &vk.hiVramView);
     destroyImage(&vk.hiWide, &vk.hiWideMemory, &vk.hiWideView);

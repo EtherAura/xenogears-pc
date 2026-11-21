@@ -640,14 +640,25 @@ void vramResolveCpuWrite(VRect r) {
  * equal at 1x and 12x), the result uploaded, so the CPU copy stays exact
  * there and nothing is read back. Such a tile stays the CPU's for
  * OWNED_VBLANKS after its last read. XG_CPU_OWNED=0: the GPU draws them.
+ *
+ * The rule learns a tile at a time, so the first frame of an effect whose
+ * pieces land on new tiles each time (a battle's opening transition: 38
+ * readbacks in one ordering table, 12 the frame before) pays a readback per
+ * group of pieces: 1.5 ms each on a phone's GPU, 90 ms for the frame. After
+ * OWNED_CHAIN such readbacks since the last vertical blank the rest of the
+ * draw area is the CPU's at once (vramOwnedArea), as its tiles would each
+ * become one by one. XG_CPU_OWNED_CHAIN=<n>: that many instead (0: never).
  */
 #define OWNED_VBLANKS 8 /* the flashback's mesh comes back every 6 (each buffer every other frame), a battle's ClearImage every 4 */
+#define OWNED_CHAIN 3   /* a frame's own draws read back this often: an effect, not a compare (one a frame) */
 static struct {
     int on;          /* -1 not read yet */
     uint32_t now;    /* vertical blanks */
     TileSet written; /* drawn since the last vertical blank */
     uint32_t read[TILES_Y][TILES_X]; /* when the CPU last read the tile after drawing it, now + 1 (0: never) */
-} owned = {.on = -1};
+    int chain;       /* device readbacks of tiles in `written` since the last vertical blank */
+    int chainLimit;  /* OWNED_CHAIN, or XG_CPU_OWNED_CHAIN's (0 never); -1 not read yet */
+} owned = {.on = -1, .chainLimit = -1};
 
 void vramOwnedDraw(VRect r) {
     tilesAdd(&owned.written, r);
@@ -665,26 +676,44 @@ int vramCpuOwned(VRect r) {
     return 0;
 }
 
+/* gp0.c, before it asks about a primitive (vramCpuOwned): the draw area's
+ * tiles are the CPU's once the frame has shown a chain of readbacks. */
+void vramOwnedArea(VRect area) {
+    if (owned.chainLimit < 0) {
+        const char* e = getenv("XG_CPU_OWNED_CHAIN");
+        owned.chainLimit = e && *e ? atoi(e) : OWNED_CHAIN;
+        if (owned.chainLimit < 0) owned.chainLimit = 0;
+    }
+    if (owned.chainLimit == 0 || owned.chain < owned.chainLimit) return;
+    for (int y = area.y0 >> TILE_SHIFT; y <= area.y1 >> TILE_SHIFT; y++)
+        for (int x = area.x0 >> TILE_SHIFT; x <= area.x1 >> TILE_SHIFT; x++) owned.read[y][x] = owned.now + 1;
+}
+
 void vramOwnedReset(void) {
     memset(owned.read, 0, sizeof(owned.read));
     tilesClear(&owned.written);
+    owned.chain = 0;
 }
 
 void vramOwnedVBlank(void) {
     tilesClear(&owned.written);
     owned.now++;
+    owned.chain = 0;
 }
 
 static int keepSyncing; /* a keep's readback (below): no read of the frame's either */
 static void keepDeviceRead(VRect r);
 
 void vramSyncRect(VRect r) {
+    int fresh = 0; /* a read of tiles drawn since the last vertical blank */
     /* The whole of VRAM (a dump, gpuReadVram) is no read of the frame's. */
     if (!keepSyncing && (r.x0 > 0 || r.y0 > 0 || r.x1 < VRAM_W - 1 || r.y1 < VRAM_H - 1)) {
         uint64_t m = tileMask(r);
         for (int y = r.y0 >> TILE_SHIFT; y <= r.y1 >> TILE_SHIFT; y++)
-            for (uint64_t bits = owned.written.rows[y] & m; bits; bits &= bits - 1)
+            for (uint64_t bits = owned.written.rows[y] & m; bits; bits &= bits - 1) {
                 owned.read[y][__builtin_ctzll(bits)] = owned.now + 1;
+                fresh = 1;
+            }
     }
     if (!tilesHit(&drawnTiles, r)) return;
     uint64_t mask = tileMask(r);
@@ -748,6 +777,7 @@ void vramSyncRect(VRect r) {
          * screen-feedback tile must not download all of VRAM per triangle. */
         keepDeviceRead(dirty); /* a picture between's device keep: the CPU copy of its tiles first */
         gp0VramChanging(dirty); /* the CPU copy changes there */
+        owned.chain += fresh;
         gvkReadback(dirty, &vramShadow[dirty.y0][dirty.x0], VRAM_W);
         vramResolveCpuDraw(dirty);
     }

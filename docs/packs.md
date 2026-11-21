@@ -68,8 +68,13 @@ F12 hides every replacement in place, to compare with the original art.
 | Glyphs | `glyph-packs` | Glyph packs |
 
 A pack folder holds a version folder: `SLUS-00664` (US) or `SLPS-01160`
-(Japanese). Put it in the default folder, or choose it in F1 > Packs, then set
-the kinds of picture that should use it in Textures and art.
+(Japanese). Texture, sprite, portrait and glyph pictures are named by the
+texture they replace, so when a pack has only one of the two, the other disc
+uses it too: the releases share every field, sprite and portrait, and a
+picture only one release has stays original. HUD artwork and movie frames are
+read only from their own disc's folder. Put the pack in the default folder, or
+choose it in F1 > Packs, then set the kinds of picture that should use it in
+Textures and art.
 
 ## Making a texture pack
 

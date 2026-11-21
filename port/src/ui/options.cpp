@@ -184,7 +184,7 @@ std::vector<Spec>& table() {
         s.mine = false; // the device's
     }
     add("gpu_ordered_batches", N_("GPU ordering"), [](int) { return gpuOrderedFallback(); },
-        [](int, int v) { gpuSetOrderedFallback(v); }, 0);
+        [](int, int v) { gpuSetOrderedFallback(v); }, 0).def = [](int) { return gpuOrderedFallbackDefault(); };
     static const char* const waits[] = {N_("Sleep between frames"), N_("Spin (steady clock)")};
     add("vsync_wait", N_("VSync wait"), [](int) { return hwSpinWait(); }, [](int, int v) { hwSetSpinWait(v); }, 0,
         waits);
@@ -212,6 +212,12 @@ std::vector<Spec>& table() {
     }
     add("upscale_color", N_("Colour"), [](int) { return hiresColor(); }, [](int, int v) { hiresSetColor(v); }, 0,
         colourNames, 4);
+    static const char* const dofLevels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+    add("depth_of_field", N_("Depth of field"), [](int) { return sceneDof(); }, [](int, int v) { sceneSetDof(v); }, 0,
+        dofLevels, 4);
+    static const char* const dofRanges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
+    add("depth_of_field_focus", N_("Focus range"), [](int) { return sceneDofFocus(); },
+        [](int, int v) { sceneSetDofFocus(v); }, 1, dofRanges, 3);
     add("present_filter", N_("Filter"), [](int) { return presentFilter(); }, [](int, int v) { presentSetFilter(v); }, 0,
         filterNames, 5);
     add("present_movie_filter", N_("Movies"), [](int) { return presentMovieFilter() - PRESENT_FILTER_SAME; },

@@ -109,9 +109,27 @@ back its data labels only, instead of scanning the assembly for them (read_asm_l
 file must be well formed for this region, boot file and the modules the assembly has, and its
 other lists must be the assembly's own); everything else, and every byte copied, still comes
 from the assembly, so this is not a link without asm/<ver>. With --write-asm-layout too, the
-layout written lists the labels read. The file is JSON:
+layout written lists the labels read.
 
-    {"format": "xenogears-pc-link-asm-layout", "version": 1, "region": "us" or "jp",
+All the link does with the assembly's bytes, before the disc's are copied at startup, is ask
+whether a range of them is all zero (Image.nonzero): an object that is gets zero storage, a
+pointer table's other words must be, a pointer field with no symbol must be. The layout lists
+each question a link asked with its answer ("zero" and "nonzero": [address, size], cut to the
+addresses the data fills), nothing else of the bytes. --asm-layout FILE takes the place of
+asm/<ver> with them (read_asm_layout()): the addresses filled, the pointer slots, the blob ends,
+the labels and the answers come from the file, and the assembly is not read. It needs --facts,
+so such a link opens nothing made from the disc: not asm/<ver>, not disc/<ver>, not
+build/<ver>. Without --ps1-objects it leaves the game C's own data out of the
+one-object-per-address check, as a link from the assembly does where no PS1 build stands (the
+release's builder has none): tables made there carry no PS1 object facts. It generates what the
+link from the assembly does. A question the
+file does not hold is answered when it lies inside a range given as zero or around one given
+as not zero; any other stops the link before it writes anything: the file was made for other
+sources (another symbol used, another size), and is made again from the disc. Files from
+several links of one region (other engines, other platforms) merge into one that answers all
+of them (merge_asm_layouts(), tools/link_tables.py). The file is JSON:
+
+    {"format": "xenogears-pc-link-asm-layout", "version": 2, "region": "us" or "jp",
      "boot": the boot file (config/<ver>/disc.yaml),
      "modules": {module: {"deltas": [file offset - address, ...] (ascending; one: a contiguous image),
                           "spans": [[start, end], ...] (the addresses data lines fill, merged; ascending,
@@ -121,10 +139,15 @@ layout written lists the labels read. The file is JSON:
                                   pointing into a blob is that blob's label plus the offset),
                           "labels": [[name, address], ...] (data labels in the link's scan order:
                                     sorted files, then lines; a name in several modules keeps its
-                                    first place)}}}
+                                    first place),
+                          "zero": [[address, size], ...] (ranges asked about that hold only zero;
+                                  ascending),
+                          "nonzero": [[address, size], ...] (ranges asked about that hold a byte
+                                     that is not zero; ascending; none inside a "zero" range)}}}
 
     python tools/pc_link.py --write-asm-layout layout.json OUTDIR OBJ...
     python tools/pc_link.py --asm-labels layout.json OUTDIR OBJ...  # its labels; asm/<ver> still read
+    python tools/pc_link.py --facts facts.json --ps1-objects ps1.json --asm-layout layout.json OUTDIR OBJ...
 
 Sizes come from the game's own declarations: each file that uses a symbol is
 compiled again with `char x[sizeof(sym)]` appended, once for the PC (x86-64)
@@ -178,9 +201,68 @@ class Image:
     deltas: set[int] = field(default_factory=set)  # file offset - address (one value: the image is contiguous)
     refs: dict[int, tuple[str, int]] = field(default_factory=dict)  # slot address -> (symbol, addend)
     ends: set[int] = field(default_factory=set)  # where an INCLUDE_RODATA blob ends
+    # nonzero()'s questions and answers, by (start, size) cut to the addresses filled.
+    asked: dict[tuple[int, int], bool] = field(default_factory=dict)
+    # An image from an assembly layout file (layout_images) has no bytes: its mem gives the
+    # addresses filled, and these are the answers nonzero() may give.
+    answers: dict[tuple[int, int], bool] | None = None
+    _spans: list[list[int]] | None = field(default=None, repr=False, compare=False)
 
     def get(self, addr: int, size: int) -> bytes:
+        if self.answers is not None:
+            raise AsmLayoutError(f"assembly layout: {self.module}: a layout has no bytes to give")
         return bytes(self.mem.get(a, 0) for a in range(addr, addr + size))
+
+    def spans(self) -> list[list[int]]:
+        """The addresses filled, as merged [start, end) ranges in order (mem must be complete)."""
+        if self._spans is None:
+            out: list[list[int]] = []
+            for a in sorted(self.mem):
+                if out and out[-1][1] == a:
+                    out[-1][1] = a + 1
+                else:
+                    out.append([a, a + 1])
+            self._spans = out
+        return self._spans
+
+    def filled(self, addr: int, size: int) -> tuple[int, int] | None:
+        """[addr, addr + size) from its first to its last filled address, as (start, size); None
+        when the data fills none of it. What is cut off is zero whatever the data holds."""
+        spans, end = self.spans(), addr + size
+        i = bisect.bisect_right(spans, [addr, 1 << 33]) - 1
+        if i < 0 or spans[i][1] <= addr:
+            i += 1
+        if i >= len(spans) or spans[i][0] >= end:
+            return None
+        j = bisect.bisect_left(spans, [end, 0]) - 1
+        lo = max(addr, spans[i][0])
+        return lo, min(end, spans[j][1]) - lo
+
+    def nonzero(self, addr: int, size: int) -> bool:
+        """Whether [addr, addr + size) holds a byte that is not zero: all the link asks of the
+        bytes before it copies them. The question, cut to the addresses filled, and its answer
+        are kept (asked): they are the assembly layout's zero answers. A layout's image answers
+        from the file: a question it holds, one inside a range it gives as zero, or one around a
+        range it gives as not zero; any other stops the link."""
+        cut = self.filled(addr, size)
+        if cut is None:
+            return False
+        if self.answers is None:
+            answer = any(self.mem.get(a, 0) for a in range(cut[0], cut[0] + cut[1]))
+        else:
+            answer = self.answers.get(cut)
+            if answer is None:
+                lo, hi = cut[0], cut[0] + cut[1]
+                if any(a <= lo and hi <= a + n for (a, n), nz in self.answers.items() if not nz):
+                    answer = False
+                elif any(lo <= a and a + n <= hi for (a, n), nz in self.answers.items() if nz):
+                    answer = True
+                else:
+                    raise AsmLayoutError(
+                        f"assembly layout: {self.module}: it does not say whether 0x{lo:08X}..0x{hi:08X} is "
+                        "zero (the tables were made for other sources: make them again from the disc)")
+        self.asked[cut] = answer
+        return answer
 
     def refs_in(self, addr: int, size: int) -> list[tuple[int, str, int]]:
         return [(a, *self.refs[a]) for a in range(addr, addr + size) if a in self.refs]
@@ -809,7 +891,7 @@ def relayout(img: Image, addr: int, q: int, size_pc: int, s: dict, sources: list
                     src.append(None)
                 if base + o in img.refs:
                     out.append(img.refs[base + o])
-                elif any(img.get(base + o, 4)):
+                elif img.nonzero(base + o, 4):
                     return None  # a number in a pointer field
                 else:
                     out.append(("", 0))
@@ -1133,8 +1215,8 @@ def ps1_objects_json(ver: str, boot: str | None, facts: dict[str, dict]) -> str:
 
 # The assembly layout (module docstring): structure the link reads from asm/<ver>, no contents.
 ASM_LAYOUT_FORMAT = "xenogears-pc-link-asm-layout"
-ASM_LAYOUT_VERSION = 1
-ASM_LAYOUT_MODULE_KEYS = {"deltas", "spans", "ends", "refs", "labels"}
+ASM_LAYOUT_VERSION = 2
+ASM_LAYOUT_MODULE_KEYS = {"deltas", "spans", "ends", "refs", "labels", "zero", "nonzero"}
 
 
 class AsmLayoutError(ValueError):
@@ -1148,16 +1230,17 @@ def asm_layout_facts(images: dict[str, Image], labels: dict[str, dict[str, int]]
     out = {}
     for m in sorted(mods):
         img = images.get(m) or Image(m)
-        spans: list[list[int]] = []
-        for a in sorted(img.mem):
-            if spans and spans[-1][1] == a:
-                spans[-1][1] = a + 1
-            else:
-                spans.append([a, a + 1])
-        out[m] = {"deltas": sorted(img.deltas), "spans": spans, "ends": sorted(img.ends),
+        out[m] = {"deltas": sorted(img.deltas), "spans": [list(x) for x in img.spans()], "ends": sorted(img.ends),
                   "refs": [[a, *img.refs[a]] for a in sorted(img.refs)],
-                  "labels": [[n, per[m]] for n, per in labels.items() if m in per]}
+                  "labels": [[n, per[m]] for n, per in labels.items() if m in per],
+                  **zero_answers(img.asked)}
     return out
+
+
+def zero_answers(asked: dict[tuple[int, int], bool]) -> dict[str, list[list[int]]]:
+    """The layout's two answer lists from an image's questions (Image.nonzero)."""
+    return {"zero": sorted([a, n] for (a, n), nz in asked.items() if not nz),
+            "nonzero": sorted([a, n] for (a, n), nz in asked.items() if nz)}
 
 
 def asm_layout_check(doc, ver: str, boot: str | None, modules: list[str]) -> None:
@@ -1182,7 +1265,7 @@ def asm_layout_check(doc, ver: str, boot: str | None, modules: list[str]) -> Non
         if not re.fullmatch(r"\w+", m) or not isinstance(f, dict) or set(f) != ASM_LAYOUT_MODULE_KEYS:
             raise AsmLayoutError(f"assembly layout: {m}: want keys {sorted(ASM_LAYOUT_MODULE_KEYS)}")
         deltas, spans, ends, refs, labels = (f[k] for k in ("deltas", "spans", "ends", "refs", "labels"))
-        if not all(isinstance(x, list) for x in (deltas, spans, ends, refs, labels)):
+        if not all(isinstance(x, list) for x in (deltas, spans, ends, refs, labels, f["zero"], f["nonzero"])):
             raise AsmLayoutError(f"assembly layout: {m}: a field is not a list")
         if (any(type(d) is not int or not -0xFFFFFFFF <= d <= 0xFFFFFFFF for d in deltas) or not ascending(deltas)
                 or bool(spans) != bool(deltas)):
@@ -1207,6 +1290,22 @@ def asm_layout_check(doc, ver: str, boot: str | None, modules: list[str]) -> Non
                 or not PS1_SYMBOL.fullmatch(e[0]) or not u32(e[1]) for e in labels)
                 or len({e[0] for e in labels}) != len(labels)):
             raise AsmLayoutError(f"assembly layout: {m}: labels are not distinct [name, address]")
+        # A question starts and ends on a filled address (Image.filled), and no two answers disagree.
+        for k in ("zero", "nonzero"):
+            if (any(not isinstance(r, list) or len(r) != 2 or not u32(r[0]) or type(r[1]) is not int or r[1] < 1
+                    or not inside(r[0]) or not inside(r[0] + r[1] - 1) for r in f[k])
+                    or any(a >= b for a, b in zip(f[k], f[k][1:]))):
+                raise AsmLayoutError(f"assembly layout: {m}: {k} answers are not ascending, distinct [address, "
+                                     "size] ranges that start and end on filled addresses")
+        z = f["zero"]
+        reach = []  # the furthest end among the zero ranges up to each one
+        for a, n in z:
+            reach.append(max(a + n, reach[-1] if reach else 0))
+        for a, n in f["nonzero"]:
+            i = bisect.bisect_right(z, [a, 1 << 33]) - 1
+            if i >= 0 and reach[i] >= a + n:
+                raise AsmLayoutError(f"assembly layout: {m}: 0x{a:08X}+{n} is given as not zero inside a range "
+                                     "given as zero")
 
 
 def scan_data_labels(ver: str) -> dict[str, dict[str, int]]:
@@ -1231,18 +1330,9 @@ def scan_data_labels(ver: str) -> dict[str, dict[str, int]]:
     return labels
 
 
-def read_asm_labels(path: Path, ver: str, boot: str | None, images: dict[str, Image]) -> dict[str, dict[str, int]]:
-    """The data labels of assembly layout file `path` (--write-asm-layout), in place of
-    scan_data_labels; AsmLayoutError unless it is well formed (asm_layout_check) for region `ver`,
-    boot file `boot` and exactly the modules load_images found, and its deltas, spans, blob ends and
-    pointer slots are the ones those images give (a layout from another PS1 build is refused).
-
-    Only the labels are taken: the images, and every byte the link copies, still come from the
-    assembly. The file keeps each module's labels in the scan's order; the scan's order across
-    modules is not in it, so the names are put in the one order every module's list keeps (ties by
-    module, then place), and a name's modules in module order. What the link does with the labels
-    depends on neither: it sorts or looks them up, and a layout it writes again (--write-asm-layout)
-    lists each module's in the file's order."""
+def parse_asm_layout(path: Path) -> dict:
+    """An assembly layout file as JSON, read strictly (no key twice, no NaN or Infinity);
+    AsmLayoutError when it cannot be. Not yet checked (asm_layout_check)."""
     def strict(pairs):
         keys = [k for k, _ in pairs]
         if len(set(keys)) != len(keys):
@@ -1252,16 +1342,64 @@ def read_asm_labels(path: Path, ver: str, boot: str | None, images: dict[str, Im
     def no_constant(c):
         raise ValueError(f"{c} is not a number")
     try:
-        doc = json.loads(Path(path).read_text(), object_pairs_hook=strict, parse_constant=no_constant)
+        return json.loads(Path(path).read_text(), object_pairs_hook=strict, parse_constant=no_constant)
     except (OSError, UnicodeDecodeError, ValueError) as e:
         raise AsmLayoutError(f"assembly layout {path}: not readable JSON: {e}") from None
+
+
+def read_asm_labels(path: Path, ver: str, boot: str | None, images: dict[str, Image]) -> dict[str, dict[str, int]]:
+    """The data labels of assembly layout file `path` (--write-asm-layout), in place of
+    scan_data_labels; AsmLayoutError unless it is well formed (asm_layout_check) for region `ver`,
+    boot file `boot` and exactly the modules load_images found, and its deltas, spans, blob ends and
+    pointer slots are the ones those images give (a layout from another PS1 build is refused).
+
+    Only the labels are taken: the images, and every byte the link copies, still come from the
+    assembly (layout_labels gives the order they are put in)."""
+    doc = parse_asm_layout(path)
     asm_layout_check(doc, ver, boot, sorted(images))
     own = asm_layout_facts(images, {})
-    mods = sorted(doc["modules"])
-    for m in mods:
+    for m in sorted(doc["modules"]):
         for k in ("deltas", "spans", "ends", "refs"):
             if doc["modules"][m][k] != own[m][k]:
                 raise AsmLayoutError(f"assembly layout: {m}: {k} are not this assembly's (another PS1 build's layout?)")
+    return layout_labels(doc)
+
+
+def read_asm_layout(path: Path, ver: str, boot: str | None,
+                    modules: list[str]) -> tuple[dict[str, Image], dict[str, dict[str, int]]]:
+    """Assembly layout file `path` in place of the data assembly (--asm-layout): each module's
+    image (layout_images) and the data labels (layout_labels), asm/<ver> unread. AsmLayoutError
+    unless it is well formed (asm_layout_check) for region `ver` and boot file `boot`, and every
+    module it names is one this link has (`modules`). What it cannot be checked against without
+    the assembly is whether the layout is the current PS1 split's: the link facts' copy
+    fingerprints (--facts) stop a link whose copy lists come out otherwise."""
+    doc = parse_asm_layout(path)
+    named = doc.get("modules") if isinstance(doc, dict) else None
+    asm_layout_check(doc, ver, boot, sorted(named) if isinstance(named, dict) and named else [])
+    if set(named) - set(modules):
+        raise AsmLayoutError(f"assembly layout: it names {sorted(set(named) - set(modules))}, which this link has not")
+    return layout_images(doc), layout_labels(doc)
+
+
+def layout_images(doc: dict) -> dict[str, Image]:
+    """Each module's image from a checked assembly layout: the addresses filled, the pointer
+    slots, and the zero answers Image.nonzero gives in place of the bytes."""
+    out = {}
+    for m, f in doc["modules"].items():
+        img = Image(m, deltas=set(f["deltas"]), refs={a: (sym, add) for a, sym, add in f["refs"]}, ends=set(f["ends"]),
+                    answers={**{(a, n): False for a, n in f["zero"]}, **{(a, n): True for a, n in f["nonzero"]}})
+        img.mem = {a: 0 for lo, hi in f["spans"] for a in range(lo, hi)}
+        out[m] = img
+    return out
+
+
+def layout_labels(doc: dict) -> dict[str, dict[str, int]]:
+    """name -> {module: address} from a checked assembly layout. The file keeps each module's
+    labels in the scan's order; the scan's order across modules is not in it, so the names are put
+    in the one order every module's list keeps (ties by module, then place), and a name's modules
+    in module order. What the link does with the labels depends on neither: it sorts or looks them
+    up, and a layout it writes again (--write-asm-layout) lists each module's in the file's order."""
+    mods = sorted(doc["modules"])
     # Each module's list is a chain; the names go in an order that keeps every chain.
     after: dict[str, set[str]] = {}
     before = {}
@@ -1293,6 +1431,31 @@ def read_asm_labels(path: Path, ver: str, boot: str | None, images: dict[str, Im
         for n, a in doc["modules"][m]["labels"]:
             labels[n][m] = a
     return labels
+
+
+def merge_asm_layouts(docs: list[dict]) -> dict:
+    """One assembly layout that answers every question of several links of one region (other
+    engines, other platforms), from their checked layouts. They must be one PS1 split's: the same
+    region, boot file, modules, and each module's structure and labels; the answers are joined,
+    and no link's may contradict another's (AsmLayoutError)."""
+    first = docs[0]
+    out = {k: first[k] for k in ("format", "version", "region", "boot")}
+    out["modules"] = {}
+    for doc in docs:
+        if any(doc[k] != first[k] for k in ("format", "version", "region", "boot")) or \
+                sorted(doc["modules"]) != sorted(first["modules"]):
+            raise AsmLayoutError("assembly layout: the layouts are not one region's, one PS1 split's")
+    for m, f in first["modules"].items():
+        for doc in docs:
+            for k in ("deltas", "spans", "ends", "refs", "labels"):
+                if doc["modules"][m][k] != f[k]:
+                    raise AsmLayoutError(f"assembly layout: {m}: {k} differ between the layouts (another PS1 split?)")
+        out["modules"][m] = {**f, **{k: sorted({tuple(r) for doc in docs for r in doc["modules"][m][k]})
+                                    for k in ("zero", "nonzero")}}
+        for k in ("zero", "nonzero"):
+            out["modules"][m][k] = [list(r) for r in out["modules"][m][k]]
+    asm_layout_check(out, first["region"], first["boot"], sorted(first["modules"]))
+    return out
 
 
 def asm_layout_json(ver: str, boot: str | None, facts: dict[str, dict], modules: list[str]) -> str:
@@ -1368,7 +1531,7 @@ def module_bounds(overlays, darwin):
     return out_modules
 
 
-def main() -> int:
+def link() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("outdir", type=Path)
     ap.add_argument("objects", nargs="+")
@@ -1392,10 +1555,17 @@ def main() -> int:
                      help="write the PS1 object facts, read from every linked module's build/<ver>/<module>.elf, to this file")
     ap.add_argument("--write-asm-layout", type=Path,
                     help="write the layout read from asm/<ver> (no contents) to this file, when the link succeeds")
-    ap.add_argument("--asm-labels", type=Path,
-                    help="take the data labels from this assembly layout file (--write-asm-layout) instead of "
-                         "scanning asm/<ver> for them; the images still come from the assembly")
+    asm = ap.add_mutually_exclusive_group()
+    asm.add_argument("--asm-labels", type=Path,
+                     help="take the data labels from this assembly layout file (--write-asm-layout) instead of "
+                          "scanning asm/<ver> for them; the images still come from the assembly")
+    asm.add_argument("--asm-layout", type=Path,
+                     help="take the data assembly's layout and zero answers from this file (--write-asm-layout) "
+                          "instead of asm/<ver>, which is then not read; needs --facts")
     args = ap.parse_args()
+    if args.asm_layout and not args.facts:
+        ap.error("--asm-layout needs --facts: without the assembly the link takes nothing from the disc, "
+                 "the extracted images or the PS1 build")
     GAME_FLAGS[GAME_FLAGS.index("-Iinclude")] = f"-I{args.game_root / 'include'}"
 
     syms_all: dict[str, dict[str, tuple[int, bool]]] = {}
@@ -1404,14 +1574,16 @@ def main() -> int:
             m = re.match(r"\s*(\w+)\s*=\s*(0x[0-9A-Fa-f]+)\s*;(.*)", line)
             if m:
                 syms_all.setdefault(m.group(1), {})[f.stem] = (int(m.group(2), 16), "type:func" in m.group(3))
-    images, labels_first = load_images(args.ver)
-    if args.asm_labels:
-        try:
-            labels_all = read_asm_labels(args.asm_labels, args.ver, boot_name(disc_files(args.ver)), images)
-        except AsmLayoutError as e:
-            raise SystemExit(f"pc_link: {e}") from None
-    else:
-        labels_all = scan_data_labels(args.ver)
+    try:
+        if args.asm_layout:
+            images, labels_all = read_asm_layout(args.asm_layout, args.ver, boot_name(disc_files(args.ver)),
+                                                 sorted({module_of(o) for o in args.objects}))
+        else:
+            images, _ = load_images(args.ver)
+            labels_all = (read_asm_labels(args.asm_labels, args.ver, boot_name(disc_files(args.ver)), images)
+                          if args.asm_labels else scan_data_labels(args.ver))
+    except AsmLayoutError as e:
+        raise SystemExit(f"pc_link: {e}") from None
     # Taken before the link uses the images; checked and written only once it has succeeded.
     asm_layout = asm_layout_facts(images, labels_all) if args.write_asm_layout else None
     asm_modules = sorted(set(images) | {m for per in labels_all.values() for m in per})
@@ -1818,9 +1990,8 @@ def main() -> int:
                 unconverted.append(f"{owner} {name}: no size known; 16 bytes")
             decl = f"__attribute__((aligned(16){in_data(owner, addr)})) unsigned char {name}[{size_pc}]"
             have = img is not None and q and addr >= 0
-            content = img.get(addr, q) if have else b""
             refs = img.refs_in(addr, q) if have else []
-            zero = not any(content) and not refs
+            zero = not refs and not (have and img.nonzero(addr, q))
             same = bool(q) and size_pc == q
             if same and refs:
                 numeric_refs.append(f"{owner} {name}: {len(refs)} symbolised word(s) kept as numbers "
@@ -1837,7 +2008,7 @@ def main() -> int:
                 add_copies(name, [(i, addr + i) for i in range(q)])
                 report["common-init" if is_common else "bytes"] += 1
             elif q % 4 == 0 and size_pc == 2 * q and all(
-                    (a in img.refs) or not any(img.get(a, 4)) for a in range(addr, addr + q, 4)):
+                    (a in img.refs) or not img.nonzero(a, 4) for a in range(addr, addr + q, 4)):
                 items = []
                 for a in range(addr, addr + q, 4):
                     if a in img.refs:
@@ -1928,7 +2099,7 @@ def main() -> int:
                 if ext and not refs:
                     generated_symbols[owner].add(sym)
                     decl_lines.append(f"extern unsigned char {sym}[];")
-                    if any(img.get(pa, ext)):  # .data, as an initialiser that is not all zero puts it
+                    if img.nonzero(pa, ext):  # .data, as an initialiser that is not all zero puts it
                         def_lines.append(f"__attribute__((aligned(16), section(\"{init_section}\"))) unsigned char {sym}[{ext}];"
                                          " /* pointed at only */")
                         add_copies(sym, [(i, pa + i) for i in range(ext)])
@@ -1937,7 +2108,7 @@ def main() -> int:
                                          "/* pointed at only */")
                     report["pointed-at"] += 1
                 elif ext and pa % 4 == 0 and ext % 4 == 0 and all(
-                        (a in img.refs) or not any(img.get(a, 4)) for a in range(pa, pa + ext, 4)):
+                        (a in img.refs) or not img.nonzero(a, 4) for a in range(pa, pa + ext, 4)):
                     generated_symbols[owner].add(sym)
                     items = []
                     for a in range(pa, pa + ext, 4):
@@ -1984,7 +2155,8 @@ def main() -> int:
         if ps1_elf_read is not None:  # the file written is read back as --ps1-objects reads it, and used so
             ps1_objects_text = ps1_objects_json(args.ver, boot_name(files), ps1_objects_facts(data_objects, ps1_elf_read))
             ps1_objects = parse_ps1_objects(ps1_objects_text, args.ver, boot_name(files), modules)
-        c_objects = ps1_c_objects(args.ver, data_objects, ps1_objects)
+        # Tables made where no PS1 build stood hold no PS1 object facts, and the images are not opened.
+        c_objects = [] if args.asm_layout and ps1_objects is None else ps1_c_objects(args.ver, data_objects, ps1_objects)
     except Ps1ObjectsError as e:
         raise SystemExit(f"pc_link: {e}") from None
     separate: set[frozenset] = set()
@@ -2083,6 +2255,8 @@ def main() -> int:
                          "extent is wrong: a blob or table cut short):\n  " + "\n  ".join(outside[:20]))
     asm_layout_text = None
     if asm_layout is not None:
+        for m, f in asm_layout.items():  # the structure as it was read, the answers as the link asked
+            f.update(zero_answers(images[m].asked if m in images else {}))
         try:
             asm_layout_text = asm_layout_json(args.ver, boot_name(files), asm_layout, asm_modules)
         except AsmLayoutError as e:
@@ -2117,6 +2291,13 @@ def main() -> int:
         args.write_asm_layout.write_text(asm_layout_text)
     print("\n".join(summary))
     return 0
+
+
+def main() -> int:
+    try:
+        return link()
+    except AsmLayoutError as e:  # a question the layout file cannot answer, before anything is written
+        raise SystemExit(f"pc_link: {e}") from None
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ English | [日本語](README.ja.md)
 
 Built from the [matching decompilation](https://github.com/EtherAura/xenogears).
 Native Linux and Windows, with optional display, gameplay and presentation extras.
+An Android version is in development.
 Part of **-Project Exodus-**.
 
 [**Website**](https://exodus.agartha.digital/) · [**Build and set up**](docs/building.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
@@ -42,7 +43,7 @@ GitHub CI covers checks that need no game data; full builds and retail checks ru
 
 - **Linux x86-64 and Windows x64.** [Public downloads](https://github.com/EtherAura/xenogears-pc/releases/latest) are available.
 - **FreeBSD 15 amd64.** [Native package](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.20-freebsd) with Original and Enhanced engines for US and Japanese discs. Install and launch passed on FreeBSD 15.1 amd64 in a VM with software Vulkan.
-- **Android.** The [APK build script](tools/build_android.sh) targets x86-64 and arm64. A signed APK ran in Remora on Android 17 x86-64. Physical arm64 testing and a public APK are pending.
+- **Android (in development).** The [APK build script](tools/build_android.sh) targets x86-64 and arm64. A signed APK runs on Android 17 x86-64, and testing on an arm64 phone is under way. A public APK is pending.
 
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Discussions](https://github.com/EtherAura/xenogears-pc/discussions)
 

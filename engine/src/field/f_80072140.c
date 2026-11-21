@@ -15,6 +15,7 @@
 #include "pc_speedup.h"
 #include "pc_gameplay.h"
 #include "pc_camera.h"
+#include "pc_scene.h"
 
 void func_80284EA4(void); /* debugger overlay */
 s32 checkCameraCollision(VECTOR* pos, SVECTOR* line, s16* out);
@@ -2117,6 +2118,35 @@ static void pcFieldPictureLog(void) {
     portFieldSweepPicture(v, n);
 }
 
+/* Enhanced (xg-rgcf.5, docs/PORT_HD2D.md): tell the port which tables the scene is in,
+ * so the display copy can keep each pixel's view depth and blur by it before
+ * the UI table is drawn (include/pc_scene.h). The chain DrawOTag walks is
+ * uiOT[7], the ground table, the scene table, then uiOT[6] down to 0: the
+ * dialogue windows, the compass and the faders. A slot is view depth / 16
+ * (OTZ >> gDepthDivider). The focus is the camera's look-at point: the
+ * tracked actor in play, the script's target in a scripted shot. A
+ * background as big as the screen is a picture, kept sharp (the same test
+ * as renderBackgroundPolyIfEnabled). The 1x picture is not involved.
+ * looking: the frame was drawn from eye level (first-person look), where the
+ * look-at point is the game camera's and no depth of that picture; it is
+ * registered with no focus, so nothing is blurred and the port can say why. */
+static void pcFieldSceneDepth(int looking) {
+    MATRIX* m = &fieldSceneState.m1E4_projectionMatrix;
+    s32 x = fieldSceneState.m10_cameraAt.vx >> 16;
+    s32 y = fieldSceneState.m10_cameraAt.vy >> 16;
+    s32 z = fieldSceneState.m10_cameraAt.vz >> 16;
+    s32 focus = looking ? 0 : ((m->m[2][0] * x + m->m[2][1] * y + m->m[2][2] * z) >> 12) + m->t[2];
+    s32 picture = -1;
+
+    if (OPX_80Params.m32_OPX_82Param4 != 0 && D_800ADB50 == 0 && OPX_80Params.m0_OPX_80Params[2] <= 0x140 &&
+        OPX_80Params.m0_OPX_80Params[3] >= 0xE0) {
+        picture = op9DVar1.m50_linkOTIndex - 1;
+    }
+    pcSceneDepth(pCurrentFieldRenderingContext->mCC_OT, 0x1000,
+                 fieldUseGroundOT != 0 ? pCurrentFieldRenderingContext->m40D0_secondaryOT : 0, 0x1000,
+                 4 << gDepthDivider, &pCurrentFieldRenderingContext->m80D4_uiOT[6], focus, picture);
+}
+
 void updateAndRenderField(void) {
     MATRIX gameCamera, gameProjection;
     int looking;
@@ -2236,6 +2266,7 @@ void updateAndRenderField(void) {
             linkOT(&pCurrentFieldRenderingContext->mCC_OT[op9DVar1.m50_linkOTIndex], pCurrentFieldRenderingContext->m40D0_secondaryOT, op9DVar1.m50_linkOTIndex);
         }
         linkOT(&pCurrentFieldRenderingContext->m80D4_uiOT[7], pCurrentFieldRenderingContext->mCC_OT, op9DVar1.m50_linkOTIndex);
+        pcFieldSceneDepth(looking); /* Enhanced (xg-rgcf.5): the scene's depth, for the display copy's depth of field */
     }
     DrawOTag(&pCurrentFieldRenderingContext->m80D4_uiOT[7]);
     pcInterpolationFrameEnd();

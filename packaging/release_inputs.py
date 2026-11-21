@@ -1,8 +1,12 @@
 """Private source copies and checked disc inputs for the release builders."""
 
+import hashlib
+import os
 import re
 import shutil
 from pathlib import Path, PurePosixPath
+
+TABLES = "port/link-tables"  # what a checkout without a disc links from (port/CMakeLists.txt XG_LINK_FROM)
 
 
 class InputError(Exception):
@@ -54,3 +58,29 @@ def module_count(tree, region):
                            or (folder / n).stat().st_size == 0 for n in want):
         raise InputError(f"extraction incomplete or unexpected: missing {sorted(want - have)}, extra {sorted(have - want)}")
     return len(want)
+
+
+def tree_digest(tree):
+    """One SHA-256 naming a private copy's sources: every file's name and bytes, the link tables left out.
+
+    A disc-backed build records it beside the tables it writes, with its executables' sums; a build from
+    those tables whose copy has the same digest must give the same executables (build_release.py)."""
+    tree = Path(tree)
+    entries = []
+    for folder, subdirs, names in os.walk(tree):
+        for name in names + [d for d in subdirs if (Path(folder) / d).is_symlink()]:
+            path = Path(folder) / name
+            rel = path.relative_to(tree).as_posix()
+            if rel.startswith(TABLES + "/"):
+                continue
+            if path.is_symlink():
+                data = b"link " + os.readlink(path).encode()
+            elif path.is_file():
+                data = path.read_bytes()
+            else:
+                raise InputError(f"{rel}: not a regular file")
+            entries.append(rel.encode() + b"\0" + hashlib.sha256(data).digest())
+    digest = hashlib.sha256()
+    for entry in sorted(entries):
+        digest.update(len(entry).to_bytes(4, "big") + entry)
+    return digest.hexdigest()

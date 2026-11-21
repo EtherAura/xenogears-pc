@@ -203,6 +203,7 @@ gpu/texture_pack.c * host texture packs
 gpu/portrait_pack.c * host independent portrait library, selection and derived cache
 gpu/texture_cel.c * host optional cel HUD artwork cache
 gpu/vk.c * host Vulkan (wideExtent serialized by wideStateIo)
+gpu/scene.c * derived the depth of field: its settings, and the scene one DrawOTag registers, draws and blurs (display copy only; nothing outlives the walk, and states are taken between frames)
 gpu/vram.c bins derived scratch of a stability scan
 gpu/vram.c captureAge state
 gpu/vram.c capturePixels state live prefixes of two native StoreImage captures

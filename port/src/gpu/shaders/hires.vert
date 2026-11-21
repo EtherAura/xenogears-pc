@@ -26,6 +26,12 @@ layout(location = 11) in uint inWideEdge;
 layout(location = 12) in float inW;
 layout(location = 13) in uvec4 inSample;
 layout(location = 14) in uint inRasterShift;
+#ifdef DEPTH
+// The scene's depth image (scene.c): the view depth at the vertex, negated
+// for a figure (a sprite), 0 for none, 1e30 for a picture kept in focus
+// (HiVertex.z).
+layout(location = 15) in float inZ;
+#endif
 
 layout(push_constant) uniform Hi {
     int n;          // N
@@ -35,6 +41,15 @@ layout(push_constant) uniform Hi {
     ivec2 ditherOrigin; // private replay's origin in the authored target, at 1x
     int coarse;     // the block size the COARSE build uses (2); the layout's field, unread
 } pc;
+
+#ifdef DEPTH
+// 1 / view depth is linear on the screen, so it is carried without the
+// perspective division and is exact across a flat face whether the face's
+// textures are perspective-correct or not; negative for a figure. A marker
+// is one value for the whole triangle (the three vertices agree, gp0.c): 0
+// none, 2 a picture kept in focus (a depth is at least 1, so 1 / z is not).
+layout(location = 14) noperspective out float vInvZ;
+#endif
 
 layout(location = 0) out vec2 vUV;
 layout(location = 1) noperspective out vec3 vColor;
@@ -84,4 +99,7 @@ void main() {
     vSample = inSample;
     vWideTex = inWideTex;
     vWideEdge = inWideEdge;
+#ifdef DEPTH
+    vInvZ = inZ == 0.0 ? 0.0 : inZ >= 1.0e29 ? 2.0 : 1.0 / inZ;
+#endif
 }

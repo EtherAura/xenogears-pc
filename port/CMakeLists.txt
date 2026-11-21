@@ -621,12 +621,104 @@ file(GLOB XG_PCLINK_INPUTS CONFIGURE_DEPENDS
 if(EXISTS "${XG_ROOT}/build.ninja")
     list(APPEND XG_PCLINK_INPUTS "${XG_ROOT}/build.ninja")
 endif()
+
+# What the link takes from the disc (xg-4oq.8): which of the game's data is
+# zero, where its pointers are, and where on the disc each copied byte is.
+#   disc    from the PS1 split (asm/<ver>), the extracted images (disc/<ver>)
+#           and the PS1 build (build/<ver>), as tools/extract.py,
+#           tools/configure.py and ninja leave them.
+#   tables  from port/link-tables: the same facts as files (addresses, sizes,
+#           offsets and hashes, no game byte), so a checkout without a disc
+#           links. They are one region's, one engine's and one platform's,
+#           and the source data plans one compiler's: a build they were not
+#           made for stops with what differs. The executable reads the game
+#           from the player's disc at every start either way.
+#   auto    the disc where asm/<ver> is, else the tables.
+# XG_WRITE_LINK_TABLES writes a disc-backed build's tables to
+# <build>/link-tables; tools/link_tables.py gathers builds' tables into
+# port/link-tables and checks them.
+set(XG_LINK_FROM "auto" CACHE STRING "What the link reads: auto, disc or tables")
+set_property(CACHE XG_LINK_FROM PROPERTY STRINGS auto disc tables)
+set(XG_LINK_TABLES "${CMAKE_CURRENT_SOURCE_DIR}/link-tables" CACHE PATH "The link tables (XG_LINK_FROM=tables)")
+option(XG_WRITE_LINK_TABLES "Write this disc-backed build's link tables to <build>/link-tables" OFF)
+string(TOLOWER "${XG_ENGINE}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}" XG_TABLES_CONFIG)
+set(xg_link_from "${XG_LINK_FROM}")
+if(xg_link_from STREQUAL "auto")
+    if(EXISTS "${XG_ROOT}/asm/${XG_VERSION_LOWER}")
+        set(xg_link_from disc)
+    else()
+        set(xg_link_from tables)
+    endif()
+endif()
+set(XG_LINK_INPUTS)
+set(XG_LINK_TABLE_FILES)
+if(xg_link_from STREQUAL "tables")
+    if(XG_WRITE_LINK_TABLES)
+        message(FATAL_ERROR "XG_WRITE_LINK_TABLES: the tables are written from a disc-backed link (XG_LINK_FROM=disc)")
+    endif()
+    set(tables "${XG_LINK_TABLES}/${XG_VERSION_LOWER}")
+    set(XG_MODULE_PLAN_DIR "${tables}/${XG_TABLES_CONFIG}/srcdata")
+    set(XG_LINK_TABLE_FILES "${tables}/${XG_TABLES_CONFIG}/facts.json" "${tables}/asm-layout.json")
+    foreach(file IN LISTS XG_LINK_TABLE_FILES)
+        if(NOT EXISTS "${file}")
+            message(FATAL_ERROR "No link table ${file}.\n"
+                "This checkout has no PS1 split (asm/${XG_VERSION_LOWER}) and no tables for ${XG_VERSION} "
+                "${XG_TABLES_CONFIG}. Build from your disc (tools/extract.py, tools/configure.py, ninja: "
+                "docs/building.md), or build a configuration the tables were made for.")
+        endif()
+    endforeach()
+    list(GET XG_LINK_TABLE_FILES 0 facts)
+    list(GET XG_LINK_TABLE_FILES 1 asm_layout)
+    set(XG_LINK_INPUTS --facts "${facts}" --asm-layout "${asm_layout}")
+    # The PS1 object facts are there when the tables were made beside a PS1 build (the release's builder has none).
+    if(EXISTS "${tables}/${XG_TABLES_CONFIG}/ps1-objects.json")
+        list(APPEND XG_LINK_TABLE_FILES "${tables}/${XG_TABLES_CONFIG}/ps1-objects.json")
+        list(APPEND XG_LINK_INPUTS --ps1-objects "${tables}/${XG_TABLES_CONFIG}/ps1-objects.json")
+    endif()
+    message(STATUS "Link from the tables in ${tables} (${XG_TABLES_CONFIG}): no disc is read")
+    # The source data plans fit one compiler's objects (tools/pc_srcdata.py): say so before the build does.
+    if(EXISTS "${tables}/${XG_TABLES_CONFIG}/compiler.txt")
+        file(STRINGS "${tables}/${XG_TABLES_CONFIG}/compiler.txt" made_with LIMIT_COUNT 1)
+        if(NOT made_with STREQUAL "${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}")
+            message(WARNING "The link tables were made with ${made_with}; this compiler is ${CMAKE_C_COMPILER_ID} "
+                "${CMAKE_C_COMPILER_VERSION}. Where it lays an object's data out differently, the build stops at a "
+                "stale source data plan: build in the release's builder (build-release.sh) or from your disc.")
+        endif()
+    endif()
+elseif(xg_link_from STREQUAL "disc")
+    if(NOT EXISTS "${XG_ROOT}/asm/${XG_VERSION_LOWER}")
+        message(FATAL_ERROR "XG_LINK_FROM=disc: no PS1 split in ${XG_ROOT}/asm/${XG_VERSION_LOWER} "
+            "(tools/extract.py, tools/configure.py, ninja)")
+    endif()
+    if(XG_WRITE_LINK_TABLES)
+        set(XG_WRITE_TABLES_DIR "${CMAKE_BINARY_DIR}/link-tables")
+        file(MAKE_DIRECTORY "${XG_WRITE_TABLES_DIR}/srcdata")
+        # Which tables these are, for tools/link_tables.py.
+        file(WRITE "${XG_WRITE_TABLES_DIR}/config.txt" "${XG_VERSION_LOWER} ${XG_TABLES_CONFIG}\n")
+        file(WRITE "${XG_WRITE_TABLES_DIR}/compiler.txt" "${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}\n")
+        set(XG_LINK_INPUTS --write-facts "${XG_WRITE_TABLES_DIR}/facts.json"
+            --write-asm-layout "${XG_WRITE_TABLES_DIR}/asm-layout.json")
+        set(XG_LINK_TABLE_BYPRODUCTS BYPRODUCTS "${XG_WRITE_TABLES_DIR}/facts.json"
+            "${XG_WRITE_TABLES_DIR}/asm-layout.json")
+        # The PS1 object facts come from the PS1 build's images: written where that build stands.
+        if(EXISTS "${XG_ROOT}/build/${XG_VERSION_LOWER}/main.elf")
+            list(APPEND XG_LINK_INPUTS --write-ps1-objects "${XG_WRITE_TABLES_DIR}/ps1-objects.json")
+            list(APPEND XG_LINK_TABLE_BYPRODUCTS "${XG_WRITE_TABLES_DIR}/ps1-objects.json")
+        else()
+            file(REMOVE "${XG_WRITE_TABLES_DIR}/ps1-objects.json")
+        endif()
+    endif()
+else()
+    message(FATAL_ERROR "XG_LINK_FROM must be auto, disc or tables, not ${XG_LINK_FROM}")
+endif()
 add_custom_command(
     OUTPUT ${XG_GEN_OUTPUTS}
     COMMAND Python3::Interpreter "${XG_ROOT}/tools/pc_link.py" --ver ${XG_VERSION_LOWER}
-            ${XG_MODULE_FORMAT} --cc "${XG_PROBE_CC}" --game-root "${XG_GAME_ROOT}" "${XG_GEN_DIR}" ${XG_ALL_OBJECTS}
-            --platform $<TARGET_OBJECTS:platform>
-    DEPENDS ${XG_ALL_OBJECTS} $<TARGET_OBJECTS:platform> "${XG_ROOT}/tools/pc_link.py" "${XG_ROOT}/tools/pc_macho.py" ${XG_PCLINK_INPUTS}
+            ${XG_MODULE_FORMAT} ${XG_LINK_INPUTS} --cc "${XG_PROBE_CC}" --game-root "${XG_GAME_ROOT}"
+            "${XG_GEN_DIR}" ${XG_ALL_OBJECTS} --platform $<TARGET_OBJECTS:platform>
+    ${XG_LINK_TABLE_BYPRODUCTS}
+    DEPENDS ${XG_ALL_OBJECTS} $<TARGET_OBJECTS:platform> "${XG_ROOT}/tools/pc_link.py" "${XG_ROOT}/tools/pc_macho.py"
+            ${XG_PCLINK_INPUTS} ${XG_LINK_TABLE_FILES}
     WORKING_DIRECTORY "${XG_ROOT}"
     COMMENT "Generating stubs, data and export lists (tools/pc_link.py)"
     COMMAND_EXPAND_LISTS

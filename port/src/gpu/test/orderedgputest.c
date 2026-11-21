@@ -118,7 +118,10 @@ int main(int argc,char** argv) {
     compact=argc>1&&strcmp(argv[1],"--compact")==0;
     CHECK(planner()==0);
     testSetEnv("XG_SETTINGS","none");testSetEnv("XG_VK_NO_INTERLOCK","1");
-    CHECK(SDL_Init(SDL_INIT_VIDEO));CHECK(gpuInit(NULL));gpuVBlank();CHECK(!gvkHasInterlock());
+#ifndef __ANDROID__ /* from a shell on the device there is no activity for SDL to start with */
+    CHECK(SDL_Init(SDL_INIT_VIDEO));
+#endif
+    CHECK(gpuInit(NULL));gpuVBlank();CHECK(!gvkHasInterlock());
     uint16_t a[SIDE*SIDE],b[SIDE*SIDE];
     const int scales[]={1,2,4,12};
     /* The backend grows the wide canvas to the touched area. A 40x40

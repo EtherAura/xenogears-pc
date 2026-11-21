@@ -37,6 +37,7 @@ int tilesHit(const TileSet* t, VRect r);
  * whether r is such, and the vertical blank that carries them over. */
 void vramOwnedDraw(VRect r);
 int vramCpuOwned(VRect r);
+void vramOwnedArea(VRect area); /* the draw area, before vramCpuOwned: the CPU's after a chain of readbacks */
 void vramOwnedVBlank(void);
 void vramOwnedReset(void); /* none (a GPU reset) */
 
@@ -185,7 +186,7 @@ int gvkHasInterlock(void);
 /* 1: the chosen device is an integrated GPU, -1 a discrete or other one, 0 none chosen yet. */
 int gvkDeviceIntegrated(void);
 /* hires.c: the settings whose defaults depend on the device, applied once it is chosen. */
-void hiresDeviceDefaults(void);
+void hiresDeviceDefaults(int orderedFallbackDefault);
 int gvkOrderedWrites(void);
 uint32_t gvkOrderedOverflow(void);
 void gvkSetOrderedFallback(int on);
@@ -301,7 +302,15 @@ typedef struct {
     uint32_t rasterShift;
     float w; /* 1 affine; view depth / 4096 for perspective textures */
     uint32_t sample[4]; /* immutable decoded texture: word base, UV origin, size, filter */
+    /* The scene's depth image (scene.c): the view depth here, negated for a
+     * figure (a sprite: scene.c can keep those in focus), SCENE_Z_NONE (no
+     * depth: the pixel keeps the one it has) or SCENE_Z_SHARP (a picture
+     * kept in focus). Read only by the copy's depth passes (hires.vert DEPTH). */
+    float z;
 } HiVertex;
+#define SCENE_Z_NONE 0.0f
+#define SCENE_Z_SHARP 1.0e30f
+#define SCENE_Z_IS_DEPTH(z) ((z) != SCENE_Z_NONE && (z) < 1.0e29f && (z) > -1.0e29f)
 
 /* hires.c: upscale_color */
 #define HIRES_COLOR_TRUE 0     /* no dither, blending in 8 bits (shaders/hires.frag) */
@@ -390,6 +399,51 @@ void hiresMove(int sx, int sy, int dx, int dy, int w, int h, int setMask, int ch
 void hiresDump(const GpuDisplay* d, uint32_t vblank, int frameWritten);
 /* At exit: a line on the uploads it kept hi-res. */
 void hiresSummary(void);
+
+/* ---- scene.c: a drawn scene's depth and the depth of field (docs/PORT_HD2D.md) --
+ *
+ * While the game's DrawOTag walks a scene registered with pcSceneDepth
+ * (include/pc_scene.h), the copy's draws also write each replaced pixel's
+ * view depth into a depth image of their own, the size of the frame being
+ * drawn. When the walk reaches the tag after the scene, the copy's frame is
+ * blurred by that depth (shaders/dof.comp) before anything else is drawn
+ * over it. The 1x VRAM and the wide target never see either. */
+
+/* The blur by depth: relative depth u (1 - focus / z behind the focus,
+ * z / focus - 1 in front); nothing inside |u| <= band, then gain per unit of
+ * u up to `radius` PS1 pixels. */
+typedef struct {
+    float focus;  /* view depth kept sharp */
+    float band, gain;
+    float radius; /* the largest blur radius, in PS1 pixels */
+    int debug;    /* 1: the blur amounts as colours instead, 2: inverted (XG_DOF_DEBUG) */
+    int figures;  /* 1: figures (sprites) stay in focus wherever they stand */
+} DofParams;
+/* libgpu.c's walk: a registered scene is being drawn (sceneWalkTag at each tag). */
+extern int sceneWalkOn;
+void sceneWalkBegin(void);
+void sceneWalkTag(const void* tag);
+void sceneWalkEnd(void);
+/* hires.c: the option wants the copy (at 1x too), and the GTE's table of
+ * projected vertices for their view depths (hiresPrecisionTable sets it). */
+int sceneWantsCopy(void);
+void hiresPrecisionTable(void);
+/* gp0.c: the depth of the packets that follow (SCENE_Z_*), while `on`. */
+void gp0SceneDepth(int on, float z);
+int gp0SceneOn(void);
+/* The draw area as a 1x rectangle of VRAM, and of the wide target when the
+ * frame is drawn wide (returns 2; inset: where VRAM's rectangle lies inside
+ * the wide one), else 1; 0 when there is none. */
+int gp0SceneRects(VRect* narrow, VRect* wide, int inset[2]);
+/* vk.c. Begin: depth images for those rectangles, cleared to "far", and the
+ * copy's draws write depth from the next batch on; 0 when the device cannot
+ * (no copy, ordered batches, no room): nothing changes then. End: the writes
+ * stop, and with `blur` the copy's two rectangles are blurred by it. */
+int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY);
+void gvkSceneEnd(const DofParams* blur);
+int gvkSceneActive(void);
+/* interpolation.c: the scene of the snapshot being recorded ended here. */
+void interpolationSceneEnd(const DofParams* blur);
 
 /* ---- present.c: the display options' side of the present pass ------------ */
 
@@ -528,6 +582,8 @@ int wideFrameView(VRect native, WideView* view);
 int wideTransitionCaptureRect(VRect* rect);
 int wideMargin(void);
 int wideActive(void);
+/* The reasons the picture is kept 4:3 now (PC_WIDE_BLOCK_*, pcWideBlock). */
+int wideBlockReasons(void);
 
 /* gp0.c */
 int wideDrawTarget(int clipX0, int clipY0, int clipX1, int clipY1, WideDraw* out);

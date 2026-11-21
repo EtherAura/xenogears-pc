@@ -464,7 +464,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise PlanError(str(e)) from None
             strips, h = plan_strip(a, objdump, parse_plan(text, a))
         except PlanError as e:
-            raise SystemExit(f"pc_srcdata: plan {a.plan}: {e}") from None
+            hint = ("\n  A plan fits the objects of one compiler and one state of the sources. Build with the "
+                    "toolchain it was made with, or from your disc (which finds the runs again)."
+                    if "stale plan" in str(e) else "")
+            raise SystemExit(f"pc_srcdata: plan {a.plan}: {e}{hint}") from None
     else:
         strips, h, image = disc_strip(a, objdump, off)
         if a.write_plan:
