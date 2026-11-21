@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -57,6 +58,49 @@ def default_packs():
     return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local/share") / "xenogears/packs"
 
 
+def restore_battle_words(folder, image):
+    """Repair the v2026.11.17 export from the player's verified Atelier image."""
+    old_snapshot = "1a288d74dbf24b4b0e9a4d11828d9d5511e7563a2ecc5f6c0bb105a6d05fdb9f"
+    battle = folder / "pictures/battle/common"
+    if not (battle / "1/1.member").is_file():
+        raise ValueError("The game did not export the battle pictures.")
+    legacy = [path for path in battle.glob("[12]/1.member")
+              if hashlib.sha256(path.read_bytes()).hexdigest() == old_snapshot]
+    if not legacy:
+        return
+    try:
+        from xenofs import Disc, lzss_decompress
+    except ImportError as error:
+        raise ValueError("Place xenofs.py beside atelier_text_pack.py to fix battle words with this game version.") from error
+
+    # The verified standard and undub pairs share this table across both discs.
+    with Disc(image) as disc:
+        bundle = disc.read_file(0x0C, 3, whole_sectors=True)
+    offset, = struct.unpack_from("<I", bundle, 4)
+    sprites = lzss_decompress(bundle[offset:])
+    if hashlib.sha256(sprites).hexdigest() != "083417a566ea5c88bc033c090ffdce5b28e22a3032eb4b13c2439259d7af25d8":
+        raise ValueError("Unexpected Atelier battle sprite table.")
+
+    # Keep the snapshot bound to the retail member. The placement template
+    # refers to the replacement table by its xgspr1 fingerprint.
+    fingerprint = 0x0A47AA88894A4F19
+    for path in legacy:
+        header = bytearray(path.read_bytes()[:32])
+        struct.pack_into("<I", header, 12, len(sprites))
+        struct.pack_into("<Q", header, 24, fingerprint)
+        path.write_bytes(header + sprites)
+        layout = path.with_suffix(".layout")
+        if layout.is_file():
+            rows = [f"xg-sprites-1 {fingerprint:016x}", *layout.read_text().splitlines()[1:3]]
+            count, = struct.unpack_from("<I", sprites)
+            for index, (start,) in enumerate(struct.iter_unpack("<H", sprites[4:4 + 2 * count])):
+                pieces, = struct.unpack_from("<H", sprites, start)
+                for piece in range(pieces):
+                    w, h, x, y = struct.unpack_from("<4h", sprites, start + 8 + piece * 28)
+                    rows.append(f"# {index} {piece} {x} {y} # {w}x{h} pixels")
+            layout.write_bytes(("\n".join(rows) + "\n").encode("ascii"))
+
+
 def make_pack(game, retail, french, packs):
     editions = [suffix for suffix in EDITIONS if all(
         (french / f"Xenogears_fr_cd{disc}{suffix}.bin").is_file() for disc in (1, 2))]
@@ -97,6 +141,7 @@ def make_pack(game, retail, french, packs):
         if (b"@@ field/1/14/" not in fields or b"@@ field/2/618/" not in fields
                 or not (folder / "font.bin").stat().st_size):
             raise ValueError("The export is missing field text or the French font.")
+        restore_battle_words(folder, work / "atelier1.bin")
         (folder / "pack.ini").write_text(
             "name=Atelier Français 1.1\nlanguage=fr\nrelease=US\nfont=pack\n"
             "print=proportional\nwindows=grow\n", encoding="utf-8")
