@@ -613,6 +613,12 @@ uint32_t wideTexture(const WideDraw* wd, uint32_t tpage, int u0, int u1, int v0,
  * coordinates) is where the wide picture's centre differs from VRAM's for it
  * (where it was drawn, or where VRAM has it and the wide picture does not). */
 void wideNoteShifted(const WideDraw* wd, VRect box);
+/* Past the scene (PC_WIDE_SCENE_EFFECT, PC_WIDE_NOT_SCENE): a scene draw's
+ * box (target coordinates, clipped) widens its frame's scene box; an
+ * effect's draw area (target coordinates, in and out) is narrowed to that
+ * box outside the unwidened draw area. */
+void wideNoteScene(const WideDraw* wd, VRect box);
+void wideSceneClip(const WideDraw* wd, int* x0, int* y0, int* x1, int* y1);
 /* VRAM written by drawing (screen captures there go stale). */
 void wideNoteWrite(VRect r);
 /* VRAM written by a drawing command the wide target did not get (its draw

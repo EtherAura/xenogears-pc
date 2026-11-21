@@ -289,6 +289,40 @@ int main(int argc, char** argv) {
         CHECK(textureSpriteCelSample(&doll,doll.request,0,&s) && s.scale==2);
         texturePackStats(&stats); CHECK(stats.celSync==0 && stats.celLate==0 && stats.gameThreadLoads==0);
         snprintf(tsv,sizeof(tsv),"%s/poses.tsv",sprites); CHECK(SDL_RemovePath(tsv));
+        /* A part drawn scaled samples a part of its cell, an x-mirrored one the texel left of it (xg-3hyf.2):
+         * textureSpriteCelCorners finds the cell from the quad's corners, and leaves a patch its own look-up
+         * places alone. The cell: 8x10 4-bit texels at u 40, v 100 of page 5 (VRAM x 330), the gutter left
+         * of it clear; written before anything decodes there. */
+        {
+            for (int y=0;y<10;++y) for (int x=0;x<8;++x) {
+                int u=40+x; uint16_t* w=&vramShadow[100+y][320+(u>>2)];
+                *w=(uint16_t)((*w&~(15u<<((u&3)*4)))|(uint16_t)((1+(x*3+y)%15)<<((u&3)*4)));
+            }
+            TextureRequest cell={5,0,0,40,100,8,10,0,0}, got;
+            const DecodedTexture* dc=textureCacheGet(cell); CHECK(dc && dc->texelKey && dc->paletteSize==16);
+            uint8_t ones[16*20*4];
+            for (int i=0;i<16*20;++i) { memset(ones+i*4,1,3); ones[i*4+3]=255; }
+            DecodedTexture lib=*dc; CHECK(packPng(sprites,&lib,1,16,20,ones)); texturePackReload();
+            TextureRequest scaled={5,0,0,41,100,6,8,0,0};   /* a far camera's texels: inside the cell */
+            CHECK(textureSpriteCelCorners(scaled,cell,0,&got) && got.u==40 && got.v==100 && got.w==8 && got.h==10);
+            TextureRequest early={5,0,0,39,100,8,10,0,0};   /* sprite.c's mirrored corners, a texel early */
+            CHECK(textureSpriteCelCorners(early,early,1,&got) && got.u==40 && got.v==100 && got.w==8 && got.h==10);
+            CHECK(textureSpriteCelCorners(scaled,cell,1,&got) && got.u==40 && got.w==8);   /* mirrored, not shifted */
+            TextureRequest oneX={5,0,0,40,100,7,9,0,0};      /* 1x: found a texel larger, as before */
+            CHECK(!textureSpriteCelCorners(oneX,cell,0,&got));
+            CHECK(textureSpriteCelSample(textureCacheGet(oneX),oneX,0,&s) && s.u==40 && s.w==8 && s.h==10);
+            /* a part a texel wide drawn mirrored samples only the clear texel beside its cell: shown as the PS1 shows it */
+            TextureRequest thin={5,0,0,40,100,1,10,0,0}, gutter={5,0,0,39,100,1,10,0,0};
+            DecodedTexture thinLib=*textureCacheGet(thin); CHECK(packPng(sprites,&thinLib,1,2,20,ones)); texturePackReload();
+            CHECK(textureSpriteCelCorners((TextureRequest){5,0,0,40,102,1,6,0,0},thin,0,&got) && got.u==40 && got.w==1);
+            CHECK(!textureSpriteCelCorners(gutter,gutter,1,&got));
+            TextureRequest outside={5,0,0,52,100,4,4,0,0};   /* texels beside the corners' cell */
+            CHECK(!textureSpriteCelCorners(outside,cell,0,&got));
+            TextureRequest blank={5,0,0,60,100,8,10,0,0}, blankPart={5,0,0,61,101,6,8,0,0};   /* a cell the library lacks */
+            CHECK(!textureSpriteCelCorners(blankPart,blank,0,&got));
+            textureReplacementsShow(0); CHECK(!textureSpriteCelCorners(scaled,cell,0,&got)); textureReplacementsShow(1);
+            CHECK(textureSpriteCelCorners(scaled,cell,0,&got));
+        }
         settingsSet("sprite_packs","none"); texturePackReload();
     }
     /* The room's poses (xg-hbc.26): poses.tsv beside the sprite pack's pack.ini names each part's poses

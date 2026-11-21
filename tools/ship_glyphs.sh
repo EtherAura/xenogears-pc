@@ -42,6 +42,32 @@ held = (base / 'batches.txt').read_text().split() if (base / 'batches.txt').exis
 (out / 'batches.txt').write_text('\n'.join(held + [name]) + '\n')
 print(f'ship_glyphs: {len(mine)} glyphs packed (both version folders), {len(glyphs)} in the record')
 PY
+# batch.json `faithful_fill`: what the disc's fonts still lack after the drawn sheets (its coloured battle word art,
+# which glyph_prep leaves out, as the English round did) is built by tools/glyph_art_pack.py --faithful-cel, the method
+# the English counterparts were made with, and copied in where the library has no picture (xg-g0ra.3)
+if $PY -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("faithful_fill") else 1)' "$B/batch.json"; then
+    rm -rf "$OUT-faithful"
+    $PY tools/glyph_art_pack.py "$OUT-faithful" --disc "$DISC" --faithful-cel | tail -1
+    $PY - "$OUT" "$OUT-faithful" <<'PY'
+import json, shutil, sys
+from pathlib import Path
+out, faithful = Path(sys.argv[1]), Path(sys.argv[2])
+filled = []
+for src in sorted((faithful / 'SLUS-00664/glyphs').glob('*.indices.png')):
+    if not (out / 'SLUS-00664/glyphs' / src.name).exists():
+        for v in ('SLUS-00664', 'SLPS-01160'):
+            (out / v / 'glyphs').mkdir(parents=True, exist_ok=True)
+            shutil.copy2(faithful / v / 'glyphs' / src.name, out / v / 'glyphs' / src.name)
+        filled.append(src.name.split('.')[0])
+(out / 'provenance-faithful-fill.json').write_text(json.dumps(dict(format=1, method='glyph_art_pack.py --faithful-cel', keys=filled), indent=1) + '\n')
+print(f'ship_glyphs: {len(filled)} glyphs filled by the faithful method')
+PY
+    rm -rf "$OUT-faithful"
+fi
+# a translation that prints proportionally (batch.json `proportional`: the discs whose dialogue fonts it prints from)
+# gets its glyphs' proportional crops cut from the redrawn cells (tools/glyph_crops.py, xg-g0ra.6)
+readarray -t PROP < <($PY -c 'import json,sys; [print(d) for d in json.load(open(sys.argv[1])).get("proportional", [])]' "$B/batch.json")
+if (( ${#PROP[@]} )); then $PY tools/glyph_crops.py "$OUT" "${PROP[@]}"; fi
 if [[ $INSTALL == 0 ]]; then echo "ship_glyphs: built $OUT (not installed)"; exit 0; fi
 for b in release enhanced release-jp enhanced-jp; do
     L=build/pc/$b/glyph-packs

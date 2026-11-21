@@ -560,6 +560,10 @@ static int wideReadsNative(const ReadSet* reads) {
     return 0;
 }
 
+/* A game command's wide draw that counts as scene (execute: not an effect,
+ * not PC_WIDE_NOT_SCENE; fills and the port's own pieces never do). */
+static int wideSceneDraw;
+
 /* The wide copy of a primitive joins the batch before its VRAM copy: its
  * texels must be what the VRAM copy reads, so they count as the batch's
  * reads. Texels it reads from the wide target are ordered against the wide
@@ -591,6 +595,9 @@ static int batchAddWide(VRect w, const ReadSet* reads) {
     }
     if (w.x0 > w.x1 || w.y0 > w.y1) {
         return 0;
+    }
+    if (wideSceneDraw) {
+        wideNoteScene(&gp.wd, w);
     }
     if (gp.pkt != NULL && (gp.pkt->dx != 0 || (gp.pkt->flags & PC_WIDE_ONLY)) && w.x1 >= gp.wd.edgeX0 &&
         w.x0 <= gp.wd.edgeX1 && w.y0 <= gp.wd.fbY1) {
@@ -2928,6 +2935,30 @@ static int spritePose(PoseGroup* g, uint32_t mode, const PVertex* colour) {
     return 1;
 }
 
+/* A sprite part drawn scaled samples a part of its cell, and an x-mirrored one the texel left of
+ * it (sprite.c starts its u a texel early when the quad's vertex 3 lies left of vertex 0), so the
+ * sampled texels name no cell the library holds; the quad's corners do (textureSpriteCelCorners).
+ * When the library has that cell and not the sampled texels', the cell stands for the polygon's
+ * texels (gp.flatUv: the decode, the copy's clamp and the motion recording), so the part is drawn
+ * through its cell's redraw, whole, as at 1x; a part the library places already is left as it was. */
+static void spriteCellFromCorners(const PVertex* v, uint32_t tpage, uint32_t clut) {
+    int u0 = v[0].u, u1 = u0, v0 = v[0].v, v1 = v0;
+    for (int k = 1; k < 4; k++) {
+        u0 = v[k].u < u0 ? v[k].u : u0; u1 = v[k].u > u1 ? v[k].u : u1;
+        v0 = v[k].v < v0 ? v[k].v : v0; v1 = v[k].v > v1 ? v[k].v : v1;
+    }
+    int pu = (int16_t)gp.flatUvMin, pv = (int16_t)(gp.flatUvMin >> 16);
+    TextureRequest patch = {(uint16_t)tpage, (uint16_t)clut, 0, pu, pv,
+                            (int16_t)gp.flatUvMax - pu + 1, (int16_t)(gp.flatUvMax >> 16) - pv + 1, 0, 0};
+    TextureRequest corners = {(uint16_t)tpage, (uint16_t)clut, 0, u0, v0, u1 - u0 + 1, v1 - v0 + 1, 0, 0};
+    /* sprite.c's own test: vertex 0 holds the cell's first texel, vertex 3 its last */
+    int mirrored = v[0].u <= v[3].u && v[3].x < v[0].x;
+    TextureRequest cell;
+    if (!textureSpriteCelCorners(patch, corners, mirrored, &cell)) return;
+    gp.flatUvMin = uvWord(cell.u, cell.v);
+    gp.flatUvMax = uvWord(cell.u + cell.w - 1, cell.v + cell.h - 1);
+}
+
 static void polygon(void) {
     gp.portraitSource = (TextureRequest){0};
     gp.glyphSource = (TextureRequest){0};
@@ -3103,6 +3134,8 @@ static void polygon(void) {
             gp.flatUvValid = gp.wideUv.flatValid; gp.flatUvMin = gp.wideUv.flatMin; gp.flatUvMax = gp.wideUv.flatMax;
         } else {
             gp.flatUvValid = flatSpanTexels(v, !firstInvalid, quad && !secondInvalid, 1, &gp.flatUvMin, &gp.flatUvMax);
+            if (gp.flatUvValid && quad && !gp.poseSkip && !gp.texWindow && gp.pkt->texClass == PC_TEX_SPRITE &&
+                textureUseSpriteCel(PC_TEX_SPRITE) && textureSpriteCelEnabled()) spriteCellFromCorners(v, tpage, clut);
             if (gp.wide) {
                 gp.wideUv.flatSaved = 1; gp.wideUv.flatValid = gp.flatUvValid;
                 gp.wideUv.flatMin = gp.flatUvMin; gp.wideUv.flatMax = gp.flatUvMax;
@@ -3759,6 +3792,10 @@ static int wideBegin(void) {
         gp.clipX0 = 0;             /* and beside it */
         gp.clipX1 = WIDE_FRAME_W - 1;
     }
+    /* Past the scene (xg-3hyf): an effect only over what the frame drew. */
+    if (gp.pkt != NULL && (gp.pkt->flags & PC_WIDE_SCENE_EFFECT)) {
+        wideSceneClip(&gp.wd, &gp.clipX0, &gp.clipY0, &gp.clipX1, &gp.clipY1);
+    }
     /* Added after the GPU's 11-bit wrap of vertex + offset, so a vertex
      * far off the screen lands where the 4:3 copy has it. */
     gp.wideShift = gp.wd.shift + dx;
@@ -3801,7 +3838,9 @@ static void execute(void) {
         if (!polylineStart && wideBegin()) {
             uint32_t e1 = gp.e1;
             if (gp.pkt == NULL || !(gp.pkt->flags & PC_WIDE_NATIVE_ONLY)) {
+                wideSceneDraw = gp.pkt == NULL || !(gp.pkt->flags & (PC_WIDE_SCENE_EFFECT | PC_WIDE_NOT_SCENE));
                 executeDraw(op);
+                wideSceneDraw = 0;
             }
             wideEnd();
             gp.replayed = 1;

@@ -1822,6 +1822,64 @@ static const DecodedTexture* spriteCellAround(const DecodedTexture* d) {
     }
     return NULL;
 }
+/* A sprite part drawn scaled (a battle seen from far, a close-up) samples a part of its cell, or
+ * the texel beside it, which no look-up above finds: the cell is the rectangle the quad's corners
+ * name, as sprite.c sets them (u from the cell's left to its last column; an x-mirrored part, its
+ * u running right to left on screen, a texel early: the PS1's mirrored sampling). The candidates,
+ * nearest the game's own first: the cell from the corners (mirrored: a texel right of them; at
+ * u 0, where sprite.c drops the last column instead, the corners and that column; then the
+ * corners themselves, as the shadows and the battle's sliced sprites draw a mirrored part), then
+ * the corners less their last column and row (the clipped upper and lower halves' corners end a
+ * texel past the cell). One holding the sampled texels (a texel's slack each side), at least one
+ * of them its own, whose index map the library has is the part's cell: a part a texel wide drawn
+ * mirrored samples only the clear texel beside its cell, so it shows nothing, as on the PS1. 0
+ * when the patch's own look-up finds its cell: that draw stays as it was. XG_SPRITE_CORNERS=0:
+ * no look-up from the corners (as before). */
+int textureSpriteCelCorners(TextureRequest patch, TextureRequest corners, int mirrored, TextureRequest* cell) {
+    if (!textureSpriteCelEnabled() || patch.window || corners.window || patch.w<1 || patch.h<1 || patch.w>256 || patch.h>256 ||
+        corners.w<1 || corners.h<1 || corners.w>256 || corners.h>256) return 0;
+    const DecodedTexture* d=textureCacheGet(textureRequestSnap(patch));
+    if (!d || !d->paletteSize) return 0;
+    if (entryLoaded(lookup(d,4)) || spriteCellAround(d)) return 0;
+    static int off=-1;
+    if (off<0) { const char* e=getenv("XG_SPRITE_CORNERS"); off=e && *e=='0'; }
+    unsigned vblank=hwVSyncCount?hwVSyncCount():0;
+    if (off) {
+        if (spriteLogOn()) fprintf(stderr,"sprite cel: no cell from the corners %d,%d %dx%d%s for %d,%d %dx%d at vblank %u (look-up off)\n",corners.u,corners.v,
+                                   corners.w,corners.h,mirrored?" (mirrored)":"",patch.u,patch.v,patch.w,patch.h,vblank);
+        return 0;
+    }
+    int n=0; TextureRequest c[4];
+    if (mirrored) {
+        c[n++]=(TextureRequest){corners.tpage,corners.clut,0,corners.u+1,corners.v,corners.w,corners.h,0,0};
+        if (corners.u==0) c[n++]=(TextureRequest){corners.tpage,corners.clut,0,0,corners.v,corners.w+1,corners.h,0,0};
+        c[n++]=(TextureRequest){corners.tpage,corners.clut,0,corners.u,corners.v,corners.w,corners.h,0,0};
+        if (corners.w>1 && corners.h>1) c[n++]=(TextureRequest){corners.tpage,corners.clut,0,corners.u+1,corners.v,corners.w-1,corners.h-1,0,0};
+    } else {
+        c[n++]=(TextureRequest){corners.tpage,corners.clut,0,corners.u,corners.v,corners.w,corners.h,0,0};
+        if (corners.w>1 && corners.h>1) c[n++]=(TextureRequest){corners.tpage,corners.clut,0,corners.u,corners.v,corners.w-1,corners.h-1,0,0};
+    }
+    for (int i=0;i<n;++i) {
+        TextureRequest r=c[i];
+        if (r.u<0 || r.v<0 || r.u+r.w>256 || r.v+r.h>256) continue;
+        if (patch.u<r.u-1 || patch.v<r.v-1 || patch.u+patch.w>r.u+r.w+1 || patch.v+patch.h>r.v+r.h+1) continue;
+        if (patch.u>=r.u+r.w || patch.u+patch.w<=r.u || patch.v>=r.v+r.h || patch.v+patch.h<=r.v) continue;
+        /* decoded as the draw (gp0.c prepareTexture) and the motion recording will decode it, snapped
+         * to an upload covering it, which must be the cell itself; the decode keeps its texel key
+         * while VRAM there is unchanged, so a part the library lacks costs a cache look-up a frame */
+        const DecodedTexture* found=textureCacheGet(textureRequestSnap(r));
+        if (!found || !found->paletteSize || found->request.u!=r.u || found->request.v!=r.v || found->request.w!=r.w || found->request.h!=r.h ||
+            !found->texelKey || !cellKnown(found->texelKey) || !entryLoaded(lookup(found,4))) continue;
+        if (spriteLogOn()) fprintf(stderr,"sprite cel: cell for %d,%d %dx%d found from the corners %d,%d %dx%d%s: %d,%d %dx%d at vblank %u\n",patch.u,patch.v,patch.w,patch.h,
+                                   corners.u,corners.v,corners.w,corners.h,mirrored?" (mirrored)":"",r.u,r.v,r.w,r.h,vblank);
+        if (replacementsHidden) return 0;   /* the A/B comparison: looked up as ever, the native texels drawn as they are */
+        *cell=r;
+        return 1;
+    }
+    if (spriteLogOn()) fprintf(stderr,"sprite cel: no cell from the corners %d,%d %dx%d%s for %d,%d %dx%d at vblank %u\n",corners.u,corners.v,corners.w,corners.h,
+                               mirrored?" (mirrored)":"",patch.u,patch.v,patch.w,patch.h,vblank);
+    return 0;
+}
 int textureSpriteCelSample(const DecodedTexture* d, TextureRequest patch, int filter, TextureSample* out) {
     if (!d || !d->paletteSize || !textureSpriteCelEnabled() || patch.w<1 || patch.h<1 || patch.u<d->request.u || patch.v<d->request.v ||
         patch.u+patch.w>d->request.u+d->request.w || patch.v+patch.h>d->request.v+d->request.h) return 0;

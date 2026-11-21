@@ -89,6 +89,20 @@ int main(int argc,char** argv) {
     CHECK(!strncmp(status,"41 cel sprite variants ready",28));
     CHECK(strstr(status,". 10 sprites over the 32 MiB artwork limit keep native pixels"));
     CHECK(!strstr(status,"unreadable"));
+    /* A translation's set (xg-g0ra.4): cel-2x/<version>/fr holds a label where the version's set has the
+     * original's; each is drawn only when the game uploaded its own native indices, whichever set lists it. */
+    char c[3200],fr[3600]; snprintf(c,sizeof(c),"%s/languages",argv[1]);
+    CHECK(set(c,2,dir,sizeof(dir)));
+    CHECK(writeFile(dir,"4 2560 256 4 4 attack\n"));
+    CHECK(grey(dir,"attack.native.png",4,4,1) && grey(dir,"attack.indices.png",8,8,2));
+    snprintf(fr,sizeof(fr),"%s/fr",dir); CHECK(SDL_CreateDirectory(fr));
+    CHECK(writeFile(fr,"4 2560 256 4 4 attaque\n"));
+    CHECK(grey(fr,"attaque.native.png",4,4,3) && grey(fr,"attaque.indices.png",8,8,4));
+    textureCelSetRoot(c);
+    CHECK(!strncmp(textureCelStatus(),"2 cel sprite variants ready",27));
+    d=texture(texels,26,0,0,4,4,1); CHECK(textureCelSample(&d,d.request,2,&s) && s.indices[0]==2);  /* English */
+    d=texture(texels,26,0,0,4,4,3); CHECK(textureCelSample(&d,d.request,2,&s) && s.indices[0]==4);  /* French */
+    d=texture(texels,26,0,0,4,4,5); CHECK(!textureCelSample(&d,d.request,2,&s));                    /* neither */
     textureCelShutdown(); texturePackShutdown(); SDL_Quit();
     printf("celpacktest: %d checks\n",checks); return 0;
 }

@@ -211,6 +211,99 @@ void pcFieldMovieBlock(s32 on) {
     pcWideBlock(PC_WIDE_BLOCK_MOVIE, on);
 }
 
+/* ---- past the room (Enhanced, xg-3hyf.1) ------------------------------------ */
+
+extern FieldBss_800B2184 op9DVar1;
+
+/* Rooms where the clear colour shows only past the room's geometry, never as
+ * part of the scene: there it gives way to black in the wide picture. Opt-in:
+ * in most rooms with a clear colour other than black it IS part of the scene
+ * the 4:3 picture shows (Solaris's sky, clouds, the radar screen under a
+ * translucent layer), and the margins rightly continue it. The survey
+ * of every room whose script sets one (work/xg-3hyf-1/NOTES.md):
+ *   405  Babel Tower's outer courtyard: pale lavender beside and below it. */
+static const u16 fieldPastBlack[] = {405};
+
+/* Whether the clear colour runs on past the room in the wide picture (a
+ * colour other than black, in a room not on fieldPastBlack): then the room's
+ * effects are not kept to the scene either (f_800A9274.c), as they show over
+ * that colour in the 4:3 picture too. */
+s32 pcFieldWideKeepsClear(void) {
+    const u8* c = op9DVar1.m18_backgroundClearColor;
+    u32 i;
+
+    if ((c[0] | c[1] | c[2]) == 0) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(fieldPastBlack) / sizeof(fieldPastBlack[0]); i++) {
+        if (fieldPastBlack[i] == (fieldMapNumber & 0xFFF)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The field clears each frame to the room's clear colour (OP 0xE7), and the
+ * wide picture's clear reaches the margins and extra rows (port/src/gpu/
+ * wide.c: a full-screen clear covers them). Where the room's geometry ends
+ * inside the wide picture that flat colour stood beside it (Babel Tower's
+ * courtyard, field 405: pale lavender). The user's choice:
+ * past the room is black. So in the rooms on fieldPastBlack black is laid
+ * there first, drawn only into the
+ * wide picture (PC_WIDE_ONLY, never VRAM: the 4:3 picture keeps the clear
+ * colour) and before the room (the head of the chain DrawOTag walks), as
+ * primitives so that motion smoothing's replay lays it too; no part of the
+ * scene (PC_WIDE_NOT_SCENE: effects are not kept over it). With expanded
+ * framing the frame buffer's rows below the 216 the TV shows (screen.h; the
+ * 4:3 picture never has them) are shown too: black goes under them as well.
+ * ot: the chain's head, linked after the scene tables. */
+void pcFieldWideCover(OTag* ot, const DRAWENV* draw, const DRAWENV* clear, const DISPENV* disp) {
+    s32 top;
+    s32 bottom;
+    s32 m = pcWideView;
+    s32 w = clear->clip.w;
+    s32 h = clear->clip.h;
+    s32 ox = clear->clip.x - draw->ofs[0]; /* the buffer's corner in drawing coordinates */
+    s32 oy = clear->clip.y - draw->ofs[1];
+    s32 shown = disp->screen.h > 0 && disp->screen.h < h ? disp->screen.h : h;
+    s32 i;
+    s32 n = 0;
+    s16 r[4][4];
+    const u8* c = op9DVar1.m18_backgroundClearColor;
+
+    if ((c[0] | c[1] | c[2]) == 0 || pcFieldWideKeepsClear()) {
+        return; /* black already, or the colour belongs to the scene */
+    }
+    pcWideFrameLines(clear->clip.x, clear->clip.y, &top, &bottom);
+    if (m > 0) {
+        r[n][0] = -m, r[n][1] = -top, r[n][2] = m, r[n][3] = top + h + bottom, n++; /* left */
+        r[n][0] = w, r[n][1] = -top, r[n][2] = m, r[n][3] = top + h + bottom, n++;  /* right */
+    }
+    if (top > 0) {
+        r[n][0] = 0, r[n][1] = -top, r[n][2] = w, r[n][3] = top, n++;
+    }
+    if (top > 0 || bottom > 0) {
+        if (h - shown + bottom > 0) {
+            r[n][0] = 0, r[n][1] = shown, r[n][2] = w, r[n][3] = h - shown + bottom, n++;
+        }
+    }
+    for (i = 0; i < n; i++) {
+        TILE* t = pcWideAlloc(sizeof(TILE));
+        if (t == NULL) {
+            return;
+        }
+        setlen(t, 3);
+        setcode(t, 0x60);
+        t->r0 = t->g0 = t->b0 = 0;
+        t->x0 = ox + r[i][0];
+        t->y0 = oy + r[i][1];
+        t->w = r[i][2];
+        t->h = r[i][3];
+        addPrim(ot, t);
+        pcWidePrim(t, 0, PC_WIDE_ONLY | PC_WIDE_NOEXTEND | PC_WIDE_NOT_SCENE);
+    }
+}
+
 /* ---- dialog windows -------------------------------------------------------- */
 
 /* A window anchored to its speaker is clamped inside the 4:3 screen (x 12 to

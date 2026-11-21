@@ -11,7 +11,7 @@
 #include "system/settings.h"
 #include "system/cputime.h"
 
-#define CEL_SPRITES 512 /* across the 2x, 4x and 8x sets: a 56-sprite library is 168 lines */
+#define CEL_SPRITES 1024 /* across the 2x, 4x and 8x sets and their language sets: a 57-sprite library is 171 lines */
 #define CEL_BYTES (32u*1024u*1024u)
 typedef struct {
     int depth,x,y,w,h,scale,checked;
@@ -46,9 +46,10 @@ void textureCelShutdown(void) {
 /* One sprite a line: depth x y width height basename. A file saved or zipped
  * on Windows (CRLF, a UTF-8 BOM) or with CR-only lines reads the same; blank
  * lines and '#' comments are skipped; any other line that does not parse is
- * counted in the status rather than dropped silently (xg-j85.14). */
-static void readSet(int scale) {
-    char path[3300];snprintf(path,sizeof(path),"%s/cel-%dx/%s/sprites.txt",root,scale,texturePackVersion());
+ * counted in the status rather than dropped silently (xg-j85.14). `dir` is
+ * the set's folder: cel-<scale>x/<version>, or one of its language sets. */
+static void readList(int scale,const char* dir) {
+    char path[3300];snprintf(path,sizeof(path),"%s/sprites.txt",dir);
     SDL_IOStream* f=SDL_IOFromFile(path,"rb");if(!f)return;
     Sint64 n=SDL_GetIOSize(f);if(n<0 || n>32768){SDL_CloseIO(f);++badFiles;return;}
     char data[32769];int ok=SDL_ReadIO(f,data,(size_t)n)==(size_t)n;SDL_CloseIO(f);if(!ok){++badFiles;return;}data[n]=0;
@@ -63,10 +64,38 @@ static void readSet(int scale) {
         if(count<CEL_SPRITES && sscanf(line,"%d %d %d %d %d %80s %c",&a.depth,&a.x,&a.y,&a.w,&a.h,name,&tail)==6 &&
            (a.depth==4 || a.depth==8) && a.x>=0 && a.x<=4096 && a.y>=0 && a.y<=512 && a.w>0 && a.w<=256 && a.h>0 && a.h<=256 &&
            a.x+a.w<=1024*(16/a.depth) && a.y+a.h<=512 && safeName(name)) {
-            a.scale=scale;snprintf(a.path,sizeof(a.path),"%s/cel-%dx/%s/%s",root,scale,texturePackVersion(),name);
+            a.scale=scale;snprintf(a.path,sizeof(a.path),"%s/%s",dir,name);
             sprites[count++]=a;
         } else ++ignored;
         line=next;
+    }
+}
+/* A translation's own labels (xg-g0ra.4): cel-<scale>x/<version>/<set>/sprites.txt, one folder per text source
+ * (fr, it, es, ...), read after the version's own set. A label sits where the original's does, so several sets
+ * hold sprites at one place; each is authenticated by its native indices (textureCelSample takes the first that
+ * matches what the game uploaded), so the set whose text is on screen is the one drawn, with no setting. */
+static SDL_EnumerationResult SDLCALL languageSet(void* data,const char* dir,const char* name) {
+    char** found=data;
+    size_t n=strlen(dir);const char* sep=n && (dir[n-1]=='/' || dir[n-1]=='\\')?"":"/";
+    char path[3400];snprintf(path,sizeof(path),"%s%s%s/sprites.txt",dir,sep,name);
+    SDL_PathInfo info;
+    if(safeName(name) && SDL_GetPathInfo(path,&info) && info.type==SDL_PATHTYPE_FILE) {
+        int k=0;while(found[k])k++;
+        if(k<15)found[k]=SDL_strdup(name);
+    }
+    return SDL_ENUM_CONTINUE;
+}
+static int byName(const void* a,const void* b){return strcmp(*(char* const*)a,*(char* const*)b);}
+static void readSet(int scale) {
+    char dir[3200];snprintf(dir,sizeof(dir),"%s/cel-%dx/%s",root,scale,texturePackVersion());
+    readList(scale,dir);
+    char* sets[16]={0};
+    SDL_EnumerateDirectory(dir,languageSet,sets);
+    int n=0;while(sets[n])n++;
+    qsort(sets,(size_t)n,sizeof(*sets),byName);
+    for(int i=0;i<n;i++) {
+        char sub[3300];snprintf(sub,sizeof(sub),"%s/%s",dir,sets[i]);
+        readList(scale,sub);SDL_free(sets[i]);
     }
 }
 void textureCelReload(void) {

@@ -310,12 +310,10 @@ extern CVECTOR fogNearColor;
 extern s32 fieldPolyCount2;
 extern BattlingKernelState battlingProgress;
 /* 0x80088BFC is a one-entry function table {battlingMainTask} (data in .text,
- * still inside the INCLUDE_ASM of battlingMainTaskTable); the VSync callback
- * func_80088C00 follows it. */
+ * defined in bl_80083DCC.c); the DrawSync callback func_80088C00 follows
+ * it. */
 extern void* battlingMainTaskTable[];
-#ifdef PLATFORM_PC
-void func_80088C00(void); /* port/src/game/battling/thread.c */
-#endif
+void func_80088C00(void);
 extern s32 battlingDebugEnabled;
 extern LoadingBatchCommand battlingStartupLoads[6];
 extern s32 battlingPlaysOwnMusic;
@@ -2288,7 +2286,16 @@ void markBattlingGearDefeated(s32 gearId) {
     checkBattlingAllDefeated();
 }
 
-INCLUDE_ASM("battling/nonmatchings/bl_80083DCC", battlingMainTaskTable);
+#ifndef PLATFORM_PC /* the PC's two are in port/src/game/battling/thread.c */
+/* battlingMain starts the task at battlingMainTaskIndex; retail keeps the
+ * table in .text, between the functions. */
+void* battlingMainTaskTable[1] __attribute__((section(".text"))) = { battlingMainTask };
+
+/* DrawSync callback (initBattlingSystem): the VSync count when the GPU finished. */
+void func_80088C00(void) {
+    battlingGpuTime = VSync(1);
+}
+#endif
 
 void showBattlingHeapDump(void) {
     if (newPadButtonForScripts & 4) {
@@ -2314,11 +2321,7 @@ void initBattlingCursorSprite(s32 arg0) {
 void initBattlingSystem(void) {
     RECT unused; /* unused 8-byte local: retail's frame has the slot */
 
-#ifdef PLATFORM_PC
     DrawSyncCallback(func_80088C00);
-#else
-    DrawSyncCallback((void (*)(void))&battlingMainTaskTable[1]);
-#endif
     InitGeom();
     resetMemoryAllocStats(6, (sptr)battlingHeapTypeNames);
     setCurrentDirectory(0x30, 0);

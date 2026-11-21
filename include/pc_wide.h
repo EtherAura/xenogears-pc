@@ -180,6 +180,11 @@ const char* pcWideOptOut(int kind, int id);
  * dx, which XG_WIDE_NOSHIFT leaves alone for these: the GPU wraps vertex x to
  * 11 bits (-1024..1023) before the wide shift. */
 #define PC_WIDE_BELOW 0x10
+/* Used by the Enhanced engine only (engine/include/pc_wide.h, xg-3hyf):
+ * an effect drawn only inside the scene drawn so far in the margins, and a
+ * primitive that is no part of the scene. */
+#define PC_WIDE_SCENE_EFFECT 0x40
+#define PC_WIDE_NOT_SCENE 0x80
 void pcWidePrim(void* prim, int dx, unsigned int flags);
 void pcWidePrimTex(void* prim, int dx, unsigned int flags, int texDx);
 void pcWidePrimTex2D(void* prim, int dx, unsigned int flags, int texDx, int texDy);

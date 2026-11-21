@@ -300,8 +300,8 @@ extern CVECTOR fogNearColor;
 extern s32 fieldPolyCount2;
 extern BattlingKernelState battlingProgress;
 /* 0x80088BFC is a one-entry function table {battlingMainTask} (data in .text,
- * still inside the INCLUDE_ASM of battlingMainTaskTable); the VSync callback
- * func_80088C00 follows it. */
+ * defined in bl_80083DCC.c); the DrawSync callback func_80088C00 follows
+ * it. */
 extern void* battlingMainTaskTable[];
 extern s32 battlingDebugEnabled;
 extern LoadingBatchCommand battlingStartupLoads[6];

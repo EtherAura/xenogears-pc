@@ -479,9 +479,51 @@ void pcWideFrameLines(int x, int y, int* top, int* bottom) {
     }
 }
 
+/* The box of what each frame buffer's frame drew so far in the wide target
+ * (wideNoteScene): outside wd, so save states keep their layout; a frame
+ * starts it empty (begin), a state loaded mid-frame at worst clips one
+ * frame's effects to the 4:3 part. */
+static struct {
+    int any;
+    VRect box;
+} sceneBox[MAX_FBS];
+
+void wideNoteScene(const WideDraw* d, VRect r) {
+    if (d->fb < 0 || d->fb >= MAX_FBS || r.x0 > r.x1 || r.y0 > r.y1) return;
+    VRect* b = &sceneBox[d->fb].box;
+    if (!sceneBox[d->fb].any) {
+        *b = r;
+        sceneBox[d->fb].any = 1;
+        return;
+    }
+    b->x0 = r.x0 < b->x0 ? r.x0 : b->x0;
+    b->y0 = r.y0 < b->y0 ? r.y0 : b->y0;
+    b->x1 = r.x1 > b->x1 ? r.x1 : b->x1;
+    b->y1 = r.y1 > b->y1 ? r.y1 : b->y1;
+}
+
+/* An effect is drawn in the margins and extra rows only over the scene's box;
+ * the unwidened draw area (the 4:3 picture's) stays whole, so the centre is
+ * VRAM's. Nothing drawn yet: the unwidened area alone. */
+void wideSceneClip(const WideDraw* d, int* x0, int* y0, int* x1, int* y1) {
+    VRect s = {d->edgeX0, d->edgeY0, d->edgeX1, d->edgeY1};
+    if (d->fb >= 0 && d->fb < MAX_FBS && sceneBox[d->fb].any) {
+        VRect b = sceneBox[d->fb].box;
+        s.x0 = b.x0 < s.x0 ? b.x0 : s.x0;
+        s.y0 = b.y0 < s.y0 ? b.y0 : s.y0;
+        s.x1 = b.x1 > s.x1 ? b.x1 : s.x1;
+        s.y1 = b.y1 > s.y1 ? b.y1 : s.y1;
+    }
+    *x0 = s.x0 > *x0 ? s.x0 : *x0;
+    *y0 = s.y0 > *y0 ? s.y0 : *y0;
+    *x1 = s.x1 < *x1 ? s.x1 : *x1;
+    *y1 = s.y1 < *y1 ? s.y1 : *y1;
+}
+
 /* A new frame in f: margins cleared, and (with a new margin) the centre put
  * back in step with VRAM. */
 static void begin(WideFb* f) {
+    sceneBox[f - wd.fb].any = 0;
     int w = fbWidth(f), h = f->r.y1 - f->r.y0 + 1;
     int m = wd.m, top, bottom, dy;
     frameLines(f, &top, &bottom, &dy);
@@ -1570,6 +1612,14 @@ void pcTextureClass(void* prim, int kind) {
 void pcFadePrim(void* prim) {
     WidePacket* p = packetSlot(prim);
     if (p) p->fade = 1;
+}
+
+/* Flags added to whatever treatment the packet has (PC_WIDE_SCENE_EFFECT,
+ * PC_WIDE_NOT_SCENE): only the wide picture reads them. */
+void pcWideFlags(void* prim, unsigned int flags) {
+    if (!wideActive()) return;
+    WidePacket* p = packetSlot(prim);
+    if (p) p->flags |= flags;
 }
 
 void pcGeometryPrim(void* prim, int treatment) {

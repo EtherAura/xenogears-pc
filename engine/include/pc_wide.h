@@ -179,6 +179,18 @@ const char* pcWideOptOut(int kind, int id);
  * dx, which XG_WIDE_NOSHIFT leaves alone for these: the GPU wraps vertex x to
  * 11 bits (-1024..1023) before the wide shift. */
 #define PC_WIDE_BELOW 0x10
+/* Past the scene (Enhanced, xg-3hyf): the scene's extent in a frame's wide
+ * picture is the box of what the frame drew there so far (draws in ordering
+ * table order: the far room and backdrop first). A PC_WIDE_SCENE_EFFECT
+ * primitive (the field's particles) is drawn in the margins and extra rows
+ * only inside that box, so an effect does not show where the room or the
+ * backdrop has ended and nothing else is drawn; the 4:3 part is never
+ * clipped. A PC_WIDE_NOT_SCENE primitive (the black laid past the room)
+ * does not widen the box. pcWideFlags adds them to a primitive's treatment
+ * (the same lifetime as pcWidePrim's). */
+#define PC_WIDE_SCENE_EFFECT 0x40
+#define PC_WIDE_NOT_SCENE 0x80
+void pcWideFlags(void* prim, unsigned int flags);
 void pcWidePrim(void* prim, int dx, unsigned int flags);
 void pcWidePrimTex(void* prim, int dx, unsigned int flags, int texDx);
 void pcWidePrimTex2D(void* prim, int dx, unsigned int flags, int texDx, int texDy);

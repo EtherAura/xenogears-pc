@@ -111,6 +111,7 @@ extern s32 fieldMapNumber;
 void pcFieldWideObject(sFieldEntitySub0* sub, MATRIX* proj, OTag* ot);
 s32 pcFieldNpcMargin(void);
 void pcFieldWideFrameStart(void);
+void pcFieldWideCover(OTag* ot, const DRAWENV* draw, const DRAWENV* clear, const DISPENV* disp); /* port/src/game/field/wide.c */
 s32 submitModelForRendering(ModelBlock* b, u8* prims, OTag* ot, s32 renderMode);
 /* Retail calls it with four arguments: the fifth is whatever the stack holds.
  * After a field load (initFieldData -> doPCCollisionCheckAfterLoading, the
@@ -2271,6 +2272,9 @@ void updateAndRenderField(void) {
         }
         linkOT(&pCurrentFieldRenderingContext->m80D4_uiOT[7], pCurrentFieldRenderingContext->mCC_OT, op9DVar1.m50_linkOTIndex);
         pcFieldSceneDepth(looking); /* Enhanced (xg-rgcf.5): the scene's depth, for the display copy's depth of field */
+        /* Enhanced (xg-3hyf.1): black past the room in the wide picture, under it */
+        pcFieldWideCover(&pCurrentFieldRenderingContext->m80D4_uiOT[7], &pCurrentFieldRenderingContext->m0_drawEnv,
+                         &pCurrentFieldRenderingContext->m5C_backgroundRect, &pCurrentFieldRenderingContext->mB8_displayEnv);
     }
     DrawOTag(&pCurrentFieldRenderingContext->m80D4_uiOT[7]);
     pcInterpolationFrameEnd();

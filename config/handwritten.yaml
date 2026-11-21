@@ -66,8 +66,6 @@ battling:
   - about: 0x80072D18 ground renderer and vector/matrix helpers ($t registers, filled delay slots)
     names: [renderBattlingGround, scaleBattlingSVector, func_800730AC, func_800730F4,
             blurBattlingImage, scaleBattlingMatrixBySVector, copyBattlingWords]
-  - about: 0x80088BFC is not code but a one-entry function table {battlingMainTask} in .text
-    names: [battlingMainTaskTable]
   - about: 0x8008BB00 thread context save/restore
     names: [func_8008BB00, func_8008BB1C, resumeBattlingThread, yieldBattlingThread]
   - about: 0x8008C3A8 software-pipelined GTE shadow loops

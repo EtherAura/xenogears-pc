@@ -162,6 +162,7 @@ gpu/gp0.c savedClipY0 derived only inside a wide draw
 gpu/gp0.c savedClipY1 derived only inside a wide draw
 gpu/gp0.c savedShift derived only inside a wide draw
 gpu/gp0.c savedShiftY derived only inside a wide draw
+gpu/gp0.c wideSceneDraw derived only inside a wide draw
 gpu/gp0.c spanBuf derived per-primitive scratch
 gpu/gp0.c stepBuf derived per-primitive scratch
 gpu/gp0.c stepMap derived per-primitive scratch
@@ -237,6 +238,7 @@ gpu/wide.c pcVerticalCull state
 gpu/wide.c pcWideCull state
 gpu/wide.c pcWideOnlyScope state
 gpu/wide.c pcWideView state
+gpu/wide.c sceneBox derived the scene's box in the frame being drawn (xg-3hyf), restarted as each frame begins
 gpu/wide.c wd state the game's choices, bookkeeping, the packet table's live entries, the arenas' used parts
 gpu/wide.c wideKept derived a frame buffer's wide picture kept across one VSync wait (the ripple's picture between), put back before the native frame draws
 gpu/vram.c kept derived VRAM's bookkeeping kept across one Battling picture between and put back with its pixels (vramBookkeepingKeep/PutBack)

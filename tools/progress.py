@@ -90,6 +90,12 @@ def main() -> int:
         if not args.versions and mod in seen and names - seen[mod]:  # some names are one version's only
             print(f"warning: config/handwritten.yaml names no function of {mod}: "
                   f"{', '.join(sorted(names - seen[mod]))}", file=sys.stderr)
+    for version, mods in report.items():  # the C+asm 100% holds only while this stays silent
+        for name, s in mods.items():
+            left = s.get("functions", 0) - s.get("functions_matched", 0) - s.get("functions_handwritten", 0)
+            if left:
+                print(f"warning: {version} {name}: {left} function(s) still assembly and not in "
+                      f"config/handwritten.yaml", file=sys.stderr)
 
     if args.json:
         json.dump(report, sys.stdout, indent=2)

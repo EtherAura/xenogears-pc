@@ -194,6 +194,11 @@ int texturePackBeetleEnabled(void);
 void texturePackBeetleInit(void); /* gpuInit: a chosen Beetle pack is read at once (its tracking sees every upload) */
 int textureSpriteCelKnown(uint64_t key);
 int textureSpriteCelSample(const DecodedTexture* texture, TextureRequest patch, int filter, TextureSample* out);
+/* A sprite quad's cell from its corners (texture_pack.c), for a draw whose sampled texels
+ * (patch) the look-up above cannot place: a part drawn scaled or x-mirrored. corners: the
+ * vertices' UV range, inclusive; mirrored: u runs right to left on screen. 1 with the cell the
+ * sprite library holds; 0 when there is none or the patch's own look-up finds its cell. */
+int textureSpriteCelCorners(TextureRequest patch, TextureRequest corners, int mirrored, TextureRequest* cell);
 /* Independent portrait lookup; shared by live drawing and motion snapshots. */
 int portraitPackSample(const DecodedTexture* texture, TextureRequest patch, TextureSample* out);
 int portraitPackClassSample(const DecodedTexture* texture, TextureRequest patch, int kind, TextureSample* out);

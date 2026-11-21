@@ -295,6 +295,7 @@ s32 interpolateParticleColor(s32 value, s32 step) {
 }
 
 void pcFieldPicParticle(const void* p, s32 x, s32 y, s32 z); /* f_80072140.c, the oracle */
+s32 pcFieldWideKeepsClear(void); /* port/src/game/field/wide.c (xg-3hyf) */
 void projectAndRenderParticle(sParticle* p, MATRIX* proj, s16 angle, s32 sort, VECTOR* scale, s32 attachMode) {
     MATRIX m;
     MATRIX local;
@@ -362,6 +363,12 @@ void projectAndRenderParticle(sParticle* p, MATRIX* proj, s16 angle, s32 sort, V
         pcInterpolationPrim(&p->m50_poly[g_frameOddOrEven]);
         pcInterpolationObject(0, 0);
         addPrim(&pCurrentFieldRenderingContext->mCC_OT[depth], &p->m50_poly[g_frameOddOrEven]);
+        /* Enhanced (xg-3hyf.3): in the wide picture only over the scene drawn
+         * so far, so no blown sand shows beside a backdrop that ends inside it
+         * (not where the room's clear colour goes on past it: a sky) */
+        if (!pcFieldWideKeepsClear()) {
+            pcWideFlags(&p->m50_poly[g_frameOddOrEven], PC_WIDE_SCENE_EFFECT);
+        }
     }
 }
 
