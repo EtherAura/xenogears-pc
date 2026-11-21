@@ -1,11 +1,13 @@
 # Playing with translated text
 
-The US download plays in English. To use a fan translation, start the game
-from your original US disc images and give the port a second, patched pair
-as its text source. You can choose the source separately for dialogue,
-battle text, game menus and item names.
+The US download plays in English. Start the game from your original US
+discs and select a translation as its text source. Italian and Spanish can
+use patched images directly. For French, make a personal text pack from
+Atelier’s patched discs using the instructions below.
 
-## Set up a translation
+## Set up a translation in v2026.11.17
+
+For a translation that works directly from patched images, such as Italian or Spanish, follow these steps. French uses the pack setup below.
 
 1. Apply the translation team's patch to **copies** of both US disc images.
    Keep your original pair selected in disc setup.
@@ -24,6 +26,32 @@ pack by name. **Disc** restores the running game's own text for that row.
 Japanese battle voices and movie audio have separate settings under
 **F1 → Audio**. [Audio settings](gameplay.md#controls-and-audio)
 
+### French with Atelier Traduction 1.1
+
+1. Apply Atelier’s 1.1 patch to copies of both US discs. Keep the
+   `Patched` folder that the patcher produces. Its `Undub_patched`
+   folder also works for text. [Atelier’s patch and instructions](https://ateliertraduction.forumgaming.fr/t51-mise-a-jour-de-xenogears-en-v1-1)
+2. Download the Python helper and run it with the Original US game
+   executable, your original US Disc 1 and the patcher’s output folder.
+   Replace the example paths with yours. Allow about 1.5 GB of temporary
+   space. The helper checks both patched images and uses the game to
+   export the text and font into your packs folder. [Download the French pack helper](https://raw.githubusercontent.com/EtherAura/xenogears-pc/main/tools/atelier_text_pack.py)
+
+   ```sh
+   python3 atelier_text_pack.py --game "/path/to/bin/xenogears" --retail "/path/to/original Disc 1.cue" --french "/path/to/Patched"
+   ```
+
+3. Launch the game from your original US discs. In **F1 → System →
+   Language and text**, choose **Atelier Français 1.1** for Dialogue,
+   Battle text, Game menus and Names/items. Enable **Pictures with text
+   too** for menus and battles. On builds with the single game-language
+   selector, choose **Atelier Français 1.1** once.
+
+Selecting the French BINs directly in v2026.11.17 leaves Fei speaking
+English. The patch stores extra data in unused file-table slots, which
+the release reads as invalid file entries. The helper accounts for those
+slots in temporary copies. [Direct-image result](img/translations/field14-fr.png)
+
 ## Which translations work?
 
 These results are from the **Original engine in the Linux x86-64 download
@@ -36,20 +64,20 @@ playthrough were outside this test. [Tested release](https://github.com/EtherAur
 | Italian · SadNES cITy 1.2.1 | Both discs showed Italian dialogue and equipment text. The battle showed **Attacco** and **Tempo**. Some status labels stayed in English. [Patch and instructions](https://www.sadnescity.it/traduzioni/xeno/xeno.php) |
 | Spanish · Romhack Hispano v1 | The text-and-graphics edition showed Spanish dialogue, menu labels and equipment names on both discs. The battle command read **Atacar**. Some status labels stayed in English. [Patch and instructions](https://xenogears.romhackhispano.org/traduccion.html) |
 | English · Perfect Works Build 0.11.4 | Use your own images patched with the **`story_mode_script`** preset for the tested text option. Revised English narration appeared on Disc 2. All six `all_*` presets failed verification on both discs. The `bug_fixes` and `story_mode` images passed verification, but their dialogue was untested. Selecting a text image leaves gameplay rules under the control of the PC engine. [Perfect Works release](https://github.com/PWBuild-Team/Perfect_Works_Build/releases/tag/0.11.4) |
-| French · Atelier Traduction 1.1 | The port rejected both patched images because a file-table entry extended beyond the image. The optional Japanese-voice images failed the same check. With the French text images selected, all five sampled scenes kept their original English text. [Team's patch notes](https://ateliertraduction.forumgaming.fr/t51-mise-a-jour-de-xenogears-en-v1-1) |
+| French · Atelier Traduction 1.1 | The personal pack showed French dialogue on both discs and French equipment text on both status screens. The Disc 1 battle wheel still read **Attack**. The standard and undub images produced identical text packs. [French setup](#french-with-atelier-traduction-11) |
 | Brazilian Portuguese · TransXeno | Compatibility with the team's translation is **unverified**. In a separate two-line Portuguese test pack, accented dialogue appeared when the pack supplied the missing glyphs. With the stock US font, both lines fell back to English. [TransXeno's translation screenshots](https://transxeno.blogspot.com/2010/06/novas-imagens-da-traducao.html) |
 
 ## Screenshot comparisons
 
-Each pair shows the same frame from the published Linux Original build. The Disc 2 narration contains a story spoiler.
+All screenshots are from the published Linux Original build. Each scene was captured at the same frame across languages. The Disc 2 narration contains a story spoiler.
 
 ### Disc 1 dialogue
 
-Fei speaks in the same room on all four runs. The French images failed verification, so that run shows the original English line.
+Fei says “Whew! That about does it...” in US retail and “Fiou ! Ça devrait suffire...” with the Atelier pack.
 
-| US retail | Atelier French selected |
+| US retail | Atelier Français 1.1 pack |
 |---|---|
-| ![US retail, Fei’s dialogue](img/translations/field14-us.png) | ![Atelier French selected, Fei’s dialogue](img/translations/field14-fr.png) |
+| ![US retail, Fei’s dialogue](img/translations/field14-us.png) | ![Fei says “Fiou ! Ça devrait suffire...” in French](img/translations/field14-fr-pack.png) |
 
 | SadNES cITy Italian | Romhack Hispano Spanish |
 |---|---|
@@ -57,7 +85,7 @@ Fei speaks in the same room on all four runs. The French images failed verificat
 
 ### Battle and status
 
-The Disc 1 battle wheel reads **Attacco** in Italian and **Atacar** in Spanish. On the status screen, the equipment names change while some stat labels stay in English.
+The Disc 1 battle wheel reads **Attacco** in Italian, **Atacar** in Spanish and **Attack** with the French pack. On the French status screen, the equipment list includes **Tenue de Kung Fu**.
 
 | Italian battle commands | Spanish battle commands |
 |---|---|
@@ -67,13 +95,17 @@ The Disc 1 battle wheel reads **Attacco** in Italian and **Atacar** in Spanish. 
 |---|---|
 | ![Italian status screen, status](img/translations/status-it.png) | ![Spanish status screen, status](img/translations/status-es.png) |
 
+| Atelier pack, battle commands | Atelier pack, status screen |
+|---|---|
+| ![French pack with the English Attack command](img/translations/battle-fr-pack.png) | ![French status screen with Force, Défense and French equipment names](img/translations/status-fr-pack.png) |
+
 ### Disc 2 narration
 
-The same moment in the narration shows a wording change with the Perfect Works `story_mode_script` preset and translated lines with the Italian and Spanish patches.
+The same moment in the narration shows a wording change with the Perfect Works `story_mode_script` preset and translated lines in French, Italian and Spanish.
 
-| US retail | Perfect Works English |
-|---|---|
-| ![US retail, Disc 2 narration](img/translations/field618-us.png) | ![Perfect Works English, Disc 2 narration](img/translations/field618-pw-story.png) |
+| US retail | Atelier Français 1.1 pack | Perfect Works English |
+|---|---|---|
+| ![US retail, Disc 2 narration](img/translations/field618-us.png) | ![French Disc 2 narration beginning “J’étais impuissant...”](img/translations/field618-fr-pack.png) | ![Perfect Works English, Disc 2 narration](img/translations/field618-pw-story.png) |
 
 | SadNES cITy Italian | Romhack Hispano Spanish |
 |---|---|
