@@ -90,7 +90,8 @@ def build(tmp, objects_only):
                 raise ValueError(f"{obj.name} did not contribute tentative common storage")
         module = build_dir / "module.o"
         data, bss = f"xgd{i:02}", f"xgb{i:02}"
-        run("xcrun", "ld", "-v", "-r", "-arch", "arm64", "-d", "-exported_symbol", "_" + entry,
+        # Xcode's classic linker supports -r -d to allocate each module's common symbols.
+        run("xcrun", "ld-classic", "-v", "-r", "-arch", "arm64", "-d", "-exported_symbol", "_" + entry,
             "-rename_section", "__DATA", "__data", "__DATA", data,
             "-rename_section", "__DATA", "__common", "__DATA", bss,
             "-rename_section", "__DATA", "__bss", "__DATA", bss, *inputs, "-o", module)
