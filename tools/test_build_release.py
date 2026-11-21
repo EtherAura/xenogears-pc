@@ -5,6 +5,7 @@ import argparse
 import contextlib
 import hashlib
 import io
+import json
 import shutil
 import subprocess
 import sys
@@ -43,14 +44,12 @@ class ReleaseTests(unittest.TestCase):
     def test_linux_failure_leaves_windows_outputs_private(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            out, python, ubuntu = (root / name for name in ("out", "python", "ubuntu"))
+            out, python, ubuntu, mingw = (root / name for name in ("out", "python", "ubuntu", "mingw"))
             out.mkdir()
             (out / "keep").write_text("existing")
-            for tool in (python / "bin/python3", ubuntu / "usr/bin/makensis"):
-                tool.parent.mkdir(parents=True)
-                tool.touch()
+            self.tools(python, ubuntu, mingw)
 
-            def windows(work, tree, cache, py, builder, discs, tag, pending, compiler):
+            def windows(work, tree, cache, py, builder, mingw, discs, tag, pending, compiler, tables):
                 (pending / "windows.zip").write_bytes(b"private")
 
             args = argparse.Namespace(discs=root / "discs", out=out, scratch=root, makensis=None)
@@ -59,9 +58,43 @@ class ReleaseTests(unittest.TestCase):
                  patch.object(release, "run"), patch.object(release, "build_windows", side_effect=windows), \
                  patch.object(release, "build_linux", side_effect=subprocess.CalledProcessError(1, "linux")):
                 with self.assertRaises(subprocess.CalledProcessError):
-                    release.build(args, root / "cache", python, ubuntu, "v2026.11.0")
+                    release.build(args, root / "cache", python, ubuntu, mingw, "v2026.11.0")
             self.assertEqual([p.name for p in out.iterdir()], ["keep"])
             self.assertFalse(list(root.glob(".xenogears-release-*")))
+
+    @staticmethod
+    def tools(python: Path, ubuntu: Path, mingw: Path) -> None:
+        for tool in (python / "bin/python3", ubuntu / release.UBUNTU_MARK, mingw / release.MINGW_MARK):
+            tool.parent.mkdir(parents=True)
+            tool.touch()
+
+    def test_windows_builder_recipe_is_pinned(self):
+        """mingw_debian.Dockerfile: the base by digest, every package but ca-certificates from one archive snapshot
+        read with errors fatal, no file copied in, the mount point the release scripts use, a final non-root user."""
+        import re
+        text = release.MINGW_RECIPE.read_text()
+        steps = re.sub(r"\\\n\s*", " ", "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#")))
+        froms = re.findall(r"^FROM (.+)$", steps, re.M)
+        self.assertEqual(len(froms), 1)
+        self.assertRegex(froms[0], r"^--platform=linux/amd64 debian:\w+@sha256:[0-9a-f]{64}$")
+        parts = [part.strip() for line in re.findall(r"^RUN (.+)$", steps, re.M) for part in line.split(";")]
+        snapshot = re.findall(r"--snapshot=(\d{8}T\d{6}Z)", steps)
+        self.assertEqual(len(set(snapshot)), 1, snapshot)
+        installs = [part for part in parts if "apt-get install" in part]
+        self.assertEqual(len(installs), 2)
+        self.assertTrue(installs[0].endswith("--no-install-recommends ca-certificates") and "--snapshot" not in installs[0])
+        self.assertIn(f"--snapshot={snapshot[0]}", installs[1])
+        for package in ("gcc-mingw-w64-x86-64-posix", "g++-mingw-w64-x86-64-posix", "binutils-mingw-w64-x86-64",
+                        "cmake", "ninja-build", "meson", "nasm", "glslc", "python3-yaml", "libvulkan-dev"):
+            self.assertIn(package, installs[1].split())
+        self.assertNotIn("gcc-mingw-w64-x86-64-win32", installs[1])  # one thread model: x86_64-w64-mingw32-gcc is posix
+        update = [part for part in parts if part.startswith("apt-get update --snapshot")]
+        self.assertEqual(update, [f"apt-get update --snapshot={snapshot[0]} -o APT::Update::Error-Mode=any"])
+        self.assertLess(parts.index("rm -rf /var/lib/apt/lists/*"), parts.index(update[0]))
+        self.assertIn("mkdir -p /work", parts)
+        self.assertNotRegex(steps, r"^(COPY|ADD|ENV|ARG) ", "nothing is copied in and nothing set for the build")
+        self.assertRegex(steps.rstrip().splitlines()[-2], r"^USER [1-9]\d*:[1-9]\d*$")
+        self.assertNotRegex(steps, r"\b(curl|wget|pip3?|git)\b|https?://")
 
     def test_complete_bundle_requires_every_checksum(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -91,7 +124,7 @@ class ReleaseTests(unittest.TestCase):
 
     def main(self, *argv):
         with patch.object(sys, "argv", ["build-release.sh", *argv]), patch.object(release, "python_pins", return_value=[]), \
-             patch.object(release, "fetch") as fetch, patch.object(release, "fetch_builder") as builder, \
+             patch.object(release, "fetch") as fetch, patch.object(release, "fetch_free") as builder, \
              patch.object(release, "build") as build, patch.object(release, "build_free") as free, \
              patch.object(release, "build_tables") as self.tables, contextlib.redirect_stderr(io.StringIO()):
             try:
@@ -111,15 +144,18 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual((args.region, args.reproduce, free.call_args.args[-1]), ("jp", True, "v2026.11.0"))
         status, fetch, builder, build, free = self.main()
         self.assertEqual(status, 0)
-        fetch.assert_not_called()  # no Python tools, no library tarballs: the builder only
-        builder.assert_called_once()
+        fetch.assert_not_called()  # no Python tools: the builders, and Windows's library sources
+        self.assertEqual(builder.call_args.args[-1], ("linux", "windows"))
         self.assertEqual(free.call_args.args[0].region, "us")
+        status, fetch, builder, build, free = self.main("--only", "linux")
+        self.assertEqual((status, builder.call_args.args[-1], free.call_args.args[0].only), (0, ("linux",), "linux"))
 
     def test_options_of_the_other_mode_are_refused(self):
         for argv in (["--write-tables", "tables"], ["--makensis", "makensis"], ["--discs", "d", "--region", "us"],
                      ["--discs", "d", "--reproduce"], ["--fetch-only", "--reproduce"],
                      ["--discs", "d", "--tables", "t.tar.gz"], ["--fetch-only", "--tables", "t.tar.gz"],
-                     ["--fetch-only", "--write-tables", "tables"],
+                     ["--fetch-only", "--write-tables", "tables"], ["--discs", "d", "--only", "linux"],
+                     ["--fetch-only", "--only", "windows"], ["--only", "macos"],
                      ["--discs", "d", "--write-tables", "tables", "--out", "out"],
                      ["--discs", "d", "--write-tables", "tables", "--version", "2026.11.0"],
                      ["--discs", "d", "--write-tables", "tables", "--makensis", "makensis"]):
@@ -175,35 +211,75 @@ class ReleaseTests(unittest.TestCase):
     def made(stage: Path) -> dict:
         return {engine: release.sha256(exe) for engine, exe in release.staged_executables(stage).items()}
 
-    def test_release_packs_the_tables_its_own_build_made(self):
-        """build(): after the Linux assets, the tables of a build that must be the packaged bytes, as one asset."""
+    def test_release_packs_the_tables_its_own_builds_made(self):
+        """build(): the Linux tables of a build that must be the packaged bytes and the Windows build's own tables,
+        whose recorded bytes must be the .zip's, gathered as one asset."""
+        import zipfile
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            python, ubuntu, out = root / "python", root / "ubuntu", root / "out"
-            for tool in (python / "bin/python3", ubuntu / "usr/bin/makensis"):
-                tool.parent.mkdir(parents=True)
-                tool.touch()
+            python, ubuntu, mingw, out = root / "python", root / "ubuntu", root / "mingw", root / "out"
+            self.tools(python, ubuntu, mingw)
             tag, seen = "v2026.11.0", {}
+            top = "xenogears-pc-2026.11.0-windows-x64"
 
-            def tables(work, tree, py, builder, tag, digest, tarball):
+            def windows(work, tree, cache, py, builder, mingw_, discs, tag, pending, compiler, tables):
+                seen["builder"] = mingw_
+                with zipfile.ZipFile(pending / f"{top}.zip", "w") as packed:
+                    for name in release.WINDOWS.values():
+                        packed.writestr(f"{top}/{name}", self.zip_bytes.get(name, name))
+                for engine, name in release.WINDOWS.items():
+                    (tables / engine / "link-tables").mkdir(parents=True)
+                    (tables / engine / "link-tables/config.txt").write_text(f"us {engine}-windows-x86_64\n")
+                    (tables / engine / "installed.sha256").write_text(hashlib.sha256(name.encode()).hexdigest() + "\n")
+
+            def linux(work, tree, ubuntu_, tag, digest, tarball):
                 seen.update(digest=digest, tarball=tarball.name)
+                return [work / "tables/us-original", work / "tables/us-enhanced"]
+
+            def gather(work, tree, py, builds):
+                seen["builds"] = [str(b.relative_to(work)) for b in builds]
+                seen["records"] = {b.name: json.loads((b / "link-tables" / release.RECORD).read_text())
+                                   for b in builds if (b / "link-tables" / release.RECORD).exists()}
                 (work / "link-tables/us").mkdir(parents=True)
                 (work / "link-tables/us/asm-layout.json").write_text("{}")
                 return work / "link-tables"
 
             args = argparse.Namespace(discs=root / "discs", out=out, scratch=root, makensis=None)
-            with patch.object(release.release_inputs, "disc_image", return_value=root / "d"), \
-                 patch.object(release.release_inputs, "copy_tree"), \
-                 patch.object(release.release_inputs, "tree_digest", return_value="d1"), \
-                 patch.object(release.shutil, "which", return_value="tool"), patch.object(release, "run"), \
-                 patch.object(release, "build_windows"), patch.object(release, "build_linux"), \
-                 patch.object(release, "write_tables", side_effect=tables), patch.object(release, "promote") as promote:
-                release.build(args, root / "cache", python, ubuntu, tag)
-            self.assertEqual(seen, {"digest": "d1", "tarball": "xenogears-pc-2026.11.0-linux-x86_64.tar.gz"})
+            self.zip_bytes = {}
+            context = lambda: (patch.object(release.release_inputs, "disc_image", return_value=root / "d"),  # noqa: E731
+                               patch.object(release.release_inputs, "copy_tree"),
+                               patch.object(release.release_inputs, "tree_digest", return_value="d1"),
+                               patch.object(release.shutil, "which", return_value="tool"), patch.object(release, "run"),
+                               patch.object(release, "build_windows", side_effect=windows),
+                               patch.object(release, "build_linux"),
+                               patch.object(release, "linux_tables", side_effect=linux),
+                               patch.object(release, "gather_tables", side_effect=gather),
+                               contextlib.redirect_stdout(io.StringIO()))
+            with contextlib.ExitStack() as stack:
+                for cm in context():
+                    stack.enter_context(cm)
+                promote = stack.enter_context(patch.object(release, "promote"))
+                release.build(args, root / "cache", python, ubuntu, mingw, tag)
+            self.assertEqual(seen["builder"], mingw)
+            self.assertEqual((seen["digest"], seen["tarball"]), ("d1", "xenogears-pc-2026.11.0-linux-x86_64.tar.gz"))
+            self.assertEqual([b.rsplit("/", 1)[-1] for b in seen["builds"]], ["us-original", "us-enhanced", "original",
+                                                                            "enhanced"])
+            self.assertEqual(seen["records"]["original"], {"version": 1, "file": "xenogears.exe", "sources": "d1",
+                                                           "sha256": hashlib.sha256(b"xenogears.exe").hexdigest()})
             names = promote.call_args.args[2]
             asset = "xenogears-pc-2026.11.0-link-tables.tar.gz"
             self.assertEqual(names[-2:], [asset, asset + ".sha256"])
             self.assertEqual(len(names), len(set(names)))
+            # the Windows tables must record the .zip's own bytes
+            self.zip_bytes = {"xenogears-enhanced.exe": "other bytes"}
+            with contextlib.ExitStack() as stack:
+                for cm in context():
+                    stack.enter_context(cm)
+                promote = stack.enter_context(patch.object(release, "promote"))
+                with self.assertRaisesRegex(release.ReleaseError, "xenogears-enhanced.exe is not the bytes packaged in "
+                                                                  f"{top}.zip"):
+                    release.build(args, root / "cache", python, ubuntu, mingw, tag)
+                promote.assert_not_called()
 
     def packed(self, root: Path, files: dict) -> Path:
         staged, pending = root / "staged", root / "pending"
@@ -298,13 +374,14 @@ class ReleaseTests(unittest.TestCase):
     def test_without_discs_refuses_a_checkout_without_tables(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
-            args = argparse.Namespace(out=root / "out", scratch=root, region="us", reproduce=False, tables=None)
+            args = argparse.Namespace(out=root / "out", scratch=root, region="us", reproduce=False, tables=None,
+                                      only=None)
             with patch.object(release, "ROOT", root / "checkout"), patch.object(release, "builder") as builder:
                 with self.assertRaisesRegex(release.ReleaseError, "no link tables for us .*link-tables.tar.gz"):
-                    release.build_free(args, root / "cache", root / "ubuntu", "v2026.11.0")
+                    release.build_free(args, root / "cache", root / "ubuntu", root / "mingw", "v2026.11.0")
                 args.tables = root / "absent.tar.gz"
                 with self.assertRaisesRegex(release.ReleaseError, "no such file"):
-                    release.build_free(args, root / "cache", root / "ubuntu", "v2026.11.0")
+                    release.build_free(args, root / "cache", root / "ubuntu", root / "mingw", "v2026.11.0")
             builder.assert_not_called()
             self.assertFalse((root / "out").exists())
 
@@ -325,12 +402,12 @@ class ReleaseTests(unittest.TestCase):
                         (build / "us-stage" / rel).parent.mkdir(parents=True, exist_ok=True)
                         (build / "us-stage" / rel).write_text(engine)
 
-            args = argparse.Namespace(out=out, scratch=root, region="us", reproduce=False, tables=None)
+            args = argparse.Namespace(out=out, scratch=root, region="us", reproduce=False, tables=None, only="linux")
             with patch.object(release, "ROOT", checkout), patch.object(release, "builder", side_effect=builder), \
                  patch.object(release.shutil, "which", return_value="bwrap"), contextlib.redirect_stdout(io.StringIO()):
-                release.build_free(args, root / "cache", ubuntu, "v2026.11.0")
+                release.build_free(args, root / "cache", ubuntu, root / "mingw", "v2026.11.0")
                 with self.assertRaisesRegex(release.ReleaseError, "already holds"):
-                    release.build_free(args, root / "cache", ubuntu, "v2026.11.0")
+                    release.build_free(args, root / "cache", ubuntu, root / "mingw", "v2026.11.0")
             self.assertEqual(calls, [(("/work/source/tools/pc_sources.py",), True), (("us", "v2026.11.0"), False)])
             # a release's tables in place of the checkout's: the build links from what the archive holds
             shutil.rmtree(checkout / "port/link-tables")
@@ -341,20 +418,78 @@ class ReleaseTests(unittest.TestCase):
                 linked.append((tree / "port/link-tables/us/asm-layout.json").read_text())
                 builder(rootfs, tree, build, *command, out=out, writable=writable)
 
-            args = argparse.Namespace(out=root / "out2", scratch=root, region="us", reproduce=False, tables=asset)
+            args = argparse.Namespace(out=root / "out2", scratch=root, region="us", reproduce=False, tables=asset,
+                                      only="linux")
             with patch.object(release, "ROOT", checkout), patch.object(release, "builder", side_effect=with_tables), \
                  patch.object(release.shutil, "which", return_value="bwrap"), contextlib.redirect_stdout(io.StringIO()):
-                release.build_free(args, root / "cache", ubuntu, "v2026.11.0")
-                args = argparse.Namespace(out=root / "out3", scratch=root, region="jp", reproduce=False, tables=asset)
+                release.build_free(args, root / "cache", ubuntu, root / "mingw", "v2026.11.0")
+                args = argparse.Namespace(out=root / "out3", scratch=root, region="jp", reproduce=False, tables=asset,
+                                          only="linux")
                 with self.assertRaisesRegex(release.ReleaseError, "holds no tables for jp"):
-                    release.build_free(args, root / "cache", ubuntu, "v2026.11.0")
+                    release.build_free(args, root / "cache", ubuntu, root / "mingw", "v2026.11.0")
             self.assertEqual(linked, ["from the release", "from the release"])
             self.assertFalse((checkout / "port/link-tables").exists())  # the checkout itself is not written to
-            folder = "xenogears-pc-2026.11.0-linux-x86_64"
-            self.assertEqual(sorted(p.name for p in out.iterdir()), [folder, folder + ".sha256"])
-            self.assertEqual((out / (folder + ".sha256")).read_text(), "".join(
+            folder, sums = "xenogears-pc-2026.11.0-linux-x86_64", "xenogears-pc-2026.11.0-us-executables.sha256"
+            self.assertEqual(sorted(p.name for p in out.iterdir()), [folder, sums])
+            self.assertEqual((out / sums).read_text(), "".join(
                 f"{hashlib.sha256(engine.encode()).hexdigest()}  {folder}/{rel}\n" for engine, rel in release.ENGINES.items()))
             self.assertFalse(list(root.glob(".xenogears-release-*")))
+
+    def test_without_discs_builds_windows_in_its_builder_and_compares_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            checkout, mingw, cache = root / "checkout", root / "mingw", root / "cache"
+            cache.mkdir()
+            config = checkout / "port/link-tables/us/original-windows-x86_64"
+            config.mkdir(parents=True)
+            (checkout / "port/link-tables/us/asm-layout.json").write_text("{}")
+            (config / "facts.json").write_text("{}")
+            (config / release.RECORD).write_text(json.dumps({"version": 1, "file": "xenogears.exe", "sources": "d1",
+                                                             "sha256": hashlib.sha256(b"xenogears.exe").hexdigest()}))
+            (mingw / release.MINGW_MARK).parent.mkdir(parents=True)
+            (mingw / release.MINGW_MARK).touch()
+            built = []
+
+            def windows(work, mingw_, cache_, region, *, audit, tables):
+                built.append((mingw_, region, audit, tables))
+                stage = work / "windows-stage"
+                stage.mkdir()
+                for name in release.WINDOWS.values():
+                    (stage / name).write_text(self.bytes_.get(name, name))
+                return stage
+
+            def run_once(out, reproduce=False):
+                args = argparse.Namespace(out=out, scratch=root, region="us", reproduce=reproduce, tables=None,
+                                          only="windows")
+                with patch.object(release, "ROOT", checkout), patch.object(release, "run") as ran, \
+                     patch.object(release, "windows_executables", side_effect=windows), \
+                     patch.object(release, "builder") as linux, \
+                     patch.object(release.release_inputs, "tree_digest", return_value="d1"), \
+                     patch.object(release.shutil, "which", return_value="bwrap"), \
+                     contextlib.redirect_stdout(io.StringIO()) as said:
+                    release.build_free(args, cache, root / "ubuntu", mingw, "v2026.11.0")
+                linux.assert_not_called()
+                self.assertIn("check", ran.call_args.args)  # the library sources are checked first
+                return said.getvalue()
+
+            self.bytes_ = {}
+            said = run_once(root / "out")
+            self.assertEqual(built, [(mingw, "us", False, False)])  # no audit without the images; no tables written
+            self.assertIn("xenogears.exe " + hashlib.sha256(b"xenogears.exe").hexdigest() + ": the bytes of the "
+                          "disc-backed build", said)
+            self.assertIn("xenogears-enhanced.exe", said.split("nothing to compare")[0].rsplit("\n", 1)[-1])
+            folder = "xenogears-pc-2026.11.0-windows-x64"
+            self.assertEqual(sorted(p.name for p in (root / "out").iterdir()),
+                             sorted([folder, "xenogears-pc-2026.11.0-us-executables.sha256"]))
+            with self.assertRaisesRegex(release.ReleaseError, "--reproduce: the tables record no xenogears-enhanced.exe"):
+                run_once(root / "out2", reproduce=True)
+            self.bytes_ = {"xenogears.exe": "other bytes"}
+            with self.assertRaisesRegex(release.ReleaseError, "xenogears.exe is .* not reproduced"):
+                run_once(root / "out3")
+            self.assertFalse((root / "out3").exists())
+            (config / "facts.json").unlink()
+            with self.assertRaisesRegex(release.ReleaseError, "no Windows tables for us"):
+                run_once(root / "out4")
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,7 +1,8 @@
 name: Build without a disc
 
-# Rebuilds a release's Linux executables with no disc anywhere, and requires
-# them to be the bytes in that release's Linux package.
+# Rebuilds a release's Linux and Windows executables with no disc anywhere, and
+# requires them to be the bytes in that release's Linux tarball and Windows
+# .zip.
 #
 # A release carries its link tables, xenogears-pc-<version>-link-tables.tar.gz:
 # what the build takes from the disc otherwise, as addresses, sizes, offsets and
@@ -10,13 +11,15 @@ name: Build without a disc
 # passed through its payload audit. This job checks out the release's tag,
 # downloads the tables and runs the command anyone can run,
 #
-#   bash build-release.sh --tables <the tables> --reproduce
+#   bash build-release.sh --tables <the tables> --only <linux or windows> --reproduce
 #
-# in the release's own builder (packaging/deb_ubuntu.Dockerfile: the base image
-# by digest, its packages from one snapshot of Ubuntu's archive). --reproduce
-# fails unless each executable is the one the tables record; the last step then
-# compares them with the executables inside the release's Linux package. The
-# executables still read the player's own disc at every start.
+# in the release's own builders (packaging/deb_ubuntu.Dockerfile for Linux,
+# packaging/mingw_debian.Dockerfile for Windows: each base image by digest, its
+# packages from one snapshot of its distribution's archive). --reproduce fails
+# unless each executable is the one the tables record; the last step then
+# compares them, and for Windows SDL3.dll too, with the files inside the
+# release's package. The executables still read the player's own disc at every
+# start.
 #
 # It runs when a release is edited, which is what happens once its files are up
 # (the release's notes get their download list then), and on request for a tag.
@@ -43,10 +46,14 @@ defaults:
     shell: bash
 
 jobs:
-  linux:
-    name: Linux executables from the release's link tables
+  rebuild:
+    name: ${{ matrix.platform }} executables from the release's link tables
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux, windows]
     steps:
       # The tag reaches the shell only through the environment, never as text in the script.
       - name: Validate the tag
@@ -61,22 +68,27 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Download the release's link tables and Linux package
+      - name: Download the release's link tables and package
         id: assets
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.tag }}
           VERSION: ${{ steps.tag.outputs.version }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           tables="xenogears-pc-$VERSION-link-tables.tar.gz"
-          package="xenogears-pc-$VERSION-linux-x86_64.tar.gz"
+          if [[ "$PLATFORM" == linux ]]; then
+            package="xenogears-pc-$VERSION-linux-x86_64.tar.gz"
+          else
+            package="xenogears-pc-$VERSION-windows-x64.zip"
+          fi
           mkdir -p "$RUNNER_TEMP/release"
           cd "$RUNNER_TEMP/release"
           for name in "$tables" "$tables.sha256" "$package" "$package.sha256"; do
             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" || true
           done
           if [[ ! -f "$tables" || ! -f "$tables.sha256" || ! -f "$package" || ! -f "$package.sha256" ]]; then
-            echo "::notice::$TAG has no link tables and Linux package (yet): nothing to rebuild"
+            echo "::notice::$TAG has no link tables and $PLATFORM package (yet): nothing to rebuild"
             echo "found=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -111,33 +123,44 @@ jobs:
         env:
           VERSION: ${{ steps.tag.outputs.version }}
           TABLES: ${{ steps.assets.outputs.tables }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          bash build-release.sh --version "$VERSION" --tables "$TABLES" --out "$RUNNER_TEMP/out" --reproduce \
-            | tee "$RUNNER_TEMP/build.log"
+          bash build-release.sh --version "$VERSION" --tables "$TABLES" --only "$PLATFORM" --out "$RUNNER_TEMP/out" \
+            --reproduce | tee "$RUNNER_TEMP/build.log"
 
-      - name: Compare them with the release's Linux package
+      - name: Compare them with the release's package
         if: steps.assets.outputs.found == 'true'
         env:
           VERSION: ${{ steps.tag.outputs.version }}
           PACKAGE: ${{ steps.assets.outputs.package }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
-          folder="xenogears-pc-$VERSION-linux-x86_64"
           mkdir -p "$RUNNER_TEMP/packaged"
-          tar -xzf "$PACKAGE" -C "$RUNNER_TEMP/packaged"
-          for exe in bin/xenogears bin/xenogears-enhanced; do
-            cmp "$RUNNER_TEMP/out/$folder/$exe" "$RUNNER_TEMP/packaged/$folder/$exe"
-            echo "$exe: the bytes in $(basename "$PACKAGE")"
+          if [[ "$PLATFORM" == linux ]]; then
+            folder="xenogears-pc-$VERSION-linux-x86_64"
+            files=(bin/xenogears bin/xenogears-enhanced)
+            tar -xzf "$PACKAGE" -C "$RUNNER_TEMP/packaged"
+          else
+            folder="xenogears-pc-$VERSION-windows-x64"
+            files=(xenogears.exe xenogears-enhanced.exe SDL3.dll)
+            python3 -I -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+              "$PACKAGE" "$RUNNER_TEMP/packaged"
+          fi
+          for file in "${files[@]}"; do
+            cmp "$RUNNER_TEMP/out/$folder/$file" "$RUNNER_TEMP/packaged/$folder/$file"
+            echo "$file: the bytes in $(basename "$PACKAGE")"
           done
 
       - name: Summarize
         if: steps.assets.outputs.found == 'true'
         env:
           TAG: ${{ steps.tag.outputs.tag }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           {
-            echo "### $TAG: Linux executables rebuilt with no disc"
+            echo "### $TAG: $PLATFORM executables rebuilt with no disc"
             echo
-            echo 'Each is byte for byte the executable in the release'"'"'s Linux package.'
+            echo 'Each is byte for byte the file in the release'"'"'s package.'
             echo
             echo '```'
             cat "$RUNNER_TEMP"/out/*.sha256

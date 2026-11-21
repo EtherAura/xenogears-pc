@@ -4,7 +4,7 @@
 # Both engines and SDL3 go through the payload audit before packaging.
 #
 #   bash packaging/build-windows-zip.sh --discs DIR --cache DIR --version vYYYY.MM.N --out OUT \
-#       [--region us|jp] [--scratch DIR] [--installer [--makensis EXE]]
+#       [--region us|jp] [--scratch DIR] [--installer [--makensis EXE]] [--builder ROOTFS] [--tables-out DIR]
 #
 # --discs   the folder holding the player's Disc 1 image, under the name
 #           config/<region>/disc.yaml gives it (directly, or in a folder of its
@@ -25,6 +25,16 @@
 # --scratch the folder the private work folder is made in (default $TMPDIR or
 #           /tmp); it needs room for a full build, the libraries included. The
 #           work folder is removed at the end, whatever happens.
+# --builder the root filesystem of the release's Windows builder
+#           (packaging/mingw_debian.Dockerfile, which build-release.sh keeps in
+#           its cache): the build, both payload audits of each executable, the
+#           strip and the map's seal run inside it under bubblewrap, with no
+#           network, the work folder at /work/w and --cache at /work/cache.
+#           Without it they run on this machine with its own MinGW-w64.
+# --tables-out  also write each engine's link tables (port/CMakeLists.txt
+#           XG_WRITE_LINK_TABLES) into DIR/<engine>/link-tables, with the
+#           SHA-256 of its audited installed bytes, the ones the .zip holds, in
+#           DIR/<engine>/installed.sha256 (build-release.sh gathers them).
 #
 # Steps, each a refusal (exit 1, nothing new in OUT) when it fails:
 # 1. the tag's names, OUT free of those assets, and installer compiler preflight;
@@ -67,15 +77,16 @@ PY="$(command -v python3 || true)"
 die() { printf 'build-windows-zip: %s\n' "$*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
 
-DISCS= CACHE= TAG= OUT= REGION=us SCRATCH_PARENT="${TMPDIR:-/tmp}" INSTALLER=0 MAKENSIS=
+DISCS= CACHE= TAG= OUT= REGION=us SCRATCH_PARENT="${TMPDIR:-/tmp}" INSTALLER=0 MAKENSIS= BUILDER= TABLES_OUT=
 while [ $# -gt 0 ]; do
     case "$1" in
-        --discs|--cache|--version|--out|--region|--scratch|--makensis)
+        --discs|--cache|--version|--out|--region|--scratch|--makensis|--builder|--tables-out)
             [ $# -ge 2 ] || die "$1 needs a value"
             case "$1" in
                 --discs) DISCS="$2" ;; --cache) CACHE="$2" ;; --version) TAG="$2" ;;
                 --out) OUT="$2" ;; --region) REGION="$2" ;; --scratch) SCRATCH_PARENT="$2" ;;
                 --makensis) [ -n "$2" ] || die "--makensis needs an executable"; MAKENSIS="$2" ;;
+                --builder) BUILDER="$2" ;; --tables-out) TABLES_OUT="$2" ;;
             esac
             shift 2 ;;
         --installer) INSTALLER=1; shift ;;
@@ -97,6 +108,16 @@ done
 DISCS="$(cd "$DISCS" && pwd)"
 CACHE="$(cd "$CACHE" && pwd)"
 SCRATCH_PARENT="$(cd "$SCRATCH_PARENT" && pwd)"
+if [ -n "$BUILDER" ]; then
+    [ -d "$BUILDER/work" ] && [ -x "$BUILDER/usr/bin/x86_64-w64-mingw32-gcc-posix" ] \
+        || die "--builder $BUILDER: not the Windows builder's root filesystem (build-release.sh --fetch-only makes it)"
+    command -v bwrap >/dev/null || die "--builder needs bubblewrap"
+    BUILDER="$(cd "$BUILDER" && pwd)"
+fi
+if [ -n "$TABLES_OUT" ]; then
+    [ -d "$TABLES_OUT" ] && [ -z "$(ls -A "$TABLES_OUT")" ] || die "--tables-out $TABLES_OUT: not an empty folder"
+    TABLES_OUT="$(cd "$TABLES_OUT" && pwd)"
+fi
 OUT_ABS="$("$PY" -I -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$OUT")"
 
 # The checks, in Python, run isolated (-I) with the checkout's own files named explicitly.
@@ -421,6 +442,33 @@ AUDIT="$WORK/audit"
 ASSETS="$WORK/assets"
 # The private copy has no .git of its own: git there must not find a folder above it.
 export GIT_CEILING_DIRECTORIES="$WORK"
+mkdir "$WORK/tmp"
+
+# Where the build, the audits and the strip run: the builder (its own root, the work folder at
+# /work/w, the cache at /work/cache, no network) or this machine. inpath is a path as they see it.
+if [ -n "$BUILDER" ]; then
+    inpath() {
+        case "$1" in
+            "$WORK"|"$WORK"/*) printf '%s' "/work/w${1#"$WORK"}" ;;
+            "$CACHE"|"$CACHE"/*) printf '%s' "/work/cache${1#"$CACHE"}" ;;
+            *) echo "build-windows-zip: $1 is outside the builder's folders" >&2; return 1 ;;
+        esac
+    }
+    inbuilder() {
+        bwrap --die-with-parent --unshare-net --unshare-ipc --clearenv --ro-bind "$BUILDER" / --dev /dev --proc /proc \
+            --tmpfs /tmp --tmpfs /work --bind "$WORK" /work/w --ro-bind "$CACHE" /work/cache \
+            --setenv HOME /tmp --setenv PATH /usr/bin:/bin --setenv LC_ALL C.UTF-8 --setenv SOURCE_DATE_EPOCH 0 \
+            --setenv XG_DEPS_CACHE /work/cache --setenv TMPDIR /work/w/tmp --setenv PYTHONDONTWRITEBYTECODE 1 \
+            --setenv GIT_CEILING_DIRECTORIES /work/w --chdir /work/w/tree -- "$@" </dev/null
+    }
+    BPY=python3
+else
+    inpath() { printf '%s' "$1"; }
+    inbuilder() { "$@" </dev/null; }
+    BPY="$PY"
+fi
+# The checks that read executables (the payload audit) run where the binutils that built them are.
+bpy() { inbuilder "$BPY" -I -B -c "$PYLIB" "$(inpath "$TREE/packaging")" "$@"; }
 
 log "Private copy of the checkout"
 py copy-tree "$ROOT" "$TREE" "$WORK" "$CACHE"
@@ -438,10 +486,13 @@ BUILD_O="$TREE/build/pc/win-$REGION-dist"
 BUILD_E="$TREE/build/pc/win-$REGION-enhanced-dist"
 regionflag=()
 [ "$REGION" = jp ] && regionflag=(--jp)
-log "Windows dist build of both engines (SOURCE_DATE_EPOCH=0)"
-XG_WIN_BUILD="$BUILD_O" XG_WIN_BUILD_ENHANCED="$BUILD_E" \
-    bash "$TREE/tools/build_windows.sh" "${regionflag[@]}" --dist --engine both "$STAGE" </dev/null \
-    || die "tools/build_windows.sh --dist failed"
+tables=()
+[ -n "$TABLES_OUT" ] && tables=(--write-tables)
+log "Windows dist build of both engines (SOURCE_DATE_EPOCH=0)${BUILDER:+, in the builder}"
+inbuilder env XG_WIN_BUILD="$(inpath "$BUILD_O")" XG_WIN_BUILD_ENHANCED="$(inpath "$BUILD_E")" \
+    XG_DEPS_CACHE="$(inpath "$CACHE")" SOURCE_DATE_EPOCH=0 \
+    bash "$(inpath "$TREE/tools/build_windows.sh")" "${regionflag[@]}" --dist "${tables[@]}" --engine both \
+    "$(inpath "$STAGE")" || die "tools/build_windows.sh --dist failed"
 py stage "$STAGE"
 
 mkdir -p "$AUDIT/all"
@@ -453,25 +504,41 @@ for target in original enhanced sdl3; do
     esac
     log "$target: the linked $name against its sealed map"
     sealed="$(py linked "$build" "$target" "$REGION")"
-    py audit "$TREE" "$build/$name" "$build" "$REGION" "$COUNT"
+    bpy audit "$(inpath "$TREE")" "$(inpath "$build/$name")" "$(inpath "$build")" "$REGION" "$COUNT"
     strip_cmd=()
     while IFS= read -r a; do strip_cmd+=("$a"); done < <(py strip-argv "$sealed")
     copy="$AUDIT/all/$name"
     cp "$build/$name" "$copy"
     chmod u+w "$copy"
     log "$target: the install's strip (${strip_cmd[*]}) on a private copy"
-    "${strip_cmd[@]}" "$copy" </dev/null || die "$target: strip failed"
+    inbuilder "${strip_cmd[@]}" "$(inpath "$copy")" || die "$target: strip failed"
     cmp "$copy" "$STAGE/$name" || die "$target: the staged $name is not the reproducible strip of the verified linked executable"
     log "$target: staged $name = the reproducible strip ($("$PY" -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$copy"))"
     py same-seal "$build" "$target" "$sealed"
     cp "$build/$name.map" "$copy.map"
     py map-is "$copy.map" "$sealed"
-    "$PY" -E -s -B "$TREE/tools/payloadcheck.py" --record-map "$copy" </dev/null || die "$target: sealing the audit copy failed"
+    inbuilder "$BPY" -E -s -B "$(inpath "$TREE/tools/payloadcheck.py")" --record-map "$(inpath "$copy")" \
+        || die "$target: sealing the audit copy failed"
     chmod a-w "$copy"
     log "$target: the installed bytes"
-    py audit "$TREE" "$copy" "$build" "$REGION" "$COUNT"
+    bpy audit "$(inpath "$TREE")" "$(inpath "$copy")" "$(inpath "$build")" "$REGION" "$COUNT"
     cmp "$copy" "$STAGE/$name" || die "$target: the staged $name changed after its audit"
 done
+
+if [ -n "$TABLES_OUT" ]; then
+    for target in original enhanced; do
+        case "$target" in
+            original) build="$BUILD_O"; name=xenogears.exe ;;
+            enhanced) build="$BUILD_E"; name=xenogears-enhanced.exe ;;
+        esac
+        [ -f "$build/link-tables/config.txt" ] || die "$target: its build wrote no link tables"
+        mkdir "$TABLES_OUT/$target"
+        cp -R "$build/link-tables" "$TABLES_OUT/$target/link-tables"
+        "$PY" -I -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' \
+            "$AUDIT/all/$name" > "$TABLES_OUT/$target/installed.sha256"
+        log "$target: link tables for $(cat "$build/link-tables/config.txt")"
+    done
+fi
 
 mkdir -p "$ASSETS"
 if [ "$INSTALLER" = 1 ]; then

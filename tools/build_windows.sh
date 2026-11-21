@@ -2,7 +2,8 @@
 # The Windows build of the PC port (x86-64, MinGW-w64 cross-compiled on
 # Linux) and its folder to run from, in one command.
 #
-#   tools/build_windows.sh [--jp] [--debug] [--dist] [--engine original|enhanced|both] [OUTDIR]
+#   tools/build_windows.sh [--jp] [--debug] [--dist [--no-audit]] [--write-tables]
+#                          [--engine original|enhanced|both] [OUTDIR]
 #
 # Both engines by default (docs/ENGINE_PLAN.md): xenogears.exe (Original, the
 # game as shipped) and xenogears-enhanced.exe (Enhanced) in one folder, so the
@@ -16,7 +17,15 @@
 # or beside the executable, the disc setup opens), it has build folders of its
 # own (build/pc/win-<ver>-dist and -enhanced-dist, so a development build is
 # not rebuilt), and tools/payloadcheck.py --dist must pass each executable
-# before anything is installed into OUTDIR.
+# before anything is installed into OUTDIR. Its link and strip write no time
+# into the PE headers (SOURCE_DATE_EPOCH, 0 unless set), so two builds of one
+# tree are the same bytes. --no-audit leaves the payload audit out, for a
+# checkout without the disc images (packaging/build_release.py's build from a
+# release's link tables, which compares the executables with the audited ones
+# the tables record instead).
+#
+# --write-tables: each build also writes its link tables to <build>/link-tables
+# (port/CMakeLists.txt XG_WRITE_LINK_TABLES; tools/link_tables.py gathers them).
 #
 # 1. SDL3 for MinGW, once (tools/build_sdl3_mingw.sh, from the local tarball),
 #    and Khronos glslang for the shader presets when its tarball is there
@@ -34,7 +43,9 @@
 #
 # Needs x86_64-w64-mingw32-gcc/ld/objcopy, cmake, ninja, glslc, the host gcc
 # (pc_link's layout probes) and, like every PC build, the PS1 build's data
-# assembly from the player's disc (tools/configure.py). The executable holds
+# assembly from the player's disc (tools/configure.py), or link tables
+# (port/link-tables) made with the same compilers. The release builds this in
+# its own builder (packaging/mingw_debian.Dockerfile). The executable holds
 # no module data from that disc: it reads it from the player's image at every
 # start (port/src/system/gamedata.c; tools/payloadcheck.py checks the build).
 #
@@ -51,12 +62,16 @@ VER=US
 TYPE=Release
 OUT=
 DIST=0
+AUDIT=1
+TABLES=()
 ENGINES="original enhanced"
 while [ $# -gt 0 ]; do
     case "$1" in
         --jp) VER=JP ;;
         --debug) TYPE=Debug ;;
         --dist) DIST=1 ;;
+        --no-audit) AUDIT=0 ;;
+        --write-tables) TABLES=(-DXG_WRITE_LINK_TABLES=ON) ;;
         --engine) shift; case "${1:-}" in
                       original|enhanced) ENGINES="$1" ;;
                       both) ENGINES="original enhanced" ;;
@@ -69,6 +84,9 @@ while [ $# -gt 0 ]; do
     shift
 done
 ver="$(echo "$VER" | tr 'A-Z' 'a-z')"
+[ "$AUDIT" = 1 ] || [ "$DIST" = 1 ] || { echo "--no-audit is for a --dist build" >&2; exit 1; }
+# A build to hand out: no link or strip time in its PE headers (xg-4oq.13).
+[ "$DIST" = 1 ] && export SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}"
 suffix=
 dist=OFF
 [ "$DIST" = 1 ] && suffix=-dist && dist=ON
@@ -95,9 +113,10 @@ for engine in $ENGINES; do
     [ "$engine" = enhanced ] && dir="$BUILD_ENHANCED"
     log "Building $VER $engine ($TYPE) in $dir"
     cmake -S "$ROOT/port" -B "$dir" -G Ninja -DCMAKE_BUILD_TYPE="$TYPE" -DXG_VERSION="$VER" -DXG_ENGINE="$engine" \
-        -DXG_DIST="$dist" -DPython3_EXECUTABLE="$PY" --toolchain "$ROOT/port/cmake/mingw-w64-x86_64.cmake" >/dev/null
+        -DXG_DIST="$dist" "${TABLES[@]}" -DPython3_EXECUTABLE="$PY" \
+        --toolchain "$ROOT/port/cmake/mingw-w64-x86_64.cmake" >/dev/null
     cmake --build "$dir"
-    if [ "$DIST" = 1 ]; then
+    if [ "$DIST" = 1 ] && [ "$AUDIT" = 1 ]; then
         exe="$dir/xenogears.exe"
         [ "$engine" = enhanced ] && exe="$dir/xenogears-enhanced.exe"
         log "Checking $exe (no retail data, no path of this machine)"

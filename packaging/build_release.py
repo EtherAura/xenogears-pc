@@ -1,29 +1,37 @@
 """Build the audited desktop release assets from a public port checkout.
 
+Two builders do the compiling, each a root filesystem in the cache made from a
+recipe beside this file that names its base image by digest and takes its
+packages from one snapshot of its distribution's archive, so everyone who
+builds gets the same compilers: deb_ubuntu.Dockerfile for Linux (GCC 15) and
+mingw_debian.Dockerfile for Windows (MinGW-w64 GCC 16). Both run under
+bubblewrap with no network.
+
 With --discs, the player's US Disc 1 image: the Windows and Linux assets, each
 executable through the payload audit before it is packaged, and the release's
 link tables, xenogears-pc-<version>-link-tables.tar.gz: what a checkout links
 from instead of the disc (port/CMakeLists.txt XG_LINK_FROM), as addresses,
-sizes, offsets and hashes, never game bytes. For the tables both Linux engines
-are built once more in the builder with the release's configuration, audited
-and required to be the bytes just packaged; each one's SHA-256 goes with the
-tables, beside a digest of the sources they were built from (executable.json).
+sizes, offsets and hashes, never game bytes. The Windows build writes its
+engines' tables as it builds; for Linux both engines are built once more in
+the builder with the release's configuration. Each engine's executable, audited
+and required to be the bytes just packaged, is recorded with its tables by its
+SHA-256, beside a digest of the sources it was built from (executable.json).
 
 With --discs and --write-tables DIR: those tables as files in DIR and nothing
 else (for a checkout of one's own: DIR is its port/link-tables), for the US
 release or, with --region jp and the JP Disc 1 image in --discs, the JP one.
 
-Without --discs: the Linux executables of one region (--region, default us),
-built in the same builder from link tables: --tables FILE, a release's
-link-tables.tar.gz, else the checkout's own port/link-tables. No disc is read
-and none is needed. It is not the release: there is no payload audit without
-the images, so nothing is packaged. The executables go into a new folder of
---out with their SHA-256 beside it, and each is compared with the one the
-tables record: with the same sources it must be the same bytes, which passed
-the audit when the tables were made (a difference is a failure). With other
-sources there is nothing to compare, which --reproduce turns into a failure.
-The Windows executables are not built this way yet: their compiler is the
-host's. Only the builder is needed, and the default cache gets one when it has
+Without --discs: the Linux and Windows executables of one region (--region,
+default us; --only linux or windows for one of them), built in the same
+builders from link tables: --tables FILE, a release's link-tables.tar.gz, else
+the checkout's own port/link-tables. No disc is read and none is needed. It is
+not the release: there is no payload audit without the images, so nothing is
+packaged. The executables go into new folders of --out with their SHA-256
+beside them, and each is compared with the one the tables record: with the
+same sources it must be the same bytes, which passed the audit when the
+tables were made (a difference is a failure). With other sources there is
+nothing to compare, which --reproduce turns into a failure. The default cache
+gets the builders (and for Windows the pinned library sources) when it has
 none (Docker, network); a cache named with --cache is never fetched into.
 """
 
@@ -54,11 +62,19 @@ import release_inputs
 import windows_release
 
 BUILDER_RECIPE = HERE / "deb_ubuntu.Dockerfile"
+MINGW_RECIPE = HERE / "mingw_debian.Dockerfile"
+# A builder's root is complete when it holds this regular file (Debian's x86_64-w64-mingw32-gcc is a symbolic link
+# through /etc/alternatives, which only resolves inside it).
+UBUNTU_MARK, MINGW_MARK = "usr/bin/makensis", "usr/bin/x86_64-w64-mingw32-gcc-posix"
 PYTHON_TOOLS = ("splat64[mips]", "spimdisasm", "rabbitizer", "pyyaml")
 DEFAULT_CACHE = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "xenogears-pc"
 REGIONS = ("us", "jp")
 ENGINES = {"original": "bin/xenogears", "enhanced": "bin/xenogears-enhanced"}  # the builds' XG_ENGINE: installed as
 TABLES_CONFIG = "{engine}-linux-x86_64"  # port/CMakeLists.txt XG_TABLES_CONFIG, in the builder
+WINDOWS = {"original": "xenogears.exe", "enhanced": "xenogears-enhanced.exe"}  # what the Windows engines install
+WINDOWS_CONFIG = "{engine}-windows-x86_64"
+WINDOWS_BUILD = {"original": "win-{region}-dist", "enhanced": "win-{region}-enhanced-dist"}  # tools/build_windows.sh
+PLATFORMS = ("linux", "windows")
 RECORD = "executable.json"  # beside a configuration's tables: the executable a disc-backed build made of them
 TABLES_ASSET = "{package}-{version}-link-tables.tar.gz"  # the release's link tables: one folder, link-tables/
 TABLES_FOLDER = "link-tables"
@@ -81,10 +97,12 @@ def python_pins() -> list[str]:
     return [f"{name}=={entries[name]}" for name in PYTHON_TOOLS]
 
 
-def cached_tools(cache: Path, pins: list[str]) -> tuple[Path, Path]:
+def cached_tools(cache: Path, pins: list[str]) -> tuple[Path, Path, Path]:
+    """The cache's Python tools, Linux builder and Windows builder, each named by what it is made from."""
     python_key = hashlib.sha256(b"\0".join(s.encode() for s in [sys.version, *pins])).hexdigest()[:16]
     ubuntu_key = hashlib.sha256(BUILDER_RECIPE.read_bytes()).hexdigest()[:16]
-    return cache / f"python-{python_key}", cache / f"ubuntu-{ubuntu_key}"
+    mingw_key = hashlib.sha256(MINGW_RECIPE.read_bytes()).hexdigest()[:16]
+    return cache / f"python-{python_key}", cache / f"ubuntu-{ubuntu_key}", cache / f"mingw-{mingw_key}"
 
 
 def cache_move(source: Path, dest: Path, marker: str) -> None:
@@ -95,7 +113,7 @@ def cache_move(source: Path, dest: Path, marker: str) -> None:
             raise
 
 
-def fetch(cache: Path, pins: list[str], python: Path, ubuntu: Path) -> None:
+def fetch(cache: Path, pins: list[str], python: Path, ubuntu: Path, mingw: Path) -> None:
     """Prepare dependencies, with no disc path or release output."""
     cache.mkdir(parents=True, exist_ok=True)
     run(sys.executable, "-I", "-B", ROOT / "tools/deps.py", "fetch", "--cache", cache)
@@ -106,32 +124,44 @@ def fetch(cache: Path, pins: list[str], python: Path, ubuntu: Path) -> None:
             run(env / "bin/python3", "-I", "-m", "pip", "--isolated", "install",
                 "--disable-pip-version-check", "--no-cache-dir", *pins)
             cache_move(env, python, "bin/python3")
-    fetch_builder(cache, ubuntu)
+    fetch_image(cache, BUILDER_RECIPE, ubuntu, UBUNTU_MARK)
+    fetch_image(cache, MINGW_RECIPE, mingw, MINGW_MARK)
 
 
-def fetch_builder(cache: Path, ubuntu: Path) -> None:
-    """The Ubuntu builder's root filesystem: all a build without a disc needs."""
+def fetch_free(cache: Path, ubuntu: Path, mingw: Path, platforms: tuple[str, ...]) -> None:
+    """What a build without a disc needs: the builders of its platforms, and Windows's library sources."""
     cache.mkdir(parents=True, exist_ok=True)
-    if not (ubuntu / "usr/bin/makensis").is_file():
-        with tempfile.TemporaryDirectory(prefix=".ubuntu-", dir=cache) as temp:
-            temp = Path(temp)
-            context = temp / "context"
-            context.mkdir()
-            image = f"xenogears-pc-deb:{ubuntu.name}"
-            run("docker", "build", "--platform", "linux/amd64", "--file", BUILDER_RECIPE, "--tag", image, context)
-            container = run("docker", "create", "--platform", "linux/amd64", "--pull", "never",
-                            "--network", "none", image, capture_output=True, text=True).stdout.strip()
-            archive = temp / "ubuntu.tar"
-            try:
-                run("docker", "export", "--output", archive, container)
-            finally:
-                run("docker", "rm", container)
-            rootfs = temp / "rootfs"
-            rootfs.mkdir()
-            run("tar", "--extract", "--file", archive, "--directory", rootfs, "--no-same-owner", "--no-overwrite-dir")
-            if not (rootfs / "usr/bin/makensis").is_file():
-                raise ReleaseError("the Ubuntu builder does not contain makensis")
-            cache_move(rootfs, ubuntu, "usr/bin/makensis")
+    if "linux" in platforms:
+        fetch_image(cache, BUILDER_RECIPE, ubuntu, UBUNTU_MARK)
+    if "windows" in platforms:
+        run(sys.executable, "-I", "-B", ROOT / "tools/deps.py", "fetch", "--cache", cache)
+        fetch_image(cache, MINGW_RECIPE, mingw, MINGW_MARK)
+
+
+def fetch_image(cache: Path, recipe: Path, dest: Path, marker: str) -> None:
+    """A builder's root filesystem from its recipe, built by Docker from an empty folder and exported."""
+    if (dest / marker).is_file():
+        return
+    kind = dest.name.split("-", 1)[0]
+    with tempfile.TemporaryDirectory(prefix=f".{kind}-", dir=cache) as temp:
+        temp = Path(temp)
+        context = temp / "context"
+        context.mkdir()
+        image = f"xenogears-pc-{'deb' if kind == 'ubuntu' else kind}:{dest.name}"
+        run("docker", "build", "--platform", "linux/amd64", "--file", recipe, "--tag", image, context)
+        container = run("docker", "create", "--platform", "linux/amd64", "--pull", "never",
+                        "--network", "none", image, capture_output=True, text=True).stdout.strip()
+        archive = temp / "rootfs.tar"
+        try:
+            run("docker", "export", "--output", archive, container)
+        finally:
+            run("docker", "rm", container)
+        rootfs = temp / "rootfs"
+        rootfs.mkdir()
+        run("tar", "--extract", "--file", archive, "--directory", rootfs, "--no-same-owner", "--no-overwrite-dir")
+        if not (rootfs / marker).is_file():
+            raise ReleaseError(f"the builder made from {recipe.name} does not contain {marker}")
+        cache_move(rootfs, dest, marker)
 
 
 def asset_names(tag: str) -> tuple[list[str], str]:
@@ -166,8 +196,10 @@ def host_sandbox(work: Path, cwd: Path, *inputs: Path) -> list[str]:
             "--chdir", str(cwd), "--"]
 
 
-def build_windows(work: Path, tree: Path, cache: Path, python: Path, ubuntu: Path,
-                  discs: Path, tag: str, pending: Path, makensis: str | None) -> None:
+def build_windows(work: Path, tree: Path, cache: Path, python: Path, ubuntu: Path, mingw: Path,
+                  discs: Path, tag: str, pending: Path, makensis: str | None, tables: Path) -> None:
+    """The Windows assets, built in the Windows builder; each engine's link tables and installed bytes' SHA-256
+    into tables/<engine>/."""
     env = dict(os.environ, PATH=os.pathsep.join([str(python / "bin"), os.environ.get("PATH", os.defpath)]))
     if makensis is None:
         env.update(NSISDIR=str(ubuntu / "usr/share/nsis"), NSISCONFDIR=str(ubuntu / "etc"))
@@ -175,7 +207,32 @@ def build_windows(work: Path, tree: Path, cache: Path, python: Path, ubuntu: Pat
     run(*host_sandbox(work, tree, cache, discs, Path(makensis).parent),
         "bash", tree / "packaging/build-windows-zip.sh", "--installer",
         "--makensis", makensis, "--discs", discs, "--cache", cache, "--version", tag,
-        "--out", pending, "--scratch", work, env=env)
+        "--out", pending, "--scratch", work, "--builder", mingw, "--tables-out", tables, env=env)
+
+
+def windows_builder(mingw: Path, work: Path, cache: Path, *command) -> None:
+    """Run a command in the Windows builder: work at /work/w (its tree at /work/w/tree), the cache read-only at
+    /work/cache, no network, as packaging/build-windows-zip.sh --builder does."""
+    run("bwrap", "--die-with-parent", "--unshare-net", "--unshare-ipc", "--clearenv", "--ro-bind", mingw, "/",
+        "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/work", "--bind", work, "/work/w",
+        "--ro-bind", cache, "/work/cache", "--setenv", "HOME", "/tmp", "--setenv", "PATH", "/usr/bin:/bin",
+        "--setenv", "LC_ALL", "C.UTF-8", "--setenv", "SOURCE_DATE_EPOCH", "0", "--setenv", "XG_DEPS_CACHE", "/work/cache",
+        "--setenv", "TMPDIR", "/work/w/tmp", "--setenv", "PYTHONDONTWRITEBYTECODE", "1",
+        "--setenv", "GIT_CEILING_DIRECTORIES", "/work/w", "--chdir", "/work/w/tree", "--", *command)
+
+
+def windows_executables(work: Path, mingw: Path, cache: Path, region: str, *, audit: bool, tables: bool) -> Path:
+    """Both Windows engines of one region built in work/tree by tools/build_windows.sh --dist in the Windows builder
+    (with the payload audit, or without for a tree that has no disc images; with link tables written, or not),
+    installed into work/windows-stage; that folder."""
+    options = [*(["--jp"] if region == "jp" else []), "--dist", *([] if audit else ["--no-audit"]),
+               *(["--write-tables"] if tables else []), "--engine", "both"]
+    windows_builder(mingw, work, cache, "bash", "/work/w/tree/tools/build_windows.sh", *options, "/work/w/windows-stage")
+    stage = work / "windows-stage"
+    for name in WINDOWS.values():
+        if not (stage / name).is_file() or (stage / name).is_symlink():
+            raise ReleaseError(f"the Windows builder left no {name}")
+    return stage
 
 
 def build_linux(work: Path, tree: Path, python: Path, ubuntu: Path, image: Path, tag: str,
@@ -236,9 +293,15 @@ def audit(ubuntu: Path, tree: Path, build: Path, engine: str, region: str, count
     return lines[1]
 
 
-def write_tables(work: Path, tree: Path, python: Path, ubuntu: Path, tag: str, digest: str,
-                 tarball: Path | None = None, region: str = "us") -> Path:
-    """The link tables of one region's Linux executables (both engines), gathered and scanned; their folder.
+def record(folder: Path, file: str, digest_: str, sources: str) -> None:
+    """executable.json beside a build's link tables: the executable it made of them, audited."""
+    (folder / "link-tables" / RECORD).write_text(
+        json.dumps({"version": 1, "file": file, "sha256": digest_, "sources": sources}, sort_keys=True) + "\n")
+
+
+def linux_tables(work: Path, tree: Path, ubuntu: Path, tag: str, digest: str,
+                 tarball: Path | None = None, region: str = "us") -> list[Path]:
+    """Both Linux engines of one region built for their link tables, audited and recorded; their build folders.
     With tarball, the release's Linux package, the executables built for the tables must be the ones in it."""
     count = release_inputs.module_count(tree, region)
     build = work / "tables"
@@ -250,16 +313,47 @@ def write_tables(work: Path, tree: Path, python: Path, ubuntu: Path, tag: str, d
     for engine, exe in staged_executables(build / f"{region}-stage").items():
         folder = build / f"{region}-{engine}"
         verdict = audit(ubuntu, tree, build, engine, region, count)
-        record = {"version": 1, "file": ENGINES[engine], "sha256": sha256(exe), "sources": digest}
-        print(f"Link tables: {region} {engine} {record['sha256']} ({count} module images; {verdict})", flush=True)
-        if packaged is not None and packaged.get(ENGINES[engine]) != record["sha256"]:
+        made = sha256(exe)
+        print(f"Link tables: {region} linux {engine} {made} ({count} module images; {verdict})", flush=True)
+        if packaged is not None and packaged.get(ENGINES[engine]) != made:
             raise ReleaseError(f"the table build's {ENGINES[engine]} is not the bytes packaged in {tarball.name}")
-        (folder / "link-tables" / RECORD).write_text(json.dumps(record, sort_keys=True) + "\n")
+        record(folder, ENGINES[engine], made, digest)
         builds.append(folder)
+    return builds
+
+
+def windows_tables(found: dict[str, tuple[Path, str]], region: str, digest: str,
+                   packaged: dict[str, str] | None = None, archive: str = "") -> list[Path]:
+    """The Windows engines' tables (engine: (build folder holding link-tables/, its installed bytes' SHA-256)),
+    recorded; their build folders. With packaged (name: SHA-256 in the release's .zip), they must be those bytes."""
+    builds = []
+    for engine, (folder, made) in found.items():
+        if packaged is not None and packaged.get(WINDOWS[engine]) != made:
+            raise ReleaseError(f"the Windows build's {WINDOWS[engine]} is not the bytes packaged in {archive}")
+        if not (folder / "link-tables" / "config.txt").is_file():
+            raise ReleaseError(f"the Windows build of {engine} wrote no link tables")
+        record(folder, WINDOWS[engine], made, digest)
+        print(f"Link tables: {region} windows {engine} {made}", flush=True)
+        builds.append(folder)
+    return builds
+
+
+def gather_tables(work: Path, tree: Path, python: Path, builds: list[Path]) -> Path:
+    """The builds' tables gathered and scanned for retail bytes (tools/link_tables.py); their folder."""
     staged = work / TABLES_FOLDER
     run(*host_sandbox(work, tree, python), python / "bin/python3", "-E", "-s", "-B", tree / "tools/link_tables.py",
         *builds, "--dest", staged)
     return staged
+
+
+def packaged_windows(archive: Path, tag: str) -> dict[str, str]:
+    """SHA-256 of each Windows engine in the release's .zip, by its name under the one folder."""
+    import zipfile
+    top = windows_release.release_names(tag)["folder"]
+    with zipfile.ZipFile(archive) as packed:
+        listed = set(packed.namelist())
+        return {name: hashlib.sha256(packed.read(f"{top}/{name}")).hexdigest()
+                for name in WINDOWS.values() if f"{top}/{name}" in listed}
 
 
 def pack_tables(staged: Path, pending: Path, tag: str) -> None:
@@ -329,26 +423,28 @@ def install_tables(staged: Path, dest: Path) -> None:
             print(target)
 
 
-def compare(made: dict[str, str], tables: Path, digest: str, reproduce: bool, what: str) -> list[str]:
+def compare(made: dict[str, str], tables: Path, digest: str, reproduce: bool, what: str,
+            platform: str = "linux") -> list[str]:
     """Each executable made (engine: SHA-256) against the one its tables record; the lines to print, or
     ReleaseError when the same sources gave other bytes, or with reproduce when there is nothing to compare."""
+    config, names = (TABLES_CONFIG, ENGINES) if platform == "linux" else (WINDOWS_CONFIG, WINDOWS)
     lines, failures = [], []
     for engine, got in made.items():
         try:
-            record = json.loads((tables / TABLES_CONFIG.format(engine=engine) / RECORD).read_text())
-            want, sources = record["sha256"], record["sources"]
+            recorded = json.loads((tables / config.format(engine=engine) / RECORD).read_text())
+            want, sources = recorded["sha256"], recorded["sources"]
         except (OSError, ValueError, KeyError, TypeError):
             want = sources = None
         if sources != digest:
-            lines.append(f"{ENGINES[engine]} {got}: nothing to compare (the tables record "
+            lines.append(f"{names[engine]} {got}: nothing to compare (the tables record "
                          + ("no executable)" if sources is None else "an executable of other sources)"))
             if reproduce:
-                failures.append(f"--reproduce: the tables record no {ENGINES[engine]} built from these sources")
+                failures.append(f"--reproduce: the tables record no {names[engine]} built from these sources")
         elif want == got:
-            lines.append(f"{ENGINES[engine]} {got}: the bytes of the disc-backed build these tables were made with "
+            lines.append(f"{names[engine]} {got}: the bytes of the disc-backed build these tables were made with "
                          "(payload audit passed there)")
         else:
-            failures.append(f"{ENGINES[engine]} is {got}, but the tables record {want} for these same sources: "
+            failures.append(f"{names[engine]} is {got}, but the tables record {want} for these same sources: "
                             f"{what}")
     if failures:
         raise ReleaseError("; ".join(failures))
@@ -396,10 +492,12 @@ def promote(pending: Path, out: Path, names: list[str]) -> None:
         print(path)
 
 
-def build_free(args, cache: Path, ubuntu: Path, tag: str) -> None:
-    """The Linux executables of one region from the checkout's link tables: no disc is read."""
-    folder = linux_release.release_names(tag)["folder"]
-    names = [folder, f"{folder}.sha256"]
+def build_free(args, cache: Path, ubuntu: Path, mingw: Path, tag: str) -> None:
+    """The Linux and Windows executables of one region from link tables: no disc is read."""
+    platforms = (args.only,) if args.only else PLATFORMS
+    folders = {"linux": linux_release.release_names(tag)["folder"], "windows": windows_release.release_names(tag)["folder"]}
+    sums = f"{linux_release.PACKAGE}-{linux_release.release_names(tag)['version']}-{args.region}-executables.sha256"
+    names = [folders[platform] for platform in platforms] + [sums]
     out = args.out.absolute()
     check_out(out, names)
     if out.resolve().is_relative_to(cache) or cache.is_relative_to(out.resolve()):
@@ -412,41 +510,59 @@ def build_free(args, cache: Path, ubuntu: Path, tag: str) -> None:
                            "or build from your disc (--discs)")
     if args.tables is not None and not args.tables.is_file():
         raise ReleaseError(f"--tables {args.tables}: no such file")
-    if not (ubuntu / "usr/bin/makensis").is_file():
-        raise ReleaseError(f"the build cache has no builder. Run bash build-release.sh --fetch-only --cache {cache}")
+    if "linux" in platforms and not (ubuntu / UBUNTU_MARK).is_file():
+        raise ReleaseError(f"the build cache has no Linux builder. Run bash build-release.sh --fetch-only --cache {cache}")
+    if "windows" in platforms:
+        if not (mingw / MINGW_MARK).is_file():
+            raise ReleaseError(f"the build cache has no Windows builder. Run bash build-release.sh --fetch-only "
+                               f"--cache {cache}")
+        run(sys.executable, "-I", "-B", ROOT / "tools/deps.py", "check", "--cache", cache)
     if not shutil.which("bwrap"):
         raise ReleaseError("the build needs bubblewrap")
-    print("No disc: the Linux executables from the link tables, not audited here and not packaged. "
-          "The Windows executables are not built this way yet.", flush=True)
+    print(f"No disc: the {' and '.join(platforms)} executables from the link tables, not audited here and not "
+          "packaged.", flush=True)
 
     scratch = args.scratch or next(parent for parent in out.parents if parent.is_dir())
     with tempfile.TemporaryDirectory(prefix=".xenogears-release-", dir=scratch) as temp:
         work = Path(temp)
         tree, build_dir = work / "tree", work / "linux"
         build_dir.mkdir()
+        (work / "tmp").mkdir()
         release_inputs.copy_tree(ROOT, tree, work, cache, out)
         digest = release_inputs.tree_digest(tree)
         if args.tables is not None:
             unpack_tables(args.tables.resolve(), tree)
             if not (tree / release_inputs.TABLES / args.region / "asm-layout.json").is_file():
                 raise ReleaseError(f"--tables {args.tables}: it holds no tables for {args.region}")
-        builder(ubuntu, tree, build_dir, "python3", "-I", "-B", "/work/source/tools/pc_sources.py", writable=True)
-        builder(ubuntu, tree, build_dir, "/bin/bash", "/work/source/packaging/build-linux-executables.sh",
-                args.region, tag)
-        stage = build_dir / f"{args.region}-stage"
-        made = {engine: sha256(exe) for engine, exe in staged_executables(stage).items()}
-        verdicts = compare(made, tree / release_inputs.TABLES / args.region, digest, args.reproduce,
-                           "the build is not reproduced (another builder image?)")
-        sums = "".join(f"{digest_}  {folder}/{ENGINES[engine]}\n" for engine, digest_ in made.items())
+        tables = tree / release_inputs.TABLES / args.region
+        stages, verdicts, lines = {}, [], []
+        if "linux" in platforms:
+            builder(ubuntu, tree, build_dir, "python3", "-I", "-B", "/work/source/tools/pc_sources.py", writable=True)
+            builder(ubuntu, tree, build_dir, "/bin/bash", "/work/source/packaging/build-linux-executables.sh",
+                    args.region, tag)
+            stages["linux"] = build_dir / f"{args.region}-stage"
+            made = {engine: sha256(exe) for engine, exe in staged_executables(stages["linux"]).items()}
+            verdicts += compare(made, tables, digest, args.reproduce,
+                                "the build is not reproduced (another builder image?)")
+            lines += [f"{got}  {folders['linux']}/{ENGINES[engine]}\n" for engine, got in made.items()]
+        if "windows" in platforms:
+            if not (tables / WINDOWS_CONFIG.format(engine="original") / "facts.json").is_file():
+                raise ReleaseError(f"the tables hold no Windows tables for {args.region} (--only linux builds Linux alone)")
+            stages["windows"] = windows_executables(work, mingw, cache, args.region, audit=False, tables=False)
+            made = {engine: sha256(stages["windows"] / name) for engine, name in WINDOWS.items()}
+            verdicts += compare(made, tables, digest, args.reproduce,
+                                "the build is not reproduced (another builder image?)", platform="windows")
+            lines += [f"{got}  {folders['windows']}/{WINDOWS[engine]}\n" for engine, got in made.items()]
         check_out(out, names)
         out.mkdir(parents=True, exist_ok=True)
         written = []
         try:
-            written.append(out / folder)
-            shutil.copytree(stage, out / folder)
-            written.append(out / names[1])
-            with (out / names[1]).open("x") as stream:
-                stream.write(sums)
+            for platform, stage in stages.items():
+                written.append(out / folders[platform])
+                shutil.copytree(stage, out / folders[platform])
+            written.append(out / sums)
+            with (out / sums).open("x") as stream:
+                stream.write("".join(lines))
         except OSError as error:
             for path in written:
                 shutil.rmtree(path) if path.is_dir() else path.unlink(missing_ok=True)
@@ -457,8 +573,9 @@ def build_free(args, cache: Path, ubuntu: Path, tag: str) -> None:
         print(path)
 
 
-def build_tables(args, cache: Path, python: Path, ubuntu: Path, tag: str) -> None:
-    """The link tables of one region's Linux executables, from the disc, into --write-tables; no asset."""
+def build_tables(args, cache: Path, python: Path, ubuntu: Path, mingw: Path, tag: str) -> None:
+    """The link tables of one region's Linux and Windows executables, from the disc, into --write-tables; no
+    asset."""
     discs = args.discs.resolve()
     image = release_inputs.disc_image(ROOT, discs, args.region)
     dest = args.write_tables.absolute()
@@ -467,10 +584,11 @@ def build_tables(args, cache: Path, python: Path, ubuntu: Path, tag: str) -> Non
     for folder in (discs, cache):
         if dest.resolve().is_relative_to(folder) or folder.is_relative_to(dest.resolve()):
             raise ReleaseError(f"--write-tables {dest} overlaps {folder}")
-    if not (python / "bin/python3").is_file() or not (ubuntu / "usr/bin/makensis").is_file():
+    if not all(path.is_file() for path in (python / "bin/python3", ubuntu / UBUNTU_MARK, mingw / MINGW_MARK)):
         raise ReleaseError(f"the build cache is incomplete. Run bash build-release.sh --fetch-only --cache {cache}")
     if not shutil.which("bwrap"):
         raise ReleaseError("the build needs bubblewrap")
+    run(sys.executable, "-I", "-B", ROOT / "tools/deps.py", "check", "--cache", cache)
     scratch = args.scratch or next(folder for folder in dest.parents if folder.is_dir())
     with tempfile.TemporaryDirectory(prefix=".xenogears-release-", dir=scratch) as temp:
         work = Path(temp)
@@ -481,10 +599,15 @@ def build_tables(args, cache: Path, python: Path, ubuntu: Path, tag: str) -> Non
         for argv in (("tools/extract.py", args.region, "--image", image, "--check-image"),
                      ("tools/configure.py", args.region)):
             run(*host_sandbox(work, tree, python, image.parent), python / "bin/python3", "-E", "-s", "-B", *argv)
-        install_tables(write_tables(work, tree, python, ubuntu, tag, digest, region=args.region), dest)
+        builds = linux_tables(work, tree, ubuntu, tag, digest, region=args.region)
+        stage = windows_executables(work, mingw, cache, args.region, audit=True, tables=True)
+        found = {engine: (tree / "build/pc" / WINDOWS_BUILD[engine].format(region=args.region), sha256(stage / name))
+                 for engine, name in WINDOWS.items()}
+        builds += windows_tables(found, args.region, digest)
+        install_tables(gather_tables(work, tree, python, builds), dest)
 
 
-def build(args, cache: Path, python: Path, ubuntu: Path, tag: str) -> None:
+def build(args, cache: Path, python: Path, ubuntu: Path, mingw: Path, tag: str) -> None:
     names, deb = asset_names(tag)
     discs = args.discs.resolve()
     image = release_inputs.disc_image(ROOT, discs, "us")
@@ -495,10 +618,10 @@ def build(args, cache: Path, python: Path, ubuntu: Path, tag: str) -> None:
             raise ReleaseError(f"--out {out} overlaps {folder}")
     if ROOT.is_relative_to(out.resolve()):
         raise ReleaseError(f"--out {out} contains the source checkout")
-    if not (python / "bin/python3").is_file() or not (ubuntu / "usr/bin/makensis").is_file():
+    if not all(path.is_file() for path in (python / "bin/python3", ubuntu / UBUNTU_MARK, mingw / MINGW_MARK)):
         raise ReleaseError(f"the build cache is incomplete. Run bash build-release.sh --fetch-only --cache {cache}")
-    if any(not shutil.which(tool) for tool in ("bwrap", "x86_64-w64-mingw32-gcc")):
-        raise ReleaseError("the build needs bubblewrap and the host's x86_64 MinGW toolchain")
+    if not shutil.which("bwrap"):
+        raise ReleaseError("the build needs bubblewrap")
     makensis = windows_release.find_makensis(args.makensis) if args.makensis else None
     run(sys.executable, "-I", "-B", ROOT / "tools/deps.py", "check", "--cache", cache)
 
@@ -510,10 +633,16 @@ def build(args, cache: Path, python: Path, ubuntu: Path, tag: str) -> None:
         (work / "tmp").mkdir()
         release_inputs.copy_tree(ROOT, tree, work, cache, discs, out)
         digest = release_inputs.tree_digest(tree)
-        build_windows(work, tree, cache, python, ubuntu, discs, tag, pending, makensis)
+        windows = work / "windows-tables"
+        windows.mkdir()
+        build_windows(work, tree, cache, python, ubuntu, mingw, discs, tag, pending, makensis, windows)
         build_linux(work, tree, python, ubuntu, image, tag, deb, pending)
-        tarball = pending / linux_release.release_names(tag)["tarball"]
-        pack_tables(write_tables(work, tree, python, ubuntu, tag, digest, tarball), pending, tag)
+        builds = linux_tables(work, tree, ubuntu, tag, digest, pending / linux_release.release_names(tag)["tarball"])
+        archive = windows_release.release_names(tag)["zip"]
+        found = {engine: (windows / engine, (windows / engine / "installed.sha256").read_text().strip())
+                 for engine in WINDOWS}
+        builds += windows_tables(found, "us", digest, packaged_windows(pending / archive, tag), archive)
+        pack_tables(gather_tables(work, tree, python, builds), pending, tag)
         promote(pending, out, names)
 
 
@@ -531,6 +660,7 @@ def main() -> int:
                         "checkout's port/link-tables")
     parser.add_argument("--region", choices=REGIONS,
                         help="without --discs, or with --write-tables: the region to build (default us)")
+    parser.add_argument("--only", choices=PLATFORMS, help="without --discs: build this platform's executables alone")
     parser.add_argument("--reproduce", action="store_true",
                         help="without --discs: fail unless each executable is the one the tables record")
     parser.add_argument("--version", help="release version YYYY.MM.N, with optional leading v")
@@ -540,10 +670,11 @@ def main() -> int:
     args = parser.parse_args()
     if args.fetch_only and any((args.discs, args.version, args.out, args.scratch, args.makensis)):
         parser.error("--fetch-only accepts only --cache")
-    if args.fetch_only and any((args.write_tables, args.tables, args.region, args.reproduce)):
+    if args.fetch_only and any((args.write_tables, args.tables, args.region, args.reproduce, args.only)):
         parser.error("--fetch-only accepts only --cache")
-    if args.discs and (args.tables or args.reproduce or (args.region and not args.write_tables)):
-        parser.error("--tables and --reproduce are for a build without --discs, --region for one or for --write-tables")
+    if args.discs and (args.tables or args.reproduce or args.only or (args.region and not args.write_tables)):
+        parser.error("--tables, --only and --reproduce are for a build without --discs, --region for one or for "
+                     "--write-tables")
     if not args.discs and (args.write_tables or args.makensis):
         parser.error("--write-tables and --makensis need --discs")
     if args.write_tables and any((args.version, args.out, args.makensis)):
@@ -551,9 +682,9 @@ def main() -> int:
     try:
         cache = (args.cache or DEFAULT_CACHE).expanduser().resolve()
         pins = python_pins()
-        python, ubuntu = cached_tools(cache, pins)
+        python, ubuntu, mingw = cached_tools(cache, pins)
         if args.fetch_only:
-            fetch(cache, pins, python, ubuntu)
+            fetch(cache, pins, python, ubuntu, mingw)
         else:
             implicit = args.cache is None and args.version is None and args.out is None
             args.out = args.out or Path("release")
@@ -561,17 +692,17 @@ def main() -> int:
             tag = f"v{version.removeprefix('v')}"
             if args.discs:
                 if implicit:
-                    fetch(cache, pins, python, ubuntu)
+                    fetch(cache, pins, python, ubuntu, mingw)
                 if args.write_tables:
                     args.region = args.region or "us"
-                    build_tables(args, cache, python, ubuntu, tag)
+                    build_tables(args, cache, python, ubuntu, mingw, tag)
                 else:
-                    build(args, cache, python, ubuntu, tag)
+                    build(args, cache, python, ubuntu, mingw, tag)
             else:
-                if args.cache is None:  # the default cache gets its builder when it has none; a named one never
-                    fetch_builder(cache, ubuntu)
+                if args.cache is None:  # the default cache gets what it lacks; a named one is never fetched into
+                    fetch_free(cache, ubuntu, mingw, (args.only,) if args.only else PLATFORMS)
                 args.region = args.region or "us"
-                build_free(args, cache, ubuntu, tag)
+                build_free(args, cache, ubuntu, mingw, tag)
     except (OSError, subprocess.CalledProcessError, ReleaseError, release_inputs.InputError,
             windows_release.ReleaseError, linux_release.ReleaseError, deb_assets.AssetError) as error:
         print(f"build-release: {error}", file=sys.stderr)

@@ -76,14 +76,20 @@ versions, URLs and SHA-256 sums are in `tools/deps.json`;
 `python tools/deps.py fetch` downloads them into `tools/toolchain-src` and
 keeps only files whose sum matches. The build itself downloads nothing.
 `--dist` makes a build to hand out, with no path of the build machine in its
-executables. The result, in `build/pc/dist/xenogears-us-windows-x86_64` by
-default, holds `xenogears.exe`, `xenogears-enhanced.exe` and `SDL3.dll`.
+executables and no link time in their headers. The result, in
+`build/pc/dist/xenogears-us-windows-x86_64` by default, holds `xenogears.exe`,
+`xenogears-enhanced.exe` and `SDL3.dll`. Releases are built the same way inside
+a pinned Debian build environment with its MinGW-w64 (below), not with the
+host's.
 
 ## Desktop release packages
 
-On a Linux x86-64 host, the release command uses bubblewrap, MinGW-w64,
-Meson, CMake, Ninja, `glslc` and the Vulkan headers. Docker is used to
-prepare the cached Ubuntu build environment and NSIS compiler.
+On a Linux x86-64 host, the release command needs bubblewrap, Python 3 and
+Docker. Docker prepares two cached build environments once: Ubuntu's for the
+Linux build and the NSIS compiler, and Debian's MinGW-w64 for the Windows
+build (`packaging/deb_ubuntu.Dockerfile` and `packaging/mingw_debian.Dockerfile`,
+each pinned by image digest and archive snapshot, so everyone gets the same
+compilers). The builds run inside them, offline.
 
 ```bash
 bash build-release.sh --fetch-only --cache release-cache
@@ -97,38 +103,37 @@ include both engines. The `.deb` includes Original.
 
 ## Building without a disc
 
-A release's Linux executables can be rebuilt on a machine that has no disc.
-Each release carries its link tables, `xenogears-pc-VERSION-link-tables.tar.gz`.
-Check out the release's tag, download that file, and run:
+A release's Linux and Windows executables can be rebuilt on a machine that
+has no disc. Each release carries its link tables,
+`xenogears-pc-VERSION-link-tables.tar.gz`. Check out the release's tag,
+download that file, and run:
 
 ```bash
 bash build-release.sh --tables xenogears-pc-VERSION-link-tables.tar.gz --out release
 ```
 
-It needs bubblewrap, and Docker once to prepare the cached build environment
-(with network access); the build itself runs offline. The tables hold
-addresses, sizes, offsets and hashes of the game's data and never its bytes.
-The executables are the same either way: they read the game from your own
-disc at every start.
+`--only linux` or `--only windows` builds one of them. It needs bubblewrap,
+and Docker once to prepare the cached build environments and fetch the
+Windows libraries' pinned sources (with network access); the build itself
+runs offline. The tables hold addresses, sizes, offsets and hashes of the
+game's data and never its bytes. The executables are the same either way:
+they read the game from your own disc at every start.
 
 The tables are made where the release is built, from the disc, with the
-compilers of the release's build environment
-(`packaging/deb_ubuntu.Dockerfile`: a base image named by digest and one
-snapshot of Ubuntu's archive). With them is the SHA-256 of each executable
-that build made and audited. With the sources of that release, the command
-fails unless it made the same bytes; `--reproduce` also fails when the
-sources are not the tables'. Nothing is packaged, because the packages'
-payload audit needs the disc images, and the Windows executables are not
-built this way yet. The repository's "Build without a disc" workflow runs
-this for each release and compares the result with the release's Linux
-package.
+compilers of the release's build environments. With them is the SHA-256 of
+each executable that build made and audited. With the sources of that
+release, the command fails unless it made the same bytes; `--reproduce` also
+fails when the sources are not the tables'. Nothing is packaged, because the
+packages' payload audit needs the disc images. The repository's "Build
+without a disc" workflow runs this for each release and compares the result
+with the release's Linux tarball and Windows `.zip`.
 
 A plain CMake build links from tables too when the checkout has no `asm/`
 folder and the tables are extracted as `port/link-tables`
-(`-DXG_LINK_FROM=tables` asks for them). They fit the build environment's
-compiler: with another one the build stops at a stale source data plan
+(`-DXG_LINK_FROM=tables` asks for them). They fit the build environments'
+compilers: with another one the build stops at a stale source data plan
 wherever that compiler lays an object's data out differently.
 
 With the disc, `bash build-release.sh --discs bin --write-tables port/link-tables`
-writes tables for your own checkout: it builds and audits both engines and
-packages nothing.
+writes tables for your own checkout: it builds and audits the Linux and
+Windows engines and packages nothing.
