@@ -664,7 +664,8 @@ if(xg_link_from STREQUAL "tables")
             message(FATAL_ERROR "No link table ${file}.\n"
                 "This checkout has no PS1 split (asm/${XG_VERSION_LOWER}) and no tables for ${XG_VERSION} "
                 "${XG_TABLES_CONFIG}. Build from your disc (tools/extract.py, tools/configure.py, ninja: "
-                "docs/building.md), or build a configuration the tables were made for.")
+                "docs/building.md), or extract a release's link tables (its link-tables.tar.gz) as "
+                "port/link-tables and build a configuration they were made for.")
         endif()
     endforeach()
     list(GET XG_LINK_TABLE_FILES 0 facts)

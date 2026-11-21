@@ -1,34 +1,41 @@
 name: Build without a disc
 
-# Builds the Linux executables from the link tables the checkout carries
-# (port/link-tables), in the release's own builder (packaging/deb_ubuntu.Dockerfile:
-# the base image by digest, its packages from one snapshot of Ubuntu's archive),
-# with no disc anywhere: bash build-release.sh without --discs.
+# Rebuilds a release's Linux executables with no disc anywhere, and requires
+# them to be the bytes in that release's Linux package.
 #
-# The tables hold addresses, sizes, offsets and hashes, never the game's bytes,
-# and the executables still read the player's own disc at every start. With the
-# tables is the SHA-256 of each executable a disc-backed build of the same
-# sources made, after its payload audit; --reproduce fails the job unless this
-# build gives those bytes. A passing run on a release's tag therefore shows that
-# anyone can rebuild that release's Linux executables, byte for byte.
+# A release carries its link tables, xenogears-pc-<version>-link-tables.tar.gz:
+# what the build takes from the disc otherwise, as addresses, sizes, offsets and
+# hashes, never the game's bytes. They are made where the release is built, from
+# the player's own disc, with the SHA-256 of each executable that build made and
+# passed through its payload audit. This job checks out the release's tag,
+# downloads the tables and runs the command anyone can run,
 #
-# The tables fit one state of the sources and are made again for a release, so
-# this runs on request, for the branch or tag chosen, not on every push. Clear
-# "reproduce" to build a tree whose tables were made for other sources: the
-# executables are then built and their sums shown, with nothing to compare.
+#   bash build-release.sh --tables <the tables> --reproduce
+#
+# in the release's own builder (packaging/deb_ubuntu.Dockerfile: the base image
+# by digest, its packages from one snapshot of Ubuntu's archive). --reproduce
+# fails unless each executable is the one the tables record; the last step then
+# compares them with the executables inside the release's Linux package. The
+# executables still read the player's own disc at every start.
+#
+# It runs when a release is edited, which is what happens once its files are up
+# (the release's notes get their download list then), and on request for a tag.
+# A release without tables yet is left alone.
 on:
+  release:
+    types: [edited]
   workflow_dispatch:
     inputs:
-      reproduce:
-        description: "Fail unless each executable is the one the tables record"
-        type: boolean
-        default: true
+      tag:
+        description: "An existing release tag (vYYYY.MM.N) to rebuild without a disc"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.release.tag_name || inputs.tag }}
   cancel-in-progress: false
 
 defaults:
@@ -37,50 +44,102 @@ defaults:
 
 jobs:
   linux:
-    name: Linux executables from the link tables
+    name: Linux executables from the release's link tables
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
+      # The tag reaches the shell only through the environment, never as text in the script.
+      - name: Validate the tag
+        id: tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::not a release tag (vYYYY.MM.N): $(printf '%q' "$TAG")"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the release's link tables and Linux package
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          tables="xenogears-pc-$VERSION-link-tables.tar.gz"
+          package="xenogears-pc-$VERSION-linux-x86_64.tar.gz"
+          mkdir -p "$RUNNER_TEMP/release"
+          cd "$RUNNER_TEMP/release"
+          for name in "$tables" "$tables.sha256" "$package" "$package.sha256"; do
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$name" || true
+          done
+          if [[ ! -f "$tables" || ! -f "$tables.sha256" || ! -f "$package" || ! -f "$package.sha256" ]]; then
+            echo "::notice::$TAG has no link tables and Linux package (yet): nothing to rebuild"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sha256sum -c "$tables.sha256" "$package.sha256"
+          echo "found=true" >> "$GITHUB_OUTPUT"
+          echo "tables=$RUNNER_TEMP/release/$tables" >> "$GITHUB_OUTPUT"
+          echo "package=$RUNNER_TEMP/release/$package" >> "$GITHUB_OUTPUT"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.assets.outputs.found == 'true'
         with:
+          ref: refs/tags/${{ steps.tag.outputs.tag }}
           persist-credentials: false
 
       # The build runs in the builder's root filesystem under bubblewrap, with
       # no network. Ubuntu 24.04 allows unprivileged user namespaces only to
       # programs with an AppArmor profile, and bubblewrap has none there.
       - name: Install bubblewrap
+        if: steps.assets.outputs.found == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: Refuse a checkout that holds game data
+        if: steps.assets.outputs.found == 'true'
         run: |
           test ! -e disc && test ! -e bin && test ! -e asm
 
-      # The version only names the output folder: a release's tag, else the default.
       - name: Build both engines and compare them with the recorded executables
+        if: steps.assets.outputs.found == 'true'
         env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
-          REPRODUCE: ${{ inputs.reproduce }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          TABLES: ${{ steps.assets.outputs.tables }}
         run: |
-          options=()
-          if [[ "$REF_TYPE" == tag && "$REF_NAME" =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)$ ]]; then
-            options+=(--version "$REF_NAME")
-          fi
-          if [[ "$REPRODUCE" == true ]]; then
-            options+=(--reproduce)
-          fi
-          bash build-release.sh --out "$RUNNER_TEMP/out" "${options[@]}" | tee "$RUNNER_TEMP/build.log"
+          bash build-release.sh --version "$VERSION" --tables "$TABLES" --out "$RUNNER_TEMP/out" --reproduce \
+            | tee "$RUNNER_TEMP/build.log"
+
+      - name: Compare them with the release's Linux package
+        if: steps.assets.outputs.found == 'true'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          PACKAGE: ${{ steps.assets.outputs.package }}
+        run: |
+          folder="xenogears-pc-$VERSION-linux-x86_64"
+          mkdir -p "$RUNNER_TEMP/packaged"
+          tar -xzf "$PACKAGE" -C "$RUNNER_TEMP/packaged"
+          for exe in bin/xenogears bin/xenogears-enhanced; do
+            cmp "$RUNNER_TEMP/out/$folder/$exe" "$RUNNER_TEMP/packaged/$folder/$exe"
+            echo "$exe: the bytes in $(basename "$PACKAGE")"
+          done
 
       - name: Summarize
+        if: steps.assets.outputs.found == 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           {
-            echo '### Linux executables built with no disc'
+            echo "### $TAG: Linux executables rebuilt with no disc"
+            echo
+            echo 'Each is byte for byte the executable in the release'"'"'s Linux package.'
             echo
             echo '```'
             cat "$RUNNER_TEMP"/out/*.sha256
-            grep -E '^bin/' "$RUNNER_TEMP/build.log" || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

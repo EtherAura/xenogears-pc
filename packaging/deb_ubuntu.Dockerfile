@@ -47,11 +47,10 @@
 # image lists), so an image built from this recipe next year holds the
 # compilers, linker and libraries it holds now. The exception is
 # ca-certificates, installed first from the current archive: the snapshot
-# service speaks only TLS and the base image trusts no authority yet. The link
-# tables in port/link-tables are made with this image's compilers and fit
-# their objects (port/CMakeLists.txt XG_LINK_FROM): after a change to the
-# digest, the snapshot or the package list, make the tables again from a disc
-# (build-release.sh --write-tables).
+# service speaks only TLS and the base image trusts no authority yet. A
+# release's link tables are made with this image's compilers and fit their
+# objects (port/CMakeLists.txt XG_LINK_FROM): tables made before a change to
+# the digest, the snapshot or the package list do not fit the builder after it.
 #
 # Limits: this recipe is not tested by building or running it; that the image
 # builds, that its dpkg-shlibdeps gives the release's Depends, and that the

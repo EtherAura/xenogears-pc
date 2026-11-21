@@ -97,33 +97,38 @@ include both engines. The `.deb` includes Original.
 
 ## Building without a disc
 
-A checkout can also build the Linux executables on a machine that has no
-disc:
+A release's Linux executables can be rebuilt on a machine that has no disc.
+Each release carries its link tables, `xenogears-pc-VERSION-link-tables.tar.gz`.
+Check out the release's tag, download that file, and run:
 
 ```bash
-bash build-release.sh --out release
+bash build-release.sh --tables xenogears-pc-VERSION-link-tables.tar.gz --out release
 ```
 
 It needs bubblewrap, and Docker once to prepare the cached build environment
-(with network access); the build itself runs offline. It links from the
-tables in `port/link-tables`, which hold addresses, sizes, offsets and hashes
-of the game's data and never its bytes. The executables are the same either
-way: they read the game from your own disc at every start.
+(with network access); the build itself runs offline. The tables hold
+addresses, sizes, offsets and hashes of the game's data and never its bytes.
+The executables are the same either way: they read the game from your own
+disc at every start.
 
-The tables are made for one state of the sources, by a build that had the
-disc, with the compilers of the release's build environment
+The tables are made where the release is built, from the disc, with the
+compilers of the release's build environment
 (`packaging/deb_ubuntu.Dockerfile`: a base image named by digest and one
 snapshot of Ubuntu's archive). With them is the SHA-256 of each executable
-that build made and audited. When your checkout has the same sources, the
-command fails unless it made the same bytes; `--reproduce` also fails when
-the sources are not the tables'. Nothing is packaged, because the packages'
+that build made and audited. With the sources of that release, the command
+fails unless it made the same bytes; `--reproduce` also fails when the
+sources are not the tables'. Nothing is packaged, because the packages'
 payload audit needs the disc images, and the Windows executables are not
-built this way yet.
+built this way yet. The repository's "Build without a disc" workflow runs
+this for each release and compares the result with the release's Linux
+package.
 
-A plain CMake build uses the tables too when the checkout has no `asm/`
-folder (`-DXG_LINK_FROM=tables` asks for them). They fit the build
-environment's compiler: with another one the build stops at a stale source
-data plan wherever that compiler lays an object's data out differently.
+A plain CMake build links from tables too when the checkout has no `asm/`
+folder and the tables are extracted as `port/link-tables`
+(`-DXG_LINK_FROM=tables` asks for them). They fit the build environment's
+compiler: with another one the build stops at a stale source data plan
+wherever that compiler lays an object's data out differently.
 
-With the disc, `--write-tables DIR` on the release command also writes fresh
-tables into `DIR` once the audits pass.
+With the disc, `bash build-release.sh --discs bin --write-tables port/link-tables`
+writes tables for your own checkout: it builds and audits both engines and
+packages nothing.
