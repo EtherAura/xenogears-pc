@@ -590,6 +590,9 @@ static void lanesInit(void) {
         lanes.done[l] = SDL_CreateSemaphore(0);
         lanes.thread[l] = lanes.go[l] && lanes.done[l] ? SDL_CreateThread(laneWorker, "rewind lane", (void*)(intptr_t)l) : NULL;
         if (lanes.thread[l] == NULL) {
+            if (lanes.go[l]) SDL_DestroySemaphore(lanes.go[l]);
+            if (lanes.done[l]) SDL_DestroySemaphore(lanes.done[l]);
+            lanes.go[l] = lanes.done[l] = NULL;
             lanes.count = l;
             break;
         }
@@ -792,6 +795,11 @@ static int packBusy(void) {
     return 0;
 }
 
+/* Only the semaphores that exist are destroyed: SDL 3's Windows semaphores
+ * call through an implementation table that their first creation fills, so
+ * SDL_DestroySemaphore(NULL) in a process that never made one jumps to
+ * address 0 (xg-lnqf: the quit of a run whose rewind never packed). This
+ * also runs a second time at exit, after SDL_Quit, with nothing left. */
 static void packShutdown(void) {
     packFinish();
     if (packing.thread) {
@@ -799,8 +807,8 @@ static void packShutdown(void) {
         SDL_SignalSemaphore(packing.ready);
         SDL_WaitThread(packing.thread, NULL);
     }
-    SDL_DestroySemaphore(packing.ready);
-    SDL_DestroySemaphore(packing.done);
+    if (packing.ready) SDL_DestroySemaphore(packing.ready);
+    if (packing.done) SDL_DestroySemaphore(packing.done);
     free(packing.d.raw);
     free(packing.own.raw);
     free(packing.late);
