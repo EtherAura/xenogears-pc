@@ -34,10 +34,60 @@ playthrough were outside this test. [Tested release](https://github.com/EtherAur
 | Translation | Result on this build |
 |---|---|
 | Italian · SadNES cITy 1.2.1 | Both discs showed Italian dialogue and equipment text. The battle showed **Attacco** and **Tempo**. Some status labels stayed in English. [Patch and instructions](https://www.sadnescity.it/traduzioni/xeno/xeno.php) |
-| Spanish · Romhack Hispano v1 | The text-and-graphics edition showed Spanish dialogue, menu labels and equipment names on both discs. The sampled battle wheel still showed **Attack**. [Patch and instructions](https://xenogears.romhackhispano.org/traduccion.html) |
+| Spanish · Romhack Hispano v1 | The text-and-graphics edition showed Spanish dialogue, menu labels and equipment names on both discs. The battle command read **Atacar**. Some status labels stayed in English. [Patch and instructions](https://xenogears.romhackhispano.org/traduccion.html) |
 | English · Perfect Works Build 0.11.4 | Use your own images patched with the **`story_mode_script`** preset for the tested text option. Revised English narration appeared on Disc 2. All six `all_*` presets failed verification on both discs. The `bug_fixes` and `story_mode` images passed verification, but their dialogue was untested. Selecting a text image leaves gameplay rules under the control of the PC engine. [Perfect Works release](https://github.com/PWBuild-Team/Perfect_Works_Build/releases/tag/0.11.4) |
 | French · Atelier Traduction 1.1 | The port rejected both patched images because a file-table entry extended beyond the image. The optional Japanese-voice images failed the same check. With the French text images selected, all five sampled scenes kept their original English text. [Team's patch notes](https://ateliertraduction.forumgaming.fr/t51-mise-a-jour-de-xenogears-en-v1-1) |
 | Brazilian Portuguese · TransXeno | Compatibility with the team's translation is **unverified**. In a separate two-line Portuguese test pack, accented dialogue appeared when the pack supplied the missing glyphs. With the stock US font, both lines fell back to English. [TransXeno's translation screenshots](https://transxeno.blogspot.com/2010/06/novas-imagens-da-traducao.html) |
+
+## Screenshot comparisons
+
+Each pair shows the same frame from the published Linux Original build. The Disc 2 narration contains a story spoiler.
+
+### Disc 1 dialogue
+
+Fei speaks in the same room on all four runs. The French images failed verification, so that run shows the original English line.
+
+| US retail | Atelier French selected |
+|---|---|
+| ![US retail, Fei’s dialogue](img/translations/field14-us.png) | ![Atelier French selected, Fei’s dialogue](img/translations/field14-fr.png) |
+
+| SadNES cITy Italian | Romhack Hispano Spanish |
+|---|---|
+| ![SadNES cITy Italian, Fei’s dialogue](img/translations/field14-it.png) | ![Romhack Hispano Spanish, Fei’s dialogue](img/translations/field14-es.png) |
+
+### Battle and status
+
+The Disc 1 battle wheel reads **Attacco** in Italian and **Atacar** in Spanish. On the status screen, the equipment names change while some stat labels stay in English.
+
+| Italian battle commands | Spanish battle commands |
+|---|---|
+| ![Italian battle commands, battle](img/translations/battle-it.png) | ![Spanish battle commands, battle](img/translations/battle-es.png) |
+
+| Italian status screen | Spanish status screen |
+|---|---|
+| ![Italian status screen, status](img/translations/status-it.png) | ![Spanish status screen, status](img/translations/status-es.png) |
+
+### Disc 2 narration
+
+The same moment in the narration shows a wording change with the Perfect Works `story_mode_script` preset and translated lines with the Italian and Spanish patches.
+
+| US retail | Perfect Works English |
+|---|---|
+| ![US retail, Disc 2 narration](img/translations/field618-us.png) | ![Perfect Works English, Disc 2 narration](img/translations/field618-pw-story.png) |
+
+| SadNES cITy Italian | Romhack Hispano Spanish |
+|---|---|
+| ![SadNES cITy Italian, Disc 2 narration](img/translations/field618-it.png) | ![Romhack Hispano Spanish, Disc 2 narration](img/translations/field618-es.png) |
+
+### Brazilian Portuguese font check
+
+Both runs use the same two-line diagnostic pack. The stock US font falls back to English. Supplying the accented glyphs makes the Portuguese line visible. TransXeno itself was untested.
+
+| Stock US font | Pack with accented glyphs |
+|---|---|
+| ![Stock US font, Fei’s dialogue](img/translations/field14-pt-demo.png) | ![Pack with accented glyphs, Fei’s dialogue](img/translations/field14-pt-font.png) |
+
+## Troubleshooting
 
 If a line stays in English, check the status under its game text row.
 The port keeps the running disc's text when it cannot read the source or
