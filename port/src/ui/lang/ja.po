@@ -2506,12 +2506,20 @@ msgstr "原作の不具合修正"
 #: port/src/ui/sections.cpp
 msgid ""
 "Fixes Gear-shop Ether amp, Billy's ammo elements on equipment/status "
-"refresh, the first Deus camera freeze, missing/stray portrait pixels on the "
+"refresh, missing/stray portrait pixels on the "
 "next portrait load, Def UP, a name's final 's' (US), the shop's "
 "Buy/Sell/Exit arrow (US), MP for EP in the party menu, and field sound "
 "loops a menu cut off."
 msgstr ""
-"ギアショップのエーテルアンプ、装備やステータス更新時のビリーの弾の属性、最初のデウス戦のカメラの停止、次の顔グラフィック読み込み時の欠けたり余分なピクセル、防御UP、名前の最後の「s」(US 版)、ショップの買う/売る/出るの矢印(US 版)、パーティメニューの EP が MP になる表示、メニューで途切れるフィールドのループ音を修正します。"
+"ギアショップのエーテルアンプ、装備やステータス更新時のビリーの弾の属性、次の顔グラフィック読み込み時の欠けたり余分なピクセル、防御UP、名前の最後の「s」(US 版)、ショップの買う/売る/出るの矢印(US 版)、パーティメニューの EP が MP になる表示、メニューで途切れるフィールドのループ音を修正します。"
+
+#: port/src/ui/sections.cpp
+msgid "Boss camera fix"
+msgstr "ボス戦のカメラ修正"
+
+#: port/src/ui/sections.cpp
+msgid "Prevents a camera stall during one late-game boss attack."
+msgstr "終盤のボス戦で、特定の攻撃中にカメラが止まって戦闘が進まなくなる不具合を修正します。"
 
 #: port/src/ui/sections.cpp
 msgid "Difficulty"

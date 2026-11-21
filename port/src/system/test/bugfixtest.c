@@ -1,4 +1,4 @@
-/* Exercise native equipment, save and battle paths behind the shared option. */
+/* Exercise native equipment, save and battle paths for original-game fixes. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,9 +65,12 @@ static int testDeusCamera(void) {
     const SVECTOR at = {1347, -430, 2991, 456};
     const SVECTOR eyeTarget = {1340, -1042, 984, 789};
     const SVECTOR atTarget = {1340, -430, 3000, 321};
-    for (int enabled = 0; enabled < 2; ++enabled)
+    const char* const overrides[] = {"", "off", "on"};
+    for (size_t setting = 0; setting < sizeof(overrides) / sizeof(overrides[0]); ++setting)
     for (int scenario = 0; scenario < 8; ++scenario) {
-        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "on" : "off");
+        int enabled = setting != 1;
+        testSetEnv("XG_DEUS_CAMERA_FIX", overrides[setting]);
+        testSetEnv("XG_ORIGINAL_BUG_FIXES", enabled ? "off" : "on");
         memset(&currentBattleConfig, 0, sizeof(currentBattleConfig));
         currentBattleConfig.m0_battleId = scenario == 1 ? 0x41 : 0x40;
         currentBattleConfig.m2_arenaId = scenario == 2 ? 0x32 : 0x33;
@@ -1110,16 +1113,23 @@ int main(int argc, char** argv) {
     if (argc != 3) return 2;
     char path[1200]; snprintf(path, sizeof(path), "%s/bugfixes.ini", argv[1]);
     testSetEnv("XG_SETTINGS", path);
+    testSetEnv("XG_DEUS_CAMERA_FIX", "");
     if (!strcmp(argv[2], "write")) {
         testSetEnv("XG_ORIGINAL_BUG_FIXES", "off");
         pcGameplaySetOriginalBugFixes(1);
         CHECK(pcGameplayOriginalBugFixes());
+        CHECK(pcGameplayDeusCameraFix());
+        pcGameplaySetDeusCameraFix(0);
+        CHECK(!pcGameplayDeusCameraFix());
     } else if (!strcmp(argv[2], "read")) {
         CHECK(pcGameplayOriginalBugFixes());
+        CHECK(!pcGameplayDeusCameraFix());
         pcGameplaySetOriginalBugFixes(0);
         CHECK(!pcGameplayOriginalBugFixes());
+        CHECK(!pcGameplayDeusCameraFix());
     } else {
         CHECK(!pcGameplayOriginalBugFixes());
+        CHECK(pcGameplayDeusCameraFix());
         testSetEnv("XG_ORIGINAL_BUG_FIXES", "true"); CHECK(pcGameplayOriginalBugFixes());
         testSetEnv("XG_ORIGINAL_BUG_FIXES", "yes"); CHECK(pcGameplayOriginalBugFixes());
         testSetEnv("XG_ORIGINAL_BUG_FIXES", "off"); CHECK(!pcGameplayOriginalBugFixes());

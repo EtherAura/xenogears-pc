@@ -54,8 +54,9 @@ void pcRetryCheckpoint(void);
 void pcBattleRetryOffer(void);
 void pcBattleRetryDraw(void);
 int pcRetryRestore(void);
-/* One shared opt-in for corrections to original-game defects. */
+/* Shared opt-in for other original-game fixes. The Deus fix defaults on. */
 int pcGameplayOriginalBugFixes(void);
+int pcGameplayDeusCameraFix(void);
 /* A field channel's looping sound effect, which a menu's sounds cut, starts
  * again after the menu (port/src/game/field/sfxkeep.c): OP_C4SubSub1 notes
  * each start; openFieldMenu takes the mask before the menu, restores after. */

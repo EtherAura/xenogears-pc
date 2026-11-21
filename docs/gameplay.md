@@ -1,6 +1,6 @@
 # Gameplay
 
-Everything here is off or at the original values by default.
+The boss camera fix is on by default. Other gameplay options default to the original values.
 
 ![F1 > Gameplay](img/gameplay-menu.png)
 
@@ -81,6 +81,7 @@ F1 > Audio > Japanese audio.
 |---|---|
 | Speedup | Shorter memory card and loading waits; turns on smoothed motion |
 | Original-game bug fixes | Fixes a list of bugs in the original game |
+| Boss camera fix | Prevents a camera stall during one late-game boss attack |
 | Text speed | Original, 2x, 3x, 4x, 8x, Instant |
 | Hold to show text | Holding confirm shows the rest of a page |
 | Auto-advance text | A finished page goes on by itself after 1 to 8 s |

@@ -192,6 +192,7 @@ static void logicList(NpSession* s) {
     logicCount = 0;
     logicAdd(s, "speedup", 0, 1, K_BOOL, speedupEnabled() != 0);
     logicAdd(s, "original_bug_fixes", 0, 1, K_BOOL, pcGameplayOriginalBugFixes() != 0);
+    logicAdd(s, "deus_camera_fix", 0, 1, K_BOOL, pcGameplayDeusCameraFix());
     logicAdd(s, "difficulty", 0, 1, K_DIFFICULTY, pcGameplayHardMode() != 0);
     for (int i = 0; i < GAMEPLAY_ENEMY_STAT_COUNT; i++) {
         logicAdd(s, pcGameplayEnemyKey(i), 25, 400, K_INT, pcGameplayEnemyMultiplier(i));

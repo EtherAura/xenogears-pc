@@ -2399,9 +2399,9 @@ void setBattleCameraMode4IfAllowed(void) {
         /* First Deus's attack effect waits for the normal camera after
          * its mecha script takes camera ownership (0x68). Finish that move
          * before mode 4 disables interpolation, or both scripts wait forever. */
-        if (pcGameplayOriginalBugFixes() && currentBattleConfig.m0_battleId == 0x40 &&
+        if (currentBattleConfig.m0_battleId == 0x40 &&
             currentBattleConfig.m2_arenaId == 0x33 && battleCameraMode == 1 &&
-            battleCameraModeInterpolation == 1) {
+            battleCameraModeInterpolation == 1 && pcGameplayDeusCameraFix()) {
             copySVector3(&battleCameraEye, &battleCameraBlock.m4_eyeTarget);
             copySVector3(&battleCameraAt, &battleCameraBlock.mC_atTarget);
         }

@@ -23,8 +23,18 @@ int pcGameplayOriginalBugFixes(void) {
 }
 
 void pcGameplaySetOriginalBugFixes(int enabled) {
-    settingsDescribe("original_bug_fixes", "All validated original-game bug fixes together; off preserves retail behavior");
+    settingsDescribe("original_bug_fixes", "Optional original-game fixes, separate from the boss camera fix");
     settingsSetInt("original_bug_fixes", enabled != 0);
+    settingsSave();
+}
+
+int pcGameplayDeusCameraFix(void) {
+    return settingsBool("deus_camera_fix", 1);
+}
+
+void pcGameplaySetDeusCameraFix(int enabled) {
+    settingsDescribe("deus_camera_fix", "Prevent the first Deus attack's camera stall (default on)");
+    settingsSetInt("deus_camera_fix", enabled != 0);
     settingsSave();
 }
 

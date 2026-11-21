@@ -64,6 +64,9 @@ void pcGameplaySetTextAutoAdvance(int seconds);
 int pcGameplayTimedText(const unsigned char* text, int twoByteLead);
 
 int pcGameplayOriginalBugFixes(void);
+void pcGameplaySetOriginalBugFixes(int enabled);
+int pcGameplayDeusCameraFix(void);
+void pcGameplaySetDeusCameraFix(int enabled);
 /* The Enhanced engine's 60 Hz field (default on there; the Original never asks). */
 int pcGameplayField60(void);
 void pcGameplaySetField60(int on);
@@ -77,6 +80,5 @@ void pcGameplaySetWorldmap60(int on);
 /* The Enhanced engine's 60 Hz battle (default on there; always off in the Original). */
 int pcGameplayBattle60(void);
 void pcGameplaySetBattle60(int on);
-void pcGameplaySetOriginalBugFixes(int enabled);
 
 #endif

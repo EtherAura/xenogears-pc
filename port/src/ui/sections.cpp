@@ -2297,10 +2297,16 @@ void gameplaySection() {
     if (row("Original-game bug fixes", "original_bug_fixes")) {
         bool originalFixes = pcGameplayOriginalBugFixes() != 0;
         if (offOnList("##original_bug_fixes", &originalFixes)) pcGameplaySetOriginalBugFixes(originalFixes);
-        hint("Fixes Gear-shop Ether amp, Billy's ammo elements on equipment/status refresh, the first Deus camera freeze, "
+        hint("Fixes Gear-shop Ether amp, Billy's ammo elements on equipment/status refresh, "
              "missing/stray portrait pixels on the next portrait load, Def UP, a name's final 's' (US), the shop's "
              "Buy/Sell/Exit arrow (US), MP for EP in the party menu, and field sound loops a menu cut off.");
         overrideNote("original_bug_fixes");
+    }
+    if (row("Boss camera fix", "deus_camera_fix")) {
+        bool cameraFix = pcGameplayDeusCameraFix() != 0;
+        if (offOnList("##deus_camera_fix", &cameraFix)) pcGameplaySetDeusCameraFix(cameraFix);
+        hint("Prevents a camera stall during one late-game boss attack.");
+        overrideNote("deus_camera_fix");
     }
 
     // ---- every 60 Hz mode together: the Enhanced engine's per-mode switches,

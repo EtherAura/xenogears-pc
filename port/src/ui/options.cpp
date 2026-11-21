@@ -394,6 +394,8 @@ std::vector<Spec>& table() {
         [](int, int v) { presentationSetRate(v); }, 60, rateNames, 5, rateValues);
     add("original_bug_fixes", N_("Original-game bug fixes"), [](int) { return pcGameplayOriginalBugFixes(); },
         [](int, int v) { pcGameplaySetOriginalBugFixes(v); }, 0);
+    add("deus_camera_fix", N_("Boss camera fix"), [](int) { return pcGameplayDeusCameraFix(); },
+        [](int, int v) { pcGameplaySetDeusCameraFix(v); }, 1);
     static const char* const difficulty[] = {N_("Normal"), N_("Hard")};
     add("difficulty", N_("Difficulty"), [](int) { return pcGameplayHardMode(); },
         [](int, int v) { pcGameplaySetHardMode(v); }, 0, difficulty);
