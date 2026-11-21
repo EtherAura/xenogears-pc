@@ -169,6 +169,7 @@ static int imageForSize(uint64_t texel,uint64_t palette,int size,int thumbnail,P
             /* Which picture a set lacks (xg-j85.40), once: the miss is kept. */
             const char* log=SDL_getenv("XG_TEXTURE_LOG");
             if(log && *log && strcmp(log,"0")) fprintf(stderr,"portrait: %s %s\n",found?"invalid":"missing",path);
+            texturePackAudit("portrait %s %s",found?"invalid":"missing",path+strlen(root));
         }
         else {
             size_t bytes=(size_t)png->w*png->h*4;

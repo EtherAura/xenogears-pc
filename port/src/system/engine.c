@@ -15,6 +15,13 @@
  * standard streams, the harness's timeouts and signals still land); Windows
  * starts the other executable with the same arguments and inherited streams,
  * waits for it and exits with its code.
+ *
+ * Android (xg-mrj.3.21) has no executables: the app's loader picks the game
+ * library of the engine the setting asks for (port/android/loader/xgloader.c:
+ * libxenogears-<region>.so or libxenogears-enhanced-<region>.so) and says
+ * which engines the app carries (XG_ANDROID_ENGINES) and which one it was
+ * asked for (XG_ANDROID_ENGINE_ASKED). A change of engine restarts the app:
+ * a new process, whose loader then loads the other library.
  */
 #define _POSIX_C_SOURCE 200809L
 #include <SDL3/SDL.h>
@@ -70,6 +77,17 @@ static int exists(const char* path) {
 }
 
 const char* engineExecutable(int e) {
+#ifdef __ANDROID__
+    /* The engine's game library, when the app carries it. */
+    const char* carried = SDL_getenv("XG_ANDROID_ENGINES");
+    if (carried == NULL || strstr(carried, engineName(e)) == NULL) return NULL;
+#ifdef VERSION_JP
+    snprintf(found, sizeof found, "libxenogears-%sjp.so", e == ENGINE_ENHANCED ? "enhanced-" : "");
+#else
+    snprintf(found, sizeof found, "libxenogears-%sus.so", e == ENGINE_ENHANCED ? "enhanced-" : "");
+#endif
+    return found;
+#endif
     const char* name = e == ENGINE_ENHANCED ? "xenogears-enhanced" : "xenogears";
 #ifdef _WIN32
     const char* ext = ".exe";
@@ -142,7 +160,10 @@ const char* engineNote(void) {
 static void handOver(const char* exe) {
     fflush(stdout);
     fflush(stderr);
-#ifdef _WIN32
+#ifdef __ANDROID__
+    (void)exe;
+    androidRestart(); /* the app again, in a new process: its loader picks the library */
+#elif defined(_WIN32)
     const char** args = calloc((size_t)argcSaved + 1, sizeof *args);
     if (args == NULL) return;
     args[0] = exe;
@@ -184,6 +205,15 @@ void engineRedirect(void) {
     note[0] = '\0';
     int want = engineSetting();
     if (want < 0 || want == engineThis()) return;
+#ifdef __ANDROID__
+    /* The loader was asked for this engine and loaded the other: a restart would do the same. */
+    const char* asked = SDL_getenv("XG_ANDROID_ENGINE_ASKED");
+    if (asked != NULL && SDL_strcasecmp(asked, engineName(want)) == 0) {
+        snprintf(note, sizeof note, "The %s engine is not part of this app", engineTitle(want));
+        fprintf(stderr, "engine: %s; running the %s engine\n", note, engineTitle(engineThis()));
+        return;
+    }
+#endif
     if (SDL_getenv("XG_ENGINE_LAUNCHED") != NULL) {
         snprintf(note, sizeof note, "Started by the %s engine: staying here", engineTitle(engineThis()));
         fprintf(stderr, "engine: %s\n", note);
@@ -191,8 +221,12 @@ void engineRedirect(void) {
     }
     const char* exe = engineExecutable(want);
     if (exe == NULL) {
+#ifdef __ANDROID__
+        snprintf(note, sizeof note, "The %s engine is not part of this app", engineTitle(want));
+#else
         snprintf(note, sizeof note, "The %s engine's executable (%s) was not found beside this one",
                  engineTitle(want), want == ENGINE_ENHANCED ? "xenogears-enhanced" : "xenogears");
+#endif
         fprintf(stderr, "engine: %s; running the %s engine\n", note, engineTitle(engineThis()));
         return;
     }

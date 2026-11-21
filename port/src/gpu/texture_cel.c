@@ -145,7 +145,7 @@ static int readSprite(CelSprite* s) {
 }
 static void kept(TextureRequest p,int x,int y,const CelSprite* s,const char* why) {
     if(logMode<0){const char* e=SDL_getenv("XG_TEXTURE_LOG");logMode=e && *e && strcmp(e,"0");}
-    if(!logMode)return;
+    if(!logMode && !texturePackAuditing())return;
     uint64_t k=((uint64_t)p.tpage<<48 | (uint64_t)p.clut<<32 | (uint64_t)(uint16_t)p.u<<16 | (uint16_t)p.v)*UINT64_C(0x9E3779B97F4A7C15);
     k^=((uint64_t)p.w<<9 | (uint64_t)p.h | (uint64_t)(s?s-sprites+1:0)<<18)*UINT64_C(0xBF58476D1CE4E5B9);
     k|=1; /* 0 marks a free slot */
@@ -153,8 +153,9 @@ static void kept(TextureRequest p,int x,int y,const CelSprite* s,const char* why
     for(int n=0;n<LOGGED && logged[at];n++,at=(at+1)%LOGGED)if(logged[at]==k)return;
     if(loggedCount>=LOGGED*3/4)return;
     logged[at]=k;++loggedCount;
-    fprintf(stderr,"cel: native pixels kept: tpage %04x clut %04x uv %d,%d %dx%d (sprites.txt x %d y %d): %s%s\n",
+    if(logMode)fprintf(stderr,"cel: native pixels kept: tpage %04x clut %04x uv %d,%d %dx%d (sprites.txt x %d y %d): %s%s\n",
             p.tpage,p.clut,p.u,p.v,p.w,p.h,x,y,why,s?s->path+strlen(root):"");
+    texturePackAudit("hud %04x %04x %d,%d %dx%d at %d,%d: %s%s",p.tpage,p.clut,p.u,p.v,p.w,p.h,x,y,why,s?s->path+strlen(root):"");
 }
 /* The frame's counts move on at the first Cel sample of a new vblank. */
 static CelFrame* frame(void) {

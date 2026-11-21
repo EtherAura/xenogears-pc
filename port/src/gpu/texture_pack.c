@@ -11,6 +11,7 @@
 #include <sys/resource.h>
 #include <sys/syscall.h>
 #endif
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -128,6 +129,8 @@ static void loaderStop(void); /* the background loader and the room lists, below
 static void posesClear(void); /* the sprite pose cache and its loaders, below */
 static void roomsRead(void);
 static void roomsPreloadField(int field);
+static void animatedRead(void); /* pages with an animated region (animated.txt), below */
+static void animatedFree(void);
 /* rooms.txt: each field's pages, asked for as the field changes (roomsPreload) */
 #define ROOM_PAGES 4096
 static struct { int field, w, h, limit; uint64_t texel; } roomPages[ROOM_PAGES];
@@ -172,6 +175,21 @@ int texturePackVersionDir(const char* root, char* out, size_t size) {
     if (!isDirectory(other) || strlen(other)>=size) return 0;
     memcpy(out,other,strlen(other)+1); return 1;
 }
+static FILE* auditFile; static int auditState; /* XG_PACK_MISSES: 0 not read yet, 1 open, -1 off */
+int texturePackAuditing(void) {
+    if (!auditState) {
+        const char* p=getenv("XG_PACK_MISSES");
+        auditFile=p && *p ? fopen(p,"a") : NULL;
+        if (auditFile) setvbuf(auditFile,NULL,_IOLBF,0); else if (p && *p) fprintf(stderr,"pack misses: %s: not writable\n",p);
+        auditState=auditFile?1:-1;
+    }
+    return auditState>0;
+}
+void texturePackAudit(const char* fmt, ...) {
+    if (!texturePackAuditing()) return;
+    va_list args; va_start(args,fmt); vfprintf(auditFile,fmt,args); va_end(args); fputc('\n',auditFile);
+}
+int gpuTextureField(void);
 static uint32_t keyHash(uint64_t texel, uint64_t palette, int indexed, int w, int h) {
     uint64_t k = texel ^ (palette * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)indexed << 61) ^ ((uint64_t)w << 20) ^ (uint64_t)h;
     k ^= k >> 29; k *= 0xBF58476D1CE4E5B9ull; k ^= k >> 32;
@@ -246,6 +264,7 @@ void texturePackShutdown(void) {
     posesClear();
     spriteIndexFree();
     cropsReset();
+    animatedFree();
     for (int i=0;i<PACK_SLOTS;++i) drop(&entries[i]);
     memset(&stats,0,sizeof(stats)); loaded=0; root[0]=dir[0]=0;
 }
@@ -560,6 +579,7 @@ void texturePackReload(void) {
     }
     loaderStop();   /* its finished loads would name entries dropped here */
     cropsReset();
+    animatedFree();
     for (int i=0;i<PACK_SLOTS;++i) drop(&entries[i]);
     memset(&stats,0,sizeof(stats)); dir[0]=0; rectKeys=1; packBytes=PACK_BYTES; cropLimit=CROP_BYTES; roomCount=0; roomField=-2;
     roomSerial=0; roomDrawn=roomOver=0; roomWaitNs=0;
@@ -612,6 +632,7 @@ void texturePackReload(void) {
     snprintf(stats.message,sizeof(stats.message),"Ready; PNGs load when their textures are drawn");
     metadata();
     roomsRead();
+    animatedRead();
     fprintf(stderr,"texture pack: %s%s%s%s\n",dir,stats.name[0]?" - ":"",stats.name,roomCount?" (room preload)":"");
 #else
     snprintf(stats.message,sizeof(stats.message),"PNG packs require SDL 3.4");
@@ -1022,6 +1043,11 @@ static Entry* lookupKey(uint64_t texel, uint64_t palette, int indexed, int w, in
     char path[sizeof(dir)+80]; SDL_PathInfo info;
     if (!packFile(path,sizeof(path),texel,palette,indexed,&info)) { /* Negative cache; explicit reload retries. */
         ++stats.misses; if (indexed==BEETLE_KIND) ++bstats.misses;
+        if (texturePackAuditing()) {
+            static const char* const kinds[]={"texture","texture-index","texture-glyph","glyph","sprite-cel","beetle"};
+            texturePackAudit("%s %016" PRIx64 " %016" PRIx64 " %dx%d field %d",indexed>=0 && indexed<=BEETLE_KIND?kinds[indexed]:"other",
+                             texel,palette,w,h,gpuTextureField());
+        }
         return e;
     }
     int page=(indexed<=1 || indexed==BEETLE_KIND) && info.size>ASYNC_FROM;
@@ -1270,6 +1296,223 @@ static void roomsPreload(void) {
      * entry spot, which varies by exit): its pages are keyed 1024 (the world map) in rooms.txt. */
     roomsPreloadField(pcWideGetMode && pcWideGetMode()==3 ? 0x400 : gpuTextureField());
 }
+/* ---- pages with an animated region (animated.txt, xg-3hyf.4) ----
+ * A page of which a small part animates (blinking console lights, a scrolling strip: the game puts
+ * a new frame of that part into VRAM every few vblanks) has a texel key per frame, so a redraw named
+ * by one frame's key matches that frame only. animated.txt in the version folder names such pages
+ * ("<key> <w> <h> <depth> <x>,<y>,<w>,<h> ..." a page, the region's rectangles in the page image's
+ * texels, '#' comments; tools/field_texture_redraw.py writes it) by their still key: the texel key
+ * with every texel of the region taken as 0, as a stable region's texels outside its load are, so
+ * every frame has the same one. The page's image (<key>.indices.png, or <key>-<palette>.png) shows
+ * outside the region; inside it the game's own texels do, VRAM as it is now with the live palette,
+ * so the animation goes on: a patch inside one rectangle is drawn as the original (nearest), one
+ * outside every rectangle from the image as any page, and one across the edge from a composite of
+ * the two at the image's scale. Only pages listed in rooms.txt for the current room (or listed for
+ * no room) are tried, so a draw of any other page costs nothing; an answer is kept per texel key. */
+#define ANIM_RECTS 64
+#define ANIM_MEMO 1024
+#define ANIM_SLOTS 256
+#define ANIM_BYTES (64u * 1024u * 1024u)
+typedef struct { int w, h, depth, n; uint16_t r[ANIM_RECTS][4]; } AnimShape;
+static struct { uint64_t key; AnimShape shape; int rooms; }* animPages; /* rooms: rooms.txt lines naming the key */
+static int animPageCount, animField=-3;
+static int* animCandidates; static int animCandidateCount; /* animPages of the room animField */
+static struct { uint64_t texel, still; int page; } animMemo[ANIM_MEMO]; /* page: index + 1, -1 none, 0 empty */
+typedef struct {
+    uint64_t loaded, native, palette, revision, touched;
+    int u, v, w, h, indexed;
+    size_t bytes;
+    uint8_t* pixels;
+} AnimComposite;
+static AnimComposite animComposites[ANIM_SLOTS];
+static size_t animBytes;
+static uint64_t animClock;
+static void animatedFree(void) {
+    free(animPages); animPages=NULL; animPageCount=0;
+    free(animCandidates); animCandidates=NULL; animCandidateCount=0; animField=-3;
+    memset(animMemo,0,sizeof(animMemo));
+    for (int i=0;i<ANIM_SLOTS;++i) free(animComposites[i].pixels);
+    memset(animComposites,0,sizeof(animComposites)); animBytes=0;
+}
+/* After roomsRead (the rooms each page is listed for). */
+static void animatedRead(void) {
+    animatedFree();
+    char path[sizeof(dir)+16]; snprintf(path,sizeof(path),"%s/animated.txt",dir);
+    FILE* f=fopen(path,"r"); if (!f) return;
+    char line[4096]; int cap=0, bad=0;
+    while (fgets(line,sizeof(line),f)) {
+        char* s=trim(line);
+        if (!*s || *s=='#') continue;
+        unsigned long long key; int used=0;
+        AnimShape sh; memset(&sh,0,sizeof(sh));
+        int ok=sscanf(s,"%llx %d %d %d%n",&key,&sh.w,&sh.h,&sh.depth,&used)==4 && sh.w>0 && sh.h>0 && sh.w<=256 && sh.h<=256 &&
+               (sh.depth==4 || sh.depth==8 || sh.depth==15);
+        for (char* p=s+used; ok; ) {
+            int x,y,w,h,n=0;
+            while (isspace((unsigned char)*p)) ++p;
+            if (!*p) break;
+            if (sscanf(p,"%d,%d,%d,%d%n",&x,&y,&w,&h,&n)!=4 || sh.n==ANIM_RECTS || x<0 || y<0 || w<1 || h<1 || x+w>sh.w || y+h>sh.h) ok=0;
+            else { sh.r[sh.n][0]=(uint16_t)x; sh.r[sh.n][1]=(uint16_t)y; sh.r[sh.n][2]=(uint16_t)w; sh.r[sh.n][3]=(uint16_t)h; ++sh.n; p+=n; }
+        }
+        if (!ok || !sh.n) { ++bad; continue; }
+        if (animPageCount==cap) {
+            int n=cap?cap*2:64; __typeof__(animPages) t=realloc(animPages,(size_t)n*sizeof(*t));
+            if (!t) break;
+            animPages=t; cap=n;
+        }
+        animPages[animPageCount].key=(uint64_t)key; animPages[animPageCount].shape=sh; animPages[animPageCount].rooms=0;
+        for (int i=0;i<roomCount;++i) animPages[animPageCount].rooms+=roomPages[i].texel==(uint64_t)key;
+        ++animPageCount;
+    }
+    fclose(f);
+    if (animPageCount || bad) fprintf(stderr,"texture pack: animated.txt: %d pages with an animated region%s\n",animPageCount,bad?" (some lines unreadable, skipped)":"");
+}
+/* The pages to try in the room the pack preloads now (roomField): those rooms.txt lists for it, and
+ * those it lists for no room; the answers kept for the last room go. */
+static void animatedRoom(void) {
+    if (animField==roomField) return;
+    animField=roomField; animCandidateCount=0; memset(animMemo,0,sizeof(animMemo));
+    if (!animCandidates && !(animCandidates=malloc((size_t)animPageCount*sizeof(int)))) return;
+    for (int i=0;i<animPageCount;++i) {
+        int here=!animPages[i].rooms;
+        for (int j=0;j<roomCount && !here;++j) here=roomPages[j].field==roomField && roomPages[j].texel==animPages[i].key;
+        if (here) animCandidates[animCandidateCount++]=i;
+    }
+}
+static uint64_t animByte(uint64_t h, uint8_t b) { return (h ^ b) * UINT64_C(1099511628211); }
+/* texture.c's texel key (xgtex1, depth, size, the texels) with the shape's region read as 0. */
+static uint64_t animStillKey(const DecodedTexture* d, const AnimShape* s) {
+    uint64_t k=UINT64_C(14695981039346656037);
+    for (const char* t="xgtex1"; *t; ++t) k=animByte(k,(uint8_t)*t);
+    k=animByte(k,(uint8_t)s->depth);
+    k=animByte(animByte(k,(uint8_t)s->w),(uint8_t)(s->w>>8)); k=animByte(animByte(k,(uint8_t)s->h),(uint8_t)(s->h>>8));
+    uint8_t row[256];
+    for (int y=0;y<s->h;++y) {
+        memset(row,0,sizeof(row));
+        for (int i=0;i<s->n;++i) if (y>=s->r[i][1] && y<s->r[i][1]+s->r[i][3]) memset(row+s->r[i][0],1,s->r[i][2]);
+        if (s->depth==15) {
+            const uint8_t* t=d->texels+(size_t)y*s->w*2;
+            for (int x=0;x<s->w;++x) { k=animByte(k,row[x]?0:t[x*2]); k=animByte(k,row[x]?0:t[x*2+1]); }
+        } else {
+            const uint8_t* t=d->texels+(size_t)y*s->w;
+            for (int x=0;x<s->w;++x) k=animByte(k,row[x]?0:t[x]);
+        }
+    }
+    return k;
+}
+/* The animated page a decoded texture is (animPages index), -1 none; *still its still key. */
+static int animatedPage(const DecodedTexture* d, uint64_t* still) {
+    animatedRoom();
+    if (!animCandidateCount || !d->texels) return -1;
+    int sized=0;   /* a texture of no candidate's size and depth is none: no memo slot for it */
+    for (int i=0;i<animCandidateCount && !sized;++i) {
+        const AnimShape* s=&animPages[animCandidates[i]].shape;
+        sized=s->w==d->request.w && s->h==d->request.h && s->depth==d->depth;
+    }
+    if (!sized) return -1;
+    uint64_t t=d->texelKey;
+    unsigned slot=(unsigned)((t^(t>>29))*UINT64_C(0x9E3779B97F4A7C15)>>40)&(ANIM_MEMO-1);
+    if (animMemo[slot].page && animMemo[slot].texel==t) { *still=animMemo[slot].still; return animMemo[slot].page>0?animMemo[slot].page-1:-1; }
+    int found=-1; uint64_t key=0;
+    for (int i=0;i<animCandidateCount && found<0;++i) {
+        const AnimShape* s=&animPages[animCandidates[i]].shape;
+        if (s->w!=d->request.w || s->h!=d->request.h || s->depth!=d->depth) continue;
+        int again=0;   /* a shape an earlier candidate had: its key is known already */
+        for (int j=0;j<i && !again;++j) again=!memcmp(s,&animPages[animCandidates[j]].shape,sizeof(*s));
+        if (again) continue;
+        uint64_t k=animStillKey(d,s);
+        for (int j=i;j<animCandidateCount;++j)
+            if (animPages[animCandidates[j]].key==k && !memcmp(s,&animPages[animCandidates[j]].shape,sizeof(*s))) { found=animCandidates[j]; key=k; break; }
+    }
+    animMemo[slot].texel=t; animMemo[slot].still=key; animMemo[slot].page=found>=0?found+1:-1;
+    if (found>=0 && spriteLogOn()) fprintf(stderr,"texture pack: page %016" PRIx64 " is animated page %016" PRIx64 " (its region as the game draws it)\n",t,key);
+    *still=key; return found;
+}
+/* A patch across the region's edge: the image's pixels outside, the game's texels (nat, the patch
+ * decoded from VRAM as it is) inside, at the image's scale; an index map when the GPU colours them
+ * (as the page's own image), else RGBA. Kept by image, native content, palette and patch. */
+static int animatedComposite(const DecodedTexture* d, Entry* e, const AnimShape* s, const DecodedTexture* nat, TextureRequest patch, TextureSample* out) {
+    int indexed=e->indexed && gpuKeeps, sc=e->scale, cw=patch.w*sc, ch=patch.h*sc;
+    size_t bytes=(size_t)cw*ch*(indexed?1:4);
+    if (bytes>(4u<<20)) return 0;   /* the renderer copies it into each frame: drawn as the original instead */
+    uint64_t palette=indexed?0:d->paletteKey;
+    AnimComposite* c=NULL; AnimComposite* victim=&animComposites[0];
+    for (int i=0;i<ANIM_SLOTS;++i) {
+        AnimComposite* k=&animComposites[i];
+        if (k->pixels && k->loaded==e->loaded && k->native==nat->texelKey && k->palette==palette && k->indexed==indexed &&
+            k->u==patch.u && k->v==patch.v && k->w==patch.w && k->h==patch.h) { c=k; break; }
+        if (!k->pixels ? victim->pixels!=NULL : (victim->pixels && k->touched<victim->touched)) victim=k;
+    }
+    if (!c) {
+        c=victim;
+        if (c->pixels) { animBytes-=c->bytes; free(c->pixels); c->pixels=NULL; }
+        while (animBytes+bytes>ANIM_BYTES) {
+            AnimComposite* old=NULL;
+            for (int i=0;i<ANIM_SLOTS;++i) if (animComposites[i].pixels && (!old || animComposites[i].touched<old->touched)) old=&animComposites[i];
+            if (!old) break;
+            animBytes-=old->bytes; free(old->pixels); old->pixels=NULL;
+        }
+        if (!(c->pixels=malloc(bytes))) return 0;
+        int pu=patch.u-d->request.u, pv=patch.v-d->request.v, stride=e->w*sc;
+        uint8_t inside[256];
+        for (int ty=0;ty<patch.h;++ty) {
+            memset(inside,0,sizeof(inside));
+            for (int i=0;i<s->n;++i) {
+                int x0=s->r[i][0]-pu, x1=x0+s->r[i][2];
+                if (pv+ty<s->r[i][1] || pv+ty>=s->r[i][1]+s->r[i][3]) continue;
+                if (x0<0) x0=0;
+                if (x1>patch.w) x1=patch.w;
+                if (x1>x0) memset(inside+x0,1,(size_t)(x1-x0));
+            }
+            for (int sy=0;sy<sc;++sy) {
+                size_t at=(size_t)((pv+ty)*sc+sy)*stride+(size_t)pu*sc;
+                uint8_t* dst=c->pixels+(size_t)(ty*sc+sy)*cw*(indexed?1:4);
+                for (int x=0;x<cw;++x) {
+                    int tx=x/sc;
+                    if (indexed) { dst[x]=inside[tx]?nat->texels[(size_t)ty*patch.w+tx]:e->indices[at+x]; continue; }
+                    uint8_t* p=dst+x*4;
+                    if (inside[tx]) { memcpy(p,nat->rgba+((size_t)ty*patch.w+tx)*4,4); continue; }
+                    if (!e->indexed) { memcpy(p,e->rgba+(at+x)*4,4); continue; }
+                    uint16_t word=d->palette[e->indices[at+x]];
+                    for (int k=0;k<3;++k) { int v=(word>>(k*5))&31; p[k]=(uint8_t)((v<<3)|(v>>2)); }
+                    p[3]=word==0?0:word&0x8000?128:255;
+                }
+            }
+        }
+        c->loaded=e->loaded; c->native=nat->texelKey; c->palette=palette; c->indexed=indexed;
+        c->u=patch.u; c->v=patch.v; c->w=patch.w; c->h=patch.h; c->bytes=bytes; animBytes+=bytes; c->revision=newRevision();
+    }
+    c->touched=++animClock;
+    ++stats.draws;
+    *out=(TextureSample){indexed?NULL:c->pixels,c->revision,c->u,c->v,c->w,c->h,sc,indexed?c->pixels:NULL,0};
+    return 1;
+}
+static int sampleEntry(const DecodedTexture* d, Entry* e, TextureRequest patch, int filter, TextureSample* out);
+/* packSample's first step: -1 not an animated page (the usual look-ups follow), 0 drawn as the
+ * original, 1 *out set. */
+static int animatedSample(const DecodedTexture* d, TextureRequest patch, int filter, TextureSample* out) {
+    uint64_t still;
+    int page=animPageCount?animatedPage(d,&still):-1;
+    if (page<0) return -1;
+    const AnimShape* s=&animPages[page].shape;
+    Entry* e=lookupKey(still,d->paletteKey,0,d->request.w,d->request.h,d->paletteSize);
+    if (!entryLoaded(e) && !e->pending && d->paletteSize) e=lookupKey(still,0,1,d->request.w,d->request.h,d->paletteSize);
+    if (!entryLoaded(e)) return e->pending?0:-1;   /* still loading: the original meanwhile; no file: as any page */
+    if (replacementsHidden) return 0;
+    int pu=patch.u-d->request.u, pv=patch.v-d->request.v, within=0, across=0;
+    for (int i=0;i<s->n;++i) {
+        int x0=s->r[i][0], y0=s->r[i][1], x1=x0+s->r[i][2], y1=y0+s->r[i][3];
+        if (pu>=x1 || pv>=y1 || pu+patch.w<=x0 || pv+patch.h<=y0) continue;
+        across=1;
+        if (pu>=x0 && pv>=y0 && pu+patch.w<=x1 && pv+patch.h<=y1) within=1;
+    }
+    if (!across) return sampleEntry(d,e,patch,filter,out);
+    if (within && filter==TEXTURE_FILTER_NEAREST) return 0;
+    TextureRequest plain=patch; plain.stableFrom=plain.stableTo=0;
+    const DecodedTexture* nat=textureCacheGet(plain);
+    if (!nat || !nat->texels || nat->request.w!=patch.w || nat->request.h!=patch.h) return 0;
+    return animatedComposite(d,e,s,nat,patch,out);
+}
 /* ---- the Beetle PSX HW pack (beetle_pack) ---- */
 static uint32_t beetleSlot(uint32_t upload, uint32_t palette) {
     uint64_t k=((uint64_t)upload<<32|palette)*0x9E3779B97F4A7C15ull;
@@ -1442,6 +1685,8 @@ static int packSample(const DecodedTexture* d, TextureRequest patch, int filter,
     /* A Beetle pack's image first (beetle_pack_order=beetle) or after ours (the default) */
     if (beetleFirstSetting && beetleSample(d,patch,out)) return !replacementsHidden;
     if (!stats.enabled) return !beetleFirstSetting && beetleSample(d,patch,out) && !replacementsHidden;
+    int animated=animatedSample(d,patch,filter,out);   /* a page with an animated region (animated.txt) */
+    if (animated>=0) return animated;
     Entry* e=lookup(d,0); /* Exact RGBA pair wins; indexed file ignores CLUT key. */
     if (!entryLoaded(e) && d->paletteSize) e=lookup(d,1);
     if (!entryLoaded(e) && d->request.stableTo && rectKeys) {

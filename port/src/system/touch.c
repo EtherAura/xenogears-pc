@@ -1,12 +1,22 @@
 /*
- * The touch pad (touch.h; xg-mrj.3.8). Each finger takes the control it
- * lands on and keeps it while it moves: on the D-pad its direction follows
- * the finger (eight ways, from the pad's centre), on the face buttons it
- * slides from one to the next; L1, L2, R1, R2, Select and Start are held
- * while touched; the menu button, the hotkey button and the hotkey row act
- * when the finger lifts on them. The layout is in hundredths of the
- * window's short side, so it keeps its proportions on any screen; the art
- * is port/src/ui/touchpad.cpp's.
+ * The touch pad (touch.h; xg-mrj.3.8, xg-mrj.3.20). Each finger takes the
+ * control it lands on and keeps it while it moves: on the D-pad its
+ * direction follows the finger (eight ways, from the pad's centre), on the
+ * face buttons it slides from one to the next; L1, L2, R1, R2, Select and
+ * Start are held while touched; the menu button, the hotkey button and the
+ * hotkey row act when the finger lifts on them. The layout is in hundredths
+ * of the window's short side, so it keeps its proportions on any screen, and
+ * smaller where the screen is too narrow or too low for it; the art is
+ * port/src/ui/touchpad.cpp's.
+ *
+ * The layout with sticks (touch_pad_layout=sticks): a stick is pushed from
+ * its own centre, as far as the finger is from it (the cap stops at the
+ * stick's reach, the finger may go on). The left one presses the directions
+ * the D-pad would (the game reads a digital pad); the right one is the
+ * camera's (pad.c sampleCamera: the free camera and the first-person view of
+ * port/src/system/freecam.c) and shows only while one of those is allowed,
+ * with a button that holds the camera's way back to the game's view and one
+ * that enters and leaves the first-person view at a touch.
  *
  * While the pad is in use the touches' mouse events (SDL makes a mouse of
  * the first finger) are dropped, or a tap would also be a click to the
@@ -25,6 +35,8 @@
 
 /* port/src/system/pad.c and port/src/ui: weak, so tests link this file alone. */
 extern void padHotkey(int scancode, int mod) __attribute__((weak));
+extern int padCameraFeatures(void) __attribute__((weak)); /* 1 the free camera, 2 the first-person view allowed, 4 on */
+extern void padFirstPerson(void) __attribute__((weak));
 extern void uiRequestToggle(void) __attribute__((weak));
 extern int uiIsOpen(void) __attribute__((weak));
 extern unsigned hwVSyncCount(void) __attribute__((weak));
@@ -89,6 +101,18 @@ void touchSetMode(int mode) {
     settingsSet("touch_pad", mode == 1 ? "on" : mode == 0 ? "off" : "auto");
 }
 
+int touchLayout(void) {
+    settingsDescribe("touch_pad_layout", "touch_pad_layout: the touch pad's controls: buttons (the D-pad and the "
+                                         "buttons), or sticks (a left stick for the directions as well and, with "
+                                         "the free camera or the first-person view, a right stick for the camera)");
+    const char* s = settingsGet("touch_pad_layout");
+    return s != NULL && SDL_strcasecmp(s, "sticks") == 0;
+}
+
+void touchSetLayout(int layout) {
+    settingsSet("touch_pad_layout", layout ? "sticks" : "buttons");
+}
+
 int touchOpacityPercent(void) {
     int v = settingsInt("touch_pad_opacity", 50);
     return v < 10 ? 10 : v > 100 ? 100 : v;
@@ -132,6 +156,9 @@ static void add(TouchControl* out, int* n, int max, int kind, int hotkey, float 
     c->w = w;
     c->h = h;
     c->pressed = 0;
+    c->held = 0;
+    c->sx = c->sy = 0;
+    c->on = 0;
 }
 
 static unsigned short bitsOf(int kind) {
@@ -150,9 +177,9 @@ static unsigned short bitsOf(int kind) {
     }
 }
 
-/* The D-pad's directions for a point (dx, dy) from its centre, r its half size. */
-static int dpadDirections(float dx, float dy, float r) {
-    if (dx * dx + dy * dy < (0.18f * r) * (0.18f * r)) return 0;
+/* The directions for a point (dx, dy) from a centre, none within dead of it. */
+static int directions(float dx, float dy, float dead) {
+    if (dx * dx + dy * dy < dead * dead) return 0;
     int d = 0;
     float ax = fabsf(dx), ay = fabsf(dy);
     /* eight sectors: a diagonal within 22.5 degrees of 45 (tan 22.5 = 0.414) */
@@ -161,20 +188,70 @@ static int dpadDirections(float dx, float dy, float r) {
     return d;
 }
 
+#define DPAD_DEAD 0.18f  /* of the D-pad's half size */
+#define STICK_DEAD 0.32f /* of the left stick's reach: no direction nearer its centre */
+#define STICK_REACH 0.62f /* of a stick's radius: how far its cap goes */
+
 static unsigned short dpadBits(int d) {
     return (unsigned short)((d & 1 ? B_UP : 0) | (d & 2 ? B_RIGHT : 0) | (d & 4 ? B_DOWN : 0) | (d & 8 ? B_LEFT : 0));
 }
 
-static int buildLayout(TouchControl* out, int max, float w, float h) {
-    int n = 0;
+static int isFace(int kind) {
+    return kind >= TOUCH_CROSS && kind <= TOUCH_TRIANGLE;
+}
+
+static int isStick(int kind) {
+    return kind == TOUCH_STICK_LEFT || kind == TOUCH_STICK_RIGHT;
+}
+
+float touchStickTravel(const TouchControl* stick) {
+    return stick->w / 2 * STICK_REACH;
+}
+
+/* The layout's unit: a hundredth of the short side at the chosen size, less
+ * where the layout would not fit (across: the two sides' controls and
+ * Select and Start between them; down: the shoulders over the D-pad). */
+static float unitOf(float w, float h, int sticks) {
     float u = (w < h ? w : h) / 100.0f * touchSizePercent() / 100.0f;
-    float base = h - 27 * u;
-    add(out, &n, max, TOUCH_DPAD, 0, 24 * u, base, 34 * u, 34 * u);
-    float fx = w - 24 * u, d = 11.5f * u, size = 13 * u;
-    add(out, &n, max, TOUCH_CROSS, 0, fx, base + d, size, size);
-    add(out, &n, max, TOUCH_CIRCLE, 0, fx + d, base, size, size);
-    add(out, &n, max, TOUCH_SQUARE, 0, fx - d, base, size, size);
-    add(out, &n, max, TOUCH_TRIANGLE, 0, fx, base - d, size, size);
+    float across = sticks ? 162 : 122, down = sticks ? 84 : 68;
+    if (across * u > w) u = w / across;
+    if (down * u > h) u = h / down;
+    return u;
+}
+
+int touchFittedSizePercent(float w, float h) {
+    float full = (w < h ? w : h) / 100.0f;
+    return full > 0 ? (int)(unitOf(w, h, touchLayout()) / full * 100 + 0.5f) : touchSizePercent();
+}
+
+static int buildLayout(TouchControl* out, int max, float w, float h) {
+    int n = 0, sticks = touchLayout();
+    int camera = sticks && padCameraFeatures != NULL ? padCameraFeatures() : 0;
+    float u = unitOf(w, h, sticks);
+    if (!sticks) {
+        float base = h - 27 * u;
+        add(out, &n, max, TOUCH_DPAD, 0, 24 * u, base, 34 * u, 34 * u);
+        float fx = w - 24 * u, d = 11.5f * u, size = 13 * u;
+        add(out, &n, max, TOUCH_CROSS, 0, fx, base + d, size, size);
+        add(out, &n, max, TOUCH_CIRCLE, 0, fx + d, base, size, size);
+        add(out, &n, max, TOUCH_SQUARE, 0, fx - d, base, size, size);
+        add(out, &n, max, TOUCH_TRIANGLE, 0, fx, base - d, size, size);
+    } else {
+        /* as on a pad with sticks: the D-pad and the buttons higher, a stick inward of and below each */
+        float base = h - 42.5f * u, low = h - 19 * u, stick = 27 * u;
+        add(out, &n, max, TOUCH_DPAD, 0, 21 * u, base, 28 * u, 28 * u);
+        add(out, &n, max, TOUCH_STICK_LEFT, 0, 47 * u, low, stick, stick);
+        float fx = w - 21.5f * u, d = 10.5f * u, size = 12.5f * u;
+        add(out, &n, max, TOUCH_CROSS, 0, fx, base + d, size, size);
+        add(out, &n, max, TOUCH_CIRCLE, 0, fx + d, base, size, size);
+        add(out, &n, max, TOUCH_SQUARE, 0, fx - d, base, size, size);
+        add(out, &n, max, TOUCH_TRIANGLE, 0, fx, base - d, size, size);
+        if (camera & 3) {
+            add(out, &n, max, TOUCH_STICK_RIGHT, 0, w - 47 * u, low, stick, stick);
+            if (camera & 1) add(out, &n, max, TOUCH_RECENTRE, 0, w - 47 * u, h - 43 * u, 8.5f * u, 8.5f * u);
+            if (camera & 2) add(out, &n, max, TOUCH_VIEW, 0, w - 63 * u, h - 36 * u, 8.5f * u, 8.5f * u);
+        }
+    }
     add(out, &n, max, TOUCH_L2, 0, 13 * u, 7 * u, 20 * u, 8.5f * u);
     add(out, &n, max, TOUCH_L1, 0, 13 * u, 17.5f * u, 20 * u, 8.5f * u);
     add(out, &n, max, TOUCH_R2, 0, w - 13 * u, 7 * u, 20 * u, 8.5f * u);
@@ -184,37 +261,51 @@ static int buildLayout(TouchControl* out, int max, float w, float h) {
     add(out, &n, max, TOUCH_HOTKEYS, 0, w / 2 - 6.5f * u, 6 * u, 9 * u, 9 * u);
     add(out, &n, max, TOUCH_MENU, 0, w / 2 + 6.5f * u, 6 * u, 9 * u, 9 * u);
     if (rowOpen) {
-        float bw = 13 * u, gap = 1.5f * u, total = HOTKEYS * bw + (HOTKEYS - 1) * gap;
+        /* between the shoulders, narrower where the screen is */
+        float bw = 13 * u, gap = 1.5f * u, total = HOTKEYS * bw + (HOTKEYS - 1) * gap, room = w - 50 * u;
+        if (total > room && room > 0) {
+            bw *= room / total;
+            gap *= room / total;
+            total = room;
+        }
         for (int i = 0; i < HOTKEYS; i++)
             add(out, &n, max, TOUCH_HOTKEY, i, w / 2 - total / 2 + bw / 2 + i * (bw + gap), 17 * u, bw, 7.5f * u);
     }
+    for (int i = 0; i < n; i++)
+        if (out[i].kind == TOUCH_VIEW) out[i].on = (camera & 4) != 0;
     return n;
 }
 
 static int inside(const TouchControl* c, float x, float y, float margin) {
-    if (c->kind >= TOUCH_CROSS && c->kind <= TOUCH_TRIANGLE) {
+    if (isFace(c->kind)) {
         float r = c->w / 2 + margin, dx = x - c->x, dy = y - c->y;
         return dx * dx + dy * dy <= r * r;
     }
     return fabsf(x - c->x) <= c->w / 2 + margin && fabsf(y - c->y) <= c->h / 2 + margin;
 }
 
-/* The control at (x, y): the face buttons by the nearest, the others by their area. */
+/* The control at (x, y): a stick by its circle, ahead of the others (the
+ * D-pad's margin reaches under one); the face buttons by the nearest, the
+ * others by their area and a margin of their size. */
 static int hit(const TouchControl* cs, int n, float x, float y, int faceOnly) {
-    float u = (winW < winH ? winW : winH) / 100.0f;
     int best = -1;
     float bestDist = 0;
+    for (int i = 0; i < n && !faceOnly; i++) {
+        const TouchControl* c = &cs[i];
+        float dx = x - c->x, dy = y - c->y, r = c->w / 2 * 1.12f;
+        if (isStick(c->kind) && dx * dx + dy * dy <= r * r) return i;
+    }
     for (int i = 0; i < n; i++) {
         const TouchControl* c = &cs[i];
-        int face = c->kind >= TOUCH_CROSS && c->kind <= TOUCH_TRIANGLE;
-        if (faceOnly && !face) continue;
+        int face = isFace(c->kind);
+        if ((faceOnly && !face) || isStick(c->kind)) continue;
         if (face) {
             float dx = x - c->x, dy = y - c->y, dist = dx * dx + dy * dy, r = c->w * 0.75f;
             if (dist <= r * r && (best < 0 || dist < bestDist)) {
                 best = i;
                 bestDist = dist;
             }
-        } else if (best < 0 && inside(c, x, y, c->kind == TOUCH_DPAD ? 6 * u : 1.5f * u)) {
+        } else if (best < 0 && inside(c, x, y, (c->kind == TOUCH_DPAD ? 0.18f : 0.16f) * (c->w < c->h ? c->w : c->h))) {
             best = i;
         }
     }
@@ -229,8 +320,22 @@ int touchControls(TouchControl* out, int max, float w, float h) {
         for (int i = 0; i < n; i++) {
             TouchControl* c = &out[i];
             if (c->kind != fingers[f].kind || c->hotkey != fingers[f].hotkey) continue;
+            float dx = fingers[f].x * sx - c->x, dy = fingers[f].y * sy - c->y;
             if (c->kind == TOUCH_DPAD) {
-                c->pressed |= dpadDirections(fingers[f].x * sx - c->x, fingers[f].y * sy - c->y, c->w / 2);
+                c->pressed |= directions(dx, dy, DPAD_DEAD * c->w / 2);
+            } else if (isStick(c->kind)) {
+                float reach = touchStickTravel(c), len;
+                dx /= reach;
+                dy /= reach;
+                len = sqrtf(dx * dx + dy * dy);
+                if (len > 1) {
+                    dx /= len;
+                    dy /= len;
+                }
+                c->sx = dx;
+                c->sy = dy;
+                c->held = 1;
+                if (c->kind == TOUCH_STICK_LEFT) c->pressed = directions(dx, dy, STICK_DEAD);
             } else {
                 c->pressed = 1;
             }
@@ -271,6 +376,7 @@ static void fingerDown(SDL_FingerID id, float x, float y) {
     fingers[f].hotkey = i >= 0 ? cs[i].hotkey : 0;
     fingers[f].x = x;
     fingers[f].y = y;
+    if (i >= 0 && cs[i].kind == TOUCH_VIEW && padFirstPerson != NULL) padFirstPerson(); /* at the touch, as a key */
 }
 
 static void fingerMove(SDL_FingerID id, float x, float y) {
@@ -279,7 +385,7 @@ static void fingerMove(SDL_FingerID id, float x, float y) {
         fingers[f].x = x;
         fingers[f].y = y;
         int k = fingers[f].kind;
-        if (k >= TOUCH_CROSS && k <= TOUCH_TRIANGLE) {
+        if (isFace(k)) {
             /* sliding over the face buttons: the one under the finger now */
             TouchControl cs[MAX_CONTROLS];
             int n = buildLayout(cs, MAX_CONTROLS, winW, winH);
@@ -427,7 +533,27 @@ unsigned short touchVBlank(void) {
     int n = touchControls(cs, MAX_CONTROLS, winW, winH);
     for (int i = 0; i < n; i++) {
         if (!cs[i].pressed) continue;
-        bits |= cs[i].kind == TOUCH_DPAD ? dpadBits(cs[i].pressed) : bitsOf(cs[i].kind);
+        bits |= cs[i].kind == TOUCH_DPAD || cs[i].kind == TOUCH_STICK_LEFT ? dpadBits(cs[i].pressed) : bitsOf(cs[i].kind);
     }
     return bits;
+}
+
+int touchCamera(float* x, float* y, int* recentre) {
+    *x = *y = 0;
+    *recentre = 0;
+    int any = 0;
+    for (int f = 0; f < FINGERS; f++)
+        any |= fingers[f].used && (fingers[f].kind == TOUCH_STICK_RIGHT || fingers[f].kind == TOUCH_RECENTRE);
+    if (!any) return 0;
+    TouchControl cs[MAX_CONTROLS];
+    int n = touchControls(cs, MAX_CONTROLS, winW, winH);
+    for (int i = 0; i < n; i++) {
+        if (cs[i].kind == TOUCH_STICK_RIGHT && cs[i].held) {
+            *x = cs[i].sx;
+            *y = cs[i].sy;
+        } else if (cs[i].kind == TOUCH_RECENTRE && cs[i].pressed) {
+            *recentre = 1;
+        }
+    }
+    return *x != 0 || *y != 0 || *recentre;
 }

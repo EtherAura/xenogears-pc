@@ -270,15 +270,17 @@ int interpolationRecording(int wide) {
     InterpFrame* f = &ip.frames[ip.building];
     return f->cleared && viewport(f) && f->wide == wide;
 }
-/* scene.c: the registered scene ended at this point of the snapshot, blurred
- * by `blur` (NULL: not). A picture between replays the draws up to here with
- * their depth, blurs, and replays the rest (vk.c interpolationRender). */
-void interpolationSceneEnd(const DofParams* blur) {
+/* scene.c: the registered scene ended at this point of the snapshot, lit and
+ * blurred by `effects` (NULL: neither). A picture between replays the draws
+ * up to here with their depth, does the same, and replays the rest (vk.c
+ * interpolationRender). */
+void interpolationSceneEnd(const SceneParams* effects) {
     if (ip.building < 0) return;
     InterpFrame* f = &ip.frames[ip.building];
     f->sceneEnd = f->vertexCount;
-    f->sceneBlur = blur != NULL && (blur->radius > 0 || blur->debug);
-    if (blur != NULL) f->dof = *blur;
+    f->sceneBlur = effects != NULL && (effects->dof.radius > 0 || effects->dof.debug);
+    f->sceneLight = effects != NULL && effects->light.on;
+    if (effects != NULL) f->fx = *effects;
 }
 void pcInterpolationFrameEnd(void) {
     if (ip.building < 0) return;

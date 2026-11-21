@@ -2167,13 +2167,49 @@ static int plainHiReplay(void) {
     return gp.replayed && !gp.wide && gvkHiScale() != 0;
 }
 
-/* Whether a primitive in this box is drawn on the CPU (vram.c: the tiles the
- * CPU reads after the frame drew them, and the whole draw area once the
- * frame's draws were read back several times). */
-static int cpuOwned(VRect box) {
-    VRect area = {gp.clipX0, gp.clipY0, gp.clipX1, gp.clipY1};
-    if (clipToVram(&area)) vramOwnedArea(area);
-    return vramCpuOwned(box);
+/* The VRAM a triangle's cache walk reads on the CPU (cacheRow, cacheTexel):
+ * the cache lines, four words each, of the texels its rows sample, and its
+ * CLUT. `reads`, the vertices' range and a texel around it, is what the
+ * device may sample (batchAdd). For the walk that texel is a read it never
+ * makes, and on a page at VRAM's right edge it is one in column 0, a frame
+ * buffer's: a cell ending on the page's last word then read the frame's own
+ * draws back, each time a queue wait, and made their tiles the CPU's
+ * (vram.c). A Gear battle's opening transition did it 38 times in one
+ * ordering table (xg-mrj.3.10.1). XG_CACHE_WALK_READS=0: `reads`, as before. */
+static void cacheWalkReads(const SelfDraw* s, const ReadSet* reads, ReadSet* walk) {
+    static int exact = -1;
+    if (exact < 0) {
+        const char* e = getenv("XG_CACHE_WALK_READS");
+        exact = !(e && *e == '0');
+    }
+    *walk = *reads;
+    if (!exact || !s->spans || reads->n == 0) return;
+    /* A row's texels lie between its first and last pixel's. Unwrapped: the
+     * walk keeps eight bits of each (cacheRow), all of the page once a row
+     * leaves 0..255. */
+    int64_t u0 = INT64_MAX, u1 = INT64_MIN, v0 = INT64_MAX, v1 = INT64_MIN;
+    const int32_t* sp = s->spans;
+    for (int r = 0; r < sp[1]; r++) {
+        const int32_t* row = sp + SPAN_HEADER + r * SPAN_ROW;
+        if (row[0] > row[1]) continue;
+        int64_t k = row[1] - row[0];
+        int64_t ua = (int64_t)row[2] >> 16, ub = (row[2] + k * sp[2]) >> 16;
+        int64_t va = (int64_t)row[3] >> 16, vb = (row[3] + k * sp[3]) >> 16;
+        u0 = ua < u0 ? ua : u0; u0 = ub < u0 ? ub : u0;
+        u1 = ua > u1 ? ua : u1; u1 = ub > u1 ? ub : u1;
+        v0 = va < v0 ? va : v0; v0 = vb < v0 ? vb : v0;
+        v1 = va > v1 ? va : v1; v1 = vb > v1 ? vb : v1;
+    }
+    if (u0 > u1) return; /* no row */
+    /* A window replaces the masked bits (textureReads): the whole axis then. */
+    if ((gp.texWindow & 0x1F) != 0 || u0 < 0 || u1 > 255) { u0 = 0; u1 = 255; }
+    if ((gp.texWindow >> 5 & 0x1F) != 0 || v0 < 0 || v1 > 255) { v0 = 0; v1 = 255; }
+    unsigned depth = (s->tpage >> 7) & 3, clut = s->tex >> 16;
+    int shift = depth == 0 ? 2 : depth == 1 ? 1 : 0;
+    int w0 = ((int)u0 >> shift) & ~3, w1 = ((int)u1 >> shift) | 3;
+    walk->n = 0;
+    addRead(walk, (int)(s->tpage & 0xF) * 64 + w0, (int)((s->tpage >> 4) & 1) * 256 + (int)v0, w1 - w0 + 1, (int)(v1 - v0) + 1);
+    if (depth < 2) addRead(walk, (int)(clut & 0x3F) * 16, (int)(clut >> 6) & 0x1FF, depth == 0 ? 16 : 256, 1);
 }
 
 /* 0 ordinary GPU path, 1 cached spans, 2 resolved draw, 3 native wave drawn. */
@@ -2187,9 +2223,11 @@ static int cacheRaster(const SelfDraw* s, const ReadSet* reads, int* ints) {
      * samples their framebuffer. Enhanced draws retain the original path.
      * The same for tiles the CPU reads after the frame drew them
      * (vramCpuOwned). */
-    int cpuWave = !feedback && ((s->tri && interpolationWavePacket()) || interpolationWaveFrame() || (!gp.wide && cpuOwned(s->box)));
+    int cpuWave = !feedback && ((s->tri && interpolationWavePacket()) || interpolationWaveFrame() || (!gp.wide && vramCpuOwned(s->box)));
     if (feedback) interpolationReject("texture-feedback");
-    for (int i = 0; i < reads->n; i++) vramSyncRect(reads->r[i]);
+    ReadSet walk;
+    cacheWalkReads(s, reads, &walk);
+    for (int i = 0; i < walk.n; i++) vramSyncRect(walk.r[i]);
     if (feedback || cpuWave) {
         vramKeepWrite(s->box); /* a picture between's keep (vram.c): shaded on the CPU, into its copy */
         vramSyncRect(s->box);
@@ -2500,7 +2538,7 @@ static void triangle(const PVertex* a, const PVertex* b, const PVertex* c, uint3
      * including the integer walker's clamp near the diagonal at >1x. */
     recordCapturedTriangle(a,b,c,mode,tex,uvMin,uvMax,perimeter,hi);
     int cached = 0;
-    if (!(mode & DRAW_TEXTURED) && !gp.wide && (interpolationWaveFrame() || cpuOwned(box))) {
+    if (!(mode & DRAW_TEXTURED) && !gp.wide && (interpolationWaveFrame() || vramCpuOwned(box))) {
         vramKeepWrite(box); /* a picture between's keep (vram.c): shaded on the CPU, into its copy */
         vramSyncRect(box);
         const PVertex* tri[3] = {a, b, c};
@@ -3212,7 +3250,7 @@ static void rectangle(int x, int y, int w, int h, int u0, int v0, const PVertex*
     probe(mode & DRAW_FILL ? "fill" : "rectangle", x, y, x + w - 1, y + h - 1);
     VRect ownedBox = wr;
     if (!gp.wide && !(mode & (DRAW_TEXTURED | DRAW_FILL)) &&
-        (interpolationWaveFrame() || (clipToVram(&ownedBox) && cpuOwned(ownedBox)))) {
+        (interpolationWaveFrame() || (clipToVram(&ownedBox) && vramCpuOwned(ownedBox)))) {
         VRect box=wr;
         if (box.x0<gp.clipX0) box.x0=gp.clipX0;
         if (box.y0<gp.clipY0) box.y0=gp.clipY0;

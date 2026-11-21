@@ -234,6 +234,14 @@ void sceneSetDof(int level);
 int sceneDofFocus(void);         /* 0 narrow, 1 normal (default), 2 wide */
 void sceneSetDofFocus(int range);
 const char* sceneDofStatus(void);
+/* Scene lighting in fields (the Enhanced engine; settings lighting and glow,
+ * each off|subtle|medium|strong). sceneLightingStatus: why neither is
+ * showing, or NULL. */
+int sceneLighting(void);         /* 0 off (default), 1 subtle, 2 medium, 3 strong */
+void sceneSetLighting(int level);
+int sceneGlow(void);
+void sceneSetGlow(int level);
+const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class
  * (PC_TEX_* in pc_wide.h). Nearest is the default for every class. */
@@ -311,6 +319,11 @@ const char* texturePackVersion(void);
  * disc draws on both, and what one release has alone stays native. 0 when neither folder exists. Cel HUD
  * sets (by VRAM position) and movies (by stream) keep their own disc's folder. */
 int texturePackVersionDir(const char* root, char* out, size_t size);
+/* XG_PACK_MISSES=<file> (pack coverage audits, xg-g0ra.1): one line for each picture a library was asked
+ * for and lacks, at its first miss (again only after a reload or a cache eviction). texturePackAuditing:
+ * that file is open; texturePackAudit: a line in it (printf format, no newline). */
+int texturePackAuditing(void);
+void texturePackAudit(const char* fmt, ...);
 void texturePackSetRoot(const char* root);
 void texturePackReload(void);
 void texturePackStats(TexturePackStats* out);

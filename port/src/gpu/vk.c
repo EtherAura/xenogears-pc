@@ -267,6 +267,9 @@ static const uint32_t hiresWideCoarseDepthInterlockFragSpv[] =
 static const uint32_t dofCompSpv[] =
 #include "dof.comp.spv.inc"
     ;
+static const uint32_t lightCompSpv[] =
+#include "light.comp.spv.inc"
+    ;
 
 /* ---- function pointers ---------------------------------------------------- */
 
@@ -391,7 +394,11 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 #define MAX_SWAPCHAIN_IMAGES 8
 
 /* XG_GPU_TIMING=1: GPU time per kind of pass, from timestamp queries. */
-enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_KINDS };
+/* light.comp's working images: seven on the PS1's pixel grid, six on a quarter of it. */
+#define SCENE_LIGHT_GRID 7
+#define SCENE_LIGHT_IMAGES 13
+#define SCENE_LIGHT_FILTERED 5 /* of those, read filtered too */
+enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_LIGHT, GT_KINDS };
 #define GT_QUERIES 4096
 
 typedef struct {
@@ -461,6 +468,9 @@ typedef struct {
      * target (SCENE_*), and the views last written into them. */
     VkDescriptorSet sceneDepthSet[3], sceneDofSet[3];
     VkImageView sceneViews[3][7];
+    /* The scene's lighting: the same for light.comp's set. */
+    VkDescriptorSet sceneLightSet[3];
+    VkImageView sceneLightViews[3][2 + SCENE_LIGHT_IMAGES];
 } FrameCtx;
 
 static struct {
@@ -563,6 +573,13 @@ static struct {
         VkPipelineLayout dofLayout;
         VkDescriptorSetLayout dofSetLayout;
         VkDescriptorPool pool;
+        /* The lighting (shaders/light.comp): its pipeline with the rest, its
+         * working images at the first scene that is lit. */
+        VkPipeline light;
+        VkPipelineLayout lightLayout;
+        VkDescriptorSetLayout lightSetLayout;
+        VkImage lightWork[SCENE_LIGHT_IMAGES]; VkDeviceMemory lightMemory[SCENE_LIGHT_IMAGES]; VkImageView lightView[SCENE_LIGHT_IMAGES];
+        int lightW, lightH;        /* the grid images' size, PS1 pixels */
     } scene;
     uint32_t hiCount, hiWideCount;
     /* finishBatch's independence tests: pending vertices already examined
@@ -947,7 +964,7 @@ static void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
  * uploads (copy) and the present pass (present). At exit, the run's mean and
  * worst vblank. XG_GPU_TIMING=summary: only that. */
 
-static const char* const gtNames[GT_KINDS] = {"draw", "wide", "hires", "hiwide", "hiutil", "copy", "present", "dof"};
+static const char* const gtNames[GT_KINDS] = {"draw", "wide", "hires", "hiwide", "hiutil", "copy", "present", "dof", "light"};
 
 static struct {
     int on;       /* 1: a line per vblank; 2: the summary only */
@@ -3957,6 +3974,11 @@ static int sceneWorkImages(int w, int h);
 static void sceneSets(FrameCtx* f, int t);
 static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
                             int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const DofParams* p);
+static int sceneLightImages(int w, int h);
+static void sceneLightSets(FrameCtx* f, int t);
+static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                             int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
+                             float centerX, float centerY);
 /* A picture between's scene draws (interpolationRender): the depth builds'
  * set 1, the replay canvas's depth image; VK_NULL_HANDLE otherwise. */
 static VkDescriptorSet interpolationDepthSet;
@@ -4571,20 +4593,35 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
          * hand the frame over, which must not happen once the replay is
          * being recorded. */
         int blurAt = -1;
-        DofParams blur = f->dof;
-        if (f->sceneBlur) {
+        DofParams blur = f->fx.dof;
+        LightParams lit = f->fx.light;
+        if (f->sceneBlur || f->sceneLight) {
             int plain = !f->capture && !f->frozen && !f->opCount && vk.hiN != 0 && !vk.orderedEnabled &&
                         f->sceneEnd <= (uint32_t)count;
             for (int i = 0; plain && i < count; i += 3)
                 if (vk.interpolationVertices[i].sample[3] & (INTERP_SAMPLE_CAPTURE | INTERP_SAMPLE_EVOLVING | INTERP_SAMPLE_NATIVE_CACHE)) plain = 0;
             if (!plain || !sceneMake() ||
                 !sceneDepthImage(SCENE_REPLAY, vk.interpolationCanvasW * vk.interpolationN, vk.interpolationCanvasH * vk.interpolationN) ||
-                !sceneWorkImages(f->viewW, f->viewH)) {
-                interpolationReport("native", "depth-of-field-replay", vblank, alpha); return 0;
+                (f->sceneBlur && !sceneWorkImages(f->viewW, f->viewH)) ||
+                (f->sceneLight && !sceneLightImages(f->viewW, f->viewH))) {
+                interpolationReport("native", f->sceneBlur ? "depth-of-field-replay" : "scene-lighting-replay", vblank, alpha); return 0;
             }
             blurAt = (int)f->sceneEnd;
+            /* The focus, the view and the strengths move with the picture. */
             const InterpFrame* next = interpolationFrame(after);
-            if (next->sceneBlur) blur.focus += (float)(alpha * (next->dof.focus - blur.focus));
+            float a = (float)alpha;
+            if (f->sceneBlur && next->sceneBlur) blur.focus += a * (next->fx.dof.focus - blur.focus);
+            if (f->sceneLight && next->sceneLight) {
+                const LightParams* to = &next->fx.light;
+                float up[3], length = 0;
+                for (int k = 0; k < 3; k++) { up[k] = lit.up[k] + a * (to->up[k] - lit.up[k]); length += up[k] * up[k]; }
+                length = sqrtf(length);
+                if (length > 1.0e-4f) for (int k = 0; k < 3; k++) lit.up[k] = up[k] / length;
+                lit.focus += a * (to->focus - lit.focus);
+                lit.screenZ += a * (to->screenZ - lit.screenZ);
+                lit.top += a * (to->top - lit.top); lit.shade += a * (to->shade - lit.shade);
+                lit.bounce += a * (to->bounce - lit.bounce); lit.glow += a * (to->glow - lit.glow);
+            }
         }
         if (!vk.interpolationSpans) vk.interpolationSpans = malloc(SPAN_BYTES);
         if (!vk.interpolationSpans) return 0;
@@ -4655,6 +4692,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
             VkClearColorValue nothing = {.uint32 = {0xFFFFFFFFu, 0, 0, 0}}; /* dof.comp DEPTH_FAR */
             vkCmdClearColorImage(cmd, vk.scene.depth[SCENE_REPLAY], VK_IMAGE_LAYOUT_GENERAL, &nothing, 1, &colorRange);
             sceneSets(ctx, SCENE_REPLAY);
+            if (f->sceneLight) sceneLightSets(ctx, SCENE_REPLAY);
         }
         interpolationBarrier(cmd);
         vkCmdBindVertexBuffers(cmd,0,1,&ctx->vertices.buffer,&offset);
@@ -4751,7 +4789,12 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 interpolationDepthSet = VK_NULL_HANDLE;
                 interpolationBarrier(cmd); first = end;
                 if (inScene && first >= (uint32_t)blurAt) {
-                    sceneBlurRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &blur);
+                    /* The canvas is the frame's view: the game's frame starts at its origin inside it. */
+                    if (f->sceneLight)
+                        sceneLightRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &lit,
+                                         lit.centerX + (float)f->originX, lit.centerY + (float)f->originY);
+                    if (f->sceneBlur)
+                        sceneBlurRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &blur);
                     interpolationBarrier(cmd);
                     vkCmdBindVertexBuffers(cmd,0,1,&ctx->vertices.buffer,&offset);
                 }
@@ -4788,7 +4831,10 @@ static void idleDevice(void) {
         vk.frames[i].submitted = 0;
         /* Images may be replaced after this wait. A driver can reuse the
          * numeric value of a destroyed image view. */
-        if (vk.scene.state > 0) memset(vk.frames[i].sceneViews, 0, sizeof(vk.frames[i].sceneViews));
+        if (vk.scene.state > 0) {
+            memset(vk.frames[i].sceneViews, 0, sizeof(vk.frames[i].sceneViews));
+            memset(vk.frames[i].sceneLightViews, 0, sizeof(vk.frames[i].sceneLightViews));
+        }
         if (vk.hiSetsStale & (1u << i)) writeHiSet(&vk.frames[i]);
     }
     vk.hiSetsStale = 0;
@@ -5341,6 +5387,19 @@ typedef struct {
     float focus, band, gain, radius;
 } DofConstants;
 
+/* light.comp's last pass, the composite at the copy's resolution. */
+#define LIGHT_COMPOSITE 14
+/* light.comp's push constants. */
+typedef struct {
+    int32_t pass, n, taps, flags;
+    int32_t originX, originY, sizeW, sizeH;
+    int32_t workW, workH;
+    int32_t layerX, layerY;
+    float up[3], screenZ;
+    float centerX, centerY, focus, unused;
+    float top, shade, bounce, glow;
+} LightConstants;
+
 static void sceneDestroy(void) {
     if (vk.device == VK_NULL_HANDLE) return;
     for (int w = 0; w < 2; w++) for (int c = 0; c < 2; c++) for (int u = 0; u < 2; u++) {
@@ -5349,8 +5408,14 @@ static void sceneDestroy(void) {
     }
     if (vk.scene.dof) vkDestroyPipeline(vk.device, vk.scene.dof, NULL);
     if (vk.scene.dofLayout) vkDestroyPipelineLayout(vk.device, vk.scene.dofLayout, NULL);
+    if (vk.scene.light) vkDestroyPipeline(vk.device, vk.scene.light, NULL);
+    if (vk.scene.lightLayout) vkDestroyPipelineLayout(vk.device, vk.scene.lightLayout, NULL);
     if (vk.scene.pool) vkDestroyDescriptorPool(vk.device, vk.scene.pool, NULL);
     if (vk.scene.dofSetLayout) vkDestroyDescriptorSetLayout(vk.device, vk.scene.dofSetLayout, NULL);
+    if (vk.scene.lightSetLayout) vkDestroyDescriptorSetLayout(vk.device, vk.scene.lightSetLayout, NULL);
+    vk.scene.light = VK_NULL_HANDLE; vk.scene.lightLayout = VK_NULL_HANDLE; vk.scene.lightSetLayout = VK_NULL_HANDLE;
+    for (int i = 0; i < SCENE_LIGHT_IMAGES; i++) destroyImage(&vk.scene.lightWork[i], &vk.scene.lightMemory[i], &vk.scene.lightView[i]);
+    vk.scene.lightW = vk.scene.lightH = 0;
     if (vk.scene.sampler) vkDestroySampler(vk.device, vk.scene.sampler, NULL);
     vk.scene.sampler = VK_NULL_HANDLE;
     vk.scene.dof = VK_NULL_HANDLE; vk.scene.dofLayout = VK_NULL_HANDLE;
@@ -5361,7 +5426,10 @@ static void sceneDestroy(void) {
     }
     for (int i = 0; i < 5; i++) destroyImage(&vk.scene.work[i], &vk.scene.workMemory[i], &vk.scene.workView[i]);
     vk.scene.workW = vk.scene.workH = 0;
-    for (int k = 0; k < FRAMES; k++) memset(vk.frames[k].sceneViews, 0, sizeof(vk.frames[k].sceneViews));
+    for (int k = 0; k < FRAMES; k++) {
+        memset(vk.frames[k].sceneViews, 0, sizeof(vk.frames[k].sceneViews));
+        memset(vk.frames[k].sceneLightViews, 0, sizeof(vk.frames[k].sceneLightViews));
+    }
     vk.scene.active = 0;
 }
 
@@ -5381,7 +5449,7 @@ static int sceneMake(void) {
     VkFormatFeatureFlags needs = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
                                  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
     if (!compute || (fp.optimalTilingFeatures & needs) != needs || envFlag("XG_SCENE_TEST_FAIL")) {
-        gpuLog("scene: depth of field needs a compute queue and 16-bit float storage images: not available");
+        gpuLog("scene: the depth of field and the lighting need a compute queue and 16-bit float storage images: not available");
         return 0;
     }
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -5409,14 +5477,35 @@ static int sceneMake(void) {
     VkResult result = vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &vk.scene.dof);
     vkDestroyShaderModule(vk.device, module, NULL);
     if (result != VK_SUCCESS) goto fail;
-    VkDescriptorPoolSize size[2] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES * SCENE_TARGETS * 8},
-                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES * SCENE_TARGETS * 2}};
+    /* The lighting (light.comp): the colour, the depth, its working images,
+     * and five of those again, filtered. */
+    VkDescriptorSetLayoutBinding lb[2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED];
+    for (uint32_t i = 0; i < 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED; i++)
+        lb[i] = (VkDescriptorSetLayoutBinding){i, i < 2 + SCENE_LIGHT_IMAGES ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+                                                                              : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                               1, VK_SHADER_STAGE_COMPUTE_BIT, NULL};
+    li.bindingCount = 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED; li.pBindings = lb;
+    if (vkCreateDescriptorSetLayout(vk.device, &li, NULL, &vk.scene.lightSetLayout) != VK_SUCCESS) goto fail;
+    range.size = sizeof(LightConstants);
+    pi.pSetLayouts = &vk.scene.lightSetLayout;
+    if (vkCreatePipelineLayout(vk.device, &pi, NULL, &vk.scene.lightLayout) != VK_SUCCESS) goto fail;
+    module = shaderModule(lightCompSpv, sizeof(lightCompSpv));
+    ci.stage.module = module;
+    ci.layout = vk.scene.lightLayout;
+    result = vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &vk.scene.light);
+    vkDestroyShaderModule(vk.device, module, NULL);
+    if (result != VK_SUCCESS) goto fail;
+    VkDescriptorPoolSize size[2] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES * SCENE_TARGETS * (8 + 2 + SCENE_LIGHT_IMAGES)},
+                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES * SCENE_TARGETS * (2 + SCENE_LIGHT_FILTERED)}};
     VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    dpi.maxSets = FRAMES * SCENE_TARGETS * 2; dpi.poolSizeCount = 2; dpi.pPoolSizes = size;
+    dpi.maxSets = FRAMES * SCENE_TARGETS * 3; dpi.poolSizeCount = 2; dpi.pPoolSizes = size;
     if (vkCreateDescriptorPool(vk.device, &dpi, NULL, &vk.scene.pool) != VK_SUCCESS) goto fail;
     for (int k = 0; k < FRAMES; k++) for (int t = 0; t < SCENE_TARGETS; t++) {
         VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         ai.descriptorPool = vk.scene.pool; ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &vk.scene.lightSetLayout;
+        if (vkAllocateDescriptorSets(vk.device, &ai, &vk.frames[k].sceneLightSet[t]) != VK_SUCCESS) goto fail;
+        memset(vk.frames[k].sceneLightViews[t], 0, sizeof(vk.frames[k].sceneLightViews[t]));
         ai.pSetLayouts = &vk.scene.dofSetLayout;
         if (vkAllocateDescriptorSets(vk.device, &ai, &vk.frames[k].sceneDofSet[t]) != VK_SUCCESS) goto fail;
         ai.pSetLayouts = &vk.movieSetLayout; /* hiLayout's set 1: one storage image */
@@ -5441,12 +5530,12 @@ static int sceneMake(void) {
     for (int w = 0; w < 2; w++) for (int c = 0; c < 2; c++) for (int u = 0; u < 2; u++)
         if (!vk.scene.draw[w][c][u]) goto fail;
     vk.scene.state = 1;
-    gpuLog("scene: depth image and depth of field ready");
+    gpuLog("scene: depth image, depth of field and lighting ready");
     return 1;
 fail:
     hiPipelineDepth = 0;
     sceneDestroy();
-    gpuLog("scene: depth of field could not be set up on this device");
+    gpuLog("scene: the depth of field and the lighting could not be set up on this device");
     return 0;
 }
 
@@ -5560,6 +5649,92 @@ static void sceneSets(FrameCtx* f, int t) {
     memcpy(f->sceneViews[t], want, sizeof(want));
 }
 
+/* The lighting's working images (16-bit float): seven of at least w x h PS1
+ * pixels and six of a quarter of that each way. On the device, else in any
+ * memory the device can use, as the blur's. */
+static int sceneLightImages(int w, int h) {
+    if (vk.scene.lightWork[0] != VK_NULL_HANDLE && vk.scene.lightW >= w && vk.scene.lightH >= h) return 1;
+    w = w > vk.scene.lightW ? w : vk.scene.lightW;
+    h = h > vk.scene.lightH ? h : vk.scene.lightH;
+    idleDevice();
+    for (int i = 0; i < SCENE_LIGHT_IMAGES; i++) destroyImage(&vk.scene.lightWork[i], &vk.scene.lightMemory[i], &vk.scene.lightView[i]);
+    vk.scene.lightW = vk.scene.lightH = 0;
+    for (int i = 0; i < SCENE_LIGHT_IMAGES; i++) {
+        int iw = i < SCENE_LIGHT_GRID ? w : (w + 3) / 4, ih = i < SCENE_LIGHT_GRID ? h : (h + 3) / 4;
+        VkImageCreateInfo ii = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ii.imageType = VK_IMAGE_TYPE_2D; ii.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        ii.extent = (VkExtent3D){(uint32_t)iw, (uint32_t)ih, 1};
+        ii.mipLevels = 1; ii.arrayLayers = 1; ii.samples = VK_SAMPLE_COUNT_1_BIT;
+        ii.tiling = VK_IMAGE_TILING_OPTIMAL; ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE; ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        int ok = (uint32_t)iw <= vk.limits.maxImageDimension2D && (uint32_t)ih <= vk.limits.maxImageDimension2D &&
+                 !envFlag("XG_SCENE_TEST_FAIL_LIGHT") &&
+                 vkCreateImage(vk.device, &ii, NULL, &vk.scene.lightWork[i]) == VK_SUCCESS;
+        if (ok) {
+            VkMemoryRequirements req;
+            vkGetImageMemoryRequirements(vk.device, vk.scene.lightWork[i], &req);
+            VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+            ai.allocationSize = req.size;
+            ai.memoryTypeIndex = findMemory(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 0);
+            ok = vkAllocateMemory(vk.device, &ai, NULL, &vk.scene.lightMemory[i]) == VK_SUCCESS;
+            for (uint32_t m = 0; !ok && m < vk.memProps.memoryTypeCount; m++) {
+                if (!(req.memoryTypeBits & (1u << m)) ||
+                    (vk.memProps.memoryTypes[m].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) continue;
+                ai.memoryTypeIndex = m;
+                ok = vkAllocateMemory(vk.device, &ai, NULL, &vk.scene.lightMemory[i]) == VK_SUCCESS;
+            }
+            if (!ok) vk.scene.lightMemory[i] = VK_NULL_HANDLE;
+            if (ok) ok = vkBindImageMemory(vk.device, vk.scene.lightWork[i], vk.scene.lightMemory[i], 0) == VK_SUCCESS;
+            if (ok) {
+                VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+                vi.image = vk.scene.lightWork[i]; vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                vi.format = VK_FORMAT_R16G16B16A16_SFLOAT; vi.subresourceRange = colorRange;
+                ok = vkCreateImageView(vk.device, &vi, NULL, &vk.scene.lightView[i]) == VK_SUCCESS;
+                if (!ok) vk.scene.lightView[i] = VK_NULL_HANDLE;
+            }
+        } else {
+            vk.scene.lightWork[i] = VK_NULL_HANDLE;
+        }
+        if (!ok) {
+            for (int k = 0; k <= i; k++) destroyImage(&vk.scene.lightWork[k], &vk.scene.lightMemory[k], &vk.scene.lightView[k]);
+            gpuWarnOnce("scenelight", "scene: no room for the %dx%d lighting images: no scene lighting", w, h);
+            return 0;
+        }
+    }
+    for (int i = 0; i < SCENE_LIGHT_IMAGES; i++) toGeneral(recording(), vk.scene.lightWork[i]);
+    vk.scene.lightW = w; vk.scene.lightH = h;
+    vk.needBarrier = 1;
+    return 1;
+}
+
+/* Context f's lighting set for target t names the images as they are now
+ * (as sceneSets: a view changes only after the device went idle). */
+static void sceneLightSets(FrameCtx* f, int t) {
+    VkImageView want[2 + SCENE_LIGHT_IMAGES];
+    want[0] = t == SCENE_NARROW ? vk.hiVramView : t == SCENE_WIDE ? vk.hiWideView : vk.interpolationView[INTERP_FRAMES];
+    want[1] = vk.scene.depthView[t];
+    for (int i = 0; i < SCENE_LIGHT_IMAGES; i++) want[2 + i] = vk.scene.lightView[i];
+    for (int i = 0; i < 2 + SCENE_LIGHT_IMAGES; i++) if (want[i] == VK_NULL_HANDLE) return; /* nothing to light with yet */
+    if (memcmp(want, f->sceneLightViews[t], sizeof(want)) == 0) return;
+    VkDescriptorImageInfo ii[2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED];
+    VkWriteDescriptorSet w[2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED];
+    /* light.comp's filtered reads, by its bindings: the surroundings'
+     * brightness (9), the bounce (12), the glow (3), the top light and shade
+     * (8) and the glow's wide spreads (14). */
+    const int filtered[SCENE_LIGHT_FILTERED] = {9, 12, 3, 8, 14};
+    for (int i = 0; i < 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED; i++) {
+        int sampled = i >= 2 + SCENE_LIGHT_IMAGES;
+        ii[i] = (VkDescriptorImageInfo){sampled ? vk.scene.sampler : VK_NULL_HANDLE,
+                                        want[sampled ? filtered[i - 2 - SCENE_LIGHT_IMAGES] : i], VK_IMAGE_LAYOUT_GENERAL};
+        w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        w[i].dstSet = f->sceneLightSet[t]; w[i].dstBinding = (uint32_t)i; w[i].descriptorCount = 1;
+        w[i].descriptorType = sampled ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        w[i].pImageInfo = &ii[i];
+    }
+    vkUpdateDescriptorSets(vk.device, 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED, w, 0, NULL);
+    memcpy(f->sceneLightViews[t], want, sizeof(want));
+}
+
 int gvkSceneActive(void) { return vk.scene.active; }
 
 int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY) {
@@ -5644,11 +5819,80 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
     vk.needBarrier = 1;
 }
 
-void gvkSceneEnd(const DofParams* p) {
+/* light.comp's passes for a frame, as sceneBlurRecord's: the layers are made
+ * from `primary` on the PS1's pixel grid and laid over it and over `second`.
+ * (centerX, centerY): the projection centre in the primary's frame. */
+static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                             int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
+                             float centerX, float centerY) {
+    rasterBarrier(cmd);
+    vk.needBarrier = 0;
+    int q = gtStart(cmd, GT_LIGHT);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.light);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
+    /* prepare's samples per PS1 pixel: all of them up to 3x, nine beyond. */
+    LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
+                        {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, 0,
+                        p->top, p->shade, p->bounce, p->glow};
+    /* Only the passes the parts in use need (all of them when asked: the
+     * checks, the debug colours). The composite reads nothing of a part
+     * that is off. */
+    int glow = p->all || p->glow > 0, bounce = p->all || p->bounce > 0, shade = p->all || p->shade > 0;
+    int surface = shade || p->top > 0;
+    for (int pass = 0; pass <= LIGHT_COMPOSITE; pass++) {
+        int needed = pass == 0 || pass == LIGHT_COMPOSITE ||
+                     (pass >= 1 && pass <= 3 && (glow || bounce)) ||          /* the surroundings, the glow's wide spreads */
+                     ((pass == 4 || pass == 10 || pass == 11) && bounce) ||
+                     (pass >= 5 && pass <= 7 && surface) ||                   /* normals, top light, shade */
+                     ((pass == 8 || pass == 9) && shade) ||
+                     ((pass == 12 || pass == 13) && glow);
+        if (!needed) continue;
+        c.pass = pass;
+        vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+        /* The PS1's grid, a quarter of it (the surroundings' brightness and
+         * the glow's wide spreads, 1-3; the bounce, 10 and 11), and the
+         * copy's own for the composite. */
+        int quarter = (pass >= 1 && pass <= 3) || pass == 10 || pass == 11;
+        int gw = pass == LIGHT_COMPOSITE ? w * n : quarter ? (w + 3) / 4 : w;
+        int gh = pass == LIGHT_COMPOSITE ? h * n : quarter ? (h + 3) / 4 : h;
+        vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
+        rasterBarrier(cmd);
+    }
+    if (second >= 0 && sw > 0 && sh > 0) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[second], 0, NULL);
+        c.pass = LIGHT_COMPOSITE;
+        c.originX = sx * n; c.originY = sy * n; c.sizeW = sw * n; c.sizeH = sh * n;
+        c.layerX = layerX; c.layerY = layerY;
+        vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+        vkCmdDispatch(cmd, (uint32_t)(sw * n + 7) / 8, (uint32_t)(sh * n + 7) / 8, 1);
+        rasterBarrier(cmd);
+    }
+    gtStop(cmd, q);
+    vk.needBarrier = 1;
+}
+
+/* The lighting for a frame of the copy (sceneBlur's arguments). */
+static void sceneLight(int primary, int x, int y, int w, int h, int second, int sx, int sy, int sw, int sh,
+                       int layerX, int layerY, int n, const LightParams* p, float centerX, float centerY) {
+    if (w <= 0 || h <= 0 || n <= 0) return;
+    if (!sceneLightImages(w, h)) return;
+    if (vk.hiN != n) return;
+    cpuResolveFlush();
+    endBatch();
+    VkCommandBuffer cmd = recording();
+    FrameCtx* ctx = frame();
+    sceneLightSets(ctx, primary);
+    if (second >= 0) sceneLightSets(ctx, second);
+    sceneLightRecord(cmd, ctx, primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p, centerX, centerY);
+}
+
+void gvkSceneEnd(const SceneParams* p) {
     if (!vk.scene.active) return;
     endBatch(); /* the scene's batches, with their depth */
     vk.scene.active = 0;
-    if (p == NULL || vk.hiN == 0 || (p->radius <= 0 && !p->debug)) return;
+    if (p == NULL || vk.hiN == 0) return;
+    int blur = p->dof.radius > 0 || p->dof.debug, light = p->light.on;
+    if (!blur && !light) return;
     VRect a = vk.scene.rect[SCENE_NARROW];
     int aw = a.x1 - a.x0 + 1, ah = a.y1 - a.y0 + 1;
     if (vk.scene.targets == 2 && vk.hiWide != VK_NULL_HANDLE) {
@@ -5659,11 +5903,17 @@ void gvkSceneEnd(const DofParams* p) {
         if (r.x0 + w > vk.hiWideW) w = vk.hiWideW - r.x0;
         if (r.y0 + h > vk.hiWideH) h = vk.hiWideH - r.y0;
         if (w > 0 && h > 0) {
-            sceneBlur(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY, vk.hiN, p);
+            /* The lighting first: the lens sees the lit scene. */
+            if (light)
+                sceneLight(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY, vk.hiN,
+                           &p->light, p->light.centerX + (float)vk.scene.insetX, p->light.centerY + (float)vk.scene.insetY);
+            if (blur)
+                sceneBlur(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY, vk.hiN, &p->dof);
             return;
         }
     }
-    sceneBlur(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, p);
+    if (light) sceneLight(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, &p->light, p->light.centerX, p->light.centerY);
+    if (blur) sceneBlur(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, &p->dof);
 }
 
 void gvkHiEffectReset(void) { vk.hiEffectValid = 0; }
@@ -7402,11 +7652,17 @@ static void presentPicture(const GpuDisplay* d, uint32_t vblank, int menu, const
     if (cacheable && vk.window) {
         SDL_GetWindowSizeInPixels(vk.window,&heldW,&heldH);
         heldWords=presentConstants(d,heldW,heldH,&heldPc,heldBits,OSD_WORDS);
+        /* The window is the player's view; a pre-rotated swapchain's images
+         * are that turned (rotate odd), so its extent is compared turned
+         * back. Compared as it was, an Android phone in landscape never kept
+         * a picture and presented every vblank (xg-mrj.3.10). */
+        int viewW = (int)(vk.rotate & 1 ? vk.swapchainExtent.height : vk.swapchainExtent.width);
+        int viewH = (int)(vk.rotate & 1 ? vk.swapchainExtent.width : vk.swapchainExtent.height);
         int same = vk.held.valid && vk.held.revision==hostPresent.revision && vk.held.w==heldW && vk.held.h==heldH &&
             vk.held.swapchain==vk.swapchain && !vk.surfaceLost && !vk.swapchainStale &&
             (vk.lastPresent==VK_SUCCESS || (asyncPresent.thread && asyncPresent.queued>asyncPresent.collected)) &&
             vk.held.scale==vk.hiN && vk.held.color==vk.hiColor &&
-            heldW==(int)vk.swapchainExtent.width && heldH==(int)vk.swapchainExtent.height &&
+            heldW==viewW && heldH==viewH &&
             vk.held.words==heldWords && !memcmp(&vk.held.pc,&heldPc,sizeof(heldPc)) &&
             (!heldWords || !memcmp(vk.held.bits,heldBits,(size_t)heldWords*4));
         if (same && !dump) {

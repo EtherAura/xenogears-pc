@@ -7336,3 +7336,15 @@ msgstr "広い"
 
 msgid "How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far behind or close to the camera."
 msgstr "パーティーの周りでピントが合う奥行きの広さです。「狭い」ほど多くの背景がぼけ、「広い」ではずっと奥かカメラのすぐ近くだけがぼけます。"
+
+msgid "Lighting"
+msgstr "ライティング"
+
+msgid "In fields, the scenery gets light from above, shade in corners and under overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 picture itself is not changed. Off by default."
+msgstr "フィールドで、背景に上からの光、すみや張り出しの下の陰、ランプや火など明るい部分からの光が加わります。会話、顔グラフィック、HUDには影響せず、PS1の画像そのものは変わりません。初期設定はオフです。"
+
+msgid "Glow"
+msgstr "グロー"
+
+msgid "In fields, bright areas such as lamps, fires and windows glow softly. Off by default."
+msgstr "フィールドで、ランプ、火、窓などの明るい部分がやわらかく光ります。初期設定はオフです。"

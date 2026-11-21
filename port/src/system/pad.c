@@ -1009,12 +1009,21 @@ static u16 readKeyboard(void) {
     return buttons;
 }
 
-/* The free field camera's input (port/src/system/freecam.c): the right stick and the
- * camera keys (J/L turn, I/K tilt, U/O zoom, Home recentre; a key bound to a game button
- * stays the game's), sampled each vblank; R3 or Home recentres. As in Xenoblade (ZL + right
- * stick), holding the game's L2 turns the stick's up/down into zoom: up closer, down out. L2
- * still reaches the game (L2 + R2 together boards the Gear, as before). */
+/* The free field camera's input (port/src/system/freecam.c): the right stick (a gamepad's,
+ * the touch pad's) and the camera keys (J/L turn, I/K tilt, U/O zoom, Home recentre; a key
+ * bound to a game button stays the game's), sampled each vblank; R3, Home or the touch pad's
+ * button recentres. As in Xenoblade (ZL + right stick), holding the game's L2 turns the
+ * stick's up/down into zoom: up closer, down out. L2 still reaches the game (L2 + R2
+ * together boards the Gear, as before). */
 static struct { float turn, tilt, zoom; int recenter; } camIn;
+/* A right stick (x right, y down, -1..1) past its dead zone, added to the camera's input. */
+static void cameraStick(float x, float y, float dead, int zoomHeld, float* turn, float* tilt, float* zoom) {
+    if (x > dead || x < -dead) *turn += (x - (x > 0 ? dead : -dead)) / (1 - dead);
+    if (y > dead || y < -dead) {
+        float v = (y - (y > 0 ? dead : -dead)) / (1 - dead);
+        if (zoomHeld) *zoom += v; else *tilt -= v;
+    }
+}
 static int keyBound(SDL_Scancode key) {
     loadBindings();
     for (int i = 0; i < PAD_BUTTONS; i++)
@@ -1041,13 +1050,14 @@ static void sampleCamera(int live, u16 held) {
         if (gamepads[0] != NULL) {
             float x = SDL_GetGamepadAxis(gamepads[0], SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
             float y = SDL_GetGamepadAxis(gamepads[0], SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
-            const float dead = 0.2f;
-            if (x > dead || x < -dead) turn += (x - (x > 0 ? dead : -dead)) / (1 - dead);
-            if (y > dead || y < -dead) {
-                float v = (y - (y > 0 ? dead : -dead)) / (1 - dead);
-                if (zoomHeld) zoom += v; else tilt -= v;
-            }
+            cameraStick(x, y, 0.2f, zoomHeld, &turn, &tilt, &zoom);
             rc |= SDL_GetGamepadButton(gamepads[0], SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+        }
+        float tx, ty;
+        int back;
+        if (touchCamera(&tx, &ty, &back)) { /* the touch pad's right stick and its button (touch.c) */
+            cameraStick(tx, ty, 0.12f, zoomHeld, &turn, &tilt, &zoom);
+            rc |= back;
         }
     }
     camIn.turn = turn < -1 ? -1 : turn > 1 ? 1 : turn;
@@ -1064,6 +1074,21 @@ static void sampleCamera(int live, u16 held) {
 void padCameraInput(float* turn, float* tilt, float* zoom, int* recenter) {
     *turn = camIn.turn; *tilt = camIn.tilt; *zoom = camIn.zoom;
     *recenter = camIn.recenter; camIn.recenter = 0;
+}
+/* For the touch pad (touch.c): what its camera controls have to drive here (1 the free
+ * camera, 2 the first-person view allowed, 4 that view showing; nothing in the Original
+ * engine), and its first-person button, as the V key. */
+int padCameraFeatures(void) {
+#if XG_ENGINE_ENHANCED
+    return (pcFreeCameraEnabled() ? 1 : 0) | (pcFirstPersonEnabled() ? 2 : 0) | (pcFirstPersonActive() ? 4 : 0);
+#else
+    return 0;
+#endif
+}
+void padFirstPerson(void) {
+#if XG_ENGINE_ENHANCED
+    if (!replayScript.count) pcFirstPersonToggle();
+#endif
 }
 
 static u16 readScript(Script* sc, int64_t now) {

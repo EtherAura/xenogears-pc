@@ -269,6 +269,26 @@ public class XgActivity extends SDLActivity {
         runOnUiThread(this::finishAndRemoveTask);
     }
 
+    // A change of engine (port/src/system/engine.c, xg-mrj.3.21): the app starts again in a
+    // new process, whose loader loads the other engine's library. RestartActivity, in a process
+    // of its own, ends this one and starts this activity with the same extras (a development
+    // start's options and discs-dir too); the native side waits for the end. On the UI thread,
+    // as the other actions: the game thread calls this on the game's own stack, where a call
+    // into a native method with object arguments (Log, Binder) fails ART's JNI checks.
+    public void restartApp() {
+        runOnUiThread(() -> {
+            Intent again = new Intent(getIntent());
+            again.removeExtra("discs-picker");
+            again.removeExtra("pack-dir");
+            again.removeExtra("test-background");
+            Intent restart = new Intent(this, RestartActivity.class);
+            restart.putExtra(RestartActivity.NEXT, again);
+            restart.putExtra(RestartActivity.PID, android.os.Process.myPid());
+            Log.i(TAG, "restart: the app starts again");
+            startActivity(restart);
+        });
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         if (requestCode == PICK_PACK) {

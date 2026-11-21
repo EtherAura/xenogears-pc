@@ -346,7 +346,7 @@ PLAIN = [
     "extras_navigationtest", "extras_observetest", "extras_ratestest",
     "extras_spritecataloguetest", "extras_writertest", "gallery_battletest",
     "gallery_mediatest", "gallery_scenetest", "geometrytest",
-    "gte_precisiontest", "jpegtest", "mdectest", "model_geometrytest", "thin_geometrytest", "slidestacktest", "retailheaptest", "rumbletest", "texturecachetest", "provenancetest",
+    "gte_precisiontest", "jpegtest", "mdectest", "model_geometrytest", "thin_geometrytest", "slidestacktest", "retailheaptest", "rumbletest", "touchtest", "texturecachetest", "provenancetest",
     "gametext_spritetest",
     "cpueffecttest", "textureedgetest", "texturefiltertest", "texturetest", "ui_l10ntest", "ui_motiontest", "verticaltest",
     "state_codectest", "rewindpacktest", "statefiletest", "seamreusetest", "spansteptest", "battlepacingtest", "spu_outputtest",

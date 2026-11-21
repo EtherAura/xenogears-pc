@@ -18,7 +18,13 @@
  *     record it, port/src/system/statefile.c);
  *   - picks the game library of the region (libxenogears-us.so or -jp.so:
  *     "--region jp", XG_REGION=jp, else the region of the discs found, US
- *     first), loads it at a fixed reserved address
+ *     first) and of the engine (xg-mrj.3.21: libxenogears-enhanced-<region>.so
+ *     when settings.ini's engine is enhanced, or XG_ENGINE=enhanced, and the
+ *     app carries it; else the Original's), tells the game which engines the
+ *     app carries for that region and which one was asked for
+ *     (XG_ANDROID_ENGINES, XG_ANDROID_ENGINE_ASKED: port/src/system/engine.c,
+ *     where a change of engine restarts the app), loads it at a fixed reserved
+ *     address
  *     (android_dlopen_ext into a reservation of our own, as Linux PIE builds
  *     run at fixed addresses: save states hold addresses and load only where
  *     they were made; port/src/system/statefile.c), or anywhere if that
@@ -156,6 +162,58 @@ static void setOptions(const char* list) {
     char copy[4096];
     snprintf(copy, sizeof copy, "%s", list);
     for (char* item = strtok(copy, ";"); item != NULL; item = strtok(NULL, ";")) setOption(item);
+}
+
+/* ---- the engine ---------------------------------------------------------------- */
+
+/* The engine the settings ask for: XG_ENGINE, else settings.ini's engine= (the file
+ * port/src/system/settings.c reads: XG_SETTINGS, "none" for none, else the pref path's).
+ * 1 Enhanced, 0 Original or unset. */
+static int enhancedAsked(void) {
+    const char* e = getenv("XG_ENGINE");
+    if (e != NULL && e[0] != '\0') return SDL_strcasecmp(e, "enhanced") == 0;
+    char path[1024];
+    const char* file = getenv("XG_SETTINGS");
+    if (file != NULL && file[0] != '\0') {
+        if (strcmp(file, "none") == 0) return 0;
+        snprintf(path, sizeof path, "%s", file);
+    } else {
+        char* pref = SDL_GetPrefPath(NULL, "xenogears");
+        if (pref == NULL) return 0;
+        snprintf(path, sizeof path, "%ssettings.ini", pref);
+        SDL_free(pref);
+    }
+    FILE* f = fopen(path, "r");
+    if (f == NULL) return 0;
+    char line[512];
+    int enhanced = 0;
+    while (fgets(line, sizeof line, f) != NULL) {
+        char* p = line;
+        while (*p == ' ' || *p == '\t') p++;
+        if (strncmp(p, "engine", 6) != 0) continue;
+        p += 6;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p != '=') continue;
+        p++;
+        while (*p == ' ' || *p == '\t') p++;
+        p[strcspn(p, " \t\r\n")] = '\0';
+        enhanced = SDL_strcasecmp(p, "enhanced") == 0; /* the last one counts, as in settings.c */
+    }
+    fclose(f);
+    return enhanced;
+}
+
+/* Whether the app carries a library: beside this one, where the system put the app's
+ * libraries (extracted at install: useLegacyPackaging). Libraries kept in the APK
+ * itself ("base.apk!/lib/...") cannot be looked at: counted as there. */
+static int carried(const char* name) {
+    Dl_info self;
+    if (dladdr((void*)carried, &self) == 0 || self.dli_fname == NULL) return 1;
+    const char* slash = strrchr(self.dli_fname, '/');
+    if (slash == NULL || strchr(self.dli_fname, '!') != NULL) return 1;
+    char path[1024];
+    snprintf(path, sizeof path, "%.*s/%s", (int)(slash - self.dli_fname), self.dli_fname, name);
+    return access(path, R_OK) == 0;
 }
 
 /* ---- disc images from file descriptors ----------------------------------------- */
@@ -358,8 +416,18 @@ int SDL_main(int argc, char* argv[]) {
     if (disc1 != NULL && getenv("XG_DISC") == NULL) setenv("XG_DISC", disc1, 1);
     if (disc2 != NULL && getenv("XG_DISC2") == NULL) setenv("XG_DISC2", disc2, 1);
     if (getenv("XG_BIOS") == NULL) setenv("XG_BIOS", biosPath[0] ? biosPath : "none", 1);
-    char name[64];
-    snprintf(name, sizeof name, "libxenogears-%s.so", jp ? "jp" : "us");
+    const char* tag = jp ? "jp" : "us";
+    char name[64], enhanced[64];
+    snprintf(enhanced, sizeof enhanced, "libxenogears-enhanced-%s.so", tag);
+    int asked = enhancedAsked(), haveEnhanced = carried(enhanced);
+    setenv("XG_ANDROID_ENGINES", haveEnhanced ? "original,enhanced" : "original", 1);
+    setenv("XG_ANDROID_ENGINE_ASKED", asked ? "enhanced" : "original", 1);
+    if (asked && haveEnhanced) {
+        snprintf(name, sizeof name, "%s", enhanced);
+    } else {
+        if (asked) fprintf(stderr, "loader: the Enhanced engine is asked for, but this app has no %s\n", enhanced);
+        snprintf(name, sizeof name, "libxenogears-%s.so", tag);
+    }
     void* game = loadGame(name);
     if (game == NULL) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Xenogears", "The game library did not load (logcat: xenogears).",

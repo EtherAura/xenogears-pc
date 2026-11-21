@@ -5,6 +5,10 @@
 #   tools/build_android.sh                 # x86_64 + arm64-v8a, US + JP, debug APK
 #   tools/build_android.sh --abi x86_64    # one ABI (repeatable)
 #   tools/build_android.sh --region us     # one region (repeatable)
+#   tools/build_android.sh --engine original  # one engine (repeatable; default both: the
+#                                          # loader loads the one settings.ini's engine names)
+#   tools/build_android.sh --id-suffix .dev   # the package name with a suffix: a test build
+#                                          # installed beside the app, not over it
 #   tools/build_android.sh --release       # release APK, signed with the user's key (below)
 #   tools/build_android.sh --native-only   # the libraries, no APK
 #
@@ -19,11 +23,13 @@
 # the host gcc with -m32 for pc_link's layout probes, glslc).
 #
 # Outputs under build/android: sdl3-<abi> (SDL3 built for the ABI),
-# <abi>-<region> (the port's CMake builds, -DXG_SHARED=ON), jniLibs/<abi>
-# (what the APK packs: libSDL3.so, libc++_shared.so, libxgloader.so,
-# libxenogears-<region>.so; each game library passes tools/payloadcheck.py),
-# gradle/ (Gradle's outputs; the APK in gradle/app/outputs/apk/). An APK with
-# arm64-v8a passes tools/check_android_alignment.py (16 KB LOAD segments).
+# <abi>-<region> and <abi>-<region>-enhanced (the port's CMake builds of each
+# engine, -DXG_SHARED=ON), jniLibs/<abi> (what the APK packs: libSDL3.so,
+# libc++_shared.so, libxgloader.so, libxenogears-<region>.so and
+# libxenogears-enhanced-<region>.so; each game library passes tools/payloadcheck.py),
+# gradle/ (Gradle's outputs; the APKs in gradle/app/outputs/apk/<variant>/, one per
+# ABI: app-arm64-v8a-<variant>.apk, app-x86_64-<variant>.apk). The arm64-v8a APK
+# passes tools/check_android_alignment.py (16 KB LOAD segments).
 #
 # Signing: debug builds use the Android debug key (~/.android/debug.keystore,
 # made by the Android Gradle plugin). A release build is signed with the
@@ -40,12 +46,18 @@ cd "$ROOT"
 
 ABIS=()
 REGIONS=()
+ENGINES=()
+ID_SUFFIX=
 VARIANT=debug
 NATIVE_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
     --abi) ABIS+=("$2"); shift ;;
     --region) REGIONS+=("$2"); shift ;;
+    --engine)
+        case "$2" in original | enhanced) ENGINES+=("$2") ;; *) echo "build_android.sh: --engine original or enhanced" >&2; exit 2 ;; esac
+        shift ;;
+    --id-suffix) ID_SUFFIX="$2"; shift ;;
     --release) VARIANT=release ;;
     --native-only) NATIVE_ONLY=1 ;;
     -h | --help) sed -n '2,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
@@ -70,6 +82,7 @@ if [ "$VARIANT" = release ] && [ "$NATIVE_ONLY" = 0 ]; then
 fi
 [ ${#ABIS[@]} -gt 0 ] || ABIS=(x86_64 arm64-v8a)
 [ ${#REGIONS[@]} -gt 0 ] || REGIONS=(us jp)
+[ ${#ENGINES[@]} -gt 0 ] || ENGINES=(original enhanced)
 case " ${ABIS[*]} " in *" arm64-v8a "*) HAS_ARM64=1 ;; *) HAS_ARM64=0 ;; esac
 
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
@@ -150,22 +163,35 @@ for abi in "${ABIS[@]}"; do
     cp -f "$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/$ndk_triple/libc++_shared.so" "$jni/"
     gnu_ld="$(command -v "$triple-ld" || { [ "$abi" = x86_64 ] && command -v ld; })"
     gnu_objcopy="$(command -v "$triple-objcopy" || { [ "$abi" = x86_64 ] && command -v objcopy; })"
-    for region in "${REGIONS[@]}"; do
-        b="$OUT/$abi-$region"
-        cmake -S port -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$API" \
-            -DANDROID_STL=c++_shared -DXG_VERSION="${region^^}" -DXG_EXTRAS=ON -DXG_SHARED=ON -DXG_LTO=OFF \
-            -DXG_DIST=ON \
-            -DSDL3_DIR="$sdl/lib/cmake/SDL3" -DVulkan_GLSLC_EXECUTABLE="$GLSLC" \
-            -DXG_LD="$gnu_ld" -DXG_OBJCOPY="$gnu_objcopy" -DXG_PROBE_CC="$(command -v gcc)" \
-            -DPython3_EXECUTABLE="$PY"
-        cmake --build "$b" --target xenogears_game xgloader
-        cp -f "$b/libxenogears-$region.so" "$b/libxgloader.so" "$jni/"
-        # No retail module data in what the APK carries (the library as built: the same bytes as
-        # the packed, stripped one, with the symbols that attribute them), and no folder of this
-        # machine (--dist, xg-4oq.9: an app never runs from the repository, so every Android
-        # build is one to hand out).
-        "$PY" tools/payloadcheck.py --dist --build "$b" --exe "$b/libxenogears-$region.so"
+    # A library a game engine and region (xg-mrj.3.21): the loader loads the one the
+    # settings ask for. An engine not built this time leaves the APK, or the APK would
+    # carry an old build of it.
+    case " ${ENGINES[*]} " in *" enhanced "*) ;; *) rm -f "$jni"/libxenogears-enhanced-*.so ;; esac
+    case " ${ENGINES[*]} " in *" original "*) ;; *) rm -f "$jni"/libxenogears-us.so "$jni"/libxenogears-jp.so ;; esac
+    for engine in "${ENGINES[@]}"; do
+        for region in "${REGIONS[@]}"; do
+            if [ "$engine" = enhanced ]; then
+                b="$OUT/$abi-$region-enhanced"
+                lib="libxenogears-enhanced-$region.so"
+            else
+                b="$OUT/$abi-$region"
+                lib="libxenogears-$region.so"
+            fi
+            cmake -S port -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$API" \
+                -DANDROID_STL=c++_shared -DXG_VERSION="${region^^}" -DXG_ENGINE="$engine" -DXG_EXTRAS=ON \
+                -DXG_SHARED=ON -DXG_LTO=OFF -DXG_DIST=ON \
+                -DSDL3_DIR="$sdl/lib/cmake/SDL3" -DVulkan_GLSLC_EXECUTABLE="$GLSLC" \
+                -DXG_LD="$gnu_ld" -DXG_OBJCOPY="$gnu_objcopy" -DXG_PROBE_CC="$(command -v gcc)" \
+                -DPython3_EXECUTABLE="$PY"
+            cmake --build "$b" --target xenogears_game xgloader
+            cp -f "$b/$lib" "$b/libxgloader.so" "$jni/"
+            # No retail module data in what the APK carries (the library as built: the same bytes as
+            # the packed, stripped one, with the symbols that attribute them), and no folder of this
+            # machine (--dist, xg-4oq.9: an app never runs from the repository, so every Android
+            # build is one to hand out).
+            "$PY" tools/payloadcheck.py --dist --build "$b" --exe "$b/$lib"
+        done
     done
 done
 [ "$NATIVE_ONLY" = 1 ] && exit 0
@@ -187,25 +213,30 @@ with LLVM exceptions); their licences are beside this file. The game's own data
 is read from the player's discs and is not part of this app.
 NOTICE
 
-# The APK: SDL's Java glue from its source, the libraries above.
+# The APKs, one per ABI: SDL's Java glue from its source, the libraries above. The variant's
+# earlier APKs go first, so none of another build (a universal APK, an ABI not built this
+# time) is listed, checked, signed or handed out.
 abilist=$(IFS=,; echo "${ABIS[*]}")
 task=assemble${VARIANT^}
+rm -f "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk
 "$GRADLE" -p port/android --project-cache-dir "$OUT/gradle-cache" --no-daemon \
     -Pxg.sdlSource="$SDL3_SOURCE" -Pxg.jniLibs="$OUT/jniLibs" -Pxg.abis="$abilist" -Pxg.buildRoot="$OUT/gradle" \
-    -Pxg.assets="$OUT/assets" \
+    -Pxg.assets="$OUT/assets" -Pxg.idSuffix="$ID_SUFFIX" \
     "$task"
 ls -l "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk
 if [ "$HAS_ARM64" = 1 ]; then
-    for built in "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk; do
+    for built in "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*arm64-v8a*.apk; do
         check_alignment "$built"
     done
 else
-    echo "build_android.sh: note: no arm64-v8a in --abi (${ABIS[*]}): the 16 KB LOAD check is not run; this APK is not for arm64 devices" >&2
+    echo "build_android.sh: note: no arm64-v8a in --abi (${ABIS[*]}): the 16 KB LOAD check is not run; no APK is for arm64 devices" >&2
 fi
 if [ "$VARIANT" = release ]; then
-    # The signature as a device checks it, and the certificate it names (its digest only).
-    apk=$(ls "$OUT"/gradle/app/outputs/apk/release/*.apk | head -1)
-    certs=$("$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --verbose --print-certs "$apk")
-    grep -E '^Verified using v[0-9]+ scheme' <<< "$certs" | grep true
+    # The signature as a device checks it, on every APK, and the certificate they name (its digest only).
+    for apk in "$OUT"/gradle/app/outputs/apk/release/*.apk; do
+        echo "$apk:"
+        certs=$("$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --verbose --print-certs "$apk")
+        grep -E '^Verified using v[0-9]+ scheme' <<< "$certs" | grep true
+    done
     grep -m1 'certificate SHA-256 digest' <<< "$certs"
 fi

@@ -5,9 +5,10 @@
     python tools/test_android_alignment_flow.py --ver us --script OTHER.sh   # e.g. a pre-change copy
 
 The build script is never run: it is read, its wiring is checked in place
-(the checker invoked on the APK of the selected variant, after Gradle and
-before the release signature check, readelf required, failure fatal; the
-payload check, options and signing untouched), and only the new pieces are
+(the checker invoked on the selected variant's arm64-v8a APK, one APK per ABI
+since xg-mrj.3.21's follow-up, after Gradle and before the release signature
+check, readelf required, failure fatal; the variant's earlier APKs removed
+before Gradle; the payload check, options and signing untouched), and only the new pieces are
 taken out of it and run by bash on their own: the ABI test, check_alignment()
 and the loop that calls it. They run on fixture APKs made here (AArch64
 libraries linked by clang and ld.lld with an explicit -z max-page-size,
@@ -33,11 +34,13 @@ import test_android_alignment as base  # noqa: E402  (link_so, make_apk, synthet
 SCRIPT = ROOT / "tools/build_android.sh"
 TIMEOUT = 120
 APK_GLOB = '"$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk'
+ARM64_GLOB = '"$OUT"/gradle/app/outputs/apk/"$VARIANT"/*arm64-v8a*.apk'
+STALE_RM = 'rm -f ' + APK_GLOB
 ABI_TEST = 'case " ${ABIS[*]} " in *" arm64-v8a "*) HAS_ARM64=1 ;; *) HAS_ARM64=0 ;; esac'
 READELF_DEF = 'READELF="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"'
 FUNC_RE = re.compile(r"^check_alignment\(\) \{\n(?:.*\n)*?^\}\n", re.M)
 GUARD_RE = re.compile(r'^if \[ "\$HAS_ARM64" = 1 \]; then\n(?:.*\n)*?^fi\n', re.M)
-LOOP_RE = re.compile(r'^    for (\w+) in ' + re.escape(APK_GLOB) + r'; do\n        check_alignment "\$\1"\n    done\n', re.M)
+LOOP_RE = re.compile(r'^    for (\w+) in ' + re.escape(ARM64_GLOB) + r'; do\n        check_alignment "\$\1"\n    done\n', re.M)
 # What the script already did before the wiring: still there, unchanged.
 PRESERVED = [
     '--abi) ABIS+=("$2"); shift ;;',
@@ -47,12 +50,12 @@ PRESERVED = [
     '[ ${#ABIS[@]} -gt 0 ] || ABIS=(x86_64 arm64-v8a)',
     '[ ${#REGIONS[@]} -gt 0 ] || REGIONS=(us jp)',
     'for name in XG_ANDROID_KEYSTORE XG_ANDROID_KEY_ALIAS XG_ANDROID_KEYSTORE_PASSWORD XG_ANDROID_KEY_PASSWORD; do',
-    '"$PY" tools/payloadcheck.py --build "$b" --exe "$b/libxenogears-$region.so"',
+    '"$PY" tools/payloadcheck.py --dist --build "$b" --exe "$b/$lib"',
     '[ "$NATIVE_ONLY" = 1 ] && exit 0',
     'task=assemble${VARIANT^}',
     '-Pxg.sdlSource="$SDL3_SOURCE" -Pxg.jniLibs="$OUT/jniLibs" -Pxg.abis="$abilist" -Pxg.buildRoot="$OUT/gradle" \\',
     'ls -l ' + APK_GLOB,
-    'apk=$(ls "$OUT"/gradle/app/outputs/apk/release/*.apk | head -1)',
+    'for apk in "$OUT"/gradle/app/outputs/apk/release/*.apk; do',
     'certs=$("$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --verbose --print-certs "$apk")',
     "grep -E '^Verified using v[0-9]+ scheme' <<< \"$certs\" | grep true",
 ]
@@ -85,7 +88,7 @@ def verify_wiring(text: str) -> list[str]:
         problems.append("HAS_ARM64 is not derived from the selected ABIs")
     loop = LOOP_RE.search(text)
     if not loop:
-        problems.append(f"no `for ... in {APK_GLOB}; do check_alignment` over the selected variant's APKs")
+        problems.append(f"no `for ... in {ARM64_GLOB}; do check_alignment` over the selected variant's arm64 APKs")
         return problems
     guard = GUARD_RE.search(text)
     if not guard or not (guard.start() < loop.start() and loop.end() <= guard.end()):
@@ -96,6 +99,9 @@ def verify_wiring(text: str) -> list[str]:
         problems.append("check_alignment is called other than once, from the APK loop")
     at_func, at_loop = text.count("\n", 0, func.start()), text.count("\n", 0, loop.start())
     at_gradle = line_of(text, '    "$task"\n')
+    at_rm = line_of(text, STALE_RM + "\n")
+    if at_rm < 0 or at_gradle < 0 or not at_rm < at_gradle:
+        problems.append(f"the variant's earlier APKs are not removed before Gradle (`{STALE_RM}`)")
     at_ls = line_of(text, "ls -l " + APK_GLOB)
     at_native = line_of(text, '[ "$NATIVE_ONLY" = 1 ] && exit 0')
     at_sign = line_of(text, 'if [ "$VARIANT" = release ]; then\n    # The signature')
@@ -136,6 +142,8 @@ class Wiring(unittest.TestCase):
             "failure ignored": ('        exit 1\n    fi\n}', '        true\n    fi\n}'),
             "or true": (f'{call}; then', f'{call} || true; then'),
             "hard-coded APK": ('check_alignment "$built"', 'check_alignment "$OUT/old.apk"'),
+            "every APK checked": (ARM64_GLOB, APK_GLOB),
+            "stale APKs kept": (STALE_RM + "\n", ""),
             "debug only": ('if [ "$HAS_ARM64" = 1 ]; then', 'if [ "$HAS_ARM64" = 1 ] && [ "$VARIANT" = debug ]; then'),
             "x86_64 guard": (ABI_TEST, 'HAS_ARM64=0'),
             "other readelf": (READELF_DEF, 'READELF=llvm-readelf'),
@@ -249,20 +257,23 @@ class Snippets(unittest.TestCase):
         apks = out / "gradle/app/outputs/apk"
         for variant, src in (("release", self.aligned), ("debug", self.unaligned)):
             (apks / variant).mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, apks / variant / f"FIXTURE app-{variant}.apk")
+            shutil.copyfile(src, apks / variant / f"FIXTURE app-arm64-v8a-{variant}.apk")
+            # The x86_64 APK beside it holds no arm64 library: it is not the check's.
+            shutil.copyfile(self.no_arm64, apks / variant / f"FIXTURE app-x86_64-{variant}.apk")
         r = self.loop("release", "1", out)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn(f"{apks}/release/FIXTURE app-release.apk: ", r.stdout)
-        self.assertNotIn("app-debug", r.stdout)
+        self.assertIn(f"{apks}/release/FIXTURE app-arm64-v8a-release.apk: ", r.stdout)
+        self.assertNotIn("app-arm64-v8a-debug", r.stdout)
+        self.assertNotIn("x86_64", r.stdout + r.stderr)
         r = self.loop("debug", "1", out)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         self.assertNotIn("XG_FLOW_RETURNED", r.stdout)
-        self.assertIn("FIXTURE app-debug.apk: arm64-v8a LOAD alignment below 16 KB", r.stderr)
-        # Every APK of the variant, not the first: a bad second one still fails.
-        shutil.copyfile(self.unaligned, apks / "release" / "FIXTURE app-release-zz.apk")
+        self.assertIn("FIXTURE app-arm64-v8a-debug.apk: arm64-v8a LOAD alignment below 16 KB", r.stderr)
+        # Every arm64 APK of the variant, not the first: a bad second one still fails.
+        shutil.copyfile(self.unaligned, apks / "release" / "FIXTURE app-arm64-v8a-release-zz.apk")
         r = self.loop("release", "1", out)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("FIXTURE app-release-zz.apk: arm64-v8a LOAD alignment", r.stderr)
+        self.assertIn("FIXTURE app-arm64-v8a-release-zz.apk: arm64-v8a LOAD alignment", r.stderr)
 
     def test_no_apk_is_no_success(self):
         out = self.tmp / "out without apk"
@@ -274,7 +285,7 @@ class Snippets(unittest.TestCase):
     def test_x86_64_only_is_said(self):
         r = self.loop("debug", "0", self.tmp / "unused", abis="x86_64")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("no arm64-v8a in --abi (x86_64): the 16 KB LOAD check is not run", r.stderr)
+        self.assertIn("no arm64-v8a in --abi (x86_64): the 16 KB LOAD check is not run; no APK is for arm64", r.stderr)
         self.assertNotIn("cross-checking", r.stdout)
 
 

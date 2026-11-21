@@ -867,6 +867,31 @@ void displaySection() {
              "behind or close to the camera.");
         overrideNote("depth_of_field_focus");
     }
+    // Scene lighting (docs/PORT_HD2D.md section 15): Lighting is the top
+    // light, the shade and the bounce light together; Glow is the glow.
+    if (row("Lighting", "lighting", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneLighting();
+        int chosen = listChoice("##lighting", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetLighting(chosen);
+        hint("In fields, the scenery gets light from above, shade in corners and under overhangs, and light from "
+             "bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 "
+             "picture itself is not changed. Off by default.");
+        if (sceneLightingStatus() != nullptr) hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        overrideNote("lighting");
+    }
+    if (row("Glow", "glow", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneGlow();
+        int chosen = listChoice("##glow", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetGlow(chosen);
+        hint("In fields, bright areas such as lamps, fires and windows glow softly. Off by default.");
+        overrideNote("glow");
+    }
 
     if (row("Filter", "present_filter")) {
         static const char* const filters[] = {"Nearest", "Linear", "Sharp", "Bicubic", "xBR (edges)"};
@@ -1746,9 +1771,29 @@ void bindingTable(const char* id, bool keys, bool gamepad) {
     ImGui::EndTable();
 }
 
+// Whether Controls has the touch pad's rows: on Android, and elsewhere with a
+// touchscreen or with the pad turned on (settings.ini touch_pad).
+bool touchRowsWanted() {
 #ifdef __ANDROID__
-// Controls > Touch pad (system/touch.h): when it shows, how strong and how large.
+    return true;
+#else
+    if (touchMode() != 0) return true;
+    int count = 0;
+    SDL_TouchID* ids = SDL_GetTouchDevices(&count);
+    bool screen = false;
+    for (int i = 0; ids != nullptr && i < count; i++) screen |= SDL_GetTouchDeviceType(ids[i]) == SDL_TOUCH_DEVICE_DIRECT;
+    SDL_free(ids);
+    return screen;
+#endif
+}
+
+// Controls > Touch pad (system/touch.h): when it shows, its controls, how
+// strong and how large. The menu hides the pad, so while one of these rows
+// is being changed (and a moment after) the pad is drawn over the menu, as
+// it will be over the game: a size or an opacity is chosen by eye.
 void touchRows() {
+    static int previewUntil;
+    bool preview = false;
     opt::group(N_("Touch pad"));
     if (row("Touch pad", "touch_pad")) {
         static const char* const modes[] = {N_("Off"), N_("On"), N_("Automatic")};
@@ -1759,21 +1804,49 @@ void touchRows() {
              "opens this menu, the four squares the hotkeys' row (save and load states, the disc, the picture). "
              "Back opens and leaves the menu.");
     }
+    if (row("Layout", "touch_pad_layout")) {
+        static const char* const layouts[] = {N_("Buttons"), N_("Buttons and sticks")};
+        int l = touchLayout();
+        ImGui::BeginGroup();
+        int chosen = choice("touch_pad_layout", layouts, 2, l);
+        ImGui::EndGroup();
+        preview |= ImGui::IsItemHovered() || ImGui::IsItemActive();
+        if (chosen != l) {
+            touchSetLayout(chosen);
+            preview = true;
+        }
+        hint("Buttons and sticks adds a left stick, which moves as the D-pad does. In the Enhanced engine, with "
+             "the free camera or the first-person look turned on (Camera and vibration, below), a right stick "
+             "turns and tilts the camera and, with L2 held, zooms it; the button over the stick returns to the "
+             "game's view, and the eye enters and leaves the first-person view.");
+    }
     if (row("Look", "touch_pad_opacity touch_pad_size")) {
         int opacity = touchOpacityPercent(), size = touchSizePercent();
         ImGui::SetNextItemWidth(-1);
         if (ImGui::SliderInt("##touch_opacity", &opacity, 10, 100, tr("Opacity: %d%%"))) touchSetOpacityPercent(opacity);
+        preview |= ImGui::IsItemHovered() || ImGui::IsItemActive() || ImGui::IsItemFocused();
         ImGui::SetNextItemWidth(-1);
         if (ImGui::SliderInt("##touch_size", &size, 60, 140, tr("Size: %d%%"))) touchSetSizePercent(size);
+        preview |= ImGui::IsItemHovered() || ImGui::IsItemActive() || ImGui::IsItemFocused();
+        const ImVec2 screen = ImGui::GetIO().DisplaySize;
+        int fitted = touchFittedSizePercent(screen.x, screen.y);
+        if (fitted < touchSizePercent()) {
+            hint("Drawn at %d%%: the largest this layout fits the screen at.", fitted);
+        }
+        hint("The pad shows over the menu while you change it.");
+    }
+    if (opt::indexing()) return;
+    int frame = ImGui::GetFrameCount();
+    if (preview) previewUntil = frame + 75; // and a little over a second after
+    if (frame < previewUntil) {
+        const ImVec2 screen = ImGui::GetIO().DisplaySize;
+        touchpadDraw(ImGui::GetForegroundDrawList(), screen.x, screen.y);
     }
 }
-#endif
 
 void controlsSection() {
     opt::beginPage("controls", CONTROLS, true); // one column: the tables want the width
-#ifdef __ANDROID__
-    touchRows();
-#endif
+    if (touchRowsWanted()) touchRows();
     opt::group(N_("Buttons"));
     if (row("Button convention", "jp_controls_us us_controls_jp")) {
         bool jp = padRegionalControls(0), us = padRegionalControls(1);
@@ -1896,6 +1969,7 @@ void controlsSection() {
         hint("%s", tr("Enhanced engine. Turn and tilt the camera around the party with the right stick; hold L2 and move "
                       "the stick up or down to zoom (keyboard: J/L turn, I/K tilt, U/O zoom). R3 or Home returns to the "
                       "game's view. Scenes and rooms with a fixed camera keep the game's."));
+        if (touchRowsWanted()) hint("By touch: the touch pad's Buttons and sticks layout (Touch pad, above); its right stick is the camera's.");
         overrideNote("free_camera");
     }
 
@@ -1903,6 +1977,7 @@ void controlsSection() {
         bool on = pcFirstPersonEnabled() != 0;
         if (checkbox("Allow first-person look in fields and on the world map", &on)) pcFirstPersonSet(on);
         hint("%s", tr("Press V or hold L2 and click L3 to enter or leave. Look with the right stick, I/J/K/L, or a right mouse drag."));
+        if (touchRowsWanted()) hint("By touch: the eye beside the touch pad's right stick (the Buttons and sticks layout).");
         overrideNote("first_person_look");
     }
 
@@ -2589,8 +2664,12 @@ void engineRow(int* engine, bool live) {
     if (*engine != engineThis()) {
         const char* exe = engineExecutable(*engine);
         if (exe == NULL) {
+#ifdef __ANDROID__
+            warning("The %s engine is not part of this app.", tr(engineTitle(*engine)));
+#else
             warning("The %s engine's executable was not found beside this one (%s).", tr(engineTitle(*engine)),
                     *engine == ENGINE_ENHANCED ? "xenogears-enhanced" : "xenogears");
+#endif
         } else {
             warning("Saved for the next launch.");
             char label[160];
@@ -2598,8 +2677,13 @@ void engineRow(int* engine, bool live) {
             if (ImGui::Button(label)) {
                 engineRestart(*engine);
             }
+#ifdef __ANDROID__
+            hint("Ends this game now: anything not saved to a memory card is lost. Then the app starts again in "
+                 "the %s engine.", tr(engineTitle(*engine)));
+#else
             hint("Ends this game now: anything not saved to a memory card is lost. Then %s starts with the same "
                  "arguments.", exe);
+#endif
         }
     }
     overrideNote("engine");

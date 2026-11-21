@@ -279,6 +279,20 @@ void androidEndTask(void) {
     activityCall("endTask", "()V", NULL, NULL);
 }
 
+void androidRestart(void) {
+    fflush(NULL);
+    if (!activityCall("restartApp", "()V", NULL, NULL)) {
+        fprintf(stderr, "android: the app cannot restart itself\n");
+        return;
+    }
+    /* XgActivity's restart activity ends this process and starts the app again; should it not
+     * have done so in a few seconds, the process ends here and the app still starts again. */
+    for (int i = 0; i < 60; i++) SDL_Delay(50);
+    fprintf(stderr, "android: restarting\n");
+    fflush(NULL);
+    _exit(0);
+}
+
 void androidActivityActionText(const char* method, const char* arg) {
     activityCall(method, "(Ljava/lang/String;)V", arg, NULL);
 }

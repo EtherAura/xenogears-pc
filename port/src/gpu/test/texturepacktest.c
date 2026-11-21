@@ -388,6 +388,52 @@ int main(int argc, char** argv) {
         CHECK(packDir(lib)); texturePackReload(); CHECK(texturePackEnabled() && !texturePackSample(&o,o.request,0,&s));
         texturePackSetRoot(argv[1]); CHECK(texturePackEnabled());
     }
+    /* A page with an animated region (animated.txt, xg-3hyf.4): every frame finds the image by its still key (the
+     * texel key with the region's texels as 0); a patch outside the region samples the image, one inside it is
+     * drawn as the original, one across its edge gets the image above and the game's texels (VRAM, its CLUT)
+     * below; a page whose static texels differ finds nothing. */
+    {
+        uint8_t tex[16*16], frame2[16*16], other[16*16];
+        for (int i=0;i<16*16;++i) tex[i]=(uint8_t)(i/16<12 ? 1+(i*7)%3 : 5);
+        memcpy(frame2,tex,sizeof(tex)); memset(frame2+12*16,9,4*16);
+        memcpy(other,frame2,sizeof(tex)); other[3]^=1;
+        uint64_t still=UINT64_C(14695981039346656037);
+        const uint8_t head[]={'x','g','t','e','x','1',4,16,0,16,0};
+        for (size_t i=0;i<sizeof(head);++i) still=(still^head[i])*UINT64_C(1099511628211);
+        for (int i=0;i<16*16;++i) still=(still^(i/16<12?tex[i]:0))*UINT64_C(1099511628211);
+        DecodedTexture an={0}; an.request=(TextureRequest){0,32000,0,0,0,16,16,1,2};
+        an.depth=4; an.paletteSize=16; an.paletteKey=0x5151; an.texelKey=0xa11; an.texels=tex;
+        for (int i=0;i<16;++i) an.palette[i]=(uint16_t)(i==1?31:i==5?31<<10:i==2?31<<5:0x4210);
+        for (int i=0;i<16;++i) vramShadow[500][i]=an.palette[i];   /* clut 32000: row 500, x 0 */
+        for (int y=8;y<16;++y) for (int x=0;x<4;++x) vramShadow[y][x]=y<12?0x2222:0x5555;   /* the patch's texels in VRAM */
+        vramMarkUploaded((VRect){0,500,15,500},0); vramMarkUploaded((VRect){0,8,3,15},0);
+        DecodedTexture named=an; named.texelKey=still;
+        uint8_t ones[32*32*4]; for (int i=0;i<32*32;++i) { memset(ones+i*4,1,3); ones[i*4+3]=255; }
+        CHECK(packPng(argv[1],&named,1,32,32,ones));
+        char list[3400], line[160]; snprintf(list,sizeof(list),"%s/%s/animated.txt",argv[1],texturePackVersion());
+        int n=snprintf(line,sizeof(line),"# a page\nzz 1 2\n%016" PRIx64 " 16 16 4 0,12,16,4\n",still);
+        CHECK(rawFile(list,line,(size_t)n)); texturePackReload();
+        TextureRequest above={0,32000,0,0,0,16,8,0,0}, within={0,32000,0,2,12,8,4,0,0}, across={0,32000,0,0,8,16,8,0,0};
+        CHECK(texturePackSample(&an,above,0,&s) && s.scale==2 && s.w==16 && s.h==16 && s.rgba && s.rgba[0]==255 && s.rgba[2]==0);
+        CHECK(!texturePackSample(&an,within,0,&s));
+        CHECK(texturePackSample(&an,across,0,&s) && s.u==0 && s.v==8 && s.w==16 && s.h==8 && s.scale==2 && s.rgba && !s.keep);
+        CHECK(s.rgba[0]==255 && s.rgba[2]==0 && s.rgba[3]==255);                       /* row 8: the image's index 1 */
+        CHECK(s.rgba[(8*32)*4]==0 && s.rgba[(8*32)*4+2]==255 && s.rgba[(8*32+31)*4+2]==255); /* row 12: VRAM's index 5 */
+        uint64_t composite=s.revision;
+        CHECK(texturePackSample(&an,across,0,&s) && s.revision==composite);              /* kept */
+        vramShadow[13][1]=0x5255; vramMarkUploaded((VRect){0,13,3,13},0);              /* the region animates */
+        CHECK(texturePackSample(&an,across,0,&s) && s.revision!=composite && s.rgba[(10*32+12)*4+1]==255);
+        DecodedTexture b=an; b.texels=frame2; b.texelKey=0xb22;                         /* another frame */
+        CHECK(texturePackSample(&b,above,0,&s) && s.w==16 && s.rgba[0]==255);
+        DecodedTexture c=an; c.texels=other; c.texelKey=0xc33;                          /* another page */
+        CHECK(!texturePackSample(&c,above,0,&s));
+        texturePackSetGpu(1);   /* the GPU colours index maps: the image kept, the composite an index map */
+        CHECK(texturePackSample(&an,above,0,&s) && s.keep && s.indices && !s.rgba);
+        CHECK(texturePackSample(&an,across,0,&s) && !s.keep && s.indices && !s.rgba && s.indices[0]==1 && s.indices[8*32]==5);
+        texturePackSetGpu(0);
+        CHECK(SDL_RemovePath(list)); packPath(path,sizeof(path),argv[1],&named,1); CHECK(SDL_RemovePath(path));
+        texturePackReload(); CHECK(!texturePackSample(&an,above,0,&s));
+    }
     /* Eight 4 MiB PNGs fill the budget; more evict actual pixel storage. */
     uint8_t* large=malloc(1024*1024*4); CHECK(large); memset(large,255,1024*1024*4);
     d.request=(TextureRequest){0,0,0,0,0,256,256,0,0}; d.paletteSize=0; d.paletteKey=0;

@@ -39,6 +39,7 @@ extern "C" {
 #include "system/rumble.h"
 #include "system/settings.h"
 #include "system/speedup.h"
+#include "system/touch.h"
 #include "system/battlespeed.h"
 #include "system/fieldspeed.h"
 int pcFreeCameraEnabled(void); /* port/src/system/freecam.c */
@@ -218,6 +219,9 @@ std::vector<Spec>& table() {
     static const char* const dofRanges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
     add("depth_of_field_focus", N_("Focus range"), [](int) { return sceneDofFocus(); },
         [](int, int v) { sceneSetDofFocus(v); }, 1, dofRanges, 3);
+    add("lighting", N_("Lighting"), [](int) { return sceneLighting(); }, [](int, int v) { sceneSetLighting(v); }, 0,
+        dofLevels, 4);
+    add("glow", N_("Glow"), [](int) { return sceneGlow(); }, [](int, int v) { sceneSetGlow(v); }, 0, dofLevels, 4);
     add("present_filter", N_("Filter"), [](int) { return presentFilter(); }, [](int, int v) { presentSetFilter(v); }, 0,
         filterNames, 5);
     add("present_movie_filter", N_("Movies"), [](int) { return presentMovieFilter() - PRESENT_FILTER_SAME; },
@@ -363,6 +367,32 @@ std::vector<Spec>& table() {
         [](int, int v) { keySet("mouse_target", v); }, 0);
     add("mouse_camera", N_("Drag to turn the camera"), [](int) { return mouseCameraEnabled(); },
         [](int, int v) { keySet("mouse_camera", v); }, 0);
+    static const char* const touchModes[] = {N_("Off"), N_("On"), N_("Automatic")};
+    static const char* const touchLayouts[] = {N_("Buttons"), N_("Buttons and sticks")};
+#ifdef __ANDROID__
+    const int touchDefault = 2;
+#else
+    const int touchDefault = 0;
+#endif
+    // The touch pad is the device's: a setup saved on one is not another's.
+    add("touch_pad", N_("Touch pad"), [](int) { return touchMode(); }, [](int, int v) { touchSetMode(v); },
+        touchDefault, touchModes, 3)
+        .mine = false;
+    add("touch_pad_layout", N_("Touch pad layout"), [](int) { return touchLayout(); },
+        [](int, int v) { touchSetLayout(v); }, 0, touchLayouts, 2)
+        .mine = false;
+    {
+        Spec& s = add("touch_pad_opacity", N_("Touch pad opacity"), [](int) { return touchOpacityPercent(); },
+                      [](int, int v) { touchSetOpacityPercent(v); }, 50, nullptr);
+        s.unit = "%";
+        s.mine = false;
+    }
+    {
+        Spec& s = add("touch_pad_size", N_("Touch pad size"), [](int) { return touchSizePercent(); },
+                      [](int, int v) { touchSetSizePercent(v); }, 100, nullptr);
+        s.unit = "%";
+        s.mine = false;
+    }
     add("free_camera", N_("Free camera in fields"), [](int) { return pcFreeCameraEnabled(); },
         [](int, int v) { pcFreeCameraSet(v); }, 0);
     add("first_person_look", N_("First-person look"), [](int) { return pcFirstPersonEnabled(); },

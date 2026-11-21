@@ -73,6 +73,18 @@ the game still works with its own. The Enhanced engine only
 F1 > Display > Depth of field (Off, Subtle, Medium, Strong) and Focus range
 (Narrow, Normal, Wide: how deep the sharp range around the party is).
 
+## Lighting and glow
+
+In fields, Lighting lights the scenery from above: floors, roofs and table
+tops get brighter and undersides darker, corners and the ground under
+overhangs get shade, and bright spots such as lamps and fires light what is
+near them. Glow makes bright areas glow softly. Both are made from the
+picture the game draws and its depth. The rooms carry almost no lights of
+their own, so the light comes from above in every room. Dialogue, portraits
+and the HUD are not touched, and the game still works with its own picture.
+The Enhanced engine only (F1 > System > Engine).
+F1 > Display > Lighting and Glow (each Off, Subtle, Medium, Strong).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -104,6 +116,8 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Filter | Nearest |
 | Depth of field | Off |
 | Focus range | Normal |
+| Lighting | Off |
+| Glow | Off |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

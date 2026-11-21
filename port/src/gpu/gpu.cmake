@@ -61,7 +61,8 @@ xg_gpu_shader(hires.frag hires_coarse_interlock.frag -DINTERLOCK -DCOARSE)
 xg_gpu_shader(hires.frag hires_wide_coarse.frag -DWIDE -DCOARSE)
 xg_gpu_shader(hires.frag hires_wide_coarse_interlock.frag -DINTERLOCK -DWIDE -DCOARSE)
 # The scene's depth image and the depth of field (scene.c): the same draws
-# with DEPTH also write each replaced pixel's view depth; dof.comp blurs by it.
+# with DEPTH also write each replaced pixel's view depth; light.comp lights
+# the scene by it and dof.comp blurs by it.
 xg_gpu_shader(hires.vert hires_depth.vert -DDEPTH)
 xg_gpu_shader(hires.vert hires_wide_depth.vert -DWIDE -DDEPTH)
 xg_gpu_shader(hires.vert hires_coarse_depth.vert -DCOARSE -DDEPTH)
@@ -75,6 +76,7 @@ xg_gpu_shader(hires.frag hires_coarse_depth_interlock.frag -DINTERLOCK -DCOARSE 
 xg_gpu_shader(hires.frag hires_wide_coarse_depth.frag -DWIDE -DCOARSE -DDEPTH)
 xg_gpu_shader(hires.frag hires_wide_coarse_depth_interlock.frag -DINTERLOCK -DWIDE -DCOARSE -DDEPTH)
 xg_gpu_shader(dof.comp dof.comp)
+xg_gpu_shader(light.comp light.comp)
 xg_gpu_shader(hires_util.frag hires_util.frag)
 xg_gpu_shader(capture.frag capture.frag)
 xg_gpu_shader(draw.frag draw_ordered.frag -DORDERED_LIST)

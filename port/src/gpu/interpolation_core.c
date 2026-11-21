@@ -157,6 +157,7 @@ void interpFrameClear(InterpFrame* f) {
     f->valid = 1;
     f->rejection = NULL;
     f->sceneBlur = 0;
+    f->sceneLight = 0;
     f->sceneEnd = 0;
 }
 

@@ -3,8 +3,8 @@ plugins {
 }
 
 // tools/build_android.sh passes these: SDL3's source (its Java glue), the native
-// libraries per ABI (jniLibs/<abi>/libSDL3.so, libxgloader.so, libxenogears-<region>.so)
-// and the ABIs built.
+// libraries per ABI (jniLibs/<abi>/libSDL3.so, libxgloader.so, libxenogears-<region>.so,
+// libxenogears-enhanced-<region>.so) and the ABIs built.
 // SDL3's source has no default: tools/build_android.sh unpacks the version tools/deps.json pins.
 def sdlSource = providers.gradleProperty('xg.sdlSource').orNull
 if (sdlSource == null) {
@@ -14,6 +14,9 @@ def jniLibsDir = providers.gradleProperty('xg.jniLibs').getOrElse("${rootDir}/..
 def abis = providers.gradleProperty('xg.abis').getOrElse('x86_64,arm64-v8a').split(',')
 // The licence files the APK carries (assets/licenses: tools/build_android.sh puts them there).
 def assetsDir = providers.gradleProperty('xg.assets').getOrElse("${rootDir}/../../build/android/assets")
+// A suffix for the package name (tools/build_android.sh --id-suffix .dev): a test build installed
+// beside the app instead of over it, with its own data. Empty by default.
+def idSuffix = providers.gradleProperty('xg.idSuffix').getOrElse('')
 
 // The version from git (the user's decision): versionCode the commit count, versionName the
 // latest tag plus the short hash ("0.0" before any tag; ".changes" for uncommitted changes).
@@ -56,13 +59,23 @@ android {
     ndkVersion = '29.0.14206865' // strips the libraries' debug information when packing
 
     defaultConfig {
-        applicationId = 'io.github.etheraura.xgport'
+        applicationId = 'io.github.etheraura.xgport' + idSuffix
         minSdk = 33
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
-        ndk {
-            abiFilters.addAll(abis)
+    }
+
+    // One APK per ABI (the user, app-arm64-v8a-<variant>.apk, app-x86_64-<variant>.apk):
+    // each carries only its own ABI's libraries, both engines' and both regions', so a phone
+    // downloads about half. No universal APK. The splits choose the ABIs (Gradle refuses
+    // ndk.abiFilters beside them).
+    splits {
+        abi {
+            enable = true
+            reset()
+            include(*abis)
+            universalApk = false
         }
     }
 

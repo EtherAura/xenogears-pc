@@ -22,6 +22,9 @@ void androidActivityAction(const char* method);
 /* The game has quit: the activity finishes and leaves the recent apps (XgActivity.endTask).
  * Called while SDL is still up; the process ends right after (system/quit.c). */
 void androidEndTask(void);
+/* The app again, in a new process (XgActivity.restartApp; engine.c, a change of engine): the
+ * loader then picks the game library anew. Returns only when the activity cannot do it. */
+void androidRestart(void);
 /* XgActivity's method(String arg), no result: e.g. "copyPack", "texture". */
 void androidActivityActionText(const char* method, const char* arg);
 /* The packs copied into the app's packs folder: each library's folders. */

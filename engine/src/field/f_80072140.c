@@ -2142,6 +2142,10 @@ static void pcFieldSceneDepth(int looking) {
         OPX_80Params.m0_OPX_80Params[3] >= 0xE0) {
         picture = op9DVar1.m50_linkOTIndex - 1;
     }
+    /* The scenery's rotation and projection, for the scene lighting (xg-rgcf.5.1):
+     * the frame's centre and distance are the ones the field sets for its
+     * scene (SetGeomOffset(0xA0, 0x70), SetGeomScreen(sceneSCRZ)). */
+    pcSceneView(m->m, fieldSceneState.m178_sceneSCRZ, 0xA0, 0x70);
     pcSceneDepth(pCurrentFieldRenderingContext->mCC_OT, 0x1000,
                  fieldUseGroundOT != 0 ? pCurrentFieldRenderingContext->m40D0_secondaryOT : 0, 0x1000,
                  4 << gDepthDivider, &pCurrentFieldRenderingContext->m80D4_uiOT[6], focus, picture);
