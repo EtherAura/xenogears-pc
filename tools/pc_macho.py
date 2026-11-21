@@ -1,4 +1,5 @@
-"""Darwin arm64 game-module objects. Only plain little-endian MH_OBJECT is accepted."""
+"""Darwin arm64 game-module objects. Only plain little-endian MH_OBJECT is accepted, and a
+linked MH_EXECUTE for reading its sections and symbols back."""
 import hashlib
 import struct
 import subprocess
@@ -25,11 +26,11 @@ class Section:
 
 
 class Object:
-    def __init__(self, data):
+    def __init__(self, data, executable=False):
         self.data = bytearray(data)
         magic, cpu, _, kind, count = struct.unpack_from("<5I", data)
-        if (magic, cpu, kind) != (0xfeedfacf, 0x100000c, 1):
-            raise ValueError("expected a thin arm64 Mach-O relocatable object")
+        if (magic, cpu, kind) != (0xfeedfacf, 0x100000c, 2 if executable else 1):
+            raise ValueError("expected a thin arm64 Mach-O " + ("executable" if executable else "relocatable object"))
         self.sections = []
         self.symtab = self.dysymtab = None
         pos = 32
@@ -49,6 +50,24 @@ class Object:
             elif cmd == 11:  # LC_DYSYMTAB
                 self.dysymtab = pos + 8
             pos += size
+
+    def symbols(self, sections=None):
+        """name -> (section index, address) for each defined symbol, None for one that is only
+        referenced or is a tentative definition (common). With sections (indices), only the
+        symbols defined in those: modules linked together repeat each other's private names."""
+        sym, count, strings, size = struct.unpack_from("<4I", self.data, self.symtab)
+        out = {}
+        for i in range(count):
+            strx, kind, sect, _, value = struct.unpack_from("<IBBHQ", self.data, sym + 16 * i)
+            if kind & 0xe0:  # debugger entries
+                continue
+            defined = (kind & 0x0e) == 0x0e
+            if sections is not None and not (defined and sect in sections):
+                continue
+            end = self.data.index(b"\0", strings + strx)
+            name = self.data[strings + strx:end].decode()
+            out[name] = (sect, value) if defined else out.get(name)
+        return out
 
     def data_sections(self):
         # C initializers, strings, literals and switch tables. Exclude code and linker metadata.
@@ -114,6 +133,9 @@ class Object:
         data.extend(names)
 
 
+NO_EXPORTS = "xg_no_exports"  # tools/pc_link.py and tools/pc_srcdata.py start every export list with it
+
+
 def section_names(module):
     # Stable within the 16-byte Mach-O limit, independent of which modules are built together.
     suffix = hashlib.sha256(module.encode()).hexdigest()[:12]
@@ -128,8 +150,20 @@ def link(module, linker, objects, exports, output, tmp):
                     "-rename_section", "__DATA", "__common", "__DATA", bss,
                     "-rename_section", "__DATA", "__bss", "__DATA", bss, *objects, "-o", partial], check=True)
     # ld-classic exports all newly allocated commons in the first pass. Localize only afterwards.
+    # The lists' first line keeps objcopy's symbol file from being empty. It names no symbol.
     names = Path(tmp) / "exports"
-    names.write_text("".join("_" + n + "\n" for n in sorted(set(exports))))
+    wanted = sorted("_" + n for n in set(exports) - {NO_EXPORTS})
+    names.write_text("".join(n + "\n" for n in wanted))
+    allocated = Object(partial.read_bytes()).symbols()
+    missing = [n for n in wanted if allocated.get(n) is None]
+    if missing:
+        # Say what each input made of the name: the linker only reports who refers to it.
+        lines = []
+        for name in missing[:8]:
+            seen = [Path(o).name for o in objects if Object(Path(o).read_bytes()).symbols().get(name)]
+            lines.append(f"  {name[1:]}: " + ("defined in " + ", ".join(seen) + ", lost in the partial link" if seen
+                                         else "no input defines it (an alias whose host is a common symbol stays undefined)"))
+        raise SystemExit(f"pc_macho: {module}: {len(missing)} exported names have no definition:\n" + "\n".join(lines))
     subprocess.run([*args, "-exported_symbols_list", names, partial, "-o", output], check=True)
 
 

@@ -1,5 +1,7 @@
 /* Reset the linked game objects. Only the field and battle overlays are present. */
 #include <inttypes.h>
+#include <mach-o/getsect.h>
+#include <mach-o/ldsyms.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,6 +69,10 @@ int main(int argc, char **argv) {
     const void *exports[] = {fieldSceneState, battleEntities};
     unsigned char *initial[2];
     size_t data[2], bss[2];
+    /* Field's data points only at its code (the opcode tables), battle's at its own data too. */
+    unsigned long textSize = 0;
+    const unsigned char *text = getsegmentdata(&_mh_execute_header, "__TEXT", &textSize);
+    require(text != NULL && textSize > 0, "the executable's code range");
     for (int i = 0; i < 2; ++i) {
         Module m = portModules[i];
         require(!strcmp(m.name, names[i]) && m.dataEnd > m.data && m.bssEnd > m.bss, "generated bounds");
@@ -78,14 +84,16 @@ int main(int argc, char **argv) {
         initial[i] = malloc(data[i]);
         require(initial[i] != NULL, "allocate comparison image");
         memcpy(initial[i], m.data, data[i]);
-        size_t pointers = 0;
+        size_t own = 0, code = 0;
         for (size_t j = 0; j + sizeof(uintptr_t) <= data[i]; j += sizeof(uintptr_t)) {
             uintptr_t p;
             memcpy(&p, m.data + j, sizeof(p));
-            if (contains(m.data, m.dataEnd, p, 1) || contains(m.bss, m.bssEnd, p, 1)) ++pointers;
+            if (contains(m.data, m.dataEnd, p, 1) || contains(m.bss, m.bssEnd, p, 1)) ++own;
+            else if (contains(text, text + textSize, p, 1)) ++code;
         }
-        require(pointers > 0, "expected live pointers into the module");
-        printf("%s has %zu data bytes, %zu BSS bytes, %zu internal pointer slots\n", m.name, data[i], bss[i], pointers);
+        require(own + code > 0, "expected live pointers in the module's data");
+        printf("%s has %zu data bytes, %zu BSS bytes, pointer slots: %zu into its data and BSS, %zu into code\n",
+               m.name, data[i], bss[i], own, code);
     }
     portModulesInit();
     for (int i = 0; i < 2; ++i) {

@@ -43,6 +43,10 @@ jobs:
           sw_vers
           xcodebuild -version
           xcrun clang --version
+          # What this compiler makes of a tentative definition when no flag says: common or defined.
+          printf 'int tentative;\n' > "$RUNNER_TEMP/tentative.c"
+          xcrun clang -c "$RUNNER_TEMP/tentative.c" -o "$RUNNER_TEMP/tentative.o"
+          nm -m "$RUNNER_TEMP/tentative.o"
       - name: Link, scan and execute disc-free fixture
         run: python3 port/src/system/test/macos_modules/run.py
       - name: Link and reset US Original field and battle

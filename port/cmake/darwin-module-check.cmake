@@ -28,6 +28,7 @@ endforeach()
 enable_language(ASM)
 add_custom_command(OUTPUT "${XG_GEN_DIR}/imports.s"
     COMMAND Python3::Interpreter "${XG_CHECK_DIR}/game_check.py" imports "${CMAKE_BINARY_DIR}"
-    DEPENDS ${objects} "${XG_CHECK_DIR}/game_check.py" VERBATIM)
+    DEPENDS ${objects} "${XG_CHECK_DIR}/game_check.py" "${XG_ROOT}/tools/pc_macho.py"
+            "${XG_MODULE_METADATA}/field.c" "${XG_MODULE_METADATA}/battle.c" VERBATIM)
 add_executable(darwin_module_check "${XG_GEN_DIR}/imports.s" "${XG_CHECK_DIR}/game_reset.c" src/system/memory.c
     "${XG_MODULE_METADATA}/bounds.c" ${objects} ${copies})

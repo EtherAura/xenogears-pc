@@ -43,7 +43,10 @@ function(xg_link_module module)
         set(XG_MODULE_METADATA "${XG_GEN_DIR}")
     endif()
     add_library(gen_${module} OBJECT "${XG_GEN_DIR}/${module}.c")
-    target_compile_options(gen_${module} PRIVATE -w -fno-data-sections ${XG_PIC_OPTIONS})
+    # -fno-common: the generated aliases (.set name, host + offset) need their host
+    # defined in this object. A tentative definition left common has no address there,
+    # and the alias stays undefined.
+    target_compile_options(gen_${module} PRIVATE -w -fno-data-sections -fno-common ${XG_PIC_OPTIONS})
     set(out "${CMAKE_BINARY_DIR}/modules/${module}.o")
     # Each module's data and BSS in sections of their own: the overlays are
     # reset at each load, main's BSS at the soft reset (port/src/system/memory.c).
