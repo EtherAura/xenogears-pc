@@ -1,3 +1,5 @@
+English | [日本語](extras-ja.md)
+
 # Extras
 
 The extras read your disc images and use the game's own code to load,

@@ -1,3 +1,5 @@
+English | [日本語](README.ja.md)
+
 <div align="center">
 
 # Xenogears PC port

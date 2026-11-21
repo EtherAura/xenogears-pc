@@ -1,3 +1,5 @@
+English | [日本語](packs-ja.md)
+
 # Packs
 
 Packs replace the game's pictures on screen. The game's data is not touched,

@@ -1,3 +1,5 @@
+English | [日本語](translations-ja.md)
+
 # Playing with translated text
 
 The US download plays in English. Start the game from your original US

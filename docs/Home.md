@@ -1,3 +1,5 @@
+English | [日本語](Home-ja.md)
+
 # Xenogears PC port
 
 Part of -Project Exodus-, an unofficial Xenogears preservation effort.

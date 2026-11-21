@@ -1,3 +1,5 @@
+English | [日本語](display-ja.md)
+
 # Display
 
 ![Lahan at 16:9 and 6x the PS1 resolution](img/display.png)

@@ -1,3 +1,5 @@
+English | [日本語](gameplay-ja.md)
+
 # Gameplay
 
 The boss camera fix is on by default. Other gameplay options default to the original values.

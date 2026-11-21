@@ -1,3 +1,5 @@
+English | [日本語](building-ja.md)
+
 # Building
 
 The port is built from source with your own discs. The executable carries no
