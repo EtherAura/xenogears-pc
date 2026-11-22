@@ -24,8 +24,8 @@ if [ "$(basename "$1")" = ninja ]; then
     for a in "$@"; do case "$a" in -j*) named=1 ;; esac; done
     [ "$named" = 1 ] || set -- "$1" -j "$jobs" "${@:2}"
 fi
-# nice 19 itself, not 19 more: an agent's shell may start below 0 (ananicy-cpp
-# gives its desktop app -8, and every build it starts inherits that).
+# nice 19 itself, not 19 more: an agent's shell may start below 0 (an Electron
+# host app raises its own main thread to -8, and every build it starts inherits it).
 by=$(( 19 - $(nice) ))
 if command -v ionice > /dev/null; then
     exec nice -n "$by" ionice -c 3 "$@"

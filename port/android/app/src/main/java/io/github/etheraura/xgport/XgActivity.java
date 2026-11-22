@@ -16,7 +16,9 @@
 //
 // The game's menu calls chooseDiscFolder, discFolder, copyPack, packCopyStatus
 // and cancelPackCopy (port/src/system/android.c); a new disc folder applies at
-// the next start.
+// the next start. The game itself starts before the picker returns (SDL starts
+// it as soon as the surface first comes up), so when a folder arrives while the
+// game runs without a disc (the first start) the app starts again with it.
 //
 // The picture (xg-mrj.3.9): the game shows 60 pictures a second (the PS1's
 // NTSC field rate, paced by the port), so the surface asks the system for 60
@@ -44,6 +46,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.UriPermission;
+import android.content.pm.ActivityInfo;
 import android.database.Cursor;
 import android.graphics.Rect;
 import android.net.Uri;
@@ -76,6 +79,8 @@ public class XgActivity extends SDLActivity {
     private static final String DISC_TREE = "discTree";
     private PackCopy packCopy;
     private String packKind = "texture";
+    // The game started with no disc image from the chosen folder (getArguments, on SDL's thread).
+    private volatile boolean startedWithoutDisc;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -151,6 +156,20 @@ public class XgActivity extends SDLActivity {
         }
     }
 
+    // The game is landscape only (AndroidManifest.xml: sensorLandscape, either way up by the
+    // sensor). SDL sets the orientation again when it makes its window, and for a resizable
+    // window with no SDL_HINT_ORIENTATIONS it asks for any orientation the user's rotation
+    // setting allows (FULL_USER): turned upright, the game went to portrait and its surface was
+    // made again (xg-098). The manifest's choice is kept instead, on the UI thread.
+    @Override
+    public void setOrientationBis(int w, int h, boolean resizable, String hint) {
+        runOnUiThread(() -> {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            Log.i(TAG, "orientation: landscape kept (SDL asked for a " + w + "x" + h
+                       + (resizable ? " resizable" : "") + " window, hint '" + hint + "')");
+        });
+    }
+
     @Override
     protected String[] getLibraries() {
         return new String[] {"SDL3", "xgloader"};
@@ -185,6 +204,7 @@ public class XgActivity extends SDLActivity {
         } else if (tree != null) {
             scan(getContentResolver(), tree, DocumentsContract.getTreeDocumentId(tree), "", 0, args);
         }
+        startedWithoutDisc = dir == null && !args.contains("--image");
         return args.toArray(new String[0]);
     }
 
@@ -339,8 +359,16 @@ public class XgActivity extends SDLActivity {
         } catch (SecurityException e) {
             Log.w(TAG, "disc folder: the grant cannot be kept: " + e);
         }
-        prefs().edit().putString(DISC_TREE, tree.toString()).apply();
+        // commit, not apply: a restart below ends this process right away
+        prefs().edit().putString(DISC_TREE, tree.toString()).commit();
         Log.i(TAG, "disc folder: " + tree);
+        if (mSDLThread != null && startedWithoutDisc) {
+            // The first start: the game came up before the picker returned and has no disc. It
+            // starts again with the folder, instead of waiting on its setup screen for the next start.
+            Log.i(TAG, "disc folder: the game has no disc yet; starting again with this folder");
+            restartApp();
+            return;
+        }
         if (getIntent().getBooleanExtra("discs-picker", false) || mSDLThread != null) {
             toast("Disc folder: " + shownName(tree) + " (from the next start)");
         }

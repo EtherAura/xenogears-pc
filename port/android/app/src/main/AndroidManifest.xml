@@ -14,7 +14,10 @@
 
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- appCategory="game" (xg-098): Android 16+ ignores an app's orientation and resizing limits on
+         screens 600 dp wide or more (tablets, foldables, desktop windows), except for games. -->
     <application android:label="@string/app_name"
+        android:appCategory="game"
         android:allowBackup="false"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
         android:enableOnBackInvokedCallback="false"
