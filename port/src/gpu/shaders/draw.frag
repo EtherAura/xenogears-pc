@@ -15,7 +15,10 @@
 // interlock): VRAM is the pass's colour attachment, the pixel's own value is
 // read from tile memory, which the extension orders by primitive, and the
 // result is the colour output. Texels still come from the storage image: a
-// batch never reads what it writes (gp0.c batchAdd).
+// batch never reads what it writes (gp0.c batchAdd). With WIDE as well the
+// wide target is the attachment (vk.c tileWidePass) and the texels taken from
+// it (vWideTex) are read from it as a storage image, apart from what the
+// batch writes (gp0.c batchAddWide).
 
 #ifdef TILE_IMAGE
 #extension GL_EXT_shader_tile_image : require

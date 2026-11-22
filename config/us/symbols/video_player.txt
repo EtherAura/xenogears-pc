@@ -38,9 +38,10 @@ StGetNext = 0x801D5C70; // type:func
 StCdInterrupt = 0x801D5D54; // type:func
 mem2mem = 0x801D66C4; // type:func
 dma_execute = 0x801D66F8; // type:func
-// Tables at the start of VLC.OBJ and VLC_C.OBJ (named as in JP).
-func_801D4C94 = 0x801D4C94;
-func_801D502C = 0x801D502C;
+// DecDCTvlc's output size limit at the start of VLC.OBJ and VLC_C.OBJ. DecDCTvlcSize(n) stores it
+// and returns the old one, 0x00FFFFFF (no limit) when n < 1.
+vlcSizeLimit = 0x801D4C94;
+vlcSizeLimit2 = 0x801D502C;
 
 // ---- Noah names (naming pass, work/naming) ----
 uploadStrSliceToVram = 0x801D30C4; // type:func

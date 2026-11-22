@@ -107,3 +107,8 @@ Battling's two-player bouts from any field, and versus battles where player 2
 commands an enemy formation. Online plays either with someone elsewhere: one
 hosts, the other joins with the same session word (UDP port 7461 by default).
 F1 > Extras.
+
+![Battling from the battle arena](img/extras-battling.webp)
+
+Weltall against Heimdal in Battling. **Every Gear** offers all 49 Gears, not
+only those the story has reached.

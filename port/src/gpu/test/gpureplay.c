@@ -24,7 +24,12 @@
  *   --from N         with --bench: statistics from vblank N on (default 180)
  *   --times FILE     with --bench: a line per vblank (number, ms, lateness ms)
  *   --hash-every N   read VRAM back every N vblanks and print its FNV-1a hash
- *                    (two devices or two renderers drew the same pixels)
+ *                    (two devices or two renderers drew the same pixels); with
+ *                    an upscale (XG_SETTINGS naming a file with upscale=N) the
+ *                    hi-res copy's hash too ("hires" lines). From a shell on an
+ *                    Android device only at 1x: the upscale's pack libraries
+ *                    start an SDL thread and look up folders that are not
+ *                    there, which SDL does there through the app's Java side.
  */
 
 #define _GNU_SOURCE
@@ -32,6 +37,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __ANDROID__
+#include <unistd.h>
+#endif
 
 #include "common.h"
 #ifdef bzero /* bionic's is a macro; psyq.h declares the function */
@@ -260,6 +268,16 @@ int main(int argc, char** argv) {
     if (!gpuInit(NULL)) {
         return 1;
     }
+#ifdef __ANDROID__
+    /* SDL takes a relative path for one in the app's storage, which a shell
+     * process has none of (SDL_CreateDirectory(".") crashes): the folder in full. */
+    static char outFull[1024];
+    if (out[0] != '/' && getcwd(outFull, sizeof outFull) != NULL) {
+        size_t used = strlen(outFull);
+        snprintf(outFull + used, sizeof outFull - used, "/%s", out);
+        out = outFull;
+    }
+#endif
     SDL_CreateDirectory(out);
     /* Traces start with the game running: its display is on. */
     SetDispMask(1);
@@ -322,6 +340,20 @@ int main(int argc, char** argv) {
                     h *= UINT64_C(1099511628211);
                 }
                 printf("vram %d %016llx\n", marker, (unsigned long long)h);
+                /* Upscaled (settings.ini upscale=N through XG_SETTINGS): the
+                 * hi-res copy of VRAM as well, colour, mask and coverage bits. */
+                int n = gvkHiScale();
+                static uint32_t* copy;
+                if (n > 0 && (copy != NULL || (copy = malloc((size_t)VRAM_W * n * VRAM_H * n * 4)) != NULL) &&
+                    gvkHiRead(0, copy, 0, 0, VRAM_W * n, VRAM_H * n)) {
+                    uint64_t hc = UINT64_C(14695981039346656037);
+                    const uint8_t* cb = (const uint8_t*)copy;
+                    for (size_t i = 0; i < (size_t)VRAM_W * n * VRAM_H * n * 4; i++) {
+                        hc ^= cb[i];
+                        hc *= UINT64_C(1099511628211);
+                    }
+                    printf("hires %d %016llx\n", marker, (unsigned long long)hc);
+                }
             }
             if (getenv("XG_GP0_PROBE") != NULL) {
                 fprintf(stderr, "V %d display (%d,%d)\n", marker, gpuDisplay()->x, gpuDisplay()->y);

@@ -10,6 +10,10 @@
  *   warp      the circle warp FX (battle_fx_circle_warp)
  *   win       the enemies' HP (and gear HP) down to 1, so the battle ends
  *             soon and the result screen shows (as XG_BATTLE_POKE, sweep.c)
+ *   combo     the party's stored AP full (28) and the Combo command enabled
+ *             (command 5), so Right on the command ring opens the Combo
+ *             ring, and Triangle there its setup menu
+ *             (drawCircleMenuComboSelect), which early fights never show
  * XG_BATTLE_HUDLOG=1 (with XG_SWEEP_LOG): one "H" line per battle frame gives
  * the HUD's state (port/src/system/sweeplog.c): battle mode, acting entity,
  * open menu, then flags (command ring, menu glyphs BA8/27C8/1E68, combo
@@ -121,6 +125,12 @@ void portBattleWideTest(void) {
             playFxScreenRipple();
         } else if (named(tests[i].name, "warp")) {
             createFxCircleWarp();
+        } else if (named(tests[i].name, "combo")) {
+            s32 k;
+            for (k = 0; k < 3; k++) {
+                apConfigArray[k].m0_storedAP = 0x1C;
+                battleVar2->m0_entityMenus[k].m1C_isCommandEnabled[5] = 0;
+            }
         } else if (named(tests[i].name, "win")) {
             s32 k;
             for (k = 3; k < 11; k++) {

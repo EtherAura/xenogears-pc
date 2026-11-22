@@ -1842,7 +1842,11 @@ void setupComboMenuMoveGlyphs(u8 entity, u8* moves) {
     }
     battleVar1->mFC_countOF1E68 = 0;
     for (j = 0; j < 16; j++) {
-        if (moves[j] != 0xFF) {
+        /* moves is drawCircleMenuComboSelect's u8[7]; the PS1 reads on into its frame (xg-fhc7). Slot 7 is a
+         * padding byte nothing writes: the cursor's eighth cell, which executes the combo (setupComboMenu
+         * always names it), so its icon is meant to show. Slots 8-15 (the AP maximum, the button prompts,
+         * the title) read the zeroed unk28 beside it and always draw. */
+        if (j >= 7 || moves[j] != 0xFF) {
             battleVar1->mFC_countOF1E68 += battleSetupStringInPolyFT4Large(comboMenuMoveGlyphs[j], &battleVar0->m1E68_menuGlyphs2[battleVar1->mFC_countOF1E68],
                                                          comboMenuMoveGlyphX[j], comboMenuMoveGlyphY[j]);
         }

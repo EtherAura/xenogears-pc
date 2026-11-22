@@ -206,6 +206,15 @@ static const uint32_t draw_ordered_fragSpv[] =
 static const uint32_t draw_tile_fragSpv[] =
 #include "draw_tile.frag.spv.inc"
     ;
+static const uint32_t draw_wide_tile_fragSpv[] =
+#include "draw_wide_tile.frag.spv.inc"
+    ;
+static const uint32_t hires_tile_fragSpv[] =
+#include "hires_tile.frag.spv.inc"
+    ;
+static const uint32_t hires_wide_tile_fragSpv[] =
+#include "hires_wide_tile.frag.spv.inc"
+    ;
 static const uint32_t draw_wide_ordered_vertSpv[] =
 #include "draw_wide_ordered.vert.spv.inc"
     ;
@@ -745,9 +754,12 @@ static struct {
     VkPipeline orderedDraw, orderedWide, orderedHi, orderedHiWide, orderedResolve;
     uint64_t orderedPasses;
     /* VK_EXT_shader_tile_image: the device has it (and no interlock), and the
-     * native pass that uses it (drawTile), made with the ordered fallback. */
+     * passes that use it, made with the ordered fallback: the native one
+     * (drawTile), the wide target's (tileWidePass) and the hi-res copies'
+     * (tileHiPass). The wide target and the 32-bit images can then be colour
+     * attachments. */
     int tileImage;
-    VkPipeline tileDraw;
+    VkPipeline tileDraw, tileWideDraw, tileHiDraw, tileHiWideDraw;
     uint64_t tilePasses;
     float tileBox[4]; /* the batch's vertices so far: x0, y0, x1, y1 (tileNote) */
     int tileWhole;    /* one of them was not finite: the pass covers all of VRAM */
@@ -1822,9 +1834,11 @@ static void createSet(FrameCtx* f) {
 
 static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int draw,
                                  VkFormat colorFormat) {
-    /* 7: the native draw with VRAM as its colour attachment (drawTile), optional like 3. */
-    int attached = draw == 0 || draw == 7;
+    /* 7: the native draw with VRAM as its colour attachment (drawTile), optional like 3;
+     * 8: the wide draw with the wide target as its attachment (tileWidePass), optional like 4. */
+    int attached = draw == 0 || draw == 7 || draw == 8;
     if(draw==7)draw=3;
+    if(draw==8)draw=4;
     int optional = draw >= 3;
     if(optional)draw-=2;
     VkShaderModule vm = shaderModule(vs, vsSize);
@@ -1915,6 +1929,9 @@ static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32
 /* createHiPipeline for the scene depth builds: HiVertex.z as well. */
 static int hiPipelineDepth;
 static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices) {
+    /* 5: optional like 3, with the copy (R32_UINT) as its colour attachment (tileHiPass). */
+    int attached = vertices == 5;
+    if(attached)vertices=3;
     int optional = vertices >= 3;
     if(optional)vertices-=2;
     VkShaderModule vm = shaderModule(vs, vsSize);
@@ -1965,12 +1982,20 @@ static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint
     rs.lineWidth = 1.0f;
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineColorBlendAttachmentState att = {0};
+    att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+                         VK_COLOR_COMPONENT_A_BIT;
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+    cb.attachmentCount = attached ? 1 : 0;
+    cb.pAttachments = &att;
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
     ds.dynamicStateCount = 2;
     ds.pDynamicStates = dyn;
+    VkFormat colorFormat = VK_FORMAT_R32_UINT;
     VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
+    ri.colorAttachmentCount = attached ? 1 : 0;
+    ri.pColorAttachmentFormats = &colorFormat;
     VkGraphicsPipelineCreateInfo gi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
     gi.pNext = &ri;
     gi.stageCount = 2;
@@ -2853,38 +2878,79 @@ static void tileNote(const GpuVertex* v, int n) {
     }
 }
 
-static void drawTile(FrameCtx* f, uint32_t first, uint32_t count) {
-    int x0 = 0, y0 = 0, x1 = VRAM_W, y1 = VRAM_H;
-    if (!vk.tileWhole) {
-        /* A pixel past each edge for the rasteriser's rounding, as orderedBounds. */
-        x0 = (int)fmaxf(0, fminf((float)VRAM_W, floorf(vk.tileBox[0]) - 1));
-        y0 = (int)fmaxf(0, fminf((float)VRAM_H, floorf(vk.tileBox[1]) - 1));
-        x1 = (int)fmaxf(0, fminf((float)VRAM_W, ceilf(vk.tileBox[2]) + 2));
-        y1 = (int)fmaxf(0, fminf((float)VRAM_H, ceilf(vk.tileBox[3]) + 2));
-    }
-    if (x1 <= x0 || y1 <= y0) return;
+/* One render pass over box (in the attachment's pixels) with view as its
+ * colour attachment, loaded and stored: vertices first..first+count of the
+ * buffer at offset, the viewport vw x vh from the target's origin. */
+static void tilePass(FrameCtx* f, VkImageView view, VkPipeline pipeline, VkPipelineLayout layout, VkDeviceSize offset,
+                     uint32_t first, uint32_t count, OrderedBox box, int vw, int vh, const void* constants,
+                     uint32_t constantBytes) {
+    if (box.x1 <= box.x0 || box.y1 <= box.y0) return;
     VkCommandBuffer cmd = f->cmd;
     VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-    color.imageView = vk.vramView;
+    color.imageView = view;
     color.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
-    ri.renderArea = (VkRect2D){{x0, y0}, {(uint32_t)(x1 - x0), (uint32_t)(y1 - y0)}};
+    ri.renderArea = (VkRect2D){{box.x0, box.y0}, {(uint32_t)(box.x1 - box.x0), (uint32_t)(box.y1 - box.y0)}};
     ri.layerCount = 1;
     ri.colorAttachmentCount = 1;
     ri.pColorAttachments = &color;
     vkCmdBeginRendering(cmd, &ri);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.tileDraw);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipelineLayout, 0, 1, &f->set, 0, NULL);
-    VkDeviceSize offset = 0;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &f->set, 0, NULL);
     vkCmdBindVertexBuffers(cmd, 0, 1, &f->vertices.buffer, &offset);
-    VkViewport viewport = {0, 0, (float)VRAM_W, (float)VRAM_H, 0, 1};
+    VkViewport viewport = {0, 0, (float)vw, (float)vh, 0, 1};
     vkCmdSetViewport(cmd, 0, 1, &viewport);
     vkCmdSetScissor(cmd, 0, 1, &ri.renderArea);
+    if (constantBytes)
+        vkCmdPushConstants(cmd, layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, constantBytes,
+                           constants);
     vkCmdDraw(cmd, count, 1, first, 0);
     vkCmdEndRendering(cmd);
     vk.tilePasses++;
+}
+
+static void drawTile(FrameCtx* f, uint32_t first, uint32_t count) {
+    OrderedBox box = {0, 0, VRAM_W, VRAM_H};
+    if (!vk.tileWhole) {
+        /* A pixel past each edge for the rasteriser's rounding, as orderedBounds. */
+        box.x0 = (int)fmaxf(0, fminf((float)VRAM_W, floorf(vk.tileBox[0]) - 1));
+        box.y0 = (int)fmaxf(0, fminf((float)VRAM_H, floorf(vk.tileBox[1]) - 1));
+        box.x1 = (int)fmaxf(0, fminf((float)VRAM_W, ceilf(vk.tileBox[2]) + 2));
+        box.y1 = (int)fmaxf(0, fminf((float)VRAM_H, ceilf(vk.tileBox[3]) + 2));
+    }
+    tilePass(f, vk.vramView, vk.tileDraw, vk.pipelineLayout, 0, first, count, box, VRAM_W, VRAM_H, NULL, 0);
+}
+
+/* The box of count vertices (triangles) at scale in a w x h target, as the
+ * ordered lists bound them (orderedBounds); all of it for a vertex that is
+ * not finite or, hi-res (wOffset: HiVertex.w), behind the eye, whose clipped
+ * triangle can reach past its vertices. */
+static OrderedBox tileBounds(const void* v, size_t stride, uint32_t count, int scale, int w, int h, size_t wOffset) {
+    OrderedBox all = {w, h, 0, 0};
+    for (uint32_t i = 0; i + 2 < count; i += 3) {
+        const char* t = (const char*)v + i * stride;
+        for (int k = 0; wOffset && k < 3; k++) {
+            float vw;
+            memcpy(&vw, t + k * stride + wOffset, sizeof vw);
+            if (!isfinite(vw) || vw <= 0) return (OrderedBox){0, 0, w, h};
+        }
+        OrderedBox b = orderedBounds(t, stride, scale, w, h);
+        if (b.x0 < all.x0) all.x0 = b.x0;
+        if (b.y0 < all.y0) all.y0 = b.y0;
+        if (b.x1 > all.x1) all.x1 = b.x1;
+        if (b.y1 > all.y1) all.y1 = b.y1;
+    }
+    return all;
+}
+
+/* The wide target's batch in one render pass (draw_wide_tile.frag), as
+ * drawTile's: the box of its vertices (already in the frame's vertex buffer
+ * at first), the wide target loaded and stored. */
+static void tileWidePass(FrameCtx* f, const GpuVertex* v, uint32_t first, uint32_t count) {
+    OrderedBox box = tileBounds(v, sizeof(GpuVertex), count, 1, WIDE_W, WIDE_H, 0);
+    tilePass(f, vk.wideView, vk.tileWideDraw, vk.pipelineLayout, 0, first, count, box, WIDE_W, WIDE_H, NULL, 0);
 }
 
 static void drawWideBatch(FrameCtx* f) {
@@ -2893,7 +2959,8 @@ static void drawWideBatch(FrameCtx* f) {
     if(vk.orderedEnabled) {
         VkDeviceSize offset=f->vertexUsed;
         memcpy(f->vertices.map+offset,wideBuf,(size_t)vk.wideCount*sizeof(GpuVertex));
-        drawOrdered(f,wideBuf,sizeof(GpuVertex),offset,0,vk.wideCount,1,WIDE_W,WIDE_H,1,NULL,0);
+        if(vk.tileWideDraw)tileWidePass(f,wideBuf,(uint32_t)(offset/sizeof(GpuVertex)),vk.wideCount);
+        else drawOrdered(f,wideBuf,sizeof(GpuVertex),offset,0,vk.wideCount,1,WIDE_W,WIDE_H,1,NULL,0);
         f->vertexUsed+=(size_t)vk.wideCount*sizeof(GpuVertex);vk.wideCount=0;
         vk.wideScanned=0;vk.wideDependent=0;
         gtStop(f->cmd,q);return;
@@ -3115,8 +3182,9 @@ static void resIdle(void) {
 }
 
 static void orderedDestroy(void) {
-    VkPipeline* pipelines[6]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw};
-    for(int i=0;i<6;i++) {
+    VkPipeline* pipelines[9]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw,
+                              &vk.tileWideDraw,&vk.tileHiDraw,&vk.tileHiWideDraw};
+    for(int i=0;i<9;i++) {
         if(*pipelines[i])vkDestroyPipeline(vk.device,*pipelines[i],NULL);
         *pipelines[i]=VK_NULL_HANDLE;
     }
@@ -3165,10 +3233,19 @@ static int orderedMake(void) {
     vk.orderedHi=createHiPipeline(hires_ordered_vertSpv,sizeof(hires_ordered_vertSpv),hires_ordered_fragSpv,sizeof(hires_ordered_fragSpv),3);
     vk.orderedHiWide=createHiPipeline(hires_wide_ordered_vertSpv,sizeof(hires_wide_ordered_vertSpv),hires_wide_ordered_fragSpv,sizeof(hires_wide_ordered_fragSpv),4);
     if(!vk.orderedDraw||!vk.orderedWide||!vk.orderedHi||!vk.orderedHiWide)goto fail;
-    /* The native draws' single pass where the device reads tile memory;
-     * the other targets keep the lists. Without it they all do. */
+    /* A single pass per batch for each target where the device reads tile
+     * memory. Without it (or a target's pipeline) the lists.
+     * XG_VK_TILE_NATIVE_ONLY=1 keeps the wide target and the hi-res copies on
+     * the lists (the native picture's passes alone, for comparisons). */
+    int others=vk.tileImage&&!envFlag("XG_VK_TILE_NATIVE_ONLY");
     if(vk.tileImage&&!vk.tileDraw)
         vk.tileDraw=createPipeline(drawVertSpv,sizeof(drawVertSpv),draw_tile_fragSpv,sizeof(draw_tile_fragSpv),7,VK_FORMAT_R16_UINT);
+    if(others&&!vk.tileWideDraw)
+        vk.tileWideDraw=createPipeline(drawWideVertSpv,sizeof(drawWideVertSpv),draw_wide_tile_fragSpv,sizeof(draw_wide_tile_fragSpv),8,VK_FORMAT_R16_UINT);
+    if(others&&!vk.tileHiDraw)
+        vk.tileHiDraw=createHiPipeline(hiresVertSpv,sizeof(hiresVertSpv),hires_tile_fragSpv,sizeof(hires_tile_fragSpv),5);
+    if(others&&!vk.tileHiWideDraw)
+        vk.tileHiWideDraw=createHiPipeline(hiresWideVertSpv,sizeof(hiresWideVertSpv),hires_wide_tile_fragSpv,sizeof(hires_wide_tile_fragSpv),5);
     VkShaderModule module=shaderModule(ordered_compSpv,sizeof(ordered_compSpv));
     VkComputePipelineCreateInfo ci={.sType=VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     ci.stage=(VkPipelineShaderStageCreateInfo){.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_COMPUTE_BIT,.module=module,.pName="main"};
@@ -3180,7 +3257,8 @@ static int orderedMake(void) {
     fullBarrier(commands);vkCmdFillBuffer(commands,vk.orderedNodes,4,4,0);fullBarrier(commands);
     vk.orderedState=1;
     gpuLog("vulkan: exact ordered fallback ready (%u operations, %.1f MiB)%s",vk.orderedCapacity,(double)(bytes+vk.orderedCapacity*4)/(1<<20),
-           vk.tileDraw?"; native draws in one tile image pass per batch":"");
+           !vk.tileDraw?"":vk.tileWideDraw&&vk.tileHiDraw&&vk.tileHiWideDraw?"; every target's draws in one tile image pass per batch":
+           "; native draws in one tile image pass per batch");
     return 1;
 fail:
     orderedDestroy();return 0;
@@ -3205,6 +3283,8 @@ int gvkOrderedWrites(void) {return vk.interlock||vk.orderedEnabled;}
 const char* gpuOrderedStatus(void) {
     if(!vk.device)return "Renderer has not started.";
     if(vk.interlock)return "Hardware ordered rendering is active.";
+    if(vk.orderedEnabled&&vk.tileDraw&&vk.tileWideDraw&&vk.tileHiDraw&&vk.tileHiWideDraw)
+        return "Exact ordered fallback is active: tile image passes for every picture.";
     if(vk.orderedEnabled&&vk.tileDraw)return "Exact ordered fallback is active: tile image passes for the native picture.";
     if(vk.orderedEnabled)return "Exact ordered fallback is active.";
     if(vk.orderedState<0)return "Ordered fallback is unavailable; exact split batches are active.";
@@ -3382,6 +3462,21 @@ static int64_t resPlace(const TextureSample* s) {
     vk.resUploads++;
     vk.resUploadBytes += bytes;
     return offset;
+}
+
+/* The pack images' GPU cache and every frame's upload room, made before the game starts (main.c)
+ * when a pack library is in use, not by the first frame that draws a pack image: that frame (a
+ * room's first with its cels) then also mapped three 32 MB host buffers and touched them page by
+ * page while it uploaded, about 70 ms of the game thread in one vblank (xg-2fy.3). */
+void gpuPackPrepare(void) {
+    if (vk.device == VK_NULL_HANDLE || !resMake()) return;
+    for (int i = 0; i < FRAMES; i++) {
+        FrameCtx* f = &vk.frames[i];
+        if (f->resStage.buffer == VK_NULL_HANDLE) {
+            createHostBuffer(&f->resStage, RES_STAGE_BYTES, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0);
+        }
+        if (f->resStage.map != NULL) memset(f->resStage.map, 0, RES_STAGE_BYTES); /* its pages, now */
+    }
 }
 
 void gvkSubmit(void) {
@@ -4114,7 +4209,11 @@ static int createImage32Memory(VkImage* image, VkDeviceMemory* memory, VkImageVi
     ii.arrayLayers = 1;
     ii.samples = VK_SAMPLE_COUNT_1_BIT;
     ii.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    /* The hi-res copies are tileHiPass's attachments where the device reads
+     * tile memory; they move between these images (growth, retirement), so
+     * every one can be. */
+    ii.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+               (vk.tileImage ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0);
     ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     if (vkCreateImage(vk.device, &ii, NULL, image) != VK_SUCCESS) {
@@ -6458,6 +6557,20 @@ static int hiViewportSize(int extent) {
     return (uint32_t)p <= vk.limits.maxViewportDimensions[0] && (uint32_t)p <= vk.limits.maxViewportDimensions[1] ? p : extent;
 }
 
+/* A hi-res copy's batch in one render pass (hires_tile.frag), as drawTile's:
+ * the vertices (at offset, rasterising where they are: rasterShift 0) within
+ * the copy's image, the viewport tw x th and constants c the ordered lists
+ * use. */
+static void tileHiPass(FrameCtx* f, int wide, const HiVertex* v, VkDeviceSize offset, uint32_t count, int tw, int th,
+                       const HiDrawConstants* c) {
+    int n = vk.hiN;
+    int iw = wide ? vk.hiWideW * n : VRAM_W * n, ih = wide ? vk.hiWideH * n : VRAM_H * n;
+    OrderedBox box = tileBounds(v, sizeof(HiVertex), count, n, iw < tw ? iw : tw, ih < th ? ih : th,
+                                offsetof(HiVertex, w));
+    tilePass(f, wide ? vk.hiWideView : vk.hiVramView, wide ? vk.tileHiWideDraw : vk.tileHiDraw, vk.hiLayout, offset, 0,
+             count, box, tw, th, c, sizeof(*c));
+}
+
 static void drawHiBatch(FrameCtx* f, int wide) {
     static uint8_t coarseMark[HI_MAX / 3];
     uint32_t count = wide ? vk.hiWideCount : vk.hiCount;
@@ -6497,7 +6610,8 @@ static void drawHiBatch(FrameCtx* f, int wide) {
         for (uint32_t i = 0; i < count; i++) ((HiVertex*)src)[i].rasterShift = 0; /* the ordered list rasterises in place */
         memcpy(f->vertices.map+offset,src,(size_t)count*sizeof(HiVertex));
         HiDrawConstants c={n,vk.hiColor,tw,th,vk.hiWideW*n,WIDE_H*n,0,0,1,0,0,0,0,0};
-        drawOrdered(f,src,sizeof(HiVertex),offset,0,count,n,tw,th,wide?3:2,&c,sizeof(c));
+        if(wide?vk.tileHiWideDraw:vk.tileHiDraw)tileHiPass(f,wide,src,offset,count,tw,th,&c);
+        else drawOrdered(f,src,sizeof(HiVertex),offset,0,count,n,tw,th,wide?3:2,&c,sizeof(c));
         f->vertexUsed+=(size_t)count*sizeof(HiVertex);
         f->vertexUsed=(f->vertexUsed+sizeof(GpuVertex)-1)/sizeof(GpuVertex)*sizeof(GpuVertex);
         gtStop(f->cmd,q);return;
@@ -8282,8 +8396,9 @@ int gvkInit(void* sdlWindow) {
         return 0;
     }
     createImage16(&vk.wide, &vk.wideMemory,
-                  VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, WIDE_W,
-                  WIDE_H);
+                  VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                      (vk.tileImage ? VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT : 0),
+                  WIDE_W, WIDE_H);
     vi.image = vk.wide;
     VK_CHECK(vkCreateImageView(vk.device, &vi, NULL, &vk.wideView));
     createLayouts();

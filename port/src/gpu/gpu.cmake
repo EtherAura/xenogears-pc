@@ -84,8 +84,12 @@ xg_gpu_shader(draw.frag draw_wide_ordered.frag -DORDERED_LIST -DWIDE)
 xg_gpu_shader(hires.frag hires_ordered.frag -DORDERED_LIST)
 xg_gpu_shader(hires.frag hires_wide_ordered.frag -DORDERED_LIST -DWIDE)
 xg_gpu_shader(ordered.comp ordered.comp)
-# VK_EXT_shader_tile_image (tile-based GPUs): VRAM as the pass's colour attachment (vk.c drawTile).
+# VK_EXT_shader_tile_image (tile-based GPUs): the target as the pass's colour attachment: VRAM
+# (vk.c drawTile), the wide target and the hi-res copies (vk.c tileHiPass, tileWidePass).
 xg_gpu_shader(draw.frag draw_tile.frag -DTILE_IMAGE)
+xg_gpu_shader(draw.frag draw_wide_tile.frag -DTILE_IMAGE -DWIDE)
+xg_gpu_shader(hires.frag hires_tile.frag -DTILE_IMAGE)
+xg_gpu_shader(hires.frag hires_wide_tile.frag -DTILE_IMAGE -DWIDE)
 xg_gpu_shader(draw.vert draw_ordered.vert -DORDERED_LIST)
 xg_gpu_shader(draw.vert draw_wide_ordered.vert -DORDERED_LIST -DWIDE)
 xg_gpu_shader(hires.vert hires_ordered.vert -DORDERED_LIST)

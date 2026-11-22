@@ -24,6 +24,13 @@
 //
 // Built with WIDE: into the hi-res wide target; 15-bit texels the primitive
 // takes from the wide target (vWideTex) come from its hi-res copy.
+//
+// Built with TILE_IMAGE (VK_EXT_shader_tile_image, as draw.frag's): the copy
+// is the pass's colour attachment and the pixel's own word is read from tile
+// memory in primitive order (vk.c tileHiPass). Texels still come from the
+// storage images: a batch never reads what it writes (gp0.c batchAdd,
+// batchAddWide). One pixel a fragment, at the copy's own position (the
+// vertices' rasterShift is 0): not with COARSE or DEPTH.
 
 #ifdef INTERLOCK
 #extension GL_ARB_fragment_shader_interlock : require
@@ -33,6 +40,12 @@ layout(pixel_interlock_ordered) in;
 #else
 #define BEGIN_ORDERED()
 #define END_ORDERED()
+#endif
+
+#ifdef TILE_IMAGE
+#extension GL_EXT_shader_tile_image : require
+layout(location = 0) tileImageEXT uattachmentEXT tilePixel;
+layout(location = 0) out uint outPixel;
 #endif
 
 #ifdef ORDERED_LIST
@@ -337,6 +350,50 @@ uint filteredPixel(vec2 at, ivec2 lo, ivec2 hi, out bool clear) {
     return pack8(color) | ((nearest >> 24) == 128u ? MASK : 0u);
 }
 
+// Whether a fragment may replace the copy's pixel dst: seam strips (fringe)
+// only fill uncovered pixels, and the PS1's mask check.
+bool hiKeeps(uint dst, uint mode) {
+    return ((mode & DRAW_FRINGE) == 0u || (dst & COVERED) == 0u) &&
+           ((mode & DRAW_CHECK_MASK) == 0u || (dst & MASK) == 0u);
+}
+
+// The copy's new word at pixel pp (inside the 1x pixel q) over dst: colour
+// in the push constant's mode, the mask bit and the display coverage.
+uint hiPixel(uint dst, ivec2 pp, ivec2 q, uint mode, bool resolved, uint fill, bool raw, bool semi, uint semiMode,
+             bool dithered, ivec3 front8, ivec3 front5, uint maskOut) {
+    uint color;
+    if (resolved || (mode & DRAW_FILL) != 0u) {
+        color = fill;
+    } else if (raw) {
+        color = pack8(semi ? blend8(semiMode, rgb8(dst), front8) : min(front8, ivec3(255)));
+    } else if (pc.color == 0 && dithered) {
+        ivec3 f = ditherAverage(front8);
+        color = pack8(semi ? blend8(semiMode, rgb8(dst), f) : f);
+    } else if (pc.color == 0) {
+        ivec3 f = expand5(front5);
+        ivec3 b = rgb8(dst);
+        ivec3 v = !semi ? f : semiMode == 3u ? b + expand5(front5 >> 2) : blend8(semiMode, b, f);
+        color = pack8(clamp(v, ivec3(0), ivec3(255)));
+    } else if (dithered) {
+        ivec2 dp = pc.color == 1 ? q + pc.ditherOrigin : pp + pc.ditherOrigin * pc.n;
+        int d = dither[(dp.y & 3) * 4 + (dp.x & 3)];
+        ivec3 f = clamp((front8 + d) >> 3, 0, 31);
+        color = pack8(expand5(semi ? ivec3(blend5(semiMode, rgb8(dst) >> 3, f)) : f));
+    } else if (semi) {
+        color = pack8(expand5(ivec3(blend5(semiMode, rgb8(dst) >> 3, front5))));
+    } else {
+        color = pack8(expand5(min(front5, ivec3(31))));
+    }
+    if (textCover < 1.0) { // smooth text: the edge over what is there
+        ivec3 under = rgb8(dst), over = rgb8(color);
+        color = pack8(clamp(ivec3(floor(mix(vec3(under), vec3(over), textCover) + 0.5)), ivec3(0), ivec3(255)));
+    }
+    uint coverage = dst & COVERED;
+    if ((mode & (DRAW_SURFACE | DRAW_FRINGE)) != 0u) coverage = COVERED;
+    else if (resolved || (mode & DRAW_FILL) != 0u) coverage = 0u;
+    return color | maskOut | coverage;
+}
+
 void main() {
     bool evolving = (vSample.w & 0x100000u) != 0u;
     bool cachedCapture = (vSample.w & 0x400000u) != 0u;
@@ -514,44 +571,27 @@ void main() {
         }
         orderedAppend(p,front,flags);
     }
+#elif defined(TILE_IMAGE)
+    // As draw.frag's: a fragment that writes nothing leaves the attachment
+    // alone, and tile memory is read only by the fragments that are kept.
+    if (write) {
+        uint dst = colorAttachmentReadEXT(tilePixel).r;
+        if (hiKeeps(dst, mode)) {
+            outPixel = hiPixel(dst, p, q, mode, resolved, fill, raw, semi, semiMode, dithered, front8, front5, maskOut);
+        } else {
+            discard;
+        }
+    } else {
+        discard;
+    }
 #else
     BEGIN_ORDERED();
     if (write) for (int by = 0; by < cs; by++) for (int bx = 0; bx < cs; bx++) {
         ivec2 pp = p + ivec2(bx, by); // the block's pixel (p itself at full resolution)
         uint dst = imageLoad(DST, pp).r;
-        if (((mode & DRAW_FRINGE) == 0u || (dst & COVERED) == 0u) &&
-            ((mode & DRAW_CHECK_MASK) == 0u || (dst & MASK) == 0u)) {
-            uint color;
-            if (resolved || (mode & DRAW_FILL) != 0u) {
-                color = fill;
-            } else if (raw) {
-                color = pack8(semi ? blend8(semiMode, rgb8(dst), front8) : min(front8, ivec3(255)));
-            } else if (pc.color == 0 && dithered) {
-                ivec3 f = ditherAverage(front8);
-                color = pack8(semi ? blend8(semiMode, rgb8(dst), f) : f);
-            } else if (pc.color == 0) {
-                ivec3 f = expand5(front5);
-                ivec3 b = rgb8(dst);
-                ivec3 v = !semi ? f : semiMode == 3u ? b + expand5(front5 >> 2) : blend8(semiMode, b, f);
-                color = pack8(clamp(v, ivec3(0), ivec3(255)));
-            } else if (dithered) {
-                ivec2 dp = pc.color == 1 ? q + pc.ditherOrigin : pp + pc.ditherOrigin * n;
-                int d = dither[(dp.y & 3) * 4 + (dp.x & 3)];
-                ivec3 f = clamp((front8 + d) >> 3, 0, 31);
-                color = pack8(expand5(semi ? ivec3(blend5(semiMode, rgb8(dst) >> 3, f)) : f));
-            } else if (semi) {
-                color = pack8(expand5(ivec3(blend5(semiMode, rgb8(dst) >> 3, front5))));
-            } else {
-                color = pack8(expand5(min(front5, ivec3(31))));
-            }
-            if (textCover < 1.0) { // smooth text: the edge over what is there
-                ivec3 under = rgb8(dst), over = rgb8(color);
-                color = pack8(clamp(ivec3(floor(mix(vec3(under), vec3(over), textCover) + 0.5)), ivec3(0), ivec3(255)));
-            }
-            uint coverage = dst & COVERED;
-            if ((mode & (DRAW_SURFACE | DRAW_FRINGE)) != 0u) coverage = COVERED;
-            else if (resolved || (mode & DRAW_FILL) != 0u) coverage = 0u;
-            imageStore(DST, pp, uvec4(color | maskOut | coverage));
+        if (hiKeeps(dst, mode)) {
+            imageStore(DST, pp, uvec4(hiPixel(dst, pp, q, mode, resolved, fill, raw, semi, semiMode, dithered,
+                                              front8, front5, maskOut)));
 #ifdef DEPTH
             // A fragment that replaces the pixel owns its depth; one that
             // blends (semi) or only smooths a text edge leaves it.

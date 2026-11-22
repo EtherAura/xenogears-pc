@@ -645,6 +645,8 @@ static void load(void) { if (!loaded) texturePackReload(); }
 /* The libraries' indexes read before the game starts (main.c), not at the first textured draw:
  * that is the boot logo's, with the sound already playing (about 70 ms: xg-2fy.2). */
 void texturePackPrepare(void) { load(); }
+/* Whether a library is in use whose images go through the GPU's pack cache (main.c: gpuPackPrepare). */
+int texturePackLibraries(void) { return dir[0] || spriteDir[0] || glyphDir[0] || beetleDir[0]; }
 const char* texturePackRoot(void) { load(); return root; }
 int texturePackEnabled(void) { load(); return stats.enabled; }
 /* A pack the user chose (texture_pack): the legacy appearance applies it to every category; the

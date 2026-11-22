@@ -3,10 +3,11 @@ English | [日本語](translations-ja.md)
 # Playing with translated text
 
 The US download plays in English. Start the game from your original US
-discs and select a translation as its text source. Italian and Spanish can
-use patched images directly. French setup depends on your build.
+discs and select a translation as its text source; the patched images are
+read only for their text. Italian, Spanish and Atelier's French work straight
+from patched images in v2026.11.20 and later.
 
-## Development builds with the Language selector
+## Choose a translation
 
 Open **F1 → System → Language and text → Language**. Choose the disc
 language, the other region if its discs were found, a saved image pair, or
@@ -21,20 +22,33 @@ list. **Individual text settings** lets you mix sources and shows **Custom**
 in the selector. **Interface language** under **This menu** changes F1 and
 Extras.
 
+1. Apply the translation team's patch to **copies** of both US disc images.
+   Keep your original pair selected in disc setup.
+2. Open **F1 → System → Language and text → Translation sources → Text
+   images**. Enter the patched Disc 1 and Disc 2 image paths and a
+   translation name, then choose **Remember these images**.
+3. Choose that name under **Language**. Reopen the game menu or enter a new
+   battle to see the menu and battle labels.
+
 For **Atelier Français 1.1**, enter the original CUEs or BINs from the
-patcher’s `Patched` or `Undub_patched` folder. Name the pair, choose
-**Remember these images**, then select that name under **Language**. The
-development build reads the French text, font and battle wheel directly. The download
-of v2026.11.17 uses the personal-pack instructions below.
+patcher’s `Patched` or `Undub_patched` folder. The port reads the French
+text, font and battle wheel directly from them. [Atelier’s patch and instructions](https://ateliertraduction.forumgaming.fr/t51-mise-a-jour-de-xenogears-en-v1-1)
 
-A pack can supply its own movie captions. For image patches the port keeps
-the original movie video, including any text already in that video. The
-selector turns separate subtitles off when the source has no track.
-Japanese voices and movie audio are still set under **F1 → Audio**.
+To read Japanese game text in the US build, supply your Japanese discs and
+choose **Japanese** under **Language**. An installed text pack is listed by
+its name. A pack can supply its own movie captions. For image patches the
+port keeps the original movie video, including any text already in that
+video. The selector turns separate subtitles off when the source has no
+track. Japanese battle voices and movie audio have separate settings under
+**F1 → Audio**. [Audio settings](gameplay.md#controls-and-audio)
 
-## Set up a translation in v2026.11.17
+## Downloads before v2026.11.20
 
-For a translation that works directly from patched images, such as Italian or Spanish, follow these steps. French uses the pack setup below.
+v2026.11.17 has no **Language** selector and cannot read Atelier's French
+images directly.
+
+For a translation that works directly from patched images, such as Italian
+or Spanish:
 
 1. Apply the translation team's patch to **copies** of both US disc images.
    Keep your original pair selected in disc setup.
@@ -45,13 +59,10 @@ For a translation that works directly from patched images, such as Italian or Sp
    enable **Pictures with text too**. Reopen the game menu or enter a new
    battle to see those labels.
 
-The **Language** row in the same section switches F1 and Extras between
-English and Japanese in the stock download. To read
-Japanese game text in the US build, supply your Japanese discs and choose
-**Japanese** in the game text rows. You can also choose an installed text
-pack by name. **Disc** restores the running game's own text for that row.
-Japanese battle voices and movie audio have separate settings under
-**F1 → Audio**. [Audio settings](gameplay.md#controls-and-audio)
+The **Language** row in that section switches F1 and Extras between English
+and Japanese. To read Japanese game text in the US build, supply your
+Japanese discs and choose **Japanese** in the game text rows. **Disc**
+restores the running game's own text for that row.
 
 ### French with Atelier Traduction 1.1
 
@@ -72,16 +83,16 @@ Japanese battle voices and movie audio have separate settings under
 3. Launch the game from your original US discs. In **F1 → System →
    Language and text**, choose **Atelier Français 1.1** for Dialogue,
    Battle text, Game menus and Names/items. Enable **Pictures with text
-   too** for menus and battles. On builds with the single game-language
-   selector, choose **Atelier Français 1.1** once.
+   too** for menus and battles.
 
 If your French wheel still says **Attack**, move the old `atelier-fr` folder
 outside your packs directory, run the updated helper and start a new battle.
 
 Selecting the French BINs directly in v2026.11.17 leaves Fei speaking
 English. The patch stores extra data in unused file-table slots, which
-the release reads as invalid file entries. The helper accounts for those
-slots in temporary copies. [Direct-image result](img/translations/field14-fr.png)
+that release reads as invalid file entries. The helper accounts for those
+slots in temporary copies; v2026.11.20 and later recognise Atelier's
+images and account for those slots themselves. [Direct-image result](img/translations/field14-fr.png)
 
 ## Which translations work?
 

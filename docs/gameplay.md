@@ -64,6 +64,13 @@ to play on. F1 > Saves > Rewind (Off by default).
 The story's bosses one after another, with the party you pick for each fight.
 Afterwards the game is put back as it was. F1 > Gameplay > Gauntlet.
 
+![A Gear gauntlet's first fight](img/gameplay-gauntlet-fight.webp)
+
+Bosses: every one in story order, the Character bosses, the Gear bosses, or a
+list of your own. Recovery between fights: full, 25%, 50%, revive only or none.
+A lost fight can be retried, and every run is recorded. Here the Gear bosses'
+first fight, Weltall against the Musha Mk100s.
+
 ## Controls and audio
 
 ![F1 > Controls](img/gameplay-controls.png)
@@ -72,7 +79,15 @@ Japanese controls in the US version (Circle confirms) or US controls in the
 Japanese version, key and gamepad bindings, mouse.
 F1 > Controls.
 
-In Enhanced development builds, turn on **First-person look** under
+![The touch pad over the game](img/gameplay-touch.webp)
+
+The touch pad draws a PlayStation pad over the game, for touch screens.
+F1 > Controls > Touch pad: Off, On, or Automatic (from your first touch until
+you use a controller or a keyboard; Android's default). Layout: Buttons, or
+Buttons and sticks. On a computer the rows show with a touchscreen, or once
+`touch_pad` is set in `settings.ini`.
+
+With the Enhanced engine (F1 → System → Engine), turn on **First-person look** under
 **F1 → Controls → Camera and vibration**. In a field or while travelling the
 world map on foot, in a Gear or aboard the Yggdrasil, press **V**, or hold **L2** and click **L3**.
 Look with the right stick, **J/L** and **I/K**, or a right mouse drag.
@@ -82,6 +97,17 @@ to where you look. In flight, the Yggdrasil keeps its usual steering and throttl
 and the view follows the ship as it turns. With that option off, stand still to look and move to leave.
 Press the shortcut again to return to the previous view. Both options start off.
 Dialogue, scripted shots and fixed-view rooms use the game camera.
+
+**Free camera in fields**, in the same group (Enhanced engine): turn and tilt the
+camera around the party with the right stick, and hold L2 and move the stick up or
+down to zoom (keys: J/L turn, I/K tilt, U/O zoom). R3 or Home returns to the
+game's view. Scenes and rooms with a fixed camera keep the game's.
+
+**Vibration**, in the same group: Off; The game's, as on a DualShock (Xenogears
+itself vibrates only in the Battling arena, with the arena's Vibration option on);
+or Enhanced, which adds hits taken and dealt, knock-outs, Gear impacts, deathblows
+and the camera shakes of battles and fields. Strength sets how strong, and Test
+plays a short pulse. It needs a controller with motors on pad 1.
 
 **F1 > Audio > Sound > Binaural (headphones)** places instruments and panned sound effects across a frontal soundstage. Switch it on or off while playing to compare. Movie audio keeps its stereo mix.
 
@@ -95,6 +121,7 @@ F1 > Audio > Japanese audio.
 | Setting | What it does |
 |---|---|
 | Speedup | Shorter memory card and loading waits; turns on smoothed motion |
+| Field speed | Fields and the world map at 2x or 4x, their scenes and dialogue included; menus, movies and battles keep their own speed |
 | Original-game bug fixes | Fixes a list of bugs in the original game |
 | Boss camera fix | Prevents a camera stall during one late-game boss attack |
 | Text speed | Original, 2x, 3x, 4x, 8x, Instant |
