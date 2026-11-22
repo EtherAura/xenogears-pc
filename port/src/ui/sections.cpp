@@ -860,8 +860,8 @@ void displaySection() {
         int chosen = listChoice("##depth_of_field", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetDof(chosen);
-        hint("In fields, scenery behind and in front of the party softens. Characters, dialogue, portraits and the "
-             "HUD stay sharp, and the PS1 picture itself is not changed. Off by default.");
+        hint("In fields, battles and on the world map, scenery behind and in front of the party softens. Characters, "
+             "dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by default.");
         if (sceneDofStatus() != nullptr) hint("Not shown now: %s.", tr(sceneDofStatus()));
         overrideNote("depth_of_field");
     }
@@ -885,9 +885,9 @@ void displaySection() {
         int chosen = listChoice("##lighting", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetLighting(chosen);
-        hint("In fields, the scenery gets light from above, shade in corners and under overhangs, and light from "
-             "bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 "
-             "picture itself is not changed. Off by default.");
+        hint("In fields, battles and on the world map, the scenery gets light from above, shade in corners and under "
+             "overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not "
+             "touched, and the PS1 picture itself is not changed. Off by default.");
         if ((sceneLighting() || sceneGlow()) && sceneLightingStatus() != nullptr)
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("lighting");
@@ -899,7 +899,8 @@ void displaySection() {
         int chosen = listChoice("##glow", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetGlow(chosen);
-        hint("In fields, bright areas such as lamps, fires and windows glow softly. Off by default.");
+        hint("In fields, battles and on the world map, bright areas such as lamps, fires and windows glow softly. Off by "
+             "default.");
         overrideNote("glow");
     }
     // Shadows (docs/PORT_HD2D.md section 20): a sun set per room.
@@ -910,8 +911,9 @@ void displaySection() {
         int chosen = listChoice("##shadows", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetShadows(chosen);
-        hint("In fields, the scenery and the characters cast shadows from a sun set when the room starts. Dialogue, "
-             "portraits and the HUD are not touched. Off by default.");
+        hint("In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, "
+             "and in fields the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by "
+             "default.");
         if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("shadows");
@@ -924,8 +926,9 @@ void displaySection() {
         int chosen = listChoice("##fog", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetFog(chosen);
-        hint("In fields, a haze that thickens past the characters, in the colour of the room's farthest scenery. Small "
-             "rooms barely change. Dialogue, portraits and the HUD are not touched. Off by default.");
+        hint("In fields, battles and on the world map, a haze that thickens past the characters, in the colour of the "
+             "farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by "
+             "default.");
         if (!sceneLighting() && !sceneGlow() && !sceneShadows() && sceneLightingStatus() != nullptr)
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("fog");
@@ -937,8 +940,8 @@ void displaySection() {
         int chosen = listChoice("##color_grade", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetGrade(chosen);
-        hint("In fields, shadows a little cool and highlights a little warm, with a touch more colour and contrast. "
-             "Dialogue, portraits and the HUD are not touched. Off by default.");
+        hint("In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch "
+             "more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default.");
         if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && sceneLightingStatus() != nullptr)
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("color_grade");
@@ -2481,10 +2484,10 @@ void gameplaySection() {
     if (row("PS1 frame rate", "ps1_frame_rate")) {
         bool ps1Rate = ps1timeFrameRateOn() != 0;
         if (offOnList("##ps1_frame_rate", &ps1Rate)) ps1timeSetFrameRate(ps1Rate);
-        hint("Draws heavy scenes as slowly as the PS1 did: each picture takes the vblanks the console's CPU and "
-             "GPU needed for it, from a model of their time (an idle Gear battle shows a new picture every third "
-             "vblank). The game keeps its speed. Original engine only; Speedup, Battle speed, Field speed and "
-             "online play leave it off. Off: every picture the game asks for, as fast as the PC draws it.");
+        hint("Draws heavy scenes as slowly as the PS1 did: each picture takes the vblanks the console's CPU "
+             "needed for it, from a model of its time (an idle Gear battle shows a new picture every third vblank). "
+             "The game keeps its speed. Original engine only; Speedup, Battle speed, Field speed and online play "
+             "leave it off. Off: every picture the game asks for, as fast as the PC draws it.");
         overrideNote("ps1_frame_rate");
     }
     if (row("Original-game bug fixes", "original_bug_fixes")) {

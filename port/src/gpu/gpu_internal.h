@@ -442,6 +442,7 @@ typedef struct {
     /* Fog: the most of a pixel's colour the haze takes, and how quickly it
      * thickens past the focus (0: no fog). The colour grade's amount (0: none). */
     float fogMost, fogDensity, grade;
+    float fogCap;  /* the farthest past the focus the fog thickens to (relative depth; 0: no cap) */
 } LightParams;
 /* What is done to a scene when it ends: the lighting, then the blur. */
 typedef struct {

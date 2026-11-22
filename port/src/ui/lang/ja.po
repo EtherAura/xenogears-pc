@@ -7144,6 +7144,14 @@ msgstr "再読込"
 msgid "Speedup"
 msgstr "高速化"
 
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "PS1 frame rate"
+msgstr "PS1 のフレームレート"
+
+#: port/src/ui/sections.cpp
+msgid "Draws heavy scenes as slowly as the PS1 did: each picture takes the vblanks the console's CPU needed for it, from a model of its time (an idle Gear battle shows a new picture every third vblank). The game keeps its speed. Original engine only; Speedup, Battle speed, Field speed and online play leave it off. Off: every picture the game asks for, as fast as the PC draws it."
+msgstr "重い場面を PlayStation と同じ遅さで描きます。1 画面ごとに、本体の CPU がその処理にかけた vblank の数だけ時間をかけます(処理時間のモデルによるもので、待機中のギア戦闘は 3 vblank ごとに新しい画面になります)。ゲームの速度は変わりません。オリジナルエンジンのみです。高速化、戦闘速度、フィールド速度、オンラインのときは働きません。オフ: ゲームが求める画面をすべて、PC が描ける速さで描きます。"
+
 #: port/src/ui/sections.cpp
 msgid "Battle speed"
 msgstr "戦闘速度"
@@ -7263,8 +7271,8 @@ msgstr "中"
 msgid "Strong"
 msgstr "強"
 
-msgid "In fields, scenery behind and in front of the party softens. Characters, dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by default."
-msgstr "フィールドで、パーティーより奥と手前の背景がやわらかくぼけます。キャラクター、会話、顔グラフィック、HUDはくっきりしたままで、PS1の画像そのものは変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, scenery behind and in front of the party softens. Characters, dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、パーティーより奥と手前の背景がやわらかくぼけます。キャラクター、会話、顔グラフィック、HUDはくっきりしたままで、PS1の画像そのものは変わりません。初期設定はオフです。"
 
 msgid "Not shown now: %s."
 msgstr "現在は表示されていません: %s。"
@@ -7284,32 +7292,32 @@ msgstr "パーティーの周りでピントが合う奥行きの広さです。
 msgid "Lighting"
 msgstr "ライティング"
 
-msgid "In fields, the scenery gets light from above, shade in corners and under overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 picture itself is not changed. Off by default."
-msgstr "フィールドで、背景に上からの光、すみや張り出しの下の陰、ランプや火など明るい部分からの光が加わります。会話、顔グラフィック、HUDは変わらず、PS1の画像そのものも変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, the scenery gets light from above, shade in corners and under overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 picture itself is not changed. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、背景に上からの光、すみや張り出しの下の陰、ランプや火など明るい部分からの光が加わります。会話、顔グラフィック、HUDは変わらず、PS1の画像そのものも変わりません。初期設定はオフです。"
 
 msgid "Glow"
 msgstr "グロー"
 
-msgid "In fields, bright areas such as lamps, fires and windows glow softly. Off by default."
-msgstr "フィールドで、ランプ、火、まどなどの明るい部分がやわらかく光ります。初期設定はオフです。"
+msgid "In fields, battles and on the world map, bright areas such as lamps, fires and windows glow softly. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、ランプ、火、まどなどの明るい部分がやわらかく光ります。初期設定はオフです。"
 
 msgid "Shadows"
 msgstr "影"
 
-msgid "In fields, the scenery and the characters cast shadows from a sun set when the room starts. Dialogue, portraits and the HUD are not touched. Off by default."
-msgstr "フィールドで、背景とキャラクターが、部屋に入ったときに決まる日の光の向きから影を落とします。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, and in fields the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、背景が、場面に入ったときに決まる日の光の向きから影を落とします。フィールドではキャラクターも影を落とします。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
 msgid "Fog"
 msgstr "フォグ"
 
-msgid "In fields, a haze that thickens past the characters, in the colour of the room's farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by default."
-msgstr "フィールドで、キャラクターより奥ほどこくなるもやを、部屋のいちばん奥の背景の色でかけます。小さな部屋ではほとんど変わりません。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, a haze that thickens past the characters, in the colour of the farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、キャラクターより奥ほどこくなるもやを、いちばん奥の背景の色でかけます。小さな部屋ではほとんど変わりません。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
 msgid "Colour grade"
 msgstr "カラーグレード"
 
-msgid "In fields, shadows a little cool and highlights a little warm, with a touch more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default."
-msgstr "フィールドで、暗い部分を少しつめたい色に、明るい部分を少しあたたかい色にして、色とコントラストを少し強めます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、暗い部分を少しつめたい色に、明るい部分を少しあたたかい色にして、色とコントラストを少し強めます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
 #: port/src/extras/shell.cpp port/src/ui/sections.cpp
 msgid "Look"

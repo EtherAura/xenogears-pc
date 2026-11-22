@@ -18,6 +18,12 @@
  * picture kept sharp, or -1. Call it right before that DrawOTag, each frame
  * the scene is drawn. */
 #define PC_SCENE_FOCUS_CENTRE (-1)
+/* Where the next scene is (pcScenePlace, before pcSceneDepth; a scene
+ * registered without it is a field's): the effects are tuned per place. */
+#define PC_SCENE_FIELD 0
+#define PC_SCENE_BATTLE 1
+#define PC_SCENE_WORLDMAP 2
+void pcScenePlace(int place);
 void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int groundCount, int zPerSlot,
                   const void* uiTag, int focusZ, int pictureSlot);
 

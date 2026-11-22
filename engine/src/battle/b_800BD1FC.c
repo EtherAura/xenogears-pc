@@ -12,6 +12,7 @@
 #include "main/task.h"
 #include "main/memory.h"
 #include "battle/battle.h"
+#include "pc_scene.h"
 
 void battlePreviewBeginFrame(void);
 void battlePreviewEndFrame(void);
@@ -794,6 +795,43 @@ void formatDamageString(u32 value, sDamageString* str, s32 digits, u8 leadingZer
 }
 
 /* Noah battleRender: one battle frame (double-buffered OT, sprites, camera, input, VSync pacing) */
+/* Enhanced (xg-rgcf.5.3): the battle's scene for the display copy's effects
+ * (depth of field, lighting, shadows, fog, grade; include/pc_scene.h). One
+ * table, m70_ot, drawn from [0xFFF] down: the fader sits in ot[2], the HUD,
+ * menus and text in ot[1], the damage numbers in ot[0], so the effects run
+ * when the walk reaches ot[2]. The view is the one the scene was drawn with,
+ * saved before pcBattle60SceneEnd puts the game's matrix back (above 60 Hz
+ * the frame is drawn from a camera halfway between steps), and the focus is
+ * the drawn look-at point. Battles share one sun, set when each starts. */
+extern s32 gDepthDivider;
+extern SVECTOR pcBattle60DrawnAt;
+void hwClockHold(int on); /* port/src/system/hw.c */
+static MATRIX pcBattleDrawnMatrix;
+static s32 pcBattleDrawnCx, pcBattleDrawnCy;
+
+/* The GTE reads here and below are the port's, not the PS1's: no time on
+ * the stepped clock (hwClockHold), or the game's own timing would move. */
+static void pcBattleSceneSave(void) {
+    pcBattleDrawnMatrix = battleCameraBlock.m20_renderingMatrix;
+    hwClockHold(1);
+    ReadGeomOffset(&pcBattleDrawnCx, &pcBattleDrawnCy);
+    hwClockHold(0);
+}
+
+static void pcBattleSceneDepth(void) {
+    MATRIX* m = &pcBattleDrawnMatrix;
+    OTag* ot = battleBssBlock.m8C50_currentRenderStruct->m70_ot;
+    s32 x = pcBattle60DrawnAt.vx, y = pcBattle60DrawnAt.vy, z = pcBattle60DrawnAt.vz;
+    s32 focus = ((m->m[2][0] * x + m->m[2][1] * y + m->m[2][2] * z) >> 12) + m->t[2];
+    s32 h;
+    hwClockHold(1);
+    h = ReadGeomScreen();
+    hwClockHold(0);
+    pcSceneView(m->m, m->t, h, pcBattleDrawnCx, pcBattleDrawnCy, 0x10000 | (u16)battleCameraBlock.m48_startOfBattleTime);
+    pcScenePlace(PC_SCENE_BATTLE);
+    pcSceneDepth(ot, 0x1000, 0, 0, 4 << gDepthDivider, &ot[2], focus, -1);
+}
+
 void battleRender(void) {
     s32 i;
     s32 old;
@@ -848,6 +886,7 @@ void battleRender(void) {
     }
     STACK_RESTORE();
     drawBattleFromModes();
+    pcBattleSceneSave(); /* Enhanced: the view this frame was drawn with */
     pcBattle60SceneEnd();
     battleUpdateInputs(0);
     while (--spriteCallback2Var4 != -1) {
@@ -872,6 +911,7 @@ void battleRender(void) {
     PutDispEnv(&battleBssBlock.m8C50_currentRenderStruct->m5C_dispEnv);
     PutDrawEnv(&battleBssBlock.m8C50_currentRenderStruct->m0_drawEnv);
     shapeTransfert();
+    pcBattleSceneDepth(); /* Enhanced (xg-rgcf.5.3): the scene's depth, for the display copy's effects */
     DrawOTag(&battleBssBlock.m8C50_currentRenderStruct->m70_ot[0xFFF]);
     battlePreviewEndFrame();
     battleLoadFileFrom0xC();

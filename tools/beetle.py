@@ -1577,7 +1577,10 @@ class Capture:
             to_splice = None
             if shadowed:
                 if not self.sites_hold_code():
-                    raise SystemExit(f"beetle: a hook site changed by vsync {b.frame}")
+                    changed = ", ".join(f"{n} {a:08X}: {b.u32(a):08X} {b.u32(a + 4):08X} (was {self.orig[n][0]:08X} "
+                                        f"{self.orig[n][1]:08X})" for n, a in self.sites.items()
+                                        if (b.u32(a), b.u32(a + 4)) != tuple(self.orig[n][:2]))
+                    raise SystemExit(f"beetle: a hook site changed by vsync {b.frame}: {changed}")
                 nxt = cur
                 for at, buttons in events[pi:]:
                     if at > v + 1:

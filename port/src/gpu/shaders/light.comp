@@ -116,7 +116,8 @@ layout(push_constant) uniform Light {
     int color;     // the copy's colour mode (scene_color.glsl)
     int colorPad;
     ivec2 ditherOrigin; // scene_color.glsl
-    vec4 atmos;    // x: the most of a pixel the fog takes (0: no fog), y: how quickly it thickens, z: the grade
+    vec4 atmos;    // x: the most of a pixel the fog takes (0: no fog), y: how quickly it thickens, z: the grade,
+                   // w: the farthest past the focus it thickens to (relative depth; 0: no cap)
 } pc;
 
 #include "scene_color.glsl"
@@ -794,6 +795,7 @@ void composite(ivec2 l) {
     // they stand, nothing on a kept picture or where nothing was drawn.
     if (pc.atmos.x > 0.0 && b >= 0 && raw != DEPTH_SHARP && raw != DEPTH_FAR) {
         float past = max(float(raw & ~DEPTH_FIGURE) / 16.0 / max(pc.lens.z, 1.0) - 1.0, 0.0);
+        if (pc.atmos.w > 0.0) past = min(past, pc.atmos.w);
         shown = mix(shown, block[b + FOG_SLOT].rgb, pc.atmos.x * (1.0 - exp(-pc.atmos.y * past)));
     }
     if (pc.atmos.z > 0.0) shown = grade(shown, pc.atmos.z);

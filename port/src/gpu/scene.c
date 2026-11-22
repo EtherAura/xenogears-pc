@@ -153,6 +153,9 @@ static struct {
     int focusCentre, autoValid, lastFocus;
     float autoFocus;
 
+    /* The place pcScenePlace gave for the scene pcSceneDepth registers next
+     * (PC_SCENE_*), and the place of the scene being drawn. */
+    int placeGiven, place;
     /* The view pcSceneView gave for the scene pcSceneDepth registers next. */
     int viewGiven, viewArmed;
     float up[3], screenZ, centerX, centerY;
@@ -365,6 +368,12 @@ static void params(SceneParams* p) {
     l->shadow = shadowDark[shadows] * gain;
     l->fogMost = fogMost[fog] * gain;
     l->fogDensity = fogDensity[fog];
+    /* Battles: their flat backdrop shares the arena's farthest slot, so the
+     * fog stops thickening at twice the focus distance (the backdrop takes
+     * the far arena's haze, not a wall of it). The world map has its own
+     * depth fog: this one is half as thick on top of it (xg-rgcf.5.3). */
+    if (sc.place == PC_SCENE_BATTLE) l->fogCap = 1.0f;
+    if (sc.place == PC_SCENE_WORLDMAP) l->fogDensity *= 0.5f;
     l->grade = gradeAmount[grade] * gain;
     if (sc.sunSet) {
         /* The room's sun in this frame's view. */
@@ -399,6 +408,8 @@ void sceneFocusMeasured(float z) {
     /* Eased, as a camera's focus moves: a third of the way each time. */
     sc.autoFocus += (z - sc.autoFocus) / 3.0f;
 }
+
+void pcScenePlace(int place) { sc.placeGiven = place; }
 
 void pcSceneFigure(int x, int y, int z) {
     uint32_t vblank = hwVSyncCount();
@@ -460,6 +471,8 @@ void pcSceneView(const short rotation[3][3], const int translation[3], int scree
 void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int groundCount, int zPerSlot,
                   const void* uiTag, int focusZ, int pictureSlot) {
     sc.armed = 0;
+    sc.place = sc.placeGiven; /* for this scene only, as the view */
+    sc.placeGiven = PC_SCENE_FIELD;
     /* The view is for this scene only: a scene registered without one is not lit. */
     sc.viewArmed = sc.viewGiven;
     sc.viewGiven = 0;

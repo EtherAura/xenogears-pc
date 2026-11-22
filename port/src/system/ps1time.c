@@ -296,8 +296,8 @@ int ps1timeFrameRateOn(void) {
 }
 
 void ps1timeSetFrameRate(int enabled) {
-    settingsDescribe("ps1_frame_rate", "ps1_frame_rate: 1 draws heavy scenes as slowly as the PS1 did (its CPU and GPU "
-                                       "time for each frame's work, modelled); the game keeps its speed. Original "
+    settingsDescribe("ps1_frame_rate", "ps1_frame_rate: 1 draws heavy scenes as slowly as the PS1 did (its CPU's time "
+                                       "for each frame's work, modelled); the game keeps its speed. Original "
                                        "engine; not with Speedup, battle or field speed, or online. 0 (default): "
                                        "every frame the game asks for");
     settingsSetInt("ps1_frame_rate", enabled != 0);

@@ -65,7 +65,8 @@ Shader takes a RetroArch `.slangp` or `.slang` preset for the whole picture.
 
 ## Depth of field
 
-In fields, scenery behind and in front of the party softens, while the
+In fields, battles and on the world map, scenery behind and in front of
+the party softens, while the
 characters, dialogue, portraits and the HUD stay sharp. It is the first
 piece of an HD-2D-style look, and it changes only how the picture is shown:
 the game still works with its own. The Enhanced engine only
@@ -75,7 +76,8 @@ F1 > Display > Depth of field (Off, Subtle, Medium, Strong) and Focus range
 
 ## Lighting and glow
 
-In fields, Lighting lights the scenery from above: floors, roofs and table
+In fields, battles and on the world map, Lighting lights the scenery from
+above: floors, roofs and table
 tops get brighter and undersides darker, corners and the ground under
 overhangs get shade, and bright spots such as lamps and fires light what is
 near them. Glow makes bright areas glow softly. Both are made from the
@@ -87,7 +89,8 @@ F1 > Display > Lighting and Glow (each Off, Subtle, Medium, Strong).
 
 ## Shadows
 
-In fields, the scenery and the characters cast shadows from a sun, which is
+In fields, battles and on the world map, the scenery casts shadows from a
+sun (and in fields the characters too), which is
 set from the camera a room starts with and then stays put in the room, so
 the shadows don't swing when the camera turns. Walls, furniture and props
 cast through the picture's depth; each character's sprite is laid on the
@@ -98,7 +101,8 @@ F1 > Display > Shadows (Off, Subtle, Medium, Strong).
 
 ## Fog and colour grade
 
-In fields, Fog lays a haze that thickens past the characters, in the colour
+In fields, battles and on the world map, Fog lays a haze that thickens past
+the characters, in the colour
 of the room's farthest scenery, so distant hills, seas and skies recede.
 Small rooms barely change. Colour grade makes shadows a little cool and
 highlights a little warm, with a touch more colour and contrast. Dialogue,

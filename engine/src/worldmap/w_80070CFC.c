@@ -14,6 +14,7 @@
 #include "pc_gameplay.h"
 #include "pc_interpolation.h"
 #include "pc_camera.h"
+#include "pc_scene.h"
 
 extern sWorldmapState* gWorldmapState;
 extern sWorldmapModel* worldmapModels;
@@ -76,6 +77,31 @@ extern sWorldmapExitDef** worldmapExitsDefs; /* exit tables (4) */
 /* worldmap_taskGround_update */
 extern s32 worldmapMatrixMode;
 extern sWorldmapCameraState worldmapCameraVector;
+extern MATRIX worldmapMainMatrix2;
+
+/* Enhanced (xg-rgcf.5.3): the world map's scene for the display copy's effects
+ * (include/pc_scene.h). One table, m70_OT, drawn from [0x3FF] down; the
+ * minimap, the fade, the windows and their text are all in OT[0], so the
+ * effects run when the walk reaches it. Render space is relative to the
+ * player, through worldmapMainMatrix2 (still the one the frame was drawn
+ * with at DrawOTag); the projection centre is read before the next frame's
+ * SetGeomOffset; the focus is the camera's target, the player. A slot is
+ * 16 view units (models OTZ >> 2, the ground SZ >> 4). One sun for the map. */
+void hwClockHold(int on); /* port/src/system/hw.c */
+static void pcWorldmapSceneDepth(OTag* ot) {
+    MATRIX* m = &worldmapMainMatrix2;
+    SVECTOR* at = &worldmapCameraVector.m8_target;
+    s32 cx, cy, h;
+    s32 focus = ((m->m[2][0] * at->vx + m->m[2][1] * at->vy + m->m[2][2] * at->vz) >> 12) + m->t[2];
+    /* The port's GTE reads, not the PS1's: no time on the stepped clock. */
+    hwClockHold(1);
+    ReadGeomOffset(&cx, &cy);
+    h = ReadGeomScreen();
+    hwClockHold(0);
+    pcSceneView(m->m, m->t, h, cx, cy, 0x20000);
+    pcScenePlace(PC_SCENE_WORLDMAP);
+    pcSceneDepth(ot, 0x400, 0, 0, 16, &ot[0], focus, -1);
+}
 extern VECTOR worldmapGridInputPosition;
 extern VECTOR worldmapRadarPosition3;
 extern s16 worldmapGridUpdateMask;
@@ -1216,6 +1242,7 @@ void worldmapMainLoop(void) {
             updateWorldmapTexAnims1();
             updateWorldmapTexAnims2();
         }
+        pcWorldmapSceneDepth(pCurrentWorldmapRenderingStruct->m70_OT); /* Enhanced (xg-rgcf.5.3): before the next offset */
         /* At 60 Hz the frame between projects halfway in the geometry offset's ease (the minimap's slide) */
         SetGeomOffset(0xA0, pcWm60Active && tick && !pcWm60CameraLive && !pcWm60CutTick && pcWm60Frame != 0 ? pcWm60Mid(pcWm60GeomStart, worldmapGeometryOffsetY, 0x40) : worldmapGeometryOffsetY);
         DrawOTag(&pCurrentWorldmapRenderingStruct->m70_OT[0x3FF]);

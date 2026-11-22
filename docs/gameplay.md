@@ -122,6 +122,7 @@ F1 > Audio > Japanese audio.
 |---|---|
 | Speedup | Shorter memory card and loading waits; turns on smoothed motion |
 | Field speed | Fields and the world map at 2x or 4x, their scenes and dialogue included; menus, movies and battles keep their own speed |
+| PS1 frame rate | Heavy scenes drawn as slowly as on the PlayStation: each picture takes the time the console's CPU needed for it (a model of it); the game keeps its speed. Original engine |
 | Original-game bug fixes | Fixes a list of bugs in the original game |
 | Boss camera fix | Prevents a camera stall during one late-game boss attack |
 | Text speed | Original, 2x, 3x, 4x, 8x, Instant |

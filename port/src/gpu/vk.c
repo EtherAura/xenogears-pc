@@ -5658,7 +5658,7 @@ typedef struct {
     float centerX, centerY, focus, block; /* block: the vec4 lightBlock wrote, or -1 */
     float top, shade, bounce, glow;
     int32_t color, colorPad, ditherX, ditherY; /* scene_color.glsl */
-    float fogMost, fogDensity, grade, atmosPad; /* 128 bytes: Vulkan's least push constant room */
+    float fogMost, fogDensity, grade, fogCap; /* 128 bytes: Vulkan's least push constant room */
 } LightConstants;
 
 static void sceneDestroy(void) {
@@ -6126,7 +6126,7 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
                         p->top, p->shade, p->bounce, p->glow};
     c.color = vk.hiColor;
     c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
-    c.fogMost = fog ? p->fogMost : 0; c.fogDensity = p->fogDensity; c.grade = p->grade;
+    c.fogMost = fog ? p->fogMost : 0; c.fogDensity = p->fogDensity; c.grade = p->grade; c.fogCap = p->fogCap;
     /* Only the passes the parts in use need (all of them when asked: the
      * checks, the debug colours). The composite reads nothing of a part
      * that is off. */
