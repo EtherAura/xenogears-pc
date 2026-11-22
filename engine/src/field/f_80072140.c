@@ -2146,7 +2146,7 @@ static void pcFieldSceneDepth(int looking) {
     /* The scenery's rotation and projection, for the scene lighting (xg-rgcf.5.1):
      * the frame's centre and distance are the ones the field sets for its
      * scene (SetGeomOffset(0xA0, 0x70), SetGeomScreen(sceneSCRZ)). */
-    pcSceneView(m->m, fieldSceneState.m178_sceneSCRZ, 0xA0, 0x70);
+    pcSceneView(m->m, m->t, fieldSceneState.m178_sceneSCRZ, 0xA0, 0x70, fieldMapNumber & 0xFFF);
     pcSceneDepth(pCurrentFieldRenderingContext->mCC_OT, 0x1000,
                  fieldUseGroundOT != 0 ? pCurrentFieldRenderingContext->m40D0_secondaryOT : 0, 0x1000,
                  4 << gDepthDivider, &pCurrentFieldRenderingContext->m80D4_uiOT[6], focus, picture);
@@ -2586,6 +2586,8 @@ void renderCharShadows(OTag* ot, s32 oddOrEven) {
                     otz >>= gDepthDivider;
                     pcInterpolationKeyType(e, e->m8_2dSprite, 0x10000, &((FieldQuad*)e->m8_2dSprite)->m20_poly[oddOrEven], PC_INTERP_SHADOW);
                     addPrim(ot + otz, &((FieldQuad*)e->m8_2dSprite)->m20_poly[oddOrEven]);
+                    /* Enhanced (xg-rgcf.5.2): where the shadow lies, for the display copy's cast shadows */
+                    pcSceneFigure(m.t[0], m.t[1], m.t[2]);
                 }
                 }
             }

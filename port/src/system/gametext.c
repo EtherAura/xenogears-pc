@@ -379,6 +379,7 @@ static GtImage* textImage(int d) {
         }
         if (im == NULL && why[0] == '\0') snprintf(why, whySize, "No text image for Disc %d (text_image%d)", d, d);
         if (im != NULL) fprintf(stderr, "gametext: Disc %d text image %s (%s)\n", d, gtImagePath(im), gtImageRegion(im));
+        else if (path && path[0]) fprintf(stderr, "gametext: Disc %d text image %s not read: %s\n", d, path, why);
         *slot = im;
     }
     return *slot;

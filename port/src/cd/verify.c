@@ -83,6 +83,25 @@ static int atelierIndex(const CdImageInfo* info, const uint8_t* table, const uin
     return 0;
 }
 
+/* Perfect Works 0.11.4's full presets (all_*: its script with its gameplay and graphics options; xg-g0ra.7) keep
+ * code of their own in file-table slots the retail disc leaves empty (283 to 4463), which read as entries past the
+ * image's end. Measured on all twelve: two tables a disc (the normal-text presets', and the fast-text and no-graphics
+ * ones'), the retail directory tables. Identified whole, as Atelier's are, a text source reads them with those
+ * entries masked; booting them stays refused, since they patch the game's code as well. */
+static int perfectWorksIndex(const CdImageInfo* info, const uint8_t* table, const uint8_t* dirs) {
+    static const struct { int disc, sectors; uint32_t fileCrc, dirCrc; } editions[] = {
+        {1, 305561, 0x1fbab9ec, 0xcb8f1e5b}, {1, 305561, 0xde3d7305, 0xcb8f1e5b},
+        {2, 292787, 0xda28fe92, 0xcc6fd9e9}, {2, 292787, 0x53aeb278, 0xcc6fd9e9},
+    };
+    if (strcmp(info->region, "US")) return 0;
+    for (size_t i = 0; i < SDL_arraysize(editions); i++) {
+        if (info->disc == editions[i].disc && info->sectors == editions[i].sectors &&
+            SDL_crc32(0, table, CD_FILE_TABLE_BYTES) == editions[i].fileCrc &&
+            SDL_crc32(0, dirs, CD_DIRECTORY_BYTES) == editions[i].dirCrc) return 1;
+    }
+    return 0;
+}
+
 int cdReadImageIndex(CdDisc* d, int textSource, CdImageInfo* info, uint8_t table[CD_FILE_TABLE_BYTES],
                      uint8_t dirs[CD_DIRECTORY_BYTES], char* why, size_t size) {
     if (size)
@@ -119,6 +138,17 @@ int cdReadImageIndex(CdDisc* d, int textSource, CdImageInfo* info, uint8_t table
             /* The patch occupies retail-empty entries 280 through 381. */
             memset(table + 280 * 7, 0, 102 * 7);
             found.atelierFrench = 1;
+        } else if (textSource && perfectWorksIndex(&found, table, dirs)) {
+            for (int i = 0; i < CD_FILE_TABLE_BYTES / 7; i++) {
+                uint8_t* e = table + i * 7;
+                unsigned sector = e[0] | (unsigned)e[1] << 8 | (unsigned)e[2] << 16;
+                if (sector == 0xFFFFFF) break;
+                int32_t bytes = (int32_t)u32(e + 3);
+                if (bytes != 0 && (bytes < 0 || sector >= (unsigned)found.sectors ||
+                                   ((uint32_t)bytes + 2047u) / 2048u > (unsigned)found.sectors - sector))
+                    memset(e, 0, 7);
+            }
+            found.perfectWorks = 1;
         }
         int count = 0;
         for (; count < CD_FILE_TABLE_BYTES / 7; count++) {

@@ -7348,3 +7348,9 @@ msgstr "グロー"
 
 msgid "In fields, bright areas such as lamps, fires and windows glow softly. Off by default."
 msgstr "フィールドで、ランプ、火、窓などの明るい部分がやわらかく光ります。初期設定はオフです。"
+
+msgid "Shadows"
+msgstr "影"
+
+msgid "In fields, the scenery and the characters cast shadows from a sun set when the room starts. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールドで、背景とキャラクターが、部屋に入ったときに決まる太陽の向きから影を落とします。会話、顔グラフィック、HUDには影響しません。初期設定はオフです。"

@@ -394,10 +394,16 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 #define MAX_SWAPCHAIN_IMAGES 8
 
 /* XG_GPU_TIMING=1: GPU time per kind of pass, from timestamp queries. */
-/* light.comp's working images: seven on the PS1's pixel grid, six on a quarter of it. */
-#define SCENE_LIGHT_GRID 7
-#define SCENE_LIGHT_IMAGES 13
-#define SCENE_LIGHT_FILTERED 5 /* of those, read filtered too */
+/* light.comp's working images: eight on the PS1's pixel grid, six on a quarter of it. */
+#define SCENE_LIGHT_GRID 8
+#define SCENE_LIGHT_IMAGES 14
+#define SCENE_LIGHT_FILTERED 6 /* of those, read filtered too */
+/* light.comp's last binding: the frame's span buffer, which carries each
+ * scene's sun and actors' ground points (lightBlock). */
+#define SCENE_LIGHT_BINDINGS (2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED + 1)
+/* That block: a vec4 of the sun and the shadow's darkness, a vec4 of the
+ * count, then one vec4 per ground point. */
+#define LIGHT_BLOCK_BYTES ((2 + SCENE_FIGURES) * 16 + 16)
 enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_LIGHT, GT_KINDS };
 #define GT_QUERIES 4096
 
@@ -4631,6 +4637,15 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 lit.screenZ += a * (to->screenZ - lit.screenZ);
                 lit.top += a * (to->top - lit.top); lit.shade += a * (to->shade - lit.shade);
                 lit.bounce += a * (to->bounce - lit.bounce); lit.glow += a * (to->glow - lit.glow);
+                lit.shadow += a * (to->shadow - lit.shadow);
+                float sun[3]; length = 0;
+                for (int k = 0; k < 3; k++) { sun[k] = lit.sun[k] + a * (to->sun[k] - lit.sun[k]); length += sun[k] * sun[k]; }
+                length = sqrtf(length);
+                if (length > 1.0e-4f) for (int k = 0; k < 3; k++) lit.sun[k] = sun[k] / length;
+                /* The actors' ground points move with them; their order is the actors'. */
+                if (to->figures == lit.figures)
+                    for (int k = 0; k < lit.figures; k++)
+                        for (int i = 0; i < 3; i++) lit.figure[k][i] += a * (to->figure[k][i] - lit.figure[k][i]);
             }
         }
         if (!vk.interpolationSpans) vk.interpolationSpans = malloc(SPAN_BYTES);
@@ -4667,7 +4682,8 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         size_t vb = (size_t)count*sizeof(HiVertex), pb = (size_t)f->pixelCount*4, sb = (size_t)spanCount*4;
         endBatch();
         if (vb > VERTEX_BYTES || pb+sb > SPAN_BYTES) return 0;
-        if (frame()->vertexUsed+vb > VERTEX_BYTES || frame()->spanUsed+pb+sb > SPAN_BYTES) {
+        size_t lb = f->sceneLight && (f->fx.light.all || f->fx.light.shadow > 0) ? 16 + LIGHT_BLOCK_BYTES : 0; /* lightBlock's */
+        if (frame()->vertexUsed+vb > VERTEX_BYTES || frame()->spanUsed+pb+sb+lb > SPAN_BYTES) {
             if(vk.presentAcquired)return 0;
             submitFrame(NULL,NULL);
         }
@@ -5397,8 +5413,10 @@ typedef struct {
     float focus, band, gain, radius;
 } DofConstants;
 
-/* light.comp's last pass, the composite at the copy's resolution. */
-#define LIGHT_COMPOSITE 14
+/* light.comp's passes: the shadows' (14-17), and the last, the composite at
+ * the copy's resolution. */
+#define LIGHT_SHADOWS 14
+#define LIGHT_COMPOSITE 18
 /* light.comp's push constants. */
 typedef struct {
     int32_t pass, n, taps, flags;
@@ -5406,7 +5424,7 @@ typedef struct {
     int32_t workW, workH;
     int32_t layerX, layerY;
     float up[3], screenZ;
-    float centerX, centerY, focus, unused;
+    float centerX, centerY, focus, block; /* block: the vec4 lightBlock wrote, or -1 */
     float top, shade, bounce, glow;
 } LightConstants;
 
@@ -5488,13 +5506,14 @@ static int sceneMake(void) {
     vkDestroyShaderModule(vk.device, module, NULL);
     if (result != VK_SUCCESS) goto fail;
     /* The lighting (light.comp): the colour, the depth, its working images,
-     * and five of those again, filtered. */
-    VkDescriptorSetLayoutBinding lb[2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED];
-    for (uint32_t i = 0; i < 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED; i++)
+     * six of those again, filtered, and the frame's span buffer. */
+    VkDescriptorSetLayoutBinding lb[SCENE_LIGHT_BINDINGS];
+    for (uint32_t i = 0; i < SCENE_LIGHT_BINDINGS; i++)
         lb[i] = (VkDescriptorSetLayoutBinding){i, i < 2 + SCENE_LIGHT_IMAGES ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-                                                                              : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                                  : i < SCENE_LIGHT_BINDINGS - 1 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                                                                                 : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
                                                1, VK_SHADER_STAGE_COMPUTE_BIT, NULL};
-    li.bindingCount = 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED; li.pBindings = lb;
+    li.bindingCount = SCENE_LIGHT_BINDINGS; li.pBindings = lb;
     if (vkCreateDescriptorSetLayout(vk.device, &li, NULL, &vk.scene.lightSetLayout) != VK_SUCCESS) goto fail;
     range.size = sizeof(LightConstants);
     pi.pSetLayouts = &vk.scene.lightSetLayout;
@@ -5505,10 +5524,11 @@ static int sceneMake(void) {
     result = vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &vk.scene.light);
     vkDestroyShaderModule(vk.device, module, NULL);
     if (result != VK_SUCCESS) goto fail;
-    VkDescriptorPoolSize size[2] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES * SCENE_TARGETS * (8 + 2 + SCENE_LIGHT_IMAGES)},
-                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES * SCENE_TARGETS * (2 + SCENE_LIGHT_FILTERED)}};
+    VkDescriptorPoolSize size[3] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES * SCENE_TARGETS * (8 + 2 + SCENE_LIGHT_IMAGES)},
+                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES * SCENE_TARGETS * (2 + SCENE_LIGHT_FILTERED)},
+                                    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, FRAMES * SCENE_TARGETS}};
     VkDescriptorPoolCreateInfo dpi = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    dpi.maxSets = FRAMES * SCENE_TARGETS * 3; dpi.poolSizeCount = 2; dpi.pPoolSizes = size;
+    dpi.maxSets = FRAMES * SCENE_TARGETS * 3; dpi.poolSizeCount = 3; dpi.pPoolSizes = size;
     if (vkCreateDescriptorPool(vk.device, &dpi, NULL, &vk.scene.pool) != VK_SUCCESS) goto fail;
     for (int k = 0; k < FRAMES; k++) for (int t = 0; t < SCENE_TARGETS; t++) {
         VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -5727,11 +5747,11 @@ static void sceneLightSets(FrameCtx* f, int t) {
     for (int i = 0; i < 2 + SCENE_LIGHT_IMAGES; i++) if (want[i] == VK_NULL_HANDLE) return; /* nothing to light with yet */
     if (memcmp(want, f->sceneLightViews[t], sizeof(want)) == 0) return;
     VkDescriptorImageInfo ii[2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED];
-    VkWriteDescriptorSet w[2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED];
+    VkWriteDescriptorSet w[SCENE_LIGHT_BINDINGS];
     /* light.comp's filtered reads, by its bindings: the surroundings'
-     * brightness (9), the bounce (12), the glow (3), the top light and shade
-     * (8) and the glow's wide spreads (14). */
-    const int filtered[SCENE_LIGHT_FILTERED] = {9, 12, 3, 8, 14};
+     * brightness (10), the bounce (13), the glow (3), the top light and shade
+     * (8), the glow's wide spreads (15) and the cast shadows (9). */
+    const int filtered[SCENE_LIGHT_FILTERED] = {10, 13, 3, 8, 15, 9};
     for (int i = 0; i < 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED; i++) {
         int sampled = i >= 2 + SCENE_LIGHT_IMAGES;
         ii[i] = (VkDescriptorImageInfo){sampled ? vk.scene.sampler : VK_NULL_HANDLE,
@@ -5741,7 +5761,12 @@ static void sceneLightSets(FrameCtx* f, int t) {
         w[i].descriptorType = sampled ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
         w[i].pImageInfo = &ii[i];
     }
-    vkUpdateDescriptorSets(vk.device, 2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED, w, 0, NULL);
+    VkDescriptorBufferInfo bi = {f->spans.buffer, 0, VK_WHOLE_SIZE};
+    w[SCENE_LIGHT_BINDINGS - 1] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    w[SCENE_LIGHT_BINDINGS - 1].dstSet = f->sceneLightSet[t]; w[SCENE_LIGHT_BINDINGS - 1].dstBinding = SCENE_LIGHT_BINDINGS - 1;
+    w[SCENE_LIGHT_BINDINGS - 1].descriptorCount = 1; w[SCENE_LIGHT_BINDINGS - 1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    w[SCENE_LIGHT_BINDINGS - 1].pBufferInfo = &bi;
+    vkUpdateDescriptorSets(vk.device, SCENE_LIGHT_BINDINGS, w, 0, NULL);
     memcpy(f->sceneLightViews[t], want, sizeof(want));
 }
 
@@ -5829,6 +5854,23 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
     vk.needBarrier = 1;
 }
 
+/* The shadows' block for a scene, at the end of the frame's span buffer:
+ * returns where it starts, in vec4s, or -1 when the buffer has no room (the
+ * callers make room first). */
+static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
+    size_t at = (ctx->spanUsed + 15) & ~(size_t)15;
+    if (at + LIGHT_BLOCK_BYTES > SPAN_BYTES) return -1;
+    float* b = (float*)(ctx->spans.map + at);
+    int count = p->figures < 0 ? 0 : p->figures > SCENE_FIGURES ? SCENE_FIGURES : p->figures;
+    b[0] = p->sun[0]; b[1] = p->sun[1]; b[2] = p->sun[2]; b[3] = p->shadow;
+    b[4] = (float)count; b[5] = b[6] = b[7] = 0;
+    for (int k = 0; k < count; k++) {
+        b[8 + 4 * k] = p->figure[k][0]; b[9 + 4 * k] = p->figure[k][1]; b[10 + 4 * k] = p->figure[k][2]; b[11 + 4 * k] = 0;
+    }
+    ctx->spanUsed = at + LIGHT_BLOCK_BYTES;
+    return (int32_t)(at / 16);
+}
+
 /* light.comp's passes for a frame, as sceneBlurRecord's: the layers are made
  * from `primary` on the PS1's pixel grid and laid over it and over `second`.
  * (centerX, centerY): the projection centre in the primary's frame. */
@@ -5841,8 +5883,11 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.light);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
     /* prepare's samples per PS1 pixel: all of them up to 3x, nine beyond. */
+    int shadows = p->all || p->shadow > 0;
+    int32_t block = shadows ? lightBlock(ctx, p) : -1;
+    if (block < 0) shadows = 0; /* no room for the block: no shadows in this picture */
     LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
-                        {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, 0,
+                        {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, (float)block,
                         p->top, p->shade, p->bounce, p->glow};
     /* Only the passes the parts in use need (all of them when asked: the
      * checks, the debug colours). The composite reads nothing of a part
@@ -5855,7 +5900,8 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
                      ((pass == 4 || pass == 10 || pass == 11) && bounce) ||
                      (pass >= 5 && pass <= 7 && surface) ||                   /* normals, top light, shade */
                      ((pass == 8 || pass == 9) && shade) ||
-                     ((pass == 12 || pass == 13) && glow);
+                     ((pass == 12 || pass == 13) && glow) ||
+                     (pass >= LIGHT_SHADOWS && pass < LIGHT_COMPOSITE && shadows); /* cast shadows */
         if (!needed) continue;
         c.pass = pass;
         vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
@@ -5863,6 +5909,7 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
          * the glow's wide spreads, 1-3; the bounce, 10 and 11), and the
          * copy's own for the composite. */
         int quarter = (pass >= 1 && pass <= 3) || pass == 10 || pass == 11;
+        /* (the shadows' passes, 14-17, run on the PS1's grid) */
         int gw = pass == LIGHT_COMPOSITE ? w * n : quarter ? (w + 3) / 4 : w;
         int gh = pass == LIGHT_COMPOSITE ? h * n : quarter ? (h + 3) / 4 : h;
         vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
@@ -5889,6 +5936,9 @@ static void sceneLight(int primary, int x, int y, int w, int h, int second, int 
     if (vk.hiN != n) return;
     cpuResolveFlush();
     endBatch();
+    /* Room for the shadows' block in this frame's span buffer. */
+    if ((p->all || p->shadow > 0) && frame()->spanUsed + 16 + LIGHT_BLOCK_BYTES > SPAN_BYTES && !vk.presentAcquired)
+        submitFrame(NULL, NULL);
     VkCommandBuffer cmd = recording();
     FrameCtx* ctx = frame();
     sceneLightSets(ctx, primary);

@@ -38,6 +38,12 @@ def gitTag = git(['describe', '--tags', '--abbrev=0'])
 def gitChanges = git(['status', '--porcelain', '--untracked-files=no'])
 def appVersionCode = gitCount ? gitCount.toInteger() : 1
 def appVersionName = "${gitTag ?: '0.0'}+${gitHash ?: 'unknown'}${gitChanges ? '.changes' : ''}"
+// A release names its own version (tools/build_android.sh --version-name/--version-code, from the
+// release's tag: a tree made with git archive has no history to count).
+def releaseCode = providers.gradleProperty('xg.versionCode').getOrElse('')
+def releaseName = providers.gradleProperty('xg.versionName').getOrElse('')
+if (releaseCode) appVersionCode = releaseCode.toInteger()
+if (releaseName) appVersionName = releaseName
 logger.lifecycle("xenogears: version ${appVersionCode} (${appVersionName})")
 
 // A release is signed with the user's own key, from the environment, never from a file

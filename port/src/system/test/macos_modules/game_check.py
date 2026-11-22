@@ -1,6 +1,10 @@
-"""Link-only imports and payload verification for the field/battle reset executable."""
+"""Link-only imports and payload verification for the field/battle reset executable.
+
+On a Linux host (tools/darwin_link.py) XG_NM names an nm that reads Mach-O
+(llvm-nm), and verify --link-only checks the link without codesign or running it."""
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -42,7 +46,7 @@ def check_aliases(module, image, executable=False):
 
 
 def symbols(obj, flags):
-    output = subprocess.check_output(["nm", flags, obj], text=True)
+    output = subprocess.check_output([os.environ.get("XG_NM", "nm"), flags, obj], text=True)
     return {line.split()[-1] for line in output.splitlines() if line.strip()}
 
 
@@ -75,10 +79,11 @@ def imports(build):
     print(f"{len(standins)} address-only stand-ins for imports from outside these two overlays")
 
 
-def verify(build):
+def verify(build, run=True):
     objs = json.loads((build / "compile_commands.json").read_text())
     exe = build / "darwin_module_check"
-    subprocess.run(["codesign", "--verify", "--strict", exe], check=True)
+    if run:
+        subprocess.run(["codesign", "--verify", "--strict", exe], check=True)
     for module in MODULES:
         check_aliases(module, exe, executable=True)
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -116,12 +121,18 @@ def verify(build):
             path = Path(tmpdir) / module
             path.write_bytes(image)
             files.append(path)
-        subprocess.run([exe, *files], check=True)
+        if run:
+            subprocess.run([exe, *files], check=True)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("imports", "verify"))
     parser.add_argument("build", type=Path)
+    parser.add_argument("--link-only", action="store_true",
+                        help="verify: no codesign and no run (a host that cannot run the executable)")
     args = parser.parse_args()
-    (imports if args.action == "imports" else verify)(args.build.resolve())
+    if args.action == "imports":
+        imports(args.build.resolve())
+    else:
+        verify(args.build.resolve(), run=not args.link_only)

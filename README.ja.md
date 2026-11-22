@@ -12,9 +12,9 @@
 ![Linux, Windows and FreeBSD](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20FreeBSD-627eaa)
 [![Listed on Reversed with AI](https://reversedwithai.com/badge.svg)](https://reversedwithai.com/p/xenogears-native-pc-port-from-matching-decomp-claude)
 
-ビルドすると製品版と 1 バイト単位で一致する[マッチング逆コンパイル](https://github.com/EtherAura/xenogears)から作っています。Linux、Windows、FreeBSD でネイティブに動き、画面、ゲームプレイ、演出の追加機能を好みで使えます。Android 版も開発中です。**-Project Exodus-** の一部です。
+ビルドすると製品版と 1 バイト単位で一致する[マッチング逆コンパイル](https://github.com/EtherAura/xenogears)から作っています。Linux、Windows、FreeBSD、Android でネイティブに動き、画面、ゲームプレイ、演出の追加機能を好みで使えます。**-Project Exodus-** の一部です。
 
-[**ウェブサイト**](https://exodus.agartha.digital/) · [**ビルドとセットアップ**](docs/building-ja.md) · [**画面**](docs/display-ja.md) · [**パック**](docs/packs-ja.md) · [**ゲームプレイ**](docs/gameplay-ja.md) · [**おまけ**](docs/extras-ja.md)
+[**ウェブサイト**](https://exodus.agartha.digital/) · [**ビルドとセットアップ**](docs/building-ja.md) · [**Android**](docs/android-ja.md) · [**画面**](docs/display-ja.md) · [**パック**](docs/packs-ja.md) · [**ゲームプレイ**](docs/gameplay-ja.md) · [**おまけ**](docs/extras-ja.md)
 
 ## PC でゼノギアスを最初から最後まで
 
@@ -39,7 +39,7 @@ Linux と Windows の両方で、ディスク 1 とディスク 2 のどちら�
 
 - **Linux x86-64 と Windows x64。** [ダウンロード](https://github.com/EtherAura/xenogears-pc/releases/latest)を公開しています。
 - **FreeBSD 15 amd64。** 北米版と日本版のディスクに対応し、オリジナルエンジンと強化エンジンを含む[ネイティブパッケージ](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.20-freebsd)があります。ソフトウェア Vulkan を使う VM 上の FreeBSD 15.1 amd64 で、インストールと起動を確認しました。
-- **Android（開発中）。** [APK ビルドスクリプト](tools/build_android.sh)は x86-64 と arm64 向けです。署名済みの APK が Android 17 x86-64 で動作し、arm64 のスマートフォン実機でのテストを進めています。APK の公開はまだです。
+- **Android 13 以降、arm64 と x86-64。** すべての[リリース](https://github.com/EtherAura/xenogears-pc/releases/latest)に、それぞれ向けの署名済み APK があります。どちらを使うかとインストール方法は [Android のページ](docs/android-ja.md)にあります。Pixel 10 Pro XL（arm64）と Android 17 x86-64 のエミュレーターでテストしました。
 
 [開発への参加](CONTRIBUTING.ja.md) · [セキュリティ](SECURITY.ja.md) · [ディスカッション](https://github.com/EtherAura/xenogears-pc/discussions)
 

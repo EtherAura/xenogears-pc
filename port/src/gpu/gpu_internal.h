@@ -421,8 +421,11 @@ typedef struct {
     int debug;    /* 1: the blur amounts as colours instead, 2: inverted (XG_DOF_DEBUG) */
     int figures;  /* 1: figures (sprites) stay in focus wherever they stand */
 } DofParams;
-/* The lighting: each part's strength (0: without it), and the view the scene
- * was projected with, which gives each pixel its place and its normal. */
+/* The most actors' ground points a scene's shadows take (pcSceneFigure). */
+#define SCENE_FIGURES 32
+/* The lighting and the shadows: each part's strength (0: without it), and the
+ * view the scene was projected with, which gives each pixel its place and its
+ * normal. */
 typedef struct {
     int on;        /* the lighting runs (with every strength 0 too: it must then change nothing) */
     int all;       /* every pass runs, whatever the strengths (the checks, the debug colours) */
@@ -432,6 +435,10 @@ typedef struct {
     float centerX, centerY; /* the projection centre in the game's frame, PS1 pixels */
     float focus;   /* the focus depth: lengths are PS1 pixels at this depth, and the backdrop is told by it */
     int debug;     /* 1: the parts as colours instead (XG_LIGHT_DEBUG) */
+    float shadow;  /* how dark a full shadow makes what it falls on (0: no shadows) */
+    float sun[3];  /* towards the room's sun, in view space */
+    int figures;   /* the actors' ground points (view space) the characters' shadows start from */
+    float figure[SCENE_FIGURES][3];
 } LightParams;
 /* What is done to a scene when it ends: the lighting, then the blur. */
 typedef struct {

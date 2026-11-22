@@ -176,10 +176,13 @@ int main(int argc, char** argv) {
     CHECK(cdSwapSetOther("")); /* invalid automatically found images do not block one-disc use */
     CHECK(cdSwapPath(1) == NULL);
     CHECK(driveCalls == 0);
-    /* Optional compatibility check with player-provided Atelier 1.1 images. */
+    /* Optional compatibility check with player-provided Atelier 1.1 images, and Perfect Works 0.11.4 full presets
+     * given as pw:<path> (xg-g0ra.7): read as text sources, refused as game discs. */
     for (int i = 2; i < argc; i++) {
-        CHECK(textIndex(argv[i], &info[0], why, sizeof why) && info[0].atelierFrench);
-        CHECK(!cdVerifyImage(argv[i], &info[0], why, sizeof why) && strstr(why, "beyond"));
+        int pw = !strncmp(argv[i], "pw:", 3);
+        const char* path = argv[i] + (pw ? 3 : 0);
+        CHECK(textIndex(path, &info[0], why, sizeof why) && (pw ? info[0].perfectWorks && !info[0].atelierFrench : info[0].atelierFrench));
+        CHECK(!cdVerifyImage(path, &info[0], why, sizeof why) && strstr(why, "beyond"));
     }
     printf("Disc verification: %d checks passed\n", checks);
     return 0;

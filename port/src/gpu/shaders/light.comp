@@ -25,11 +25,17 @@
 //   bounce     a pixel that stands out as bright against its surroundings is
 //              a small light at its own place in the scene, and lights what
 //              is near it by distance and facing;
-//   glow       light above a high threshold, spread softly.
-// Figures (sprites) get no top light and no shade, cast neither, and are no
-// source of bounce or glow; bounce and glow fall on them. A distant backdrop
-// (far behind the focus, by the depth of field's measure) is a painting:
-// neither lit, shaded nor a source.
+//   glow       light above a high threshold, spread softly;
+//   shadows    cast by a sun set per room (scene.c): the scenery's marched
+//              through the depth image toward the sun, the characters' laid
+//              on the ground from where the game lays its own shadow, each
+//              sprite as if it turned to face the sun (docs/PORT_HD2D.md
+//              section 20).
+// Figures (sprites) get no top light and no occlusion shade, cast none, and
+// are no source of bounce or glow; bounce, glow and the scenery's cast
+// shadows fall on them, and they cast their own shadows as silhouettes. A
+// distant backdrop (far behind the focus, by the depth of field's measure) is
+// a painting: neither lit, shaded nor a source.
 //
 // Everything but the last pass is made on the PS1's own pixel grid or on a
 // quarter of it, in PS1 pixels and view units, so the look does not depend
@@ -45,7 +51,10 @@
 //   10, 11 on the quarter grid: the sources summed, then gathered by each
 //          quarter pixel within its reach (every one of them: no noise);
 //   12, 13 the glow's narrow spread, and the wide ones added;
-//   14     composite at the copy's resolution. Top light, shade and bounce
+//   14     the scenery's cast shadows, marched toward the sun;
+//   15     the characters' shadows, laid on the ground;
+//   16, 17 the shadows smoothed along surfaces;
+//   18     composite at the copy's resolution. Top light, shade and bounce
 //          are read from the grid pixels around: filtered where those lie on
 //          the pixel's own surface (their filtered depth is the pixel's),
 //          else one by one, weighted by how close their depth is to the
@@ -65,19 +74,25 @@ layout(set = 0, binding = 5, rgba16f) uniform image2D tempA;
 layout(set = 0, binding = 6, rgba16f) uniform image2D tempB;
 layout(set = 0, binding = 7, rgba16f) uniform image2D tempC;
 layout(set = 0, binding = 8, rgba16f) uniform image2D terms;   // r: top light, g: shade, b: depth code, a: backdrop fade
+layout(set = 0, binding = 9, rgba16f) uniform image2D shadowImg; // r: cast shadow, b: depth code
 // The quarter grid.
-layout(set = 0, binding = 9, rgba16f) uniform image2D quarterA;     // the surroundings' brightness
-layout(set = 0, binding = 10, rgba16f) uniform image2D quarterB;
-layout(set = 0, binding = 11, rgba16f) uniform image2D quarterE;    // rgb: the sources summed, a: their depth
-layout(set = 0, binding = 12, rgba16f) uniform image2D quarterPool; // rgb: the bounce light, a: the depth it was gathered at
-layout(set = 0, binding = 13, rgba16f) uniform image2D quarterGlow; // the glow's source
-layout(set = 0, binding = 14, rgba16f) uniform image2D quarterWide; // the glow's wide spreads
+layout(set = 0, binding = 10, rgba16f) uniform image2D quarterA;     // the surroundings' brightness
+layout(set = 0, binding = 11, rgba16f) uniform image2D quarterB;
+layout(set = 0, binding = 12, rgba16f) uniform image2D quarterE;    // rgb: the sources summed, a: their depth
+layout(set = 0, binding = 13, rgba16f) uniform image2D quarterPool; // rgb: the bounce light, a: the depth it was gathered at
+layout(set = 0, binding = 14, rgba16f) uniform image2D quarterGlow; // the glow's source
+layout(set = 0, binding = 15, rgba16f) uniform image2D quarterWide; // the glow's wide spreads
 // Read with bilinear filtering.
-layout(set = 0, binding = 15) uniform sampler2D surround;    // quarterA
-layout(set = 0, binding = 16) uniform sampler2D poolLayer;   // quarterPool
-layout(set = 0, binding = 17) uniform sampler2D glowLayer;   // glow
-layout(set = 0, binding = 18) uniform sampler2D termsLayer;  // terms
-layout(set = 0, binding = 19) uniform sampler2D wideLayer;   // quarterWide
+layout(set = 0, binding = 16) uniform sampler2D surround;    // quarterA
+layout(set = 0, binding = 17) uniform sampler2D poolLayer;   // quarterPool
+layout(set = 0, binding = 18) uniform sampler2D glowLayer;   // glow
+layout(set = 0, binding = 19) uniform sampler2D termsLayer;  // terms
+layout(set = 0, binding = 20) uniform sampler2D wideLayer;   // quarterWide
+layout(set = 0, binding = 21) uniform sampler2D castLayer;   // shadowImg
+// The frame's span buffer: at block (pc.lens.w, in vec4s) the sun and the
+// shadow's darkness, the count of ground points, then the ground points
+// (vk.c lightBlock).
+layout(std430, set = 0, binding = 22) readonly buffer Spans { vec4 block[]; };
 
 layout(push_constant) uniform Light {
     int pass;
@@ -89,7 +104,7 @@ layout(push_constant) uniform Light {
     ivec2 work;    // the layers' used size (the frame they were made from, PS1 pixels)
     ivec2 layer;   // this frame's first PS1 pixel in the layers
     vec4 view;     // xyz: the room's up in view space; w: the projection distance
-    vec4 lens;     // xy: the projection centre in the frame, PS1 pixels; z: the focus depth
+    vec4 lens;     // xy: the projection centre in the frame, PS1 pixels; z: the focus depth; w: the shadows' block, or -1
     vec4 strength; // top light, shade, bounce, glow
 } pc;
 
@@ -131,6 +146,16 @@ const int SHADE_DIRS = 8, SHADE_STEPS = 4;
 // this slice (docs/PORT_HD2D.md section 16): the prototype took the field's
 // projection matrix, a rotation times 3, as the up direction.
 const float TOP_UP = 0.55, TOP_DOWN = 0.9, TOP_RESPONSE = 3.0;
+// Shadows: the reach of a march toward the sun in PS1 pixels at the focus
+// depth, its steps, and how far behind a caster a step may be and still be
+// shadowed (a share of the reach). Characters: how far from its foot a
+// sprite's pixel may be (PS1 pixels at the foot; depth as a share), and how
+// near the ground there must be to the shadow's depth. The most dark.
+const float SHADOW_REACH = 48.0, SHADOW_THICK = 0.25, SHADOW_MOST = 0.85;
+// What is painted this bright (light, the squared 8-bit value) is a light: no shadow from here, none at all from there.
+const float SHADOW_KEEP_FROM = 0.45, SHADOW_KEEP_TO = 0.75;
+const int SHADOW_STEPS = 24, MAX_FIGURES = 32;
+const float FIGURE_HEIGHT = 96.0, FIGURE_WIDTH = 32.0, FIGURE_DEPTH = 0.15, GROUND_DEPTH = 0.05;
 
 vec3 light(uint word) {
     vec3 c = vec3(float(word & 255u), float((word >> 8) & 255u), float((word >> 16) & 255u)) / 255.0;
@@ -231,6 +256,7 @@ void prepare(ivec2 t) {
         }
     }
     imageStore(geo, t, vec4(normal, code));
+    imageStore(shadowImg, t, vec4(0.0, 0.0, code, 0.0));
 }
 
 // On the quarter grid: the mean of 4x4 PS1 pixels, of the brightness (for the
@@ -481,6 +507,124 @@ void glowDown(ivec2 t) {
     imageStore(glow, t, vec4((sum / total * GLOW_SHARE.x + wide) * GLOW_GAIN, 0.0));
 }
 
+// The scenery's cast shadows: from each PS1 pixel's middle, steps toward the
+// sun; a step that lands behind what the depth image holds there (by less
+// than a thickness) is in shadow, darker the nearer the caster. Figures cast
+// only through their silhouettes (below); everything drawn receives.
+void shadowMarch(ivec2 t) {
+    float code = imageLoad(geo, t).a;
+    float occ = 0.0;
+    int b = int(pc.lens.w);
+    if (code != 0.0 && b >= 0) {
+        float z = abs(code);
+        vec3 sun = block[b].xyz;
+        vec3 p = place(middleAt(t), z);
+        float reach = SHADOW_REACH * pc.lens.z / pc.view.w; // view units
+        float thick = SHADOW_THICK * reach;
+        float noise = turn(t);
+        for (int i = 0; i < SHADOW_STEPS; i++) {
+            vec3 q = p + sun * ((float(i) + 0.5 + noise) / float(SHADOW_STEPS) * reach);
+            if (q.z <= 1.0) break;
+            ivec2 l = ivec2((q.xy * pc.view.w / q.z + pc.lens.xy) * float(pc.n));
+            if (l.x < 0 || l.y < 0 || l.x >= pc.size.x || l.y >= pc.size.y) continue;
+            float cq = depthCode(imageLoad(depth, l).r);
+            if (cq > 0.0 && cq < q.z - 0.004 * q.z && q.z - cq < thick)
+                occ = max(occ, sqrt(1.0 - float(i) / float(SHADOW_STEPS)));
+        }
+        occ *= backdropFade(z);
+    }
+    imageStore(shadowImg, t, vec4(occ, 0.0, code, 0.0));
+}
+
+// The characters' shadows: each figure pixel belongs to the actor whose ground
+// point is nearest (across the screen and in depth) and below it; it is laid
+// on the ground from there as if the sprite turned to face the sun: its
+// offset across the sprite runs across the sun, its height along the sun's
+// way, shortened by the sun's height.
+void silhouettes(ivec2 t) {
+    int b = int(pc.lens.w);
+    float code = imageLoad(geo, t).a;
+    if (b < 0 || code >= 0.0) return;
+    int count = min(int(block[b + 1].x), MAX_FIGURES);
+    vec3 sun = block[b].xyz, up = pc.view.xyz;
+    float rise = dot(sun, up);
+    vec3 level = sun - rise * up;
+    float run = length(level);
+    if (count <= 0 || rise <= 0.05 || run < 1.0e-3) return;
+    vec3 along = -level / run, across = cross(up, along);
+    float cot = run / rise;
+    vec3 cardX = normalize(vec3(1.0, 0.0, 0.0) - up.x * up); // the sprite's width, on the ground
+    vec3 p = place(middleAt(t), -code);
+    int best = -1;
+    float bestScore = 1.0e9, bw = 0.0, bh = 0.0;
+    for (int k = 0; k < count; k++) {
+        vec3 f = block[b + 2 + k].xyz;
+        if (f.z <= 1.0) continue;
+        vec3 d = p - f;
+        float scale = f.z / pc.view.w; // view units per PS1 pixel at the foot
+        float h = dot(d, up), w = dot(d, cardX), dz = abs(p.z - f.z);
+        if (h < -4.0 * scale || h > FIGURE_HEIGHT * scale || abs(w) > FIGURE_WIDTH * scale || dz > FIGURE_DEPTH * f.z) continue;
+        float score = abs(w) / scale + dz / (0.01 * f.z);
+        if (score < bestScore) { bestScore = score; best = k; bw = w; bh = max(h, 0.0); }
+    }
+    if (best < 0) return;
+    vec3 s = block[b + 2 + best].xyz + bw * across + bh * cot * along;
+    if (s.z <= 1.0) return;
+    ivec2 g0 = ivec2(floor(s.xy * pc.view.w / s.z + pc.lens.xy - 0.5));
+    for (int k = 0; k < 4; k++) {
+        ivec2 g = g0 + ivec2(k & 1, k >> 1);
+        if (g.x < 0 || g.y < 0 || g.x >= pc.work.x || g.y >= pc.work.y) continue;
+        float rc = imageLoad(geo, g).a;
+        // Only on what is drawn there at about the shadow's depth: the ground.
+        if (rc <= 0.0 || abs(rc - s.z) > GROUND_DEPTH * s.z) continue;
+        imageStore(shadowImg, g, vec4(backdropFade(rc), 0.0, rc, 0.0));
+    }
+}
+
+// The shadows smoothed along surfaces: across what is drawn at nearly the
+// same depth (figures with figures, scenery with scenery).
+void castBlur(ivec2 t, ivec2 axis, bool second) {
+    vec4 own = second ? imageLoad(tempB, t) : imageLoad(shadowImg, t);
+    if (own.b != 0.0) {
+        float z = abs(own.b);
+        float sum = 0.0, total = 0.0;
+        for (int d = -2; d <= 2; d++) {
+            ivec2 s = t + axis * d;
+            if (s.x < 0 || s.y < 0 || s.x >= pc.work.x || s.y >= pc.work.y) continue;
+            vec4 v = second ? imageLoad(tempB, s) : imageLoad(shadowImg, s);
+            if (v.b == 0.0 || (v.b > 0.0) != (own.b > 0.0)) continue;
+            float w = exp(-float(d * d) / 2.0) * exp(-abs(abs(v.b) - z) / (0.02 * z));
+            sum += v.r * w;
+            total += w;
+        }
+        if (total > 0.0) own.r = sum / total;
+    }
+    if (second) imageStore(shadowImg, t, own);
+    else imageStore(tempB, t, own);
+}
+
+// The cast shadow at a point of the copy: filtered inside a surface, the four
+// grid pixels one by one at an outline (as the top light and shade are read).
+float castAt(vec2 at, vec2 uv, float code) {
+    float z = abs(code);
+    vec4 around = textureLod(castLayer, uv, 0.0);
+    if (abs(around.b - code) <= 0.004 * z) return around.r;
+    vec2 f = at - 0.5;
+    ivec2 t0 = ivec2(floor(f));
+    vec2 w = f - vec2(t0);
+    float sum = 0.0, total = 0.0;
+    for (int k = 0; k < 4; k++) {
+        ivec2 o = ivec2(k & 1, k >> 1);
+        vec4 v = imageLoad(shadowImg, inside(t0 + o));
+        if (v.b == 0.0 || (v.b > 0.0) != (code > 0.0)) continue;
+        float weight = (o.x == 1 ? w.x : 1.0 - w.x) * (o.y == 1 ? w.y : 1.0 - w.y);
+        weight = (weight + 0.02) * exp(-abs(abs(v.b) - z) / (0.02 * z));
+        sum += v.r * weight;
+        total += weight;
+    }
+    return total > 1.0e-5 ? sum / total : 0.0;
+}
+
 // Brighter by a factor with a shoulder: black stays black, white stays white.
 vec3 brighten(vec3 c, vec3 factor) {
     return c * factor / (1.0 + (factor - 1.0) * clamp(c, 0.0, 1.0));
@@ -549,10 +693,13 @@ void composite(ivec2 l) {
         pool *= BOUNCE_GAIN;
     }
     vec3 halo = all || pc.strength.w > 0.0 ? textureLod(glowLayer, uv, 0.0).rgb : vec3(0.0);
+    int b = int(pc.lens.w);
+    float dark = b >= 0 ? block[b].w : 0.0;
+    float shadow = code != 0.0 && b >= 0 && (all || dark > 0.0) ? castAt(at, uv, code) : 0.0;
 
     if ((pc.flags & DEBUG) != 0) {
-        // Red: shade; green: top light around a middle; blue: glow and bounce.
-        vec3 shown = vec3(clamp(shade * SHADE_GAIN, 0.0, 1.0), 0.5 + 0.5 * top,
+        // Red: shade and cast shadows; green: top light around a middle; blue: glow and bounce.
+        vec3 shown = vec3(clamp(max(shade * SHADE_GAIN, shadow), 0.0, 1.0), 0.5 + 0.5 * top,
                           clamp(dot(halo + pool, vec3(0.3333)), 0.0, 1.0));
         uvec3 o = uvec3(clamp(shown, 0.0, 1.0) * 255.0 + 0.5);
         imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
@@ -569,6 +716,12 @@ void composite(ivec2 l) {
         float s = 1.0 - clamp(pc.strength.y * SHADE_GAIN * shade, 0.0, SHADE_MOST);
         c *= s * s;
     }
+    if (dark > 0.0 && shadow > 0.0) {
+        // A painted light (a window, a lamp, a fire) stays as bright as it is painted.
+        float own = max(c.r, max(c.g, c.b));
+        float s = 1.0 - clamp(dark * shadow * (1.0 - smoothstep(SHADOW_KEEP_FROM, SHADOW_KEEP_TO, own)), 0.0, SHADOW_MOST);
+        c *= s * s;
+    }
     if (pc.strength.w > 0.0) c += pc.strength.w * halo * (1.0 - clamp(c, 0.0, 1.0)); // never past white
     uvec3 o = uvec3(clamp(sqrt(max(c, 0.0)), 0.0, 1.0) * 255.0 + 0.5);
     uint packed = o.r | o.g << 8 | o.b << 16;
@@ -578,7 +731,7 @@ void composite(ivec2 l) {
 
 void main() {
     ivec2 t = ivec2(gl_GlobalInvocationID.xy);
-    if (pc.pass == 14) {
+    if (pc.pass == 18) {
         if (t.x < pc.size.x && t.y < pc.size.y) composite(t);
         return;
     }
@@ -604,6 +757,10 @@ void main() {
     case 8: shadeBlur(t, ivec2(1, 0), false); break;
     case 9: shadeBlur(t, ivec2(0, 1), true); break;
     case 12: glowAcross(t); break;
-    default: glowDown(t); break;
+    case 13: glowDown(t); break;
+    case 14: shadowMarch(t); break;
+    case 15: silhouettes(t); break;
+    case 16: castBlur(t, ivec2(1, 0), false); break;
+    default: castBlur(t, ivec2(0, 1), true); break;
     }
 }

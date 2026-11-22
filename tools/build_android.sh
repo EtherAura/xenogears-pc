@@ -10,6 +10,9 @@
 #   tools/build_android.sh --id-suffix .dev   # the package name with a suffix: a test build
 #                                          # installed beside the app, not over it
 #   tools/build_android.sh --release       # release APK, signed with the user's key (below)
+#   tools/build_android.sh --version-name 2026.11.21 --version-code 202611021
+#                                          # the app's version (a release's, from its tag), instead of
+#                                          # git's: the latest tag + short hash, and the commit count
 #   tools/build_android.sh --native-only   # the libraries, no APK
 #
 # Needs (docs/ANDROID_PLAN.md "Android tooling"): the Android SDK in
@@ -48,6 +51,8 @@ ABIS=()
 REGIONS=()
 ENGINES=()
 ID_SUFFIX=
+VERSION_NAME=
+VERSION_CODE=
 VARIANT=debug
 NATIVE_ONLY=0
 while [ $# -gt 0 ]; do
@@ -58,6 +63,10 @@ while [ $# -gt 0 ]; do
         case "$2" in original | enhanced) ENGINES+=("$2") ;; *) echo "build_android.sh: --engine original or enhanced" >&2; exit 2 ;; esac
         shift ;;
     --id-suffix) ID_SUFFIX="$2"; shift ;;
+    --version-name) VERSION_NAME="$2"; shift ;;
+    --version-code)
+        case "$2" in '' | *[!0-9]*) echo "build_android.sh: --version-code takes a number" >&2; exit 2 ;; esac
+        VERSION_CODE="$2"; shift ;;
     --release) VARIANT=release ;;
     --native-only) NATIVE_ONLY=1 ;;
     -h | --help) sed -n '2,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
@@ -222,6 +231,7 @@ rm -f "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk
 "$GRADLE" -p port/android --project-cache-dir "$OUT/gradle-cache" --no-daemon \
     -Pxg.sdlSource="$SDL3_SOURCE" -Pxg.jniLibs="$OUT/jniLibs" -Pxg.abis="$abilist" -Pxg.buildRoot="$OUT/gradle" \
     -Pxg.assets="$OUT/assets" -Pxg.idSuffix="$ID_SUFFIX" \
+    ${VERSION_NAME:+-Pxg.versionName="$VERSION_NAME"} ${VERSION_CODE:+-Pxg.versionCode="$VERSION_CODE"} \
     "$task"
 ls -l "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk
 if [ "$HAS_ARM64" = 1 ]; then

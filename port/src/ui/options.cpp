@@ -222,6 +222,7 @@ std::vector<Spec>& table() {
     add("lighting", N_("Lighting"), [](int) { return sceneLighting(); }, [](int, int v) { sceneSetLighting(v); }, 0,
         dofLevels, 4);
     add("glow", N_("Glow"), [](int) { return sceneGlow(); }, [](int, int v) { sceneSetGlow(v); }, 0, dofLevels, 4);
+    add("shadows", N_("Shadows"), [](int) { return sceneShadows(); }, [](int, int v) { sceneSetShadows(v); }, 0, dofLevels, 4);
     add("present_filter", N_("Filter"), [](int) { return presentFilter(); }, [](int, int v) { presentSetFilter(v); }, 0,
         filterNames, 5);
     add("present_movie_filter", N_("Movies"), [](int) { return presentMovieFilter() - PRESENT_FILTER_SAME; },

@@ -33,6 +33,10 @@
 #               objects cross-built for arm64 macOS (tools/darwin_plans.py;
 #               `write` rewrites a stale one from the disc): skipped without a
 #               clang that targets AArch64
+#   darwin-link that module check linked as the macOS workflow links it, with
+#               ld64 955.13 (tools/darwin_link.py; the linker from
+#               tools/build_ld64.sh), and its checks short of running it:
+#               skipped without that linker
 #   statevars   every writable static of the platform layer in $XG_TEST_BUILD
 #               is classified for save states (port/src/system/
 #               savestate_inventory.txt; tools/statecheck.py inventory):
@@ -172,6 +176,7 @@ done
 # The plans the public macOS workflow links field and battle from: a data change
 # there makes them stale, and only that run would see it.
 gate darwin-plans "$PY" tools/darwin_plans.py check
+gate darwin-link "$PY" tools/darwin_link.py
 
 # The default test build is the gates' own (the tests build the executable
 # too, and build/pc/release is the user's launcher).

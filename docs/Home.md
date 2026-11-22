@@ -19,6 +19,7 @@ like the PlayStation version.
 | page | what it covers |
 |---|---|
 | [Building](building.md) | What you need, the build steps, the first start, the Enhanced engine and the Windows build |
+| [Android](android.md) | Installing the APK: checking its signature, the disc folder, developer verification |
 | [Display](display.md) | Widescreen, higher resolutions and filters, smoothed motion, the performance overlay |
 | [Gameplay](gameplay.md) | Battle speed, battles, save states and rewind, controls and audio |
 | [Translations](translations.md) | How to select translated game text and which fan patches worked on each disc |

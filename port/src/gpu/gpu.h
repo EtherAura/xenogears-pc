@@ -241,6 +241,8 @@ int sceneLighting(void);         /* 0 off (default), 1 subtle, 2 medium, 3 stron
 void sceneSetLighting(int level);
 int sceneGlow(void);
 void sceneSetGlow(int level);
+int sceneShadows(void);          /* shadows: 0 off (default) .. 3 strong */
+void sceneSetShadows(int level);
 const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class

@@ -892,6 +892,18 @@ void displaySection() {
         hint("In fields, bright areas such as lamps, fires and windows glow softly. Off by default.");
         overrideNote("glow");
     }
+    // Shadows (docs/PORT_HD2D.md section 20): a sun set per room.
+    if (row("Shadows", "shadows", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneShadows();
+        int chosen = listChoice("##shadows", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetShadows(chosen);
+        hint("In fields, the scenery and the characters cast shadows from a sun set when the room starts. Dialogue, "
+             "portraits and the HUD are not touched. Off by default.");
+        overrideNote("shadows");
+    }
 
     if (row("Filter", "present_filter")) {
         static const char* const filters[] = {"Nearest", "Linear", "Sharp", "Bicubic", "xBR (edges)"};

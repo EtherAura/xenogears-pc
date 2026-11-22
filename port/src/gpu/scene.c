@@ -50,6 +50,13 @@
  * no top light and no shade and are no source of light; a distant backdrop
  * is left as painted.
  *
+ * The shadows (docs/PORT_HD2D.md section 20): a sun 55 degrees up from the
+ * left of the camera the room starts with, kept in room space from then on,
+ * so it does not swing when the camera turns. The scenery's shadows are
+ * marched through the depth image toward it; each character's sprite is laid
+ * on the ground away from it from the point where the game lays its own
+ * shadow (pcSceneFigure), as if the sprite turned to face the sun.
+ *
  * Settings (settings.ini; XG_<KEY> overrides):
  *   depth_of_field=off        off (default), subtle, medium or strong: the
  *                             largest blur radius, 1.25, 2.5 or 4 PS1 pixels
@@ -63,6 +70,8 @@
  *   glow=off                  off (default), subtle, medium or strong
  *   lighting_shade=on, lighting_bounce=on  off: lighting without that part
  *                             (settings.ini only)
+ *   shadows=off               off (default), subtle, medium or strong: cast
+ *                             shadows from the room's sun (xg-rgcf.5.2)
  * The Enhanced engine only: the Original has no hook and never arms a scene.
  *
  * Env: XG_DOF_DEBUG=1: the blur amounts as colours instead of the blur (red
@@ -93,6 +102,7 @@
 #include "pc_scene.h"
 #include "pc_wide.h"
 #include "system/engine.h"
+#include "system/hw.h"
 #include "system/settings.h"
 
 #define TABLES 2
@@ -106,6 +116,11 @@ static const float lightTop[] = {0, 0.25f, 0.45f, 0.75f};
 static const float lightShade[] = {0, 0.6f, 1.0f, 1.4f};
 static const float lightBounce[] = {0, 0.6f, 1.0f, 1.5f};
 static const float glowGain[] = {0, 0.6f, 1.0f, 1.5f};
+/* How dark a full shadow makes what it falls on, by level. */
+static const float shadowDark[] = {0, 0.25f, 0.45f, 0.6f};
+/* The sun: this far above the ground, from the camera's left and a little
+ * from beyond the scene, when the room starts. */
+#define SUN_ELEVATION 55.0f
 /* The blur reaches its radius 0.25 of relative depth beyond the focus range. */
 #define DOF_GAIN 4.0f
 
@@ -116,7 +131,7 @@ static struct {
     int debug, log;
     float bandOverride;
     int haveBand;
-    int lighting, glow;       /* levels, 0 off */
+    int lighting, glow, shadows; /* levels, 0 off */
     int shadePart, bouncePart;
     int lightDebug, haveLightGain;
     float lightGain;
@@ -124,6 +139,16 @@ static struct {
     /* The view pcSceneView gave for the scene pcSceneDepth registers next. */
     int viewGiven, viewArmed;
     float up[3], screenZ, centerX, centerY;
+    float rot[3][3];          /* room to view, unit length (the field's matrix over its scale) */
+    float matrix[3][3], trans[3]; /* room to view as the GTE takes it (4096 = 1) */
+
+    /* The shadows' sun in room space, set when the room changes. */
+    int sunRoomId, sunSet;
+    float sunRoom[3];
+    /* Ground points pcSceneFigure gave this frame (room space), and the vblank they belong to. */
+    int figureCount;
+    uint32_t figureVblank;
+    float figureRoom[SCENE_FIGURES][3];
 
     /* The scene pcSceneDepth registered, for the next walk. */
     int armed;
@@ -189,6 +214,9 @@ static void load(void) {
     settingsDescribe("lighting_bounce", "lighting_bounce: on (default) or off: the light from bright spots, as part of lighting");
     sc.lighting = levelOf("lighting");
     sc.glow = levelOf("glow");
+    settingsDescribe("shadows", "shadows: off (default), subtle, medium or strong: shadows cast by the scenery and the "
+                                "characters in fields, from a sun set per room (the Enhanced engine)");
+    sc.shadows = levelOf("shadows");
     s = settingsGet("lighting_shade");
     sc.shadePart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     s = settingsGet("lighting_bounce");
@@ -249,15 +277,26 @@ static void setLevel(const char* key, int* held, int level) {
     hiresPrecisionTable(); /* the vertices' view depths, from now on */
 }
 
+int sceneShadows(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.shadows : 0;
+}
+
 void sceneSetLighting(int level) { setLevel("lighting", &sc.lighting, level); }
 void sceneSetGlow(int level) { setLevel("glow", &sc.glow, level); }
+void sceneSetShadows(int level) { setLevel("shadows", &sc.shadows, level); }
 
 const char* sceneLightingStatus(void) {
-    if (!sceneLighting() && !sceneGlow()) return NULL;
+    if (!sceneLighting() && !sceneGlow() && !sceneShadows()) return NULL;
     return sc.status != NULL ? sc.status : sc.lightStatus;
 }
 
-int sceneWantsCopy(void) { return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0; }
+int sceneWantsCopy(void) { return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0; }
+
+static void normalize3(float v[3]) {
+    float length = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (length > 0) for (int i = 0; i < 3; i++) v[i] /= length;
+}
 
 static void params(SceneParams* p) {
     DofParams* d = &p->dof;
@@ -270,9 +309,9 @@ static void params(SceneParams* p) {
 
     LightParams* l = &p->light;
     memset(l, 0, sizeof(*l));
-    int lighting = sceneLighting(), glow = sceneGlow();
+    int lighting = sceneLighting(), glow = sceneGlow(), shadows = sceneShadows();
     sc.lightStatus = NULL;
-    if (!lighting && !glow) return;
+    if (!lighting && !glow && !shadows) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
         return;
@@ -284,6 +323,26 @@ static void params(SceneParams* p) {
     l->shade = sc.shadePart ? lightShade[lighting] * gain : 0;
     l->bounce = sc.bouncePart ? lightBounce[lighting] * gain : 0;
     l->glow = glowGain[glow] * gain;
+    l->shadow = shadowDark[shadows] * gain;
+    if (sc.sunSet) {
+        /* The room's sun in this frame's view. */
+        for (int i = 0; i < 3; i++)
+            l->sun[i] = sc.rot[i][0] * sc.sunRoom[0] + sc.rot[i][1] * sc.sunRoom[1] + sc.rot[i][2] * sc.sunRoom[2];
+        normalize3(l->sun);
+    } else {
+        memcpy(l->sun, sc.up, sizeof(l->sun));
+    }
+    /* This frame's actors' ground points, in view space. */
+    l->figures = 0;
+    if (sc.figureVblank == hwVSyncCount()) {
+        for (int k = 0; k < sc.figureCount; k++) {
+            const float* r = sc.figureRoom[k];
+            for (int i = 0; i < 3; i++)
+                l->figure[k][i] = (sc.matrix[i][0] * r[0] + sc.matrix[i][1] * r[1] + sc.matrix[i][2] * r[2]) / 4096.0f + sc.trans[i];
+        }
+        l->figures = sc.figureCount;
+    }
+    sc.figureCount = 0;
     memcpy(l->up, sc.up, sizeof(l->up));
     l->screenZ = sc.screenZ;
     l->centerX = sc.centerX;
@@ -292,9 +351,38 @@ static void params(SceneParams* p) {
     l->debug = sc.lightDebug;
 }
 
-void pcSceneView(const short rotation[3][3], int screenZ, int centerX, int centerY) {
+void pcSceneFigure(int x, int y, int z) {
+    uint32_t vblank = hwVSyncCount();
+    if (vblank != sc.figureVblank) {
+        sc.figureVblank = vblank;
+        sc.figureCount = 0;
+    }
+    if (sc.figureCount >= SCENE_FIGURES) return;
+    sc.figureRoom[sc.figureCount][0] = (float)x;
+    sc.figureRoom[sc.figureCount][1] = (float)y;
+    sc.figureRoom[sc.figureCount][2] = (float)z;
+    sc.figureCount++;
+}
+
+/* The room's sun from this view: SUN_ELEVATION above the ground, from the
+ * camera's left and a little from beyond the scene, kept in room space. */
+static void setSun(void) {
+    float target[3] = {-0.7071f, 0.0f, 0.7071f}; /* left and away from the camera, in view space */
+    float d = target[0] * sc.up[0] + target[1] * sc.up[1] + target[2] * sc.up[2];
+    float h[3] = {target[0] - d * sc.up[0], target[1] - d * sc.up[1], target[2] - d * sc.up[2]};
+    normalize3(h);
+    float e = SUN_ELEVATION * 3.14159265f / 180.0f;
+    float sun[3];
+    for (int i = 0; i < 3; i++) sun[i] = sc.up[i] * sinf(e) + h[i] * cosf(e);
+    /* View to room: the rotation's transpose. */
+    for (int j = 0; j < 3; j++) sc.sunRoom[j] = sc.rot[0][j] * sun[0] + sc.rot[1][j] * sun[1] + sc.rot[2][j] * sun[2];
+    normalize3(sc.sunRoom);
+    sc.sunSet = 1;
+}
+
+void pcSceneView(const short rotation[3][3], const int translation[3], int screenZ, int centerX, int centerY, int room) {
     sc.viewGiven = 0;
-    if (rotation == NULL || screenZ <= 0) return;
+    if (rotation == NULL || translation == NULL || screenZ <= 0) return;
     /* The room's up (its y axis points down, as the PS1's does) in view
      * space: minus the matrix's second column, made unit length (the
      * field's matrix is a rotation times 3). light.comp's top light keeps
@@ -303,10 +391,21 @@ void pcSceneView(const short rotation[3][3], int screenZ, int centerX, int cente
     float length = sqrtf(up[0] * up[0] + up[1] * up[1] + up[2] * up[2]);
     if (length <= 0) return;
     for (int i = 0; i < 3; i++) sc.up[i] = up[i] / length;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            sc.matrix[i][j] = (float)rotation[i][j];
+            sc.rot[i][j] = (float)rotation[i][j] / length; /* the columns share the scale */
+        }
+        sc.trans[i] = (float)translation[i];
+    }
     sc.screenZ = (float)screenZ;
     sc.centerX = (float)centerX;
     sc.centerY = (float)centerY;
     sc.viewGiven = 1;
+    if (!sc.sunSet || room != sc.sunRoomId) {
+        sc.sunRoomId = room;
+        setSun();
+    }
 }
 
 void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int groundCount, int zPerSlot,

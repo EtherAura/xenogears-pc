@@ -85,6 +85,17 @@ and the HUD are not touched, and the game still works with its own picture.
 The Enhanced engine only (F1 > System > Engine).
 F1 > Display > Lighting and Glow (each Off, Subtle, Medium, Strong).
 
+## Shadows
+
+In fields, the scenery and the characters cast shadows from a sun, which is
+set from the camera a room starts with and then stays put in the room, so
+the shadows don't swing when the camera turns. Walls, furniture and props
+cast through the picture's depth; each character's sprite is laid on the
+ground away from the sun, beside the game's own shadow under it. Painted
+lights such as windows and lamps stay as bright as they are painted. The
+Enhanced engine only (F1 > System > Engine).
+F1 > Display > Shadows (Off, Subtle, Medium, Strong).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -118,6 +129,7 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Focus range | Normal |
 | Lighting | Off |
 | Glow | Off |
+| Shadows | Off |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

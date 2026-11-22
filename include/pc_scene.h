@@ -20,14 +20,21 @@ void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int g
                   const void* uiTag, int focusZ, int pictureSlot);
 
 /* The view that scene is drawn with, for effects that need a pixel's place in
- * the room (scene lighting): rotation, the room-to-view matrix the scenery is
- * projected with (rows x, y, z of view space; 4096 = 1; the field's is a
- * rotation times 3, which the port takes out); screenZ, the
- * projection distance (the GTE's H); centerX and centerY, the projection
- * centre in the frame (the GTE's OFX and OFY). Call it before pcSceneDepth,
- * each frame the scene is drawn; without it the effects that need it are not
- * drawn. */
-void pcSceneView(const short rotation[3][3], int screenZ, int centerX, int centerY);
+ * the room (scene lighting and shadows): rotation and translation, the
+ * room-to-view matrix the scenery is projected with, as the GTE takes it
+ * (view = rotation * room / 4096 + translation; rows x, y, z of view space;
+ * the field's rotation is a rotation times 3, which the port takes out);
+ * screenZ, the projection distance (the GTE's H); centerX and centerY, the
+ * projection centre in the frame (the GTE's OFX and OFY); room, the field's
+ * number (the shadows' sun is set from the view when it changes). Call it
+ * before pcSceneDepth, each frame the scene is drawn; without it the effects
+ * that need it are not drawn. */
+void pcSceneView(const short rotation[3][3], const int translation[3], int screenZ, int centerX, int centerY, int room);
+
+/* An actor's ground point in room coordinates, where the game lays its
+ * shadow under it: the shadows lay the actor's sprite on the ground from
+ * there. Call it for each such actor in the frame, before pcSceneDepth. */
+void pcSceneFigure(int x, int y, int z);
 
 #endif /* PLATFORM_PC */
 

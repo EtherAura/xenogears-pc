@@ -13,11 +13,10 @@ English | [日本語](README.ja.md)
 [![Listed on Reversed with AI](https://reversedwithai.com/badge.svg)](https://reversedwithai.com/p/xenogears-native-pc-port-from-matching-decomp-claude)
 
 Built from the [matching decompilation](https://github.com/EtherAura/xenogears).
-Native Linux, Windows and FreeBSD, with optional display, gameplay and presentation extras.
-An Android version is in development.
+Native Linux, Windows, FreeBSD and Android, with optional display, gameplay and presentation extras.
 Part of **-Project Exodus-**.
 
-[**Website**](https://exodus.agartha.digital/) · [**Build and set up**](docs/building.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
+[**Website**](https://exodus.agartha.digital/) · [**Build and set up**](docs/building.md) · [**Android**](docs/android.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
 
 ## Start your full Xenogears playthrough on PC
 
@@ -44,7 +43,7 @@ GitHub CI covers checks that need no game data; full builds and retail checks ru
 
 - **Linux x86-64 and Windows x64.** [Public downloads](https://github.com/EtherAura/xenogears-pc/releases/latest) are available.
 - **FreeBSD 15 amd64.** [Native package](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.20-freebsd) with Original and Enhanced engines for US and Japanese discs. Install and launch passed on FreeBSD 15.1 amd64 in a VM with software Vulkan.
-- **Android (in development).** The [APK build script](tools/build_android.sh) targets x86-64 and arm64. A signed APK runs on Android 17 x86-64, and testing on an arm64 phone is under way. A public APK is pending.
+- **Android 13 or later, arm64 and x86-64.** Every [release](https://github.com/EtherAura/xenogears-pc/releases/latest) has a signed APK for each; the [Android page](docs/android.md) says which to take and how to install it. Tested on a Pixel 10 Pro XL (arm64) and in an Android 17 x86-64 emulator.
 
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Discussions](https://github.com/EtherAura/xenogears-pc/discussions)
 
