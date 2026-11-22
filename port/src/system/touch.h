@@ -2,7 +2,8 @@
  * The touch pad (system/touch.c; xg-mrj.3.8, xg-mrj.3.20): a PS1 pad drawn
  * over the game for a touchscreen, its presses ORed into port 1 as the
  * keyboard's are, with a menu button (F1) and a row of the hotkeys' functions
- * (F2-F9).
+ * (F2-F9). It shows over the settings menu too, and moves about it as a
+ * controller does (touch.c).
  *
  *   touch_pad=auto|on|off   (settings.ini; XG_TOUCH_PAD) auto: shown from a
  *                           touch until a key or a controller is used; the
@@ -72,6 +73,11 @@ typedef struct {
 } TouchControl;
 
 int touchEvent(const union SDL_Event* e); /* pad.c's pump, while the menu is closed: 1 when taken */
+/* ui/menu.cpp, while the settings menu is open: 1 when the event is the pad's (a finger that
+ * landed on one of its controls, and the mouse SDL makes of it); the others are the menu's. */
+int touchMenuEvent(const union SDL_Event* e);
+/* ui/menu.cpp: a finger holds the PS1 button of that name (pad.h's: "up", "cross", "start"...). */
+int touchButtonHeld(const char* name);
 unsigned short touchVBlank(void);         /* pad.c, each vblank of live input: the buttons held */
 /* pad.c, each vblank of live input: the right stick (-1..1, right and down
  * positive, 0 while no finger is on it) and whether the camera is asked back

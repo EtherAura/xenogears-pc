@@ -325,6 +325,95 @@ const char* androidActivityText(const char* method, char* out, size_t size) {
     return out;
 }
 
+/* ---- the BIOS image ------------------------------------------------------------------
+ *
+ * The save titles on the memory card screens (their chapter names) and the text over some
+ * scenes are drawn with the BIOS's font (system/krom.c). The activity holds the choice of
+ * image (XgActivity: a file chosen in the menu, else none when so chosen, else a 512 KB .bin
+ * in the disc folder) and opens it; the loader passes it as XG_BIOS. Without one it asks at
+ * the start (XG_ANDROID_BIOS_ASK, set by the loader when the disc folder has none and nothing
+ * was chosen), until the player says to go on without. What the picker or the folder gives
+ * while the game runs arrives later: taken in the menu's BIOS row, else at a vblank. */
+
+const char* kromPath(void);
+int kromLoad(const char* path);
+
+static int biosPending; /* the activity owes an answer (a picker open, a folder looked in) */
+
+void androidBiosChoose(void) {
+    biosPending = 1;
+    androidActivityAction("chooseBiosFile");
+}
+
+void androidBiosFromFolder(void) {
+    biosPending = 1;
+    androidActivityAction("useFolderBios");
+}
+
+void androidBiosNone(void) {
+    biosPending = 0;
+    androidActivityAction("useNoBios");
+    kromLoad("none");
+}
+
+int androidBiosTake(char* message, size_t size) {
+    message[0] = '\0';
+    if (!biosPending) return 0;
+    char text[1200];
+    androidActivityText("takeBios", text, sizeof text); /* XgActivity.biosAnswer */
+    if (text[0] == '\0') return 0;
+    biosPending = 0;
+    int fd = -1, used = 0;
+    if (sscanf(text, "ok|%d|%n", &fd, &used) == 1 && used > 0) {
+        char path[64];
+        snprintf(path, sizeof path, "/proc/self/fd/%d", fd);
+        int ok = kromLoad(path); /* read whole: the descriptor is done with */
+        close(fd);
+        snprintf(message, size, "%s%s", ok ? "" : "notbios|", text + used);
+        fprintf(stderr, "android: BIOS image %s%s\n", text + used, ok ? "" : ": not read");
+        return ok ? 1 : -1;
+    }
+    if (strncmp(text, "error|", 6) == 0) {
+        snprintf(message, size, "%s", text + 6);
+        fprintf(stderr, "android: BIOS image: %s\n", message);
+        if (strncmp(message, "nofolder|", 9) == 0) kromLoad("none"); /* the folder's, which is none */
+        return -1;
+    }
+    return 2;
+}
+
+void androidBiosVBlank(void) {
+    static unsigned n;
+    if (!biosPending || ++n % 30 != 0) return; /* twice a second while an answer is owed */
+    char message[1024];
+    androidBiosTake(message, sizeof message);
+}
+
+void androidBiosAsk(SDL_Window* window) {
+    if (kromPath() != NULL || SDL_getenv("XG_ANDROID_BIOS_ASK") == NULL || SDL_getenv("XG_HEADLESS") != NULL) return;
+    char folder[1024], text[1600];
+    androidActivityText("discFolder", folder, sizeof folder);
+    snprintf(text, sizeof text,
+             "Your disc folder (%s) has no PS1 BIOS image.\n\nThe game uses only the font in it: without one, the "
+             "chapter names of the saves on the memory card screens and the text over some scenes are blank.\n\n"
+             "Choose a BIOS image (scph5501.bin, scph1001.bin...: 512 KB), or put one in the disc folder. F1 > "
+             "System > Discs and BIOS changes it later.",
+             folder[0] ? folder : "none chosen");
+    const SDL_MessageBoxButtonData buttons[] = {
+        {SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, "Choose a BIOS file"},
+        {SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 0, "Go on without"},
+    };
+    const SDL_MessageBoxData box = {SDL_MESSAGEBOX_INFORMATION, window, "Xenogears", text, 2, buttons, NULL};
+    int pressed = 0;
+    if (!SDL_ShowMessageBox(&box, &pressed)) return;
+    fprintf(stderr, "android: no BIOS image: %s\n", pressed == 1 ? "choosing one" : "going on without (not asked again)");
+    if (pressed == 1) {
+        androidBiosChoose(); /* the picker answers while the game starts (androidBiosVBlank) */
+    } else {
+        androidActivityAction("biosAskOff");
+    }
+}
+
 /* ---- performance hints (ADPF) ----------------------------------------------------------
  *
  * The game thread sleeps most of every vblank, so the phone's governor keeps

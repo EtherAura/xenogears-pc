@@ -215,6 +215,12 @@ static const uint32_t hires_tile_fragSpv[] =
 static const uint32_t hires_wide_tile_fragSpv[] =
 #include "hires_wide_tile.frag.spv.inc"
     ;
+static const uint32_t hires_tile_depth_fragSpv[] =
+#include "hires_tile_depth.frag.spv.inc"
+    ;
+static const uint32_t hires_wide_tile_depth_fragSpv[] =
+#include "hires_wide_tile_depth.frag.spv.inc"
+    ;
 static const uint32_t draw_wide_ordered_vertSpv[] =
 #include "draw_wide_ordered.vert.spv.inc"
     ;
@@ -430,7 +436,12 @@ VK_DEVICE_FUNCS(VK_DECLARE)
  * count, one vec4 per ground point, then the fog's colour, which light.comp's
  * fog pass writes there (FOG_SLOT). */
 #define LIGHT_BLOCK_BYTES ((3 + SCENE_FIGURES) * 16 + 16)
-enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_LIGHT, GT_KINDS };
+/* GT_PRESENT includes the wait for the swapchain image: a vblank's submission
+ * waits for it at the colour attachment output stage, so the present pass's
+ * time grows with the frame's slack (on the Pixel 6.6 ms with an idle field,
+ * 3.9 with the HD-2D effects on, xg-mrj.3.30); GT_ROTATE the pre-rotation's
+ * turn, GT_PREPASS the picture prepass. */
+enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_LIGHT, GT_PREPASS, GT_ROTATE, GT_KINDS };
 #define GT_QUERIES 4096
 
 typedef struct {
@@ -600,6 +611,12 @@ static struct {
         VRect rect[3];             /* each target's frame, 1x */
         VkImage depth[3]; VkDeviceMemory depthMemory[3]; VkImageView depthView[3];
         int depthW[3], depthH[3];  /* hi-res pixels allocated */
+        /* With tile passes (tileHiDepthPass): the narrow and wide targets'
+         * depth in the copy's own pixel grid while the scene draws, the
+         * pass's second attachment; copied into depth[] at gvkSceneEnd. */
+        VkImage plane[2]; VkDeviceMemory planeMemory[2]; VkImageView planeView[2];
+        int planeW[2], planeH[2];
+        int planes; /* this scene's batches draw their depth into the planes */
         VkImage work[5]; VkDeviceMemory workMemory[5]; VkImageView workView[5];
         int workW, workH;
         /* [wide][coarse][unordered] */
@@ -783,6 +800,7 @@ static struct {
      * attachments. */
     int tileImage;
     VkPipeline tileDraw, tileWideDraw, tileHiDraw, tileHiWideDraw;
+    VkPipeline tileHiDepthDraw, tileHiWideDepthDraw; /* a registered scene's (orderedDepthMake) */
     uint64_t tilePasses;
     float tileBox[4]; /* the batch's vertices so far: x0, y0, x1, y1 (tileNote) */
     int tileWhole;    /* one of them was not finite: the pass covers all of VRAM */
@@ -1014,7 +1032,8 @@ static void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
  * uploads (copy) and the present pass (present). At exit, the run's mean and
  * worst vblank. XG_GPU_TIMING=summary: only that. */
 
-static const char* const gtNames[GT_KINDS] = {"draw", "wide", "hires", "hiwide", "hiutil", "copy", "present", "dof", "light"};
+static const char* const gtNames[GT_KINDS] = {"draw", "wide", "hires", "hiwide", "hiutil", "copy", "present", "dof", "light",
+                                                "prepass", "rotate"};
 
 static struct {
     int on;       /* 1: a line per vblank; 2: the summary only */
@@ -1960,8 +1979,9 @@ static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32
 /* createHiPipeline for the scene depth builds: HiVertex.z as well. */
 static int hiPipelineDepth;
 static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices) {
-    /* 5: optional like 3, with the copy (R32_UINT) as its colour attachment (tileHiPass). */
-    int attached = vertices == 5;
+    /* 5: optional like 3, with the copy (R32_UINT) as its colour attachment (tileHiPass);
+     * 6: the same with the scene's depth plane (R32_UINT) as a second one (tileHiDepthPass). */
+    int attached = vertices == 5 ? 1 : vertices == 6 ? 2 : 0;
     if(attached)vertices=3;
     int optional = vertices >= 3;
     if(optional)vertices-=2;
@@ -2013,20 +2033,21 @@ static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint
     rs.lineWidth = 1.0f;
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
     ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-    VkPipelineColorBlendAttachmentState att = {0};
-    att.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-                         VK_COLOR_COMPONENT_A_BIT;
+    VkPipelineColorBlendAttachmentState att[2] = {{0}};
+    for (int i = 0; i < 2; i++)
+        att[i].colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+                                VK_COLOR_COMPONENT_A_BIT;
     VkPipelineColorBlendStateCreateInfo cb = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
-    cb.attachmentCount = attached ? 1 : 0;
-    cb.pAttachments = &att;
+    cb.attachmentCount = (uint32_t)attached;
+    cb.pAttachments = att;
     VkDynamicState dyn[2] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
     ds.dynamicStateCount = 2;
     ds.pDynamicStates = dyn;
-    VkFormat colorFormat = VK_FORMAT_R32_UINT;
+    VkFormat colorFormats[2] = {VK_FORMAT_R32_UINT, VK_FORMAT_R32_UINT};
     VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
-    ri.colorAttachmentCount = attached ? 1 : 0;
-    ri.pColorAttachmentFormats = &colorFormat;
+    ri.colorAttachmentCount = (uint32_t)attached;
+    ri.pColorAttachmentFormats = colorFormats;
     VkGraphicsPipelineCreateInfo gi = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
     gi.pNext = &ri;
     gi.stageCount = 2;
@@ -2926,23 +2947,28 @@ static void tileNote(const GpuVertex* v, int n) {
 }
 
 /* One render pass over box (in the attachment's pixels) with view as its
- * colour attachment, loaded and stored: vertices first..first+count of the
- * buffer at offset, the viewport vw x vh from the target's origin. */
-static void tilePass(FrameCtx* f, VkImageView view, VkPipeline pipeline, VkPipelineLayout layout, VkDeviceSize offset,
-                     uint32_t first, uint32_t count, OrderedBox box, int vw, int vh, const void* constants,
-                     uint32_t constantBytes) {
+ * colour attachment (and second, if any, as another in the same pixel grid),
+ * loaded and stored: vertices first..first+count of the buffer at offset,
+ * the viewport vw x vh from the target's origin. */
+static void tilePass(FrameCtx* f, VkImageView view, VkImageView second, VkPipeline pipeline, VkPipelineLayout layout,
+                     VkDeviceSize offset, uint32_t first, uint32_t count, OrderedBox box, int vw, int vh,
+                     const void* constants, uint32_t constantBytes) {
     if (box.x1 <= box.x0 || box.y1 <= box.y0) return;
     VkCommandBuffer cmd = f->cmd;
-    VkRenderingAttachmentInfo color = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-    color.imageView = view;
-    color.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-    color.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingAttachmentInfo color[2] = {{.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO},
+                                          {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO}};
+    VkImageView views[2] = {view, second};
+    for (int i = 0; i < 2; i++) {
+        color[i].imageView = views[i];
+        color[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        color[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        color[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    }
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea = (VkRect2D){{box.x0, box.y0}, {(uint32_t)(box.x1 - box.x0), (uint32_t)(box.y1 - box.y0)}};
     ri.layerCount = 1;
-    ri.colorAttachmentCount = 1;
-    ri.pColorAttachments = &color;
+    ri.colorAttachmentCount = second != VK_NULL_HANDLE ? 2 : 1;
+    ri.pColorAttachments = color;
     vkCmdBeginRendering(cmd, &ri);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &f->set, 0, NULL);
@@ -2967,7 +2993,7 @@ static void drawTile(FrameCtx* f, uint32_t first, uint32_t count) {
         box.x1 = (int)fmaxf(0, fminf((float)VRAM_W, ceilf(vk.tileBox[2]) + 2));
         box.y1 = (int)fmaxf(0, fminf((float)VRAM_H, ceilf(vk.tileBox[3]) + 2));
     }
-    tilePass(f, vk.vramView, vk.tileDraw, vk.pipelineLayout, 0, first, count, box, VRAM_W, VRAM_H, NULL, 0);
+    tilePass(f, vk.vramView, VK_NULL_HANDLE, vk.tileDraw, vk.pipelineLayout, 0, first, count, box, VRAM_W, VRAM_H, NULL, 0);
 }
 
 /* The box of count vertices (triangles) at scale in a w x h target, as the
@@ -2997,7 +3023,8 @@ static OrderedBox tileBounds(const void* v, size_t stride, uint32_t count, int s
  * at first), the wide target loaded and stored. */
 static void tileWidePass(FrameCtx* f, const GpuVertex* v, uint32_t first, uint32_t count) {
     OrderedBox box = tileBounds(v, sizeof(GpuVertex), count, 1, WIDE_W, WIDE_H, 0);
-    tilePass(f, vk.wideView, vk.tileWideDraw, vk.pipelineLayout, 0, first, count, box, WIDE_W, WIDE_H, NULL, 0);
+    tilePass(f, vk.wideView, VK_NULL_HANDLE, vk.tileWideDraw, vk.pipelineLayout, 0, first, count, box, WIDE_W, WIDE_H,
+             NULL, 0);
 }
 
 static void drawWideBatch(FrameCtx* f) {
@@ -3229,11 +3256,12 @@ static void resIdle(void) {
 }
 
 static void orderedDestroy(void) {
-    VkPipeline* pipelines[12]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw,
+    VkPipeline* pipelines[14]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw,
                               &vk.tileWideDraw,&vk.tileHiDraw,&vk.tileHiWideDraw,
-                              &vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth};
+                              &vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth,
+                              &vk.tileHiDepthDraw,&vk.tileHiWideDepthDraw};
     vk.orderedDepthState=0;
-    for(int i=0;i<12;i++) {
+    for(int i=0;i<14;i++) {
         if(*pipelines[i])vkDestroyPipeline(vk.device,*pipelines[i],NULL);
         *pipelines[i]=VK_NULL_HANDLE;
     }
@@ -3335,14 +3363,27 @@ static int orderedDepthMake(void) {
     VkResult result=vkCreateComputePipelines(vk.device,VK_NULL_HANDLE,1,&ci,NULL,&vk.orderedResolveDepth);
     vkDestroyShaderModule(vk.device,module,NULL);
     if(result!=VK_SUCCESS)vk.orderedResolveDepth=VK_NULL_HANDLE;
+    /* The tile passes' own (tileHiDepthPass), where the copies take tile
+     * passes; without them a scene's batches keep the lists. */
+    if(vk.tileHiDraw&&vk.tileHiWideDraw) {
+        hiPipelineDepth=1;
+        vk.tileHiDepthDraw=createHiPipeline(hiresDepthVertSpv,sizeof(hiresDepthVertSpv),hires_tile_depth_fragSpv,sizeof(hires_tile_depth_fragSpv),6);
+        vk.tileHiWideDepthDraw=createHiPipeline(hiresWideDepthVertSpv,sizeof(hiresWideDepthVertSpv),hires_wide_tile_depth_fragSpv,sizeof(hires_wide_tile_depth_fragSpv),6);
+        hiPipelineDepth=0;
+        if(!vk.tileHiDepthDraw||!vk.tileHiWideDepthDraw) {
+            if(vk.tileHiDepthDraw)vkDestroyPipeline(vk.device,vk.tileHiDepthDraw,NULL);
+            if(vk.tileHiWideDepthDraw)vkDestroyPipeline(vk.device,vk.tileHiWideDepthDraw,NULL);
+            vk.tileHiDepthDraw=vk.tileHiWideDepthDraw=VK_NULL_HANDLE;
+        }
+    }
     if(!vk.orderedHiDepth||!vk.orderedHiWideDepth||!vk.orderedResolveDepth) {
-        VkPipeline* made[3]={&vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth};
-        for(int i=0;i<3;i++){if(*made[i])vkDestroyPipeline(vk.device,*made[i],NULL);*made[i]=VK_NULL_HANDLE;}
+        VkPipeline* made[5]={&vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth,&vk.tileHiDepthDraw,&vk.tileHiWideDepthDraw};
+        for(int i=0;i<5;i++){if(*made[i])vkDestroyPipeline(vk.device,*made[i],NULL);*made[i]=VK_NULL_HANDLE;}
         gpuLog("scene: no depth in GPU ordering mode on this device");
         return 0;
     }
     vk.orderedDepthState=1;
-    gpuLog("scene: depth in GPU ordering mode ready");
+    gpuLog("scene: depth in GPU ordering mode ready%s",vk.tileHiDepthDraw?" (tile image passes)":"");
     return 1;
 }
 
@@ -3351,6 +3392,10 @@ void gvkSetOrderedFallback(int on) {
     endBatch();
     if(on&&!vk.interlock&&vk.orderedState==0) {resIdle();orderedMake();}
     vk.orderedEnabled=on&&!vk.interlock&&vk.orderedState>0;
+    /* The scene's pipelines are made at the start when an effect is on (gvkInit):
+     * this mode's depth ones with them, not at the first field scene (1.2 s of
+     * the game thread on the Pixel's PowerVR, xg-mrj.3.27). */
+    if(vk.orderedEnabled&&vk.scene.state>0)orderedDepthMake();
     if(on&&!vk.interlock&&!vk.orderedEnabled)gpuWarnOnce("ordered-fallback","vulkan: ordered fallback unavailable; using exact split batches");
 }
 uint32_t gvkOrderedOverflow(void) {
@@ -5685,6 +5730,11 @@ static void sceneDestroy(void) {
         destroyImage(&vk.scene.depth[t], &vk.scene.depthMemory[t], &vk.scene.depthView[t]);
         vk.scene.depthW[t] = vk.scene.depthH[t] = 0;
     }
+    for (int t = 0; t < 2; t++) {
+        destroyImage(&vk.scene.plane[t], &vk.scene.planeMemory[t], &vk.scene.planeView[t]);
+        vk.scene.planeW[t] = vk.scene.planeH[t] = 0;
+    }
+    vk.scene.planes = 0;
     for (int i = 0; i < 5; i++) destroyImage(&vk.scene.work[i], &vk.scene.workMemory[i], &vk.scene.workView[i]);
     vk.scene.workW = vk.scene.workH = 0;
     for (int k = 0; k < FRAMES; k++) {
@@ -5821,6 +5871,52 @@ static int sceneDepthImage(int t, int w, int h) {
     toGeneral(recording(), vk.scene.depth[t]);
     vk.needBarrier = 1;
     return 1;
+}
+
+/* Target t's depth plane (tileHiDepthPass), at least w x h hi-res pixels:
+ * the size of its copy, so a batch's pass covers both attachments. */
+static int scenePlane(int t, int w, int h) {
+    if (vk.scene.plane[t] != VK_NULL_HANDLE && vk.scene.planeW[t] >= w && vk.scene.planeH[t] >= h) return 1;
+    w = w > vk.scene.planeW[t] ? w : vk.scene.planeW[t];
+    h = h > vk.scene.planeH[t] ? h : vk.scene.planeH[t];
+    idleDevice();
+    destroyImage(&vk.scene.plane[t], &vk.scene.planeMemory[t], &vk.scene.planeView[t]);
+    vk.scene.planeW[t] = vk.scene.planeH[t] = 0;
+    if (!createImage32(&vk.scene.plane[t], &vk.scene.planeMemory[t], &vk.scene.planeView[t], w, h) &&
+        !createImage32Memory(&vk.scene.plane[t], &vk.scene.planeMemory[t], &vk.scene.planeView[t], w, h, 1)) {
+        gpuWarnOnce("sceneplane", "scene: no room for a %dx%d depth plane: the scene's batches take the lists", w, h);
+        return 0;
+    }
+    vk.scene.planeW[t] = w; vk.scene.planeH[t] = h;
+    toGeneral(recording(), vk.scene.plane[t]);
+    vk.needBarrier = 1;
+    return 1;
+}
+
+/* The planes' scene frames into the depth images, which hold the scene's
+ * depth again from here: at gvkSceneEnd, before anything reads it, or when a
+ * copy has outgrown its plane (drawHiBatch), the rest of the scene then
+ * taking the lists. Recorded into cmd, outside any pass. */
+static void scenePlanesFlush(VkCommandBuffer cmd) {
+    if (!vk.scene.planes) return;
+    vk.scene.planes = 0;
+    int n = vk.hiN;
+    rasterBarrier(cmd);
+    for (int t = 0; t < vk.scene.targets && t < 2; t++) {
+        VRect r = vk.scene.rect[t];
+        int x = r.x0 * n, y = r.y0 * n, w = (r.x1 - r.x0 + 1) * n, h = (r.y1 - r.y0 + 1) * n;
+        if (x + w > vk.scene.planeW[t]) w = vk.scene.planeW[t] - x;
+        if (y + h > vk.scene.planeH[t]) h = vk.scene.planeH[t] - y;
+        if (w > vk.scene.depthW[t]) w = vk.scene.depthW[t];
+        if (h > vk.scene.depthH[t]) h = vk.scene.depthH[t];
+        if (w <= 0 || h <= 0) continue;
+        VkImageCopy c = {0};
+        c.srcSubresource = c.dstSubresource = colorLayers;
+        c.srcOffset.x = x; c.srcOffset.y = y;
+        c.extent = (VkExtent3D){(uint32_t)w, (uint32_t)h, 1};
+        vkCmdCopyImage(cmd, vk.scene.plane[t], VK_IMAGE_LAYOUT_GENERAL, vk.scene.depth[t], VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    }
+    rasterBarrier(cmd);
 }
 
 /* The blur's five working images (16-bit float), at least w x h. */
@@ -6007,6 +6103,7 @@ int gvkSceneActive(void) { return vk.scene.active; }
 
 int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY) {
     vk.scene.active = 0;
+    vk.scene.planes = 0;
     if (vk.device == VK_NULL_HANDLE || vk.hiN == 0 || !sceneMake() || (vk.orderedEnabled && !orderedDepthMake())) return 0;
     endBatch();
     int n = vk.hiN;
@@ -6026,11 +6123,20 @@ int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY) {
         }
     }
     if (vk.hiN != n) return 0;
+    /* With tile passes the batches keep the depth in planes in the copies'
+     * own pixel grid (tileHiDepthPass), copied into the depth images at the
+     * end (scenePlanesFlush): the depth images' frames cannot be a pass's
+     * attachment beside the copy's. */
+    vk.scene.planes = vk.orderedEnabled && vk.tileHiDepthDraw && vk.tileHiWideDepthDraw &&
+                      scenePlane(SCENE_NARROW, VRAM_W * n, VRAM_H * n) &&
+                      (vk.scene.targets < 2 || scenePlane(SCENE_WIDE, vk.hiWideW * n, vk.hiWideH * n));
     VkCommandBuffer cmd = recording();
     rasterBarrier(cmd);
     VkClearColorValue nothing = {.uint32 = {0xFFFFFFFFu, 0, 0, 0}}; /* dof.comp DEPTH_FAR */
-    for (int t = 0; t < vk.scene.targets; t++)
+    for (int t = 0; t < vk.scene.targets; t++) {
         vkCmdClearColorImage(cmd, vk.scene.depth[t], VK_IMAGE_LAYOUT_GENERAL, &nothing, 1, &colorRange);
+        if (vk.scene.planes && t < 2) vkCmdClearColorImage(cmd, vk.scene.plane[t], VK_IMAGE_LAYOUT_GENERAL, &nothing, 1, &colorRange);
+    }
     vk.needBarrier = 1;
     vk.scene.active = 1;
     return 1;
@@ -6222,6 +6328,7 @@ static void sceneFocusRead(float cx, float cy, int frameW, int frameH) {
 void gvkSceneEnd(const SceneParams* p) {
     if (!vk.scene.active) return;
     endBatch(); /* the scene's batches, with their depth */
+    scenePlanesFlush(recording());
     vk.scene.active = 0;
     if (p == NULL || vk.hiN == 0) return;
     int blur = p->dof.radius > 0 || p->dof.debug, light = p->light.on;
@@ -6657,8 +6764,23 @@ static void tileHiPass(FrameCtx* f, int wide, const HiVertex* v, VkDeviceSize of
     int iw = wide ? vk.hiWideW * n : VRAM_W * n, ih = wide ? vk.hiWideH * n : VRAM_H * n;
     OrderedBox box = tileBounds(v, sizeof(HiVertex), count, n, iw < tw ? iw : tw, ih < th ? ih : th,
                                 offsetof(HiVertex, w));
-    tilePass(f, wide ? vk.hiWideView : vk.hiVramView, wide ? vk.tileHiWideDraw : vk.tileHiDraw, vk.hiLayout, offset, 0,
-             count, box, tw, th, c, sizeof(*c));
+    tilePass(f, wide ? vk.hiWideView : vk.hiVramView, VK_NULL_HANDLE, wide ? vk.tileHiWideDraw : vk.tileHiDraw,
+             vk.hiLayout, offset, 0, count, box, tw, th, c, sizeof(*c));
+}
+
+/* A registered scene's batch (hires_tile_depth.frag): as tileHiPass's, with
+ * the target's depth plane as the second attachment. */
+static void tileHiDepthPass(FrameCtx* f, int wide, const HiVertex* v, VkDeviceSize offset, uint32_t count, int tw,
+                            int th, const HiDrawConstants* c) {
+    int n = vk.hiN, t = wide ? SCENE_WIDE : SCENE_NARROW;
+    int iw = wide ? vk.hiWideW * n : VRAM_W * n, ih = wide ? vk.hiWideH * n : VRAM_H * n;
+    if (iw > vk.scene.planeW[t]) iw = vk.scene.planeW[t];
+    if (ih > vk.scene.planeH[t]) ih = vk.scene.planeH[t];
+    OrderedBox box = tileBounds(v, sizeof(HiVertex), count, n, iw < tw ? iw : tw, ih < th ? ih : th,
+                                offsetof(HiVertex, w));
+    tilePass(f, wide ? vk.hiWideView : vk.hiVramView, vk.scene.planeView[t],
+             wide ? vk.tileHiWideDepthDraw : vk.tileHiDepthDraw, vk.hiLayout, offset, 0, count, box, tw, th, c,
+             sizeof(*c));
 }
 
 static void drawHiBatch(FrameCtx* f, int wide) {
@@ -6700,10 +6822,16 @@ static void drawHiBatch(FrameCtx* f, int wide) {
         for (uint32_t i = 0; i < count; i++) ((HiVertex*)src)[i].rasterShift = 0; /* the ordered list rasterises in place */
         memcpy(f->vertices.map+offset,src,(size_t)count*sizeof(HiVertex));
         HiDrawConstants c={n,vk.hiColor,tw,th,vk.hiWideW*n,WIDE_H*n,0,0,1,0,0,0,0,0};
-        /* A registered scene's batches take the lists, which carry its depth
-         * (the tile pass stores none: xg-mrj.3.10.2); everything else the
-         * tile pass where the device has it. */
-        if (sceneDepth) {
+        /* A registered scene's batches take the tile pass with its depth
+         * plane (tileHiDepthPass) or the lists, which carry its depth; a wide
+         * copy grown past its plane since the scene began ends the planes.
+         * Everything else the tile pass where the device has it. */
+        if (sceneDepth && vk.scene.planes && wide &&
+            (vk.hiWideW * n > vk.scene.planeW[SCENE_WIDE] || vk.hiWideH * n > vk.scene.planeH[SCENE_WIDE]))
+            scenePlanesFlush(f->cmd);
+        if (sceneDepth && vk.scene.planes) {
+            tileHiDepthPass(f, wide, src, offset, count, tw, th, &c);
+        } else if (sceneDepth) {
             VRect r = vk.scene.rect[wide];
             c.depthX = r.x0 * n; c.depthY = r.y0 * n;
             c.depthW = (r.x1 - r.x0 + 1) * n; c.depthH = (r.y1 - r.y0 + 1) * n;
@@ -7804,7 +7932,7 @@ static void recordPicturePrepass(VkCommandBuffer cmd, FrameCtx* f, PresentConsta
         pc->codes = (int32_t)(f->spanUsed / 4);
         f->spanUsed += plane;
     }
-    int q = gtStart(cmd, GT_PRESENT);
+    int q = gtStart(cmd, GT_PREPASS);
     imageBarrier(cmd, prepass.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
@@ -8104,6 +8232,8 @@ static void presentPicture(const GpuDisplay* d, uint32_t vblank, int menu, const
             ensureRotation(w, h, vk.swapchainFormat);
             rotationTargetBarrier(cmd);
             recordPresentPass(cmd, vk.rotView, vk.presentPipeline, vk.swapchainFormat, w, h, &pc, chain);
+            gtStop(cmd, q); /* XG_GPU_TIMING: the turn on its own */
+            q = gtStart(cmd, GT_ROTATE);
             recordRotation(cmd, vk.swapchainViews[index], (int)vk.swapchainExtent.width,
                            (int)vk.swapchainExtent.height);
         } else {

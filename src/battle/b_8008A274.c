@@ -470,9 +470,29 @@ void* allocateBattleHeap(s32 size, s32 flags) {
 }
 
 /* 72 263 260] */
+#ifdef PLATFORM_PC
+void* memset(void* dst, s32 c, s32 n);
+#endif
+
 u16* allocateTextureRamForText(s32 n) {
     resetMemoryAllocStats(2, 0);
+#ifdef PLATFORM_PC
+    {
+        /* xg-jnqb: a battle text image (a name, a label) is drawn into one 2-bit plane
+         * (renderString's odd), and the other plane keeps what the heap held: on the
+         * PC the allocator's leftover block headers, host pointers and return
+         * addresses, which differ with every build's layout. The CLUT ignores that
+         * plane, so nothing shows, but VRAM and GPU traces differed between builds.
+         * The image starts cleared instead. */
+        u16* image = allocateHeap((n + 3) * 26, 0);
+        if (image != 0) {
+            memset(image, 0, (n + 3) * 26);
+        }
+        return image;
+    }
+#else
     return allocateHeap((n + 3) * 26, 0);
+#endif
 }
 
 /* 72 263 260] */

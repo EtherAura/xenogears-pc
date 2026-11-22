@@ -3,7 +3,10 @@
  * the screen, none over another), then fingers: the left stick's directions,
  * the right stick and the camera's buttons, and what shows with which of the
  * camera's features; last, display cutouts (XG_TOUCH_CUTOUT): no control on
- * one, the layout's rules kept, nothing moved by one that covers nothing.
+ * one, the layout's rules kept, nothing moved by one that covers nothing;
+ * then over the settings menu (touchMenuEvent): the fingers on controls and
+ * their mouse the pad's, the others the menu's, the buttons held as the
+ * menu reads them, the menu button, an automatic pad shown by a touch.
  * Settings stay in memory (XG_SETTINGS=none). */
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -16,6 +19,9 @@
 static int features, toggles;
 int padCameraFeatures(void) { return features; }
 void padFirstPerson(void) { toggles++; }
+static int menuOpen, menuToggles;
+int uiIsOpen(void) { return menuOpen; }
+void uiRequestToggle(void) { menuToggles++; }
 
 static int checks, failures;
 static char context[160];
@@ -40,6 +46,41 @@ static void finger(Uint32 type, int id, float x, float y) {
     e.tfinger.x = x / W;
     e.tfinger.y = y / H;
     touchEvent(&e);
+}
+
+/* The same over the settings menu: 1 when the pad takes it. */
+static int menuFinger(Uint32 type, int id, float x, float y) {
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = type;
+    e.tfinger.windowID = SDL_GetWindowID(window);
+    e.tfinger.fingerID = (SDL_FingerID)(id + 1);
+    e.tfinger.x = x / W;
+    e.tfinger.y = y / H;
+    return touchMenuEvent(&e);
+}
+
+/* A mouse event over the settings menu (the dummy driver's window: its coordinates are its
+ * pixels), from the touch's mouse or another; 1 when the pad takes it. */
+static int menuMouse(Uint32 type, SDL_MouseID which, float x, float y, int held) {
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = type;
+    if (type == SDL_EVENT_MOUSE_MOTION) {
+        e.motion.windowID = SDL_GetWindowID(window);
+        e.motion.which = which;
+        e.motion.x = x;
+        e.motion.y = y;
+        e.motion.state = held ? SDL_BUTTON_LMASK : 0;
+    } else {
+        e.button.windowID = SDL_GetWindowID(window);
+        e.button.which = which;
+        e.button.button = SDL_BUTTON_LEFT;
+        e.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+        e.button.x = x;
+        e.button.y = y;
+    }
+    return touchMenuEvent(&e);
 }
 
 static int isRound(int kind) {
@@ -357,6 +398,91 @@ int main(void) {
         int m = touchControls(plain, 32, W, H);
         EXPECT(n == m);
         for (int i = 0; i < n && i < m; i++) EXPECT(cs[i].x == plain[i].x && cs[i].y == plain[i].y);
+    }
+
+    /* ---- over the settings menu: the pad's fingers and their mouse, the menu's the rest ---- */
+    {
+        snprintf(context, sizeof context, "menu");
+        menuOpen = 1;
+        touchSetLayout(0);
+        touchSetSizePercent(100);
+        TouchControl cs[32];
+        int n = touchControls(cs, 32, W, H);
+        const TouchControl *dpad = find(cs, n, TOUCH_DPAD), *cross = find(cs, n, TOUCH_CROSS);
+        const TouchControl *start = find(cs, n, TOUCH_START), *menu = find(cs, n, TOUCH_MENU);
+        EXPECT(dpad && cross && start && menu);
+        float mx = W / 2, my = H / 2; /* the middle: the menu's, no control there */
+        if (dpad && cross && start && menu) {
+            EXPECT(touchButtonHeld("cross") == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_DOWN, 0, cross->x, cross->y) == 1);
+            EXPECT(touchButtonHeld("cross") == 1 && touchButtonHeld("circle") == 0 && touchButtonHeld("up") == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_DOWN, 1, dpad->x, dpad->y - dpad->h * 0.4f) == 1);
+            EXPECT(touchButtonHeld("up") == 1 && touchButtonHeld("down") == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_MOTION, 1, dpad->x, dpad->y + dpad->h * 0.4f) == 1);
+            EXPECT(touchButtonHeld("up") == 0 && touchButtonHeld("down") == 1);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_UP, 1, dpad->x, dpad->y + dpad->h * 0.4f) == 1);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_UP, 0, cross->x, cross->y) == 1);
+            EXPECT(touchButtonHeld("cross") == 0 && touchButtonHeld("down") == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_DOWN, 2, start->x, start->y) == 1);
+            EXPECT(touchButtonHeld("start") == 1 && touchButtonHeld("select") == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_UP, 2, start->x, start->y) == 1);
+            EXPECT(touchButtonHeld("start") == 0 && touchButtonHeld("nonsense") == 0 && touchButtonHeld(NULL) == 0);
+
+            /* a finger off the pad, and what it does later, is the menu's: a tap, a drag */
+            EXPECT(menuFinger(SDL_EVENT_FINGER_DOWN, 3, mx, my) == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_MOTION, 3, cross->x, cross->y) == 0);
+            EXPECT(touchButtonHeld("cross") == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_UP, 3, cross->x, cross->y) == 0);
+
+            /* the touch's mouse: a press on a control the pad's until it lifts, the others the menu's */
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_MOTION, SDL_TOUCH_MOUSEID, cross->x, cross->y, 0) == 1);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_TOUCH_MOUSEID, cross->x, cross->y, 1) == 1);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_MOTION, SDL_TOUCH_MOUSEID, mx, my, 1) == 1);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_UP, SDL_TOUCH_MOUSEID, mx, my, 0) == 1);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_MOTION, SDL_TOUCH_MOUSEID, mx, my, 0) == 0);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_TOUCH_MOUSEID, mx, my, 1) == 0);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_MOTION, SDL_TOUCH_MOUSEID, cross->x, cross->y, 1) == 0); /* a drag */
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_UP, SDL_TOUCH_MOUSEID, cross->x, cross->y, 0) == 0);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_DOWN, 1, cross->x, cross->y, 1) == 0); /* a real mouse */
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_UP, 1, cross->x, cross->y, 0) == 0);
+
+            /* the menu button leaves the menu, at the lift on it */
+            int before = menuToggles;
+            EXPECT(menuFinger(SDL_EVENT_FINGER_DOWN, 0, menu->x, menu->y) == 1);
+            EXPECT(menuToggles == before);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_UP, 0, menu->x, menu->y) == 1);
+            EXPECT(menuToggles == before + 1);
+
+            /* an automatic pad hidden by a key: a touch is the menu's, and shows the pad again */
+            touchSetMode(2);
+            SDL_Event key;
+            SDL_zero(key);
+            key.type = SDL_EVENT_KEY_DOWN;
+            key.key.scancode = SDL_SCANCODE_A;
+            touchInputSeen(&key);
+            EXPECT(!touchShown());
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_DOWN, SDL_TOUCH_MOUSEID, cross->x, cross->y, 1) == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_DOWN, 0, cross->x, cross->y) == 0);
+            EXPECT(touchShown() && touchButtonHeld("cross") == 0);
+            EXPECT(menuMouse(SDL_EVENT_MOUSE_BUTTON_UP, SDL_TOUCH_MOUSEID, cross->x, cross->y, 0) == 0);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_UP, 0, cross->x, cross->y) == 0);
+            touchSetMode(1);
+        }
+
+        /* the first-person view's button: the game's camera, nothing while the menu is open */
+        touchSetLayout(1);
+        features = 3;
+        n = touchControls(cs, 32, W, H);
+        const TouchControl* view = find(cs, n, TOUCH_VIEW);
+        EXPECT(view != NULL);
+        if (view != NULL) {
+            int before = toggles;
+            EXPECT(menuFinger(SDL_EVENT_FINGER_DOWN, 0, view->x, view->y) == 1);
+            EXPECT(menuFinger(SDL_EVENT_FINGER_UP, 0, view->x, view->y) == 1);
+            EXPECT(toggles == before);
+        }
+        menuOpen = 0;
+        context[0] = '\0';
     }
 
     SDL_DestroyWindow(window);

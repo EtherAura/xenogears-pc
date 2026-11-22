@@ -170,17 +170,19 @@ const char* kromPath(void) {
     return romPath[0] != '\0' ? romPath : NULL;
 }
 
-int kromSetBios(const char* path) {
+int kromLoad(const char* path) {
     if (strcmp(path, "none") == 0) {
         if (rom != NULL) {
             memset(rom, 0, BIOS_SIZE); /* blank glyphs, at the same address */
         }
         romPath[0] = '\0';
-    } else if (path[0] == '\0') {
-        if (!searchDefault()) {
-            return 0;
-        }
-    } else if (!loadBios(path, 0)) {
+        return 1;
+    }
+    return path[0] == '\0' ? searchDefault() : loadBios(path, 0);
+}
+
+int kromSetBios(const char* path) {
+    if (!kromLoad(path)) {
         return 0;
     }
     settingsSet("bios", path);

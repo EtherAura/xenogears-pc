@@ -45,6 +45,20 @@ int androidRemovePack(const char* library, const char* name);
 void androidUpdateCheck(SDL_Window* window);
 /* XgActivity's String method() into out ("" when there is none). */
 const char* androidActivityText(const char* method, char* out, size_t size);
+/* The BIOS image for the kanji font (system/krom.c), chosen through the activity: a file from
+ * the system's picker, the disc folder's, or none (that one at once). The picker's and the
+ * folder's answer comes later: androidBiosTake returns 1 when an image was read (message: its
+ * name), -1 when not (message "CODE|ARG": notbios|NAME, open|NAME, nofolder|FOLDER (the glyphs
+ * are blanked then), nopicker|), 2 when the picker was left, 0 while nothing has come. */
+void androidBiosChoose(void);
+void androidBiosFromFolder(void);
+void androidBiosNone(void);
+int androidBiosTake(char* message, size_t size);
+/* Each vblank: takes an answer that came while no menu row asked for it. */
+void androidBiosVBlank(void);
+/* At the start (main.c): no BIOS image in the disc folder and nothing chosen, the player asked
+ * to choose one or to go on without (not asked again). */
+void androidBiosAsk(SDL_Window* window);
 /* Once per vblank on the game thread: its work since the last one, reported to
  * Android's performance hint session (performance_hints; android.c). */
 void androidPerfVBlank(void);

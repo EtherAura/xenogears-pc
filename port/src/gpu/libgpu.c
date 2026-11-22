@@ -208,6 +208,7 @@ static void logVBlank(void) {
 #ifdef __ANDROID__
 /* port/src/system/android.c (weak: the test programs have no app). */
 void androidPerfVBlank(void) __attribute__((weak));
+void androidBiosVBlank(void) __attribute__((weak));
 #endif
 
 static void vblank(void) {
@@ -219,6 +220,7 @@ static void vblank(void) {
     cpuTimingVBlank(g.vblanks);
 #ifdef __ANDROID__
     if (androidPerfVBlank != NULL) androidPerfVBlank(); /* the game thread's work, for the phone's governor */
+    if (androidBiosVBlank != NULL) androidBiosVBlank(); /* a BIOS image the activity opened meanwhile */
 #endif
     vramStampClock(g.vblanks);
     textureDumpVBlank(g.vblanks);
@@ -763,7 +765,9 @@ void DrawOTagEnv(void* ot, DRAWENV* env) {
         return;
     }
     g.otags++;
+    sceneWalkEnvTag = &env->dr_env.tag;
     walk(&env->dr_env.tag);
+    sceneWalkEnvTag = NULL;
     widePacketsDone();
     interpolationPacketsDone();
     memcpy(&g.drawEnv, env, sizeof(DRAWENV));

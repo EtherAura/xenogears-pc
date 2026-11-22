@@ -455,6 +455,9 @@ typedef struct {
 } SceneParams;
 /* libgpu.c's walk: a registered scene is being drawn (sceneWalkTag at each tag). */
 extern int sceneWalkOn;
+/* libgpu.c DrawOTagEnv: the draw environment's tag its walk starts at, for the
+ * walk only (NULL otherwise): the scene starts after that packet (scene.c). */
+extern const void* sceneWalkEnvTag;
 void sceneWalkBegin(void);
 void sceneWalkTag(const void* tag);
 void sceneWalkEnd(void);

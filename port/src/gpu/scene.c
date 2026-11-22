@@ -502,6 +502,16 @@ void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int g
 
 /* The walk starts: the device takes the scene, or the frame is drawn as
  * without the option. */
+/* A walk DrawOTagEnv starts at its draw environment's packet (libgpu.c): the
+ * scene's frame is the area that packet sets, so the scene starts at the next
+ * tag, once it is drawn (Battling: its two display buffers alternate, and the
+ * area before the packet is the other buffer's). */
+const void* sceneWalkEnvTag;
+static const void* walkEnvTag;
+static int walkPending;
+
+static void walkStart(void);
+
 void sceneWalkBegin(void) {
     if (!sc.armed) {
         sceneWalkOn = 0;
@@ -510,6 +520,13 @@ void sceneWalkBegin(void) {
     sc.armed = 0;
     sc.drawing = 0;
     sc.status = NULL;
+    walkEnvTag = sceneWalkEnvTag;
+    walkPending = walkEnvTag != NULL;
+    if (!walkPending) walkStart();
+}
+
+static void walkStart(void) {
+    walkPending = 0;
     if (sc.focusZ <= 0) {
         /* The look-at point is behind the view, or the game gave none. */
         sc.status = "no focus point in this view";
@@ -565,6 +582,10 @@ static void finish(int reached) {
 }
 
 void sceneWalkTag(const void* tag) {
+    if (walkPending) {
+        if (tag == walkEnvTag) return; /* its packet, the area, is written after this */
+        walkStart();
+    }
     if (!sc.drawing) return;
     const OTag* t = tag;
     if (t == sc.uiTag) {
@@ -585,6 +606,11 @@ void sceneWalkTag(const void* tag) {
 }
 
 void sceneWalkEnd(void) {
+    if (walkPending) {
+        walkPending = 0;
+        sceneWalkOn = 0; /* a walk of the environment's packet alone: no scene in it */
+        return;
+    }
     finish(0);
     sceneWalkOn = 0;
 }

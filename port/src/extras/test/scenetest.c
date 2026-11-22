@@ -15,6 +15,7 @@ void portStartState(void);
 void portStartPrepare(void);
 int portStartPending(void);
 int portBootMode(void);
+int portStartMusic(int music);
 static int checks;
 #include "test/check.h"
 
@@ -203,6 +204,30 @@ int main(void) {
     r.party[1] = 11; CHECK(!portRequestStart(&r));
     r.party[0] = 255; r.party[1] = 2; CHECK(!portRequestStart(&r));
     r.party[1] = 255; CHECK(!portRequestStart(&r));
+
+    /* xg-xukn: a start's music, taken once by the first field boot. */
+    XgScene house = {.field = 13, .setsTo = 7, .progress = 6, .entry = 1, .disc = 1};
+    p = xgScenePreset(&house, "US");
+    CHECK(p != NULL && p->start.music == 1); /* the Lahan theme, id 0 */
+    xgSceneStart(&house, "US", &r);
+    CHECK(r.music == 1 && xgScenePresetMatches(p, &r));
+    r.music = 0; CHECK(!xgScenePresetMatches(p, &r)); r.music = 1;
+    bad = r; bad.music = -1; CHECK(!portRequestStart(&bad));
+    bad.music = 0x100; CHECK(!portRequestStart(&bad));
+    CHECK(portRequestStart(&r));
+    portStartPrepare(); memset(&gameState, 0, sizeof(gameState)); portStartState();
+    CHECK(portStartMusic(0xFF) == 0 && portStartMusic(0xFF) == 0xFF && portStartMusic(7) == 7);
+    xgSceneStart(&scene, "US", &r); CHECK(r.music == 0 && portRequestStart(&r)); /* field 19: none */
+    portStartPrepare(); memset(&gameState, 0, sizeof(gameState)); portStartState();
+    CHECK(portStartMusic(0xFF) == 0xFF);
+    testSetEnv("XG_MUSIC", "0x2A"); /* a development start (XG_FIELD) */
+    portStartPrepare(); portStartState();
+    CHECK(portStartMusic(0xFF) == 42 && portStartMusic(0xFF) == 0xFF);
+    testSetEnv("XG_MUSIC", "255"); portStartPrepare(); portStartState(); CHECK(portStartMusic(0xFF) == 0xFF);
+    testSetEnv("XG_MUSIC", "1x"); portStartPrepare(); portStartState(); CHECK(portStartMusic(0xFF) == 0xFF);
+    testSetEnv("XG_MUSIC", "0"); portStartPrepare(); portStartState();
+    testSetEnv("XG_MUSIC", ""); portStartPrepare(); portStartState(); /* the next start without it: none */
+    CHECK(portStartMusic(0xFF) == 0xFF);
     printf("Gallery scene starts: %d checks passed\n", checks);
     return 0;
 }

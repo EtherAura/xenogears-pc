@@ -35,8 +35,15 @@
  *
  * While the pad is in use the touches' mouse events (SDL makes a mouse of
  * the first finger) are dropped, or a tap would also be a click to the
- * mouse's pad (mouse.c). With the pad off, they go there as before. The
- * settings menu takes touches as the mouse (port/src/ui/menu.cpp).
+ * mouse's pad (mouse.c). With the pad off, they go there as before.
+ *
+ * Over the settings menu (port/src/ui/menu.cpp) the pad is drawn too and
+ * works as a controller does there (touchButtonHeld: the D-pad moves, the
+ * confirm and cancel buttons choose and go back, Start and the menu button
+ * leave). A finger that lands on one of its controls is the pad's, with the
+ * mouse SDL makes of it (that mouse's press comes before the finger's own
+ * event, so it is told by where it lands); every other touch is the menu's
+ * mouse, its taps and drags.
  */
 
 #include <SDL3/SDL.h>
@@ -513,7 +520,10 @@ static void fingerDown(SDL_FingerID id, float x, float y) {
     fingers[f].hotkey = i >= 0 ? cs[i].hotkey : 0;
     fingers[f].x = x;
     fingers[f].y = y;
-    if (i >= 0 && cs[i].kind == TOUCH_VIEW && padFirstPerson != NULL) padFirstPerson(); /* at the touch, as a key */
+    /* at the touch, as a key; not while the settings menu is open (the game's camera) */
+    if (i >= 0 && cs[i].kind == TOUCH_VIEW && padFirstPerson != NULL && !(uiIsOpen != NULL && uiIsOpen())) {
+        padFirstPerson();
+    }
 }
 
 static void fingerMove(SDL_FingerID id, float x, float y) {
@@ -556,6 +566,9 @@ static void releaseAll(void) {
     for (int f = 0; f < FINGERS; f++) fingers[f].used = 0;
 }
 
+/* The settings menu: the touch's mouse pressed on a control, its events the pad's until it lifts. */
+static int menuMouseHeld;
+
 int touchEvent(const SDL_Event* e) {
     switch (e->type) {
     case SDL_EVENT_FINGER_DOWN:
@@ -577,13 +590,78 @@ int touchEvent(const SDL_Event* e) {
         return e->motion.which == SDL_TOUCH_MOUSEID && touchMode() != 0;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (e->type == SDL_EVENT_MOUSE_BUTTON_UP && e->button.which == SDL_TOUCH_MOUSEID) {
+            menuMouseHeld = 0; /* the menu closed while it was held */
+        }
         return e->button.which == SDL_TOUCH_MOUSEID && touchMode() != 0;
     case SDL_EVENT_MOUSE_WHEEL:
         return e->wheel.which == SDL_TOUCH_MOUSEID && touchMode() != 0;
     case SDL_EVENT_WILL_ENTER_BACKGROUND:
     case SDL_EVENT_WINDOW_FOCUS_LOST:
         releaseAll(); /* no finger lifts while the app is away */
+        menuMouseHeld = 0;
         return 0;
+    default:
+        return 0;
+    }
+}
+
+/* ---- over the settings menu ------------------------------------------------------- */
+
+/* The control at a point of the window (its pixels), or -1. */
+static int controlAt(float x, float y) {
+    TouchControl cs[MAX_CONTROLS];
+    int n = buildLayout(cs, MAX_CONTROLS, winW, winH);
+    return hit(cs, n, x, y, 0);
+}
+
+/* Whether a mouse event's point (window coordinates) is on a control. */
+static int mouseOnControl(SDL_WindowID id, float x, float y) {
+    windowSize(id);
+    SDL_Window* win = SDL_GetWindowFromID(id);
+    float density = win != NULL ? SDL_GetWindowPixelDensity(win) : 1.0f;
+    if (density <= 0) density = 1.0f;
+    return controlAt(x * density, y * density) >= 0;
+}
+
+static int fingerTracked(SDL_FingerID id) {
+    for (int f = 0; f < FINGERS; f++)
+        if (fingers[f].used && fingers[f].id == id) return 1;
+    return 0;
+}
+
+int touchMenuEvent(const SDL_Event* e) {
+    if (touchMode() == 0) return 0;
+    switch (e->type) {
+    case SDL_EVENT_FINGER_DOWN: {
+        int shown = touchShown();
+        windowSize(e->tfinger.windowID);
+        if (!shown || controlAt(e->tfinger.x * winW, e->tfinger.y * winH) < 0) {
+            autoShown = 1; /* a touch shows an automatic pad, here too; this one is the menu's */
+            return 0;
+        }
+        return touchEvent(e);
+    }
+    case SDL_EVENT_FINGER_MOTION:
+    case SDL_EVENT_FINGER_UP:
+    case SDL_EVENT_FINGER_CANCELED:
+        return fingerTracked(e->tfinger.fingerID) ? touchEvent(e) : 0;
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (e->button.which != SDL_TOUCH_MOUSEID || !touchShown() ||
+            !mouseOnControl(e->button.windowID, e->button.x, e->button.y)) {
+            return 0;
+        }
+        menuMouseHeld = 1;
+        return 1;
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+        if (e->button.which != SDL_TOUCH_MOUSEID || !menuMouseHeld) return 0;
+        menuMouseHeld = 0;
+        return 1;
+    case SDL_EVENT_MOUSE_MOTION:
+        if (e->motion.which != SDL_TOUCH_MOUSEID) return 0;
+        if (menuMouseHeld) return 1;
+        /* the motion SDL sends to a touch's point before its press: none for a press on a control */
+        return e->motion.state == 0 && touchShown() && mouseOnControl(e->motion.windowID, e->motion.x, e->motion.y);
     default:
         return 0;
     }
@@ -668,8 +746,8 @@ static void runScript(void) {
     }
 }
 
-unsigned short touchVBlank(void) {
-    runScript();
+/* The buttons the fingers hold now. */
+static unsigned short heldBits(void) {
     if (winW <= 0) windowSize(0);
     unsigned short bits = 0;
     TouchControl cs[MAX_CONTROLS];
@@ -679,6 +757,29 @@ unsigned short touchVBlank(void) {
         bits |= cs[i].kind == TOUCH_DPAD || cs[i].kind == TOUCH_STICK_LEFT ? dpadBits(cs[i].pressed) : bitsOf(cs[i].kind);
     }
     return bits;
+}
+
+unsigned short touchVBlank(void) {
+    runScript();
+    return heldBits();
+}
+
+int touchButtonHeld(const char* name) {
+    static const struct {
+        const char* name;
+        unsigned short bit;
+    } buttons[] = {
+        {"up", B_UP},         {"down", B_DOWN}, {"left", B_LEFT}, {"right", B_RIGHT},   {"cross", B_CROSS},
+        {"circle", B_CIRCLE}, {"square", B_SQUARE}, {"triangle", B_TRIANGLE}, {"l1", B_L1}, {"r1", B_R1},
+        {"l2", B_L2},         {"r2", B_R2},     {"start", B_START}, {"select", B_SELECT},
+    };
+    int any = 0;
+    for (int f = 0; f < FINGERS && !any; f++) any = fingers[f].used && fingers[f].control >= 0;
+    if (!any || name == NULL) return 0;
+    for (size_t i = 0; i < sizeof buttons / sizeof buttons[0]; i++) {
+        if (strcmp(buttons[i].name, name) == 0) return (heldBits() & buttons[i].bit) != 0;
+    }
+    return 0;
 }
 
 int touchCamera(float* x, float* y, int* recentre) {

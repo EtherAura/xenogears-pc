@@ -11,6 +11,10 @@ typedef struct {
     int party[3]; /* IDs 0..10; slot 0 is required, slots 1/2 may be 255 (empty) */
     int variableCount;
     PortStartVariable variables[PORT_START_VARIABLES];
+    /* The music the story has playing as the field is entered, 1 + its id; 0
+     * none. A field whose script plays no music keeps the one before it, which
+     * a start has not got (xg-xukn: field 13 plays the Lahan theme, id 0). */
+    int music;
 } PortStartRequest;
 
 #ifdef __cplusplus

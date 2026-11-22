@@ -461,10 +461,23 @@ void* allocateBattleHeap(s32 size, s32 flags) {
     return allocateHeap(size, flags);
 }
 
-/* 72 263 260] */
+void* memset(void* dst, s32 c, s32 n);
+
+/* 72 263 260]
+ * xg-jnqb: a battle text image (a name, a label) is drawn into one 2-bit plane
+ * (renderString's odd), and the other plane kept what the heap held: the
+ * allocator's leftover block headers, host pointers and return addresses, which
+ * differ with every build's layout (invisible: the CLUT ignores that plane, but
+ * VRAM and GPU traces differed between builds). The image starts cleared. */
 u16* allocateTextureRamForText(s32 n) {
+    u16* image;
+
     resetMemoryAllocStats(2, 0);
-    return allocateHeap((n + 3) * 26, 0);
+    image = allocateHeap((n + 3) * 26, 0);
+    if (image != 0) {
+        memset(image, 0, (n + 3) * 26);
+    }
+    return image;
 }
 
 /* 72 263 260] */

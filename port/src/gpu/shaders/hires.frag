@@ -30,7 +30,10 @@
 // memory in primitive order (vk.c tileHiPass). Texels still come from the
 // storage images: a batch never reads what it writes (gp0.c batchAdd,
 // batchAddWide). One pixel a fragment, at the copy's own position (the
-// vertices' rasterShift is 0): not with COARSE or DEPTH.
+// vertices' rasterShift is 0): not with COARSE. With DEPTH as well (a
+// registered scene) the pass has a second attachment, the scene's depth
+// plane in the copy's pixel grid (vk.c tileHiDepthPass), read and written in
+// the same primitive order.
 
 #ifdef INTERLOCK
 #extension GL_ARB_fragment_shader_interlock : require
@@ -46,6 +49,10 @@ layout(pixel_interlock_ordered) in;
 #extension GL_EXT_shader_tile_image : require
 layout(location = 0) tileImageEXT uattachmentEXT tilePixel;
 layout(location = 0) out uint outPixel;
+#ifdef DEPTH
+layout(location = 1) tileImageEXT uattachmentEXT tileDepth;
+layout(location = 1) out uint outDepth;
+#endif
 #endif
 
 #ifdef ORDERED_LIST
@@ -117,6 +124,11 @@ layout(location = 14) noperspective in float vInvZ;
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
 const uint DEPTH_FIGURE = 0x40000000u;
+// The depth a fragment that replaces its pixel gives it.
+uint depthWord() {
+    return vInvZ > 1.5 ? DEPTH_SHARP
+                       : uint(clamp(16.0 / abs(vInvZ) + 0.5, 1.0, 1.0e9)) | (vInvZ < 0.0 ? DEPTH_FIGURE : 0u);
+}
 #endif
 
 layout(location = 0) in vec2 vUV;
@@ -579,8 +591,7 @@ void main() {
         uint z = 0u;
         if (vInvZ != 0.0 && !semi && textCover >= 1.0 &&
             all(greaterThanEqual(zp, ivec2(0))) && all(lessThan(zp, pc.depthSize))) {
-            z = vInvZ > 1.5 ? DEPTH_SHARP
-              : uint(clamp(16.0 / abs(vInvZ) + 0.5, 1.0, 1.0e9)) | (vInvZ < 0.0 ? DEPTH_FIGURE : 0u);
+            z = depthWord();
             flags |= ORD_DEPTH;
         }
         orderedAppend(p,front,flags,z);
@@ -595,6 +606,12 @@ void main() {
         uint dst = colorAttachmentReadEXT(tilePixel).r;
         if (hiKeeps(dst, mode)) {
             outPixel = hiPixel(dst, p, q, mode, resolved, fill, raw, semi, semiMode, dithered, front8, front5, maskOut);
+#ifdef DEPTH
+            // The interlocked pass's rule: a fragment that replaces the pixel
+            // owns its depth; one that blends or only smooths a text edge
+            // keeps what is there.
+            outDepth = vInvZ != 0.0 && !semi && textCover >= 1.0 ? depthWord() : colorAttachmentReadEXT(tileDepth).r;
+#endif
         } else {
             discard;
         }
@@ -615,9 +632,7 @@ void main() {
             ivec2 dp = pp - pc.depthOrigin;
             if (vInvZ != 0.0 && !semi && textCover >= 1.0 &&
                 all(greaterThanEqual(dp, ivec2(0))) && all(lessThan(dp, pc.depthSize))) {
-                uint z = vInvZ > 1.5 ? DEPTH_SHARP
-                       : uint(clamp(16.0 / abs(vInvZ) + 0.5, 1.0, 1.0e9)) | (vInvZ < 0.0 ? DEPTH_FIGURE : 0u);
-                imageStore(sceneDepth, dp, uvec4(z));
+                imageStore(sceneDepth, dp, uvec4(depthWord()));
             }
 #endif
         }

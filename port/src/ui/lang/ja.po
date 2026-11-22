@@ -2845,6 +2845,36 @@ msgstr ""
 "BIOS イメージのフォントだけを使います(セーブのタイトル、ムービーに重なる一部の文字)。イメージはその場所で読み、コピーはしません。"
 
 #: port/src/ui/sections.cpp
+msgid ""
+"Only the font in the BIOS image is used (save titles, some text over "
+"movies): a file chosen here, else a 512 KB .bin in the disc folder. It is "
+"read where it is and never copied."
+msgstr ""
+"BIOS イメージのフォントだけを使います(セーブのタイトル、ムービーに重なる一部の文字)。ここで選んだファイル、なければディスクのフォルダにある 512 KB の .bin です。その場所で読み、コピーはしません。"
+
+#: port/src/ui/sections.cpp
+msgid "Choose a BIOS file"
+msgstr "BIOS ファイルを選ぶ"
+
+#: port/src/ui/sections.cpp
+msgid "Use the disc folder's"
+msgstr "ディスクのフォルダのものを使う"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "No BIOS image (a 512 KB .bin) in the disc folder %s"
+msgstr "ディスクのフォルダ %s に BIOS イメージ(512 KB の .bin)がありません"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s cannot be opened"
+msgstr "%s を開けません"
+
+#: port/src/ui/sections.cpp
+msgid "The system has no file picker"
+msgstr "システムにファイルを選ぶ画面がありません"
+
+#: port/src/ui/sections.cpp
 msgid "Current disc"
 msgstr "現在のディスク"
 

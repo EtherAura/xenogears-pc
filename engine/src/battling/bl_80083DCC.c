@@ -488,6 +488,11 @@ void updateBattlingGearGlowLights(BattlingScene* scene, BattlingGear* gear, s32 
 void pcBattling60RenderHook(BattlingScene* scene, int demo);
 void pcBattling60Wait(void);
 void pcBattling60WaitDone(void);
+/* Enhanced (xg-rgcf.5.3): the arena drawn this frame, for the display copy's
+ * effects (port/src/game/battling/between.c pcBattlingSceneDepth); NULL when
+ * the frame drew none (pause, menus, the victory turntable). */
+void pcBattlingSceneDepth(BattlingScene* scene);
+static BattlingScene* pcBattlingDrawn;
 void portBattlingSweepFrame(void); /* port/src/game/battling/sweep.c */
 
 s32 renderBattlingArenaScene(BattlingScene* scene) {
@@ -498,6 +503,7 @@ s32 renderBattlingArenaScene(BattlingScene* scene) {
     BattlingLight* light;
 
     pcBattling60RenderHook(scene, 0); /* Enhanced, 60 Hz (above) */
+    pcBattlingDrawn = scene;
     layer = scene->m284_layer;
     beginBattlingLayer(layer);
     setBattlingSceneCamera(scene, &battlingCameraPos, &battlingCameraTarget);
@@ -566,6 +572,7 @@ s32 renderBattlingDemoScene(BattlingScene* scene) {
     BattlingLight* light;
 
     pcBattling60RenderHook(scene, 1); /* Enhanced, 60 Hz (above) */
+    pcBattlingDrawn = scene;
     layer = scene->m284_layer;
     beginBattlingLayer(layer);
     setBattlingSceneCamera(scene, &battlingCameraPos, &battlingCameraTarget);
@@ -2342,6 +2349,8 @@ loop:
         startBattlingFrameTimer();
         DrawSync(0);
         PutDispEnv(&disp);
+        if (pcBattlingDrawn != NULL) pcBattlingSceneDepth(pcBattlingDrawn); /* after the picture between's draw */
+        pcBattlingDrawn = NULL;
         DrawOTagEnv(battlingCurrentOt, &battlingDisplayBuffer->m0_drawEnv);
         goto loop;
 }

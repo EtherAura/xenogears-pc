@@ -16,8 +16,10 @@ static const XgScenePreset presets[] = {
     /* xg-55m. Field 14's exit leads to entrance 1, with Fei alone after
      * story 6. Field 13 actor 10 waits for trigger 1 before the conversation;
      * confirm presses alone never start it. No carried story flags needed.
-     * Walk right from the doorway: Beetle US 7@5669, JP 7@4708. */
-    {7, {13, 1, 6, 1, {0, 255, 255}, 0, {{0, 0}}},
+     * Walk right from the doorway: Beetle US 7@5669, JP 7@4708.
+     * xg-xukn: field 13's script plays no music; the story arrives with
+     * the Lahan theme (id 0) from the fields before, so the start keeps it. */
+    {7, {13, 1, 6, 1, {0, 255, 255}, 0, {{0, 0}}, 1},
      "Walk right from the doorway toward the group to begin the conversation. Advance dialogue with the confirm button."},
     {55, {80, 1, 54, 1, {0, 255, 255}, 0, {{0, 0}}},
      "Arrival at Bart's Lair starts automatically. Citan appears as a scripted NPC; advance dialogue with the confirm button."},
@@ -242,7 +244,7 @@ void xgSceneStart(const XgScene* scene, const char* region, PortStartRequest* ou
 int xgScenePresetMatches(const XgScenePreset* p, const PortStartRequest* r) {
     if (p == NULL || r == NULL || r->field != p->start.field || r->entry != p->start.entry ||
         r->progress != p->start.progress || r->disc != p->start.disc ||
-        r->variableCount != p->start.variableCount) return 0;
+        r->variableCount != p->start.variableCount || r->music != p->start.music) return 0;
     for (int i = 0; i < 3; i++) if (r->party[i] != p->start.party[i]) return 0;
     for (int i = 0; i < r->variableCount; i++) {
         if (r->variables[i].index != p->start.variables[i].index ||

@@ -464,7 +464,29 @@ void quarterSources(ivec2 q) {
 // The sources within reach of each quarter pixel, by distance in the scene
 // and by how its surface faces them: every one of them, so nothing flickers.
 // A figure has no surface: it takes a fixed share.
-void gather(ivec2 q) {
+// Pass 11 per group: which quarter pixels round its own 8x8 hold a source,
+// one bit each (BOUNCE_SCAN about it: everything a pixel of it can reach).
+// The sources are few, so a pixel then visits only those, row by row and
+// left to right: the same ones in the same order as a scan of every quarter
+// pixel, so the sum is the same to the bit (and the reads far fewer).
+const int GATHER_SPAN = 8 + 2 * BOUNCE_SCAN;
+shared uint gatherBits[GATHER_SPAN][2];
+
+void gatherMark(ivec2 base) {
+    uint i = gl_LocalInvocationIndex;
+    for (uint k = i; k < uint(GATHER_SPAN * 2); k += 64u) gatherBits[k / 2u][k % 2u] = 0u;
+    barrier();
+    ivec2 last = quarters() - 1;
+    for (uint k = i; k < uint(GATHER_SPAN * GATHER_SPAN); k += 64u) {
+        ivec2 c = ivec2(int(k % uint(GATHER_SPAN)), int(k / uint(GATHER_SPAN)));
+        ivec2 s = base + c;
+        if (s.x < 0 || s.y < 0 || s.x > last.x || s.y > last.y) continue;
+        if (imageLoad(quarterE, s).a > 0.0) atomicOr(gatherBits[c.y][c.x >> 5], 1u << uint(c.x & 31));
+    }
+    barrier();
+}
+
+void gather(ivec2 q, ivec2 base) {
     ivec2 t = quarterMiddle(q);
     vec4 g = imageLoad(geo, t);
     float z = abs(g.a);
@@ -476,26 +498,35 @@ void gather(ivec2 q) {
         float span = pixels / 4.0;                                // quarter pixels
         int scan = min(int(ceil(span)), BOUNCE_SCAN);
         float near = 8.0 * z / pc.view.w;                         // two quarter pixels here, in view units
-        ivec2 last = quarters() - 1;
-        for (int y = -scan; y <= scan; y++) for (int x = -scan; x <= scan; x++) {
-            if (float(x * x + y * y) > span * span) continue;
-            ivec2 s = q + ivec2(x, y);
-            if (s.x < 0 || s.y < 0 || s.x > last.x || s.y > last.y) continue;
-            vec4 e = imageLoad(quarterE, s);
-            if (e.a <= 0.0) continue;
-            vec3 v = place(middleAt(quarterMiddle(s)), e.a) - p;
-            float d2 = dot(v, v);
-            float dist = sqrt(max(d2, 1.0e-6));
-            float facing = BOUNCE_FIGURE;
-            if (g.a > 0.0) {
-                // Closer than two quarter pixels the direction to a source means
-                // little (it may be this very spot): the fixed share there, the
-                // surface's facing beyond.
-                float lambert = clamp((dot(g.xyz, v) / dist + BOUNCE_WRAP) / (1.0 + BOUNCE_WRAP), 0.0, 1.0);
-                facing = mix(BOUNCE_FIGURE, lambert, clamp(dist / near, 0.0, 1.0));
+        ivec2 at = q - base; // this pixel in the group's bits
+        for (int y = -scan; y <= scan; y++) {
+            int row = at.y + y;
+            for (int word = 0; word < 2; word++) {
+                // The row's bits from x = -scan to scan, in this word.
+                int lo = clamp(at.x - scan - word * 32, 0, 32), hi = clamp(at.x + scan + 1 - word * 32, 0, 32);
+                if (lo >= hi) continue;
+                uint bits = gatherBits[row][word] & (hi - lo == 32 ? 0xFFFFFFFFu : ((1u << uint(hi - lo)) - 1u) << uint(lo));
+                while (bits != 0u) {
+                    int x = word * 32 + findLSB(bits) - at.x;
+                    bits &= bits - 1u;
+                    if (float(x * x + y * y) > span * span) continue;
+                    ivec2 s = q + ivec2(x, y);
+                    vec4 e = imageLoad(quarterE, s);
+                    vec3 v = place(middleAt(quarterMiddle(s)), e.a) - p;
+                    float d2 = dot(v, v);
+                    float dist = sqrt(max(d2, 1.0e-6));
+                    float facing = BOUNCE_FIGURE;
+                    if (g.a > 0.0) {
+                        // Closer than two quarter pixels the direction to a source means
+                        // little (it may be this very spot): the fixed share there, the
+                        // surface's facing beyond.
+                        float lambert = clamp((dot(g.xyz, v) / dist + BOUNCE_WRAP) / (1.0 + BOUNCE_WRAP), 0.0, 1.0);
+                        facing = mix(BOUNCE_FIGURE, lambert, clamp(dist / near, 0.0, 1.0));
+                    }
+                    float window = max(1.0 - d2 / (reach * reach), 0.0);
+                    sum += e.rgb * (window * window * facing);
+                }
             }
-            float window = max(1.0 - d2 / (reach * reach), 0.0);
-            sum += e.rgb * (window * window * facing);
         }
         // The mean over the disc times its area in PS1 pixels, over pi: the
         // sum of the sources in it over pi.
@@ -543,14 +574,19 @@ void shadowMarch(ivec2 t) {
         float reach = SHADOW_REACH * pc.lens.z / pc.view.w; // view units
         float thick = SHADOW_THICK * reach;
         float noise = turn(t);
+        // The nearest caster decides (the darkness falls with the step), so
+        // the march stops at the first; and a march that has left the frame
+        // never comes back into it (a straight line out of a rectangle).
         for (int i = 0; i < SHADOW_STEPS; i++) {
             vec3 q = p + sun * ((float(i) + 0.5 + noise) / float(SHADOW_STEPS) * reach);
             if (q.z <= 1.0) break;
             ivec2 l = ivec2((q.xy * pc.view.w / q.z + pc.lens.xy) * float(pc.n));
-            if (l.x < 0 || l.y < 0 || l.x >= pc.size.x || l.y >= pc.size.y) continue;
+            if (l.x < 0 || l.y < 0 || l.x >= pc.size.x || l.y >= pc.size.y) break;
             float cq = depthCode(imageLoad(depth, l).r);
-            if (cq > 0.0 && cq < q.z - 0.004 * q.z && q.z - cq < thick)
-                occ = max(occ, sqrt(1.0 - float(i) / float(SHADOW_STEPS)));
+            if (cq > 0.0 && cq < q.z - 0.004 * q.z && q.z - cq < thick) {
+                occ = sqrt(1.0 - float(i) / float(SHADOW_STEPS));
+                break;
+            }
         }
         occ *= backdropFade(z);
     }
@@ -809,6 +845,15 @@ void composite(ivec2 l) {
 
 void main() {
     ivec2 t = ivec2(gl_GlobalInvocationID.xy);
+    if (pc.pass == 11) {
+        // Every invocation of the group marks the sources (barriers), then
+        // those on the grid gather.
+        ivec2 base = ivec2(gl_WorkGroupID.xy) * 8 - BOUNCE_SCAN;
+        gatherMark(base);
+        ivec2 q = quarters();
+        if (t.x < q.x && t.y < q.y) gather(t, base);
+        return;
+    }
     if (pc.pass == 19) {
         if (t.x < pc.size.x && t.y < pc.size.y) composite(t);
         return;
@@ -824,8 +869,7 @@ void main() {
         case 1: quarter(t); break;
         case 2: quarterAcross(t); break;
         case 3: quarterDown(t); break;
-        case 10: quarterSources(t); break;
-        default: gather(t); break;
+        default: quarterSources(t); break;
         }
         return;
     }

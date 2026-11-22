@@ -31,8 +31,11 @@ Each release has two APKs. Phones and tablets take the one whose name has
 4. Start the app. The first time, the system's folder picker asks for the
    folder that holds your disc images. They are read where they are (also
    from one folder down, as a folder per disc), nothing is copied, and the
-   app keeps access to that folder. A PlayStation BIOS image in the same
-   folder is used too.
+   app keeps access to that folder. A PlayStation BIOS image (a 512 KB
+   `.bin`) in the same folder is used too: its font draws the chapter names
+   of your saves on the memory card screens. Without one, the app asks for
+   one at the start; System > Discs and BIOS chooses another file, the
+   folder's, or none.
 
 To update, install the new APK over the old one. An APK signed with the same
 certificate keeps your saves, settings and save states; uninstalling deletes
@@ -77,6 +80,11 @@ Buttons and sticks, which adds a left stick that moves as the D-pad does and,
 with the Enhanced engine's Free camera or First-person look turned on
 (Controls > Camera and vibration), a right stick for the camera, a button that
 puts the camera back and one that enters and leaves the first-person view.
+
+The pad stays over the settings menu too, and works there as a controller
+does: the D-pad moves, the game's confirm and cancel buttons choose and go
+back, L1 and R1 change the section, and the menu button or Start closes it.
+A touch anywhere else taps or drags the menu.
 
 System > Engine chooses the Original engine, the game as the PlayStation ran
 it (the default), or the Enhanced one, the port's own. On Android the app

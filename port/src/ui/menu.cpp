@@ -130,6 +130,8 @@ State st;
 // Transform copies for the renderer. ImGui retains private write pointers
 // and table channels in its original lists between frames.
 std::vector<ImDrawList*> projectedLists;
+// The touch pad over the open menu (frame()), outside the menu's motion.
+ImDrawList* touchPadList;
 
 // ---- XG_UI_SCRIPT ------------------------------------------------------------------
 
@@ -508,10 +510,13 @@ bool keyboardOwn(SDL_Scancode k) {
 
 // Is the PS1 button held: one of its keys (not while text is typed), its
 // gamepad input on any gamepad, or for the D-pad the left stick when it
-// drives the D-pad.
+// drives the D-pad, or the touch pad's control for it (touch.c).
 bool buttonHeld(int b, bool typing) {
     if (b < 0) {
         return false;
+    }
+    if (touchButtonHeld(padButtonName(b))) {
+        return true;
     }
     for (int slot = 0; slot < PAD_KEYS && !typing; slot++) {
         SDL_Scancode k = ::padKey(b, slot);
@@ -1669,6 +1674,20 @@ void frame() {
         if (hides) skin::hideUnopened(original, copy); // a message box still opening: its frame alone
         if (moving) menuMotion::drawList(copy, view, st.leaving);
     }
+    // The touch pad over everything, where it is over the game: still while
+    // the menu comes in and goes (touch.c takes its fingers, uiEvent).
+    // Changing its rows previews it whether it shows or not (sections.cpp).
+    if (touchShown()) {
+        if (touchPadList == nullptr) touchPadList = IM_NEW(ImDrawList)(ImGui::GetDrawListSharedData());
+        ImDrawList* pad = touchPadList;
+        pad->_ResetForNewFrame();
+        pad->PushTexture(io.Fonts->TexRef);
+        pad->PushClipRect(ImVec2(0, 0), io.DisplaySize, false);
+        touchpadDraw(pad, io.DisplaySize.x, io.DisplaySize.y);
+        pad->PopClipRect();
+        pad->PopTexture();
+        data->AddDrawList(pad);
+    }
     data->TotalVtxCount = data->TotalIdxCount = 0;
     for (ImDrawList* list : data->CmdLists) {
         data->TotalVtxCount += list->VtxBuffer.Size; data->TotalIdxCount += list->IdxBuffer.Size;
@@ -2010,6 +2029,13 @@ extern "C" int uiEvent(const SDL_Event* e) {
     if (capturing() && captureEvent(e)) {
         return 1;
     }
+    // The touch pad drawn over the menu (frame()): a finger on one of its
+    // controls is the pad's, with its mouse, and moves about as a controller
+    // does (buttonHeld); the other touches tap and drag the menu.
+    if (touchMenuEvent(e)) {
+        if (e->type == SDL_EVENT_FINGER_DOWN) inputUse.method = METHOD_PAD; // the legend shows the pad's buttons
+        return 1;
+    }
     switch (e->type) {
     case SDL_EVENT_KEY_DOWN:
     case SDL_EVENT_KEY_UP:
@@ -2232,6 +2258,8 @@ extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture
 extern "C" void uiVulkanShutdown(void) {
     for (ImDrawList* list : projectedLists) IM_DELETE(list);
     projectedLists.clear();
+    if (touchPadList != nullptr) IM_DELETE(touchPadList); // registered with the context's shared data
+    touchPadList = nullptr;
     dim::shutdown();
     if (st.vkReady) {
         ImGui_ImplVulkan_Shutdown();

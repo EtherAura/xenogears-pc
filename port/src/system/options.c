@@ -20,6 +20,11 @@
  *                    script variable n is at 0x1930 + 2n.
  *   XG_FIELD=n       start the field mode in field n (m231A_fieldID); on its
  *                    own it implies XG_BOOT_MODE=1
+ *   XG_MUSIC=n       the music (id 0-254) already playing as that first field
+ *                    starts, as if the field before had played it: a field
+ *                    whose script plays none keeps it (field 13 plays 0, the
+ *                    Lahan theme, in the story). Unset: none, the game's own
+ *                    silence after a cold start (portStartMusic, xg-xukn).
  *
  * Presets:
  *   disc2            field variable 82 (the current disc, 0 or 1) = 1, as the
@@ -67,6 +72,7 @@ static struct {
     int pending; /* asked for: the next kernelMain applies it */
     int active;  /* this boot applied it: field mode until the next reset */
     PortStartRequest request;
+    int music; /* the start's music for its first field boot, 1 + id; 0 none or taken (portStartMusic) */
 } start;
 
 /* system/netplay.c (weak: tests link this file without it). */
@@ -77,7 +83,7 @@ int portRequestStart(const PortStartRequest* request) {
     if (request == NULL || request->field < 0 || request->field > 729 ||
         request->entry < 0 || request->entry > 255 || request->progress < 0 || request->progress > 0x7fff ||
         request->disc < 1 || request->disc > 2 || request->variableCount < 0 ||
-        request->variableCount > PORT_START_VARIABLES) return 0;
+        request->variableCount > PORT_START_VARIABLES || request->music < 0 || request->music > 0xFF) return 0;
     /* OP_INIT_ENTITY_PC assigns the player/camera actor only to party slot
      * zero. An empty leader leaves that setup missing, even with followers. */
     if (request->party[0] < 0 || request->party[0] > 10) return 0;
@@ -95,9 +101,9 @@ int portRequestStart(const PortStartRequest* request) {
     }
     start.request = *request;
     start.pending = 1;
-    fprintf(stderr, "options: start field %d, entrance %d, story %d, disc %d, party %d,%d,%d, %d variables requested\n",
+    fprintf(stderr, "options: start field %d, entrance %d, story %d, disc %d, party %d,%d,%d, %d variables, music %d requested\n",
             request->field, request->entry, request->progress, request->disc,
-            request->party[0], request->party[1], request->party[2], request->variableCount);
+            request->party[0], request->party[1], request->party[2], request->variableCount, request->music - 1);
     return 1;
 }
 
@@ -201,9 +207,21 @@ void portStartState(void) {
         for (int i = 0; i < r->variableCount; i++) {
             gameState.m1930_fieldVarsBackup[r->variables[i].index] = (u16)r->variables[i].value;
         }
+        start.music = r->music;
         return;
     }
-    const char* s = getenv("XG_PRESET");
+    start.music = 0;
+    const char* s = getenv("XG_MUSIC");
+    if (s != NULL && s[0] != '\0') {
+        char* end;
+        long id = strtol(s, &end, 0);
+        if (end != s && *end == '\0' && id >= 0 && id < 0xFF) {
+            start.music = (int)id + 1;
+        } else {
+            fprintf(stderr, "options: XG_MUSIC: expected a music id 0-254, not '%s'\n", s);
+        }
+    }
+    s = getenv("XG_PRESET");
     while (s != NULL && *s != '\0') {
         const char* end = strchr(s, ',');
         size_t len = end != NULL ? (size_t)(end - s) : strlen(s);
@@ -227,6 +245,20 @@ void portStartState(void) {
     if (s != NULL && s[0] != '\0') {
         gameState.m231A_fieldID = (u16)strtol(s, NULL, 0);
     }
+}
+
+/* The field's first boot after a start (src/field/f_800775C0.c, as it sets the
+ * music the field keeps): the start's music in place of `music`, once. The
+ * field's bootField then plays it as one carried over from the field before;
+ * a field whose script plays its own music replaces it as usual. */
+int portStartMusic(int music) {
+    if (start.music <= 0) {
+        return music;
+    }
+    int id = start.music - 1;
+    start.music = 0;
+    fprintf(stderr, "options: the start keeps music %d playing\n", id);
+    return id;
 }
 
 /* Save states (savestate.h): a start asked for or applied by this boot. */

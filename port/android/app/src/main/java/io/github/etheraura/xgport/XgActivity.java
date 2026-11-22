@@ -7,15 +7,24 @@
 // (takePersistableUriPermission), and every launch opens the images in it
 // (and one folder down: a folder per disc, as Redump sets come) and passes
 // their file descriptors to the loader, which sorts them by region and disc.
-// A BIOS image (512 KB .bin) there is passed too. Nothing is copied.
+// Nothing is copied.
+//
+// The BIOS image (its font draws the save titles' chapter names and the text
+// over some scenes: port/src/system/krom.c) is a file the player chose in the
+// menu (the system's file picker, its grant kept too), else none when so
+// chosen, else the first 512 KB .bin in the disc folder. With none, the game
+// asks for one at the start ("--bios-ask") until told to go on without
+// (port/src/system/android.c androidBiosAsk). A choice made while the game
+// runs is opened here and taken by the game (takeBios).
 //
 // Packs (texture-packs/, ui-packs/... : port/src/system/engine.c) are read
 // from the app's own folder (Android/data/<package>/files). The player
 // copies one in from a folder picked in the menu (Packs > Copy in a pack:
 // PackCopy), or over USB from a computer.
 //
-// The game's menu calls chooseDiscFolder, discFolder, copyPack, packCopyStatus
-// and cancelPackCopy (port/src/system/android.c); a new disc folder applies at
+// The game's menu calls chooseDiscFolder, discFolder, copyPack, packCopyStatus,
+// cancelPackCopy, chooseBiosFile, useFolderBios, useNoBios, biosAskOff,
+// takeBios and biosName (port/src/system/android.c); a new disc folder applies at
 // the next start. The game itself starts before the picker returns (SDL starts
 // it as soon as the surface first comes up), so when a folder arrives while the
 // game runs without a disc (the first start) the app starts again with it.
@@ -56,6 +65,7 @@ import android.os.Looper;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsContract.Document;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.DisplayCutout;
 import android.view.Surface;
@@ -67,6 +77,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.libsdl.app.SDLActivity;
 import org.libsdl.app.SDLSurface;
@@ -75,9 +86,20 @@ public class XgActivity extends SDLActivity {
     private static final String TAG = "xenogears";
     private static final int PICK_DISC_FOLDER = 0x5847;
     private static final int PICK_PACK = 0x5848;
+    private static final int PICK_BIOS = 0x5849;
     private static final String PREFS = "xgport";
     private static final String DISC_TREE = "discTree";
+    private static final String BIOS_DOC = "biosDoc"; // the chosen file's URI, or BIOS_NONE
+    private static final String BIOS_NAME = "biosName";
+    private static final String BIOS_ASK_OFF = "biosAskOff"; // "go on without" at the start's question
+    private static final String BIOS_NONE = "none";
+    private static final long BIOS_SIZE = 524288L;
     private PackCopy packCopy;
+    // The BIOS image as the player knows it ("" for none), and the game's answer to take
+    // (takeBios): "ok|FD|NAME", "error|notbios|NAME", "error|open|NAME", "error|nofolder|FOLDER",
+    // "error|nopicker|", "cancel|", or "" while nothing is owed.
+    private static volatile String biosShown = "";
+    private final AtomicReference<String> biosAnswer = new AtomicReference<>("");
     private String packKind = "texture";
     // The game started with no disc image from the chosen folder (getArguments, on SDL's thread).
     private volatile boolean startedWithoutDisc;
@@ -199,41 +221,206 @@ public class XgActivity extends SDLActivity {
         }
         String dir = getIntent().getStringExtra("discs-dir");
         Uri tree = discTree();
+        FoundBios found = new FoundBios();
         if (dir != null) {
-            scanFiles(new File(dir), "", 0, args);
+            scanFiles(new File(dir), "", 0, args, found);
         } else if (tree != null) {
-            scan(getContentResolver(), tree, DocumentsContract.getTreeDocumentId(tree), "", 0, args);
+            scan(getContentResolver(), tree, DocumentsContract.getTreeDocumentId(tree), "", 0, args, found);
         }
         startedWithoutDisc = dir == null && !args.contains("--image");
+        biosArguments(args, found, dir == null && tree != null);
         return args.toArray(new String[0]);
     }
 
     /** As scan, from a folder the app reads directly (tests: its own storage). */
-    private void scanFiles(File folder, String prefix, int depth, ArrayList<String> args) {
+    private void scanFiles(File folder, String prefix, int depth, ArrayList<String> args, FoundBios found) {
         File[] files = folder.listFiles();
         for (int i = 0; files != null && i < files.length; i++) {
             File f = files[i];
             if (f.isDirectory()) {
                 if (depth < 1) {
-                    scanFiles(f, prefix + f.getName() + "/", depth + 1, args);
+                    scanFiles(f, prefix + f.getName() + "/", depth + 1, args, found);
                 }
                 continue;
             }
             String lower = f.getName().toLowerCase(Locale.ROOT);
             boolean image = (lower.endsWith(".bin") || lower.endsWith(".iso") || lower.endsWith(".img"))
                             && f.length() >= 100_000_000L;
-            boolean bios = lower.endsWith(".bin") && f.length() == 524288L;
-            if (!image && !bios) {
+            boolean bios = lower.endsWith(".bin") && f.length() == BIOS_SIZE;
+            if (bios && found.name == null) {
+                found.file = f;
+                found.name = prefix + f.getName();
+            }
+            if (!image || args == null) {
                 continue;
             }
             try {
                 ParcelFileDescriptor pfd = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY);
-                args.add(bios ? "--bios" : "--image");
+                args.add("--image");
                 args.add(pfd.detachFd() + ":" + prefix + f.getName());
             } catch (Exception e) {
                 Log.w(TAG, "discs: " + f + ": " + e);
             }
         }
+    }
+
+    // ---- the BIOS image ---------------------------------------------------------------
+
+    /** The first BIOS image (a 512 KB .bin) a scan found, opened only when it is the one used. */
+    private static final class FoundBios {
+        Uri doc;     // in the chosen folder
+        File file;   // in a folder the app reads directly (discs-dir)
+        String name; // its path in the folder
+    }
+
+    /** The BIOS image the game starts with: the file chosen in the menu, else none when so
+     *  chosen, else the disc folder's. With none, "--bios-ask" (the player's own folder only, not a
+     *  development start's discs-dir) until the player has said to go on without. */
+    private void biosArguments(ArrayList<String> args, FoundBios found, boolean playerFolder) {
+        boolean none = BIOS_NONE.equals(prefs().getString(BIOS_DOC, null));
+        Uri chosen = chosenBios();
+        int fd = -1;
+        String name = null;
+        if (chosen != null) {
+            fd = openDoc(chosen);
+            name = prefs().getString(BIOS_NAME, "BIOS");
+            if (fd < 0) Log.w(TAG, "bios: the chosen file cannot be opened; the disc folder's instead");
+        }
+        if (fd < 0 && !none && found.name != null) {
+            fd = openFound(found);
+            name = found.name;
+        }
+        if (fd >= 0) {
+            args.add("--bios");
+            args.add(fd + ":" + name);
+            biosShown = name;
+        } else {
+            biosShown = "";
+            if (playerFolder && !none && args.contains("--image") && !prefs().getBoolean(BIOS_ASK_OFF, false)) {
+                args.add("--bios-ask");
+            }
+        }
+    }
+
+    /** The BIOS file chosen in the menu, while its grant is still held. */
+    private Uri chosenBios() {
+        String saved = prefs().getString(BIOS_DOC, null);
+        if (saved == null || saved.equals(BIOS_NONE)) {
+            return null;
+        }
+        Uri doc = Uri.parse(saved);
+        for (UriPermission p : getContentResolver().getPersistedUriPermissions()) {
+            if (p.getUri().equals(doc) && p.isReadPermission()) {
+                return doc;
+            }
+        }
+        return null;
+    }
+
+    private int openDoc(Uri doc) {
+        try {
+            ParcelFileDescriptor pfd = getContentResolver().openFileDescriptor(doc, "r");
+            return pfd != null ? pfd.detachFd() : -1;
+        } catch (Exception e) {
+            Log.w(TAG, "bios: " + doc + ": " + e);
+            return -1;
+        }
+    }
+
+    private int openFound(FoundBios found) {
+        if (found.doc != null) {
+            return openDoc(found.doc);
+        }
+        try {
+            return ParcelFileDescriptor.open(found.file, ParcelFileDescriptor.MODE_READ_ONLY).detachFd();
+        } catch (Exception e) {
+            Log.w(TAG, "bios: " + found.file + ": " + e);
+            return -1;
+        }
+    }
+
+    /** The chosen file's grant given back (another file or none chosen instead). */
+    private void forgetChosenBios() {
+        Uri before = chosenBios();
+        if (before != null) {
+            try {
+                getContentResolver().releasePersistableUriPermission(before, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException e) {
+                Log.w(TAG, "bios: " + e);
+            }
+        }
+        prefs().edit().remove(BIOS_DOC).remove(BIOS_NAME).commit();
+    }
+
+    /** An answer for the game; one it did not take is dropped (its descriptor closed). */
+    private void answerBios(String text) {
+        String old = biosAnswer.getAndSet(text);
+        if (old.startsWith("ok|")) {
+            try {
+                ParcelFileDescriptor.adoptFd(Integer.parseInt(old.split("\\|", 3)[1])).close();
+            } catch (Exception e) {
+                Log.w(TAG, "bios: " + e);
+            }
+        }
+    }
+
+    private void pickBios() {
+        Intent pick = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        pick.addCategory(Intent.CATEGORY_OPENABLE);
+        pick.setType("*/*");
+        pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        Uri tree = discTree(); // the picker opens in the disc folder
+        if (tree != null) {
+            pick.putExtra(DocumentsContract.EXTRA_INITIAL_URI,
+                          DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree)));
+        }
+        try {
+            startActivityForResult(pick, PICK_BIOS);
+        } catch (Exception e) {
+            Log.w(TAG, "no file picker: " + e);
+            answerBios("error|nopicker|");
+        }
+    }
+
+    /** The picker's file: a 512 KB one is kept (its grant too), opened and handed to the game. */
+    private void biosPicked(Uri doc) {
+        if (doc == null) {
+            answerBios("cancel|");
+            return;
+        }
+        String name = "BIOS";
+        long size = -1;
+        String[] columns = {OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
+        try (Cursor c = getContentResolver().query(doc, columns, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                if (!c.isNull(0)) name = c.getString(0);
+                if (!c.isNull(1)) size = c.getLong(1);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "bios: " + e);
+        }
+        if (size != BIOS_SIZE) {
+            answerBios("error|notbios|" + name);
+            return;
+        }
+        Uri before = chosenBios();
+        if (before == null || !before.equals(doc)) {
+            forgetChosenBios();
+        }
+        try {
+            getContentResolver().takePersistableUriPermission(doc, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            Log.w(TAG, "bios: the grant cannot be kept: " + e);
+        }
+        prefs().edit().putString(BIOS_DOC, doc.toString()).putString(BIOS_NAME, name).commit();
+        int fd = openDoc(doc);
+        if (fd < 0) {
+            answerBios("error|open|" + name);
+            return;
+        }
+        Log.i(TAG, "bios: " + name + " chosen");
+        biosShown = name;
+        answerBios("ok|" + fd + "|" + name);
     }
 
     // ---- the disc folder ----------------------------------------------------------
@@ -287,6 +474,53 @@ public class XgActivity extends SDLActivity {
 
     public void cancelPackCopy() {
         packCopy().requestCancel();
+    }
+
+    /** A BIOS file from the system's picker (answered by takeBios). */
+    public void chooseBiosFile() {
+        runOnUiThread(this::pickBios);
+    }
+
+    /** The disc folder's BIOS image instead of a chosen file (answered by takeBios). */
+    public void useFolderBios() {
+        runOnUiThread(() -> {
+            forgetChosenBios();
+            FoundBios found = new FoundBios();
+            String dir = getIntent().getStringExtra("discs-dir");
+            Uri tree = discTree();
+            if (dir != null) {
+                scanFiles(new File(dir), "", 0, null, found);
+            } else if (tree != null) {
+                scan(getContentResolver(), tree, DocumentsContract.getTreeDocumentId(tree), "", 0, null, found);
+            }
+            int fd = found.name != null ? openFound(found) : -1;
+            biosShown = fd >= 0 ? found.name : "";
+            answerBios(fd >= 0 ? "ok|" + fd + "|" + found.name : "error|nofolder|" + discFolder());
+        });
+    }
+
+    /** No BIOS image, not even the disc folder's (the game blanks its glyphs itself). */
+    public void useNoBios() {
+        runOnUiThread(() -> {
+            forgetChosenBios();
+            prefs().edit().putString(BIOS_DOC, BIOS_NONE).commit();
+            biosShown = "";
+        });
+    }
+
+    /** The start's question answered "go on without": not asked again. */
+    public void biosAskOff() {
+        runOnUiThread(() -> prefs().edit().putBoolean(BIOS_ASK_OFF, true).commit());
+    }
+
+    /** The answer to chooseBiosFile or useFolderBios, once ("" while there is none). */
+    public String takeBios() {
+        return biosAnswer.getAndSet("");
+    }
+
+    /** The BIOS image the game has as the player knows it ("" for none). */
+    public String biosName() {
+        return biosShown;
     }
 
     /** The disc folder as the player knows it ("" when none is chosen). */
@@ -345,6 +579,10 @@ public class XgActivity extends SDLActivity {
             }
             return;
         }
+        if (requestCode == PICK_BIOS) {
+            biosPicked(resultCode == RESULT_OK && data != null ? data.getData() : null);
+            return;
+        }
         if (requestCode != PICK_DISC_FOLDER) {
             super.onActivityResult(requestCode, resultCode, data);
             return;
@@ -393,9 +631,11 @@ public class XgActivity extends SDLActivity {
         return null;
     }
 
-    /** Images (.bin, .iso, .img of 100 MB or more) and a BIOS (a 512 KB .bin) in the folder and one
-     *  folder down, as "--image fd:name" and "--bios fd:name" arguments. */
-    private void scan(ContentResolver cr, Uri tree, String docId, String prefix, int depth, ArrayList<String> args) {
+    /** Images (.bin, .iso, .img of 100 MB or more) in the folder and one folder down, as
+     *  "--image fd:name" arguments (none opened when args is null), and the first BIOS image (a
+     *  512 KB .bin) into found. */
+    private void scan(ContentResolver cr, Uri tree, String docId, String prefix, int depth, ArrayList<String> args,
+                      FoundBios found) {
         Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId);
         String[] columns = {Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_MIME_TYPE,
                             Document.COLUMN_SIZE};
@@ -407,15 +647,19 @@ public class XgActivity extends SDLActivity {
                 long size = c.isNull(3) ? 0 : c.getLong(3);
                 if (Document.MIME_TYPE_DIR.equals(mime)) {
                     if (depth < 1) {
-                        scan(cr, tree, id, prefix + name + "/", depth + 1, args);
+                        scan(cr, tree, id, prefix + name + "/", depth + 1, args, found);
                     }
                     continue;
                 }
                 String lower = name.toLowerCase(Locale.ROOT);
                 boolean image = (lower.endsWith(".bin") || lower.endsWith(".iso") || lower.endsWith(".img"))
                                 && size >= 100_000_000L;
-                boolean bios = lower.endsWith(".bin") && size == 524288L;
-                if (!image && !bios) {
+                boolean bios = lower.endsWith(".bin") && size == BIOS_SIZE;
+                if (bios && found.name == null) {
+                    found.doc = DocumentsContract.buildDocumentUriUsingTree(tree, id);
+                    found.name = prefix + name;
+                }
+                if (!image || args == null) {
                     continue;
                 }
                 ParcelFileDescriptor pfd = cr.openFileDescriptor(DocumentsContract.buildDocumentUriUsingTree(tree, id),
@@ -423,7 +667,7 @@ public class XgActivity extends SDLActivity {
                 if (pfd == null) {
                     continue;
                 }
-                args.add(bios ? "--bios" : "--image");
+                args.add("--image");
                 args.add(pfd.detachFd() + ":" + prefix + name);
             }
         } catch (Exception e) {

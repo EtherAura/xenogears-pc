@@ -1842,9 +1842,10 @@ bool touchRowsWanted() {
 }
 
 // Controls > Touch pad (system/touch.h): when it shows, its controls, how
-// strong and how large. The menu hides the pad, so while one of these rows
-// is being changed (and a moment after) the pad is drawn over the menu, as
-// it will be over the game: a size or an opacity is chosen by eye.
+// strong and how large. The pad shows over the menu while it shows over the
+// game (menu.cpp frame()); while one of these rows is being changed (and a
+// moment after) it is drawn even when it does not (off, or hidden by a
+// controller), so a size or an opacity is chosen by eye.
 void touchRows() {
     static int previewUntil;
     bool preview = false;
@@ -1892,7 +1893,7 @@ void touchRows() {
     if (opt::indexing()) return;
     int frame = ImGui::GetFrameCount();
     if (preview) previewUntil = frame + 75; // and a little over a second after
-    if (frame < previewUntil) {
+    if (frame < previewUntil && !touchShown()) { // shown, menu.cpp frame() draws it
         const ImVec2 screen = ImGui::GetIO().DisplaySize;
         touchpadDraw(ImGui::GetForegroundDrawList(), screen.x, screen.y);
     }
@@ -2755,7 +2756,9 @@ void engineRow(int* engine, bool live) {
 const SDL_DialogFileFilter biosFilters[] = {{"BIOS images", "bin;rom"}, {"All files", "*"}};
 const SDL_DialogFileFilter discFilters[] = {{"Disc images", "cue;bin"}, {"All files", "*"}};
 
+#ifndef __ANDROID__ // there the activity picks the file (androidBiosChoose)
 char biosPath[1024];
+#endif
 char disc2Path[1024];
 Message biosMsg, discMsg;
 
@@ -3004,7 +3007,39 @@ void systemSection() {
     opt::group(N_("Discs and BIOS"));
 #ifdef __ANDROID__
     androidDiscRow();
-#endif
+    // The activity holds the choice and opens the file (XgActivity: a file chosen here, else none
+    // when so chosen, else the disc folder's), read where it is (system/android.c).
+    if (row("BIOS (kanji)", "bios")) {
+        char shown[1024], taken[1024];
+        androidActivityText("biosName", shown, sizeof shown);
+        pathText(kromPath() == NULL ? NULL : shown[0] ? shown : kromPath(),
+                 "None read: the save titles on the memory card screens and the text that scrolls over some "
+                 "scenes are blank");
+        int answer = androidBiosTake(taken, sizeof taken);
+        if (answer == 1) {
+            biosMsg.set(false, "Kanji glyphs from %s", taken);
+        } else if (answer == -1) {
+            char* arg = strchr(taken, '|');
+            if (arg != NULL) *arg++ = '\0';
+            else arg = taken + strlen(taken); // ""
+            if (!strcmp(taken, "notbios")) biosMsg.set(true, "%s is not a 512 KB PS1 BIOS image", arg);
+            else if (!strcmp(taken, "nofolder")) biosMsg.set(true, "No BIOS image (a 512 KB .bin) in the disc folder %s", arg);
+            else if (!strcmp(taken, "open")) biosMsg.set(true, "%s cannot be opened", arg);
+            else biosMsg.set(true, "The system has no file picker");
+        }
+        if (ImGui::Button(tr("Choose a BIOS file"))) androidBiosChoose();
+        sameLineFor("Use the disc folder's");
+        if (ImGui::Button(tr("Use the disc folder's"))) androidBiosFromFolder();
+        sameLineFor("None##bios");
+        if (ImGui::Button(tr("None##bios"))) {
+            androidBiosNone();
+            biosMsg.set(false, "No BIOS: the kanji glyphs are blank");
+        }
+        biosMsg.draw();
+        hint("Only the font in the BIOS image is used (save titles, some text over movies): a file chosen here, else "
+             "a 512 KB .bin in the disc folder. It is read where it is and never copied.");
+    }
+#else
     if (row("BIOS (kanji)", "bios")) {
         pathText(kromPath(), "None read: the save titles on the memory card screens and the text that scrolls over some "
                              "scenes are blank");
@@ -3032,6 +3067,7 @@ void systemSection() {
              "is and never copied.");
         overrideNote("bios");
     }
+#endif
 
     if (row("Current disc")) {
         pathText(cdSwapPath(0), "-");

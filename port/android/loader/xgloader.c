@@ -13,7 +13,8 @@
  *     ("--image FD:NAME", "--bios FD:NAME": Storage Access Framework file
  *     descriptors, read in place through /proc/self/fd/FD), reads each
  *     image's SYSTEM.CNF for its release and disc, and sets XG_DISC,
- *     XG_DISC2 and XG_BIOS (unless the options set them already), and the
+ *     XG_DISC2 and XG_BIOS (unless the options set them already;
+ *     "--bios-ask", no BIOS image: XG_ANDROID_BIOS_ASK, the game asks), and the
  *     app's version, "--app-version NAME" (XG_APP_VERSION: save states
  *     record it, port/src/system/statefile.c);
  *   - picks the game library of the region (libxenogears-us.so or -jp.so:
@@ -268,6 +269,7 @@ typedef struct {
 static Image images[8];
 static int imageCount;
 static char biosPath[64];
+static int biosAsk; /* "--bios-ask": the activity found no BIOS image and none was chosen */
 
 /* "--image FD:NAME": the release and disc by the boot file. */
 static void addImage(const char* arg) {
@@ -403,6 +405,8 @@ int SDL_main(int argc, char* argv[]) {
             if (getenv("XG_APP_VERSION") == NULL) setenv("XG_APP_VERSION", argv[i], 1);
         } else if (strcmp(argv[i], "--bios") == 0 && i + 1 < argc) {
             snprintf(biosPath, sizeof biosPath, "/proc/self/fd/%d", atoi(argv[++i]));
+        } else if (strcmp(argv[i], "--bios-ask") == 0) {
+            biosAsk = 1;
         } else {
             argv[out++] = argv[i];
         }
@@ -415,6 +419,9 @@ int SDL_main(int argc, char* argv[]) {
     const char* disc2 = imageFor(jp, 2);
     if (disc1 != NULL && getenv("XG_DISC") == NULL) setenv("XG_DISC", disc1, 1);
     if (disc2 != NULL && getenv("XG_DISC2") == NULL) setenv("XG_DISC2", disc2, 1);
+    /* No BIOS image found or chosen, and the start options name none: the game asks for one
+     * (port/src/system/android.c androidBiosAsk). */
+    if (biosAsk && !biosPath[0] && getenv("XG_BIOS") == NULL) setenv("XG_ANDROID_BIOS_ASK", "1", 1);
     if (getenv("XG_BIOS") == NULL) setenv("XG_BIOS", biosPath[0] ? biosPath : "none", 1);
     const char* tag = jp ? "jp" : "us";
     char name[64], enhanced[64];

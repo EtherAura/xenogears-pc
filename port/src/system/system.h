@@ -62,6 +62,7 @@ void slowdownBoot(void);             /* the game installs its vsync callback (li
 /* krom.c: the BIOS image the kanji glyphs come from (the settings menu). */
 const char* kromPath(void);          /* NULL: none read */
 int kromSetBios(const char* path);   /* read another ("none": no glyphs); 0 if it is no BIOS image */
+int kromLoad(const char* path);      /* the same for this run only (settings.ini's bios unchanged) */
 
 /* bios.c: the SN debugger's host files (PCopen, PClseek, PCread, PCclose)
  * served by someone, or NULL (the default: they fail, as without a

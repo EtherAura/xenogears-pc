@@ -86,13 +86,20 @@ extern MATRIX worldmapMainMatrix2;
  * player, through worldmapMainMatrix2 (still the one the frame was drawn
  * with at DrawOTag); the projection centre is read before the next frame's
  * SetGeomOffset; the focus is the camera's target, the player. A slot is
- * 16 view units (models OTZ >> 2, the ground SZ >> 4). One sun for the map. */
+ * 16 view units (models OTZ >> 2, the ground SZ >> 4). One sun for the map.
+ * First-person look: worldmap_taskGround_update draws from eye level and then
+ * rebuilds the game's matrix, so it keeps the eye-level one here
+ * (pcWmEyeMatrix), and that frame focuses where the view's centre is. */
 void hwClockHold(int on); /* port/src/system/hw.c */
+static MATRIX pcWmEyeMatrix;
+static s32 pcWmEyeFrame; /* this frame's scene was drawn from eye level */
 static void pcWorldmapSceneDepth(OTag* ot) {
-    MATRIX* m = &worldmapMainMatrix2;
+    MATRIX* m = pcWmEyeFrame ? &pcWmEyeMatrix : &worldmapMainMatrix2;
     SVECTOR* at = &worldmapCameraVector.m8_target;
     s32 cx, cy, h;
-    s32 focus = ((m->m[2][0] * at->vx + m->m[2][1] * at->vy + m->m[2][2] * at->vz) >> 12) + m->t[2];
+    s32 focus = pcWmEyeFrame ? PC_SCENE_FOCUS_CENTRE
+                             : ((m->m[2][0] * at->vx + m->m[2][1] * at->vy + m->m[2][2] * at->vz) >> 12) + m->t[2];
+    pcWmEyeFrame = 0;
     /* The port's GTE reads, not the PS1's: no time on the stepped clock. */
     hwClockHold(1);
     ReadGeomOffset(&cx, &cy);
@@ -1363,7 +1370,9 @@ s32 worldmap_taskGround_update(s32 index) {
     if (gameState.m1842_disableWorldmapMinimap == 0) {
         worldmapRenderMinimap();
     }
+    pcWmEyeFrame = leader >= 0;
     if (leader >= 0) {
+        pcWmEyeMatrix = worldmapMainMatrix2; /* Enhanced: the eye-level view, for the scene effects */
         worldmapRotation = gameRotation;
         worldmapCameraVector = gameCamera;
         worldmapGroundMatrix();

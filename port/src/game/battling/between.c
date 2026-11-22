@@ -66,6 +66,7 @@
 #include "battling/battling.h"
 #include "gte_pc.h"
 #include "pc_wide.h"
+#include "pc_scene.h"
 
 extern BattlingGear battlingGear1;
 extern BattlingGear battlingGear2;
@@ -521,6 +522,36 @@ void pcBattling60RenderHook(BattlingScene* scene, int demo) {
 }
 
 /* Inside the frame's VSync(2), at its first vblank. */
+/* Enhanced (xg-rgcf.5.3): Battling's arena for the display copy's effects
+ * (include/pc_scene.h), from battlingMain before its DrawOTagEnv and from the
+ * picture between before its own (each walk takes one registration). The
+ * arena is one layer (the main scene's, 0x1000 slots, 4 << otShift view units
+ * each); the HUD, text, menus and fades are added to the frame's chain after
+ * it, so the effects run where the walk reaches the layer's ot[0]. Its view
+ * is the scene root's world matrix (relative to the camera's target, whose
+ * view depth, t[2], is the focus; its rows carry the 320 x 218 aspect, which
+ * the effects take as it is). Battling's arena is a battle's for the fog. */
+extern u8 battlingBufferIndex;
+void hwClockHold(int on); /* port/src/system/hw.c */
+void pcBattlingSceneDepth(BattlingScene* scene) {
+    BattlingLayer* layer;
+    MATRIX* m;
+    OTag* ot;
+    s32 cx, cy, h;
+
+    if (scene == NULL || scene->m284_layer == NULL || scene->m4_root == NULL) return;
+    layer = scene->m284_layer;
+    ot = layer->m4_ot[battlingBufferIndex];
+    m = &scene->m4_root->mC_worldMatrix;
+    hwClockHold(1); /* the port's GTE reads: no time on the stepped clock */
+    ReadGeomOffset(&cx, &cy);
+    h = ReadGeomScreen();
+    hwClockHold(0);
+    pcSceneView(m->m, m->t, h, cx, cy, 0x30000);
+    pcScenePlace(PC_SCENE_BATTLE);
+    pcSceneDepth(ot, layer->m14_otSize, 0, 0, 4 << layer->m17_otShift, &ot[0], m->t[2], -1);
+}
+
 static void battling60Between(void) {
     s32 k = battlingFrameCounter; /* the frame built, not drawn yet */
     const Transforms* a = &sb->ring[(k - 2) % 3];
@@ -590,6 +621,7 @@ static void battling60Between(void) {
     if (battlingScreenClearFlag & 1) {
         AddPrim(battlingCurrentOt, &battlingDisplayBuffer->mE8_clearTile);
     }
+    pcBattlingSceneDepth(b->scene); /* Enhanced (xg-rgcf.5.3): the effects on the picture between too */
     pcGpuQuiet(1); /* no DrawSync callback, no event for this drawing */
     DrawOTagEnv(battlingCurrentOt, &env);
     pcGpuQuiet(0);

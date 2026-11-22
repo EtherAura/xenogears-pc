@@ -293,6 +293,10 @@ int main(int argc, char** argv) {
     regionalInit();
     portModulesInit();
     kromInit(selected); /* the BIOS image's kanji font (system/krom.c, XG_BIOS) */
+#ifdef __ANDROID__
+    /* The activity holds the BIOS choice (the loader's XG_BIOS); without one, its notice. */
+    androidBiosAsk(window);
+#endif
     /* No BIOS image and none declined (bios=none): the setup screen, at its
      * BIOS page, when someone is there to answer it. */
     const char* bios = settingsGet("bios");

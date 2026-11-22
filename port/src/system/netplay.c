@@ -517,6 +517,7 @@ int netplayConnect(void) {
      * menu, or into a field with the versus battle asked for */
     char value[64];
     setEnv("XG_CLOCK", "step");
+    setEnv("XG_MUSIC", ""); /* a start's music (options.c) reads the disc: one side's alone would part them */
     if (s->terms.mode == NP_MODE_VERSUS) {
         say("a versus battle: table %d config %d%s, party %d,%d,%d", s->terms.table, s->terms.config,
             N.host && s->terms.pick ? " (player 2's choice)" : "", s->terms.party[0],

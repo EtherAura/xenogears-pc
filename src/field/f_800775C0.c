@@ -359,6 +359,7 @@ s32 isFieldBattlePrevented(void) {
 
 #ifdef PLATFORM_PC
 void pcFieldWideExit(void);
+int portStartMusic(int music); /* port/src/system/options.c */
 void pcGauntletFieldTick(void); /* port/src/game/field/gauntlet_field.c */
 #endif
 #ifdef PLATFORM_PC
@@ -421,6 +422,10 @@ void fieldEntryPoint(void) {
     } else {
         currentlyPlayingMusic = gameState.m2322_previouslyPlayingMusic;
     }
+#ifdef PLATFORM_PC
+    /* A development or Gallery start: the music the story has playing here (xg-xukn) */
+    currentlyPlayingMusic = portStartMusic(currentlyPlayingMusic);
+#endif
     if (fieldDebugDisable == 1) {
         pKernelGameState->m1930_fieldVarsBackup[40] = 1;
         setVar(0x50, 1);
