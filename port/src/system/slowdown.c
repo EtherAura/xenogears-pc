@@ -675,7 +675,7 @@ void slowdownVSync(int32_t arg) {
                 stall(want - (int64_t)now);
             } else if ((int64_t)now > want && arg == 1) {
                 /* VSync(1) only reads the time. Battling calls it from its DrawSync callback
-                 * (func_80088C00), which the PS1 runs when its GPU finishes, often after the
+                 * (recordBattlingGpuTime), which the PS1 runs when its GPU finishes, often after the
                  * frame's VSync(0) and next to the next frame's own VSync(1): reaching that
                  * run a vblank "late" says nothing about the PC's pacing, so the offset stays
                  * (moving it drifted battling 5 vblanks every 86). The next waiting or

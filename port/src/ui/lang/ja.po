@@ -162,11 +162,10 @@ msgid ""
 msgstr ""
 "マイ進行: 出会った敵は名前、絵、出現場所を、倒した敵は数値、弱点、ドロップ、攻撃を表示します。バトルはどちらのモードでも記録されます。"
 
-#: port/src/extras/bestiary.cpp
-msgid ""
-"Marks as met every enemy whose estimated first appearance is no later than "
-"the save's story."
-msgstr "推定の初登場がセーブのストーリー以前の敵を、すべて出会ったことにします。"
+#~ msgid ""
+#~ "Marks as met every enemy whose estimated first appearance is no later than "
+#~ "the save's story."
+#~ msgstr "推定の初登場がセーブのストーリー以前の敵を、すべて出会ったことにします。"
 
 #: port/src/extras/bestiary.cpp
 #, c-format
@@ -181,11 +180,10 @@ msgstr "メモリーカードにゼノギアスのセーブがありません"
 msgid "Bestiary progress forgotten"
 msgstr "モンスター一覧の進行を消去しました"
 
-#: port/src/extras/bestiary.cpp
-msgid ""
-"Progress is kept in bestiary.txt beside settings.ini, never on a memory "
-"card."
-msgstr "進行は settings.ini と同じフォルダの bestiary.txt に保存され、メモリーカードには書きません。"
+#~ msgid ""
+#~ "Progress is kept in bestiary.txt beside settings.ini, never on a memory "
+#~ "card."
+#~ msgstr "進行は settings.ini と同じフォルダの bestiary.txt に保存され、メモリーカードには書きません。"
 
 #: port/src/extras/bestiary.cpp
 msgid "No picture: its battle could not be set up here."
@@ -1129,11 +1127,10 @@ msgstr "もどる"
 msgid "Extras controls"
 msgstr "おまけの操作"
 
-#: port/src/extras/shell.cpp
-msgid ""
-"Enter / confirm: choose or open Options. Esc / cancel: back. F1: return to "
-"the game menu."
-msgstr "Enter / 決定: 選ぶ、または「オプション」を開く。Esc / キャンセル: もどる。F1: ゲームのメニューにもどる。"
+#~ msgid ""
+#~ "Enter / confirm: choose or open Options. Esc / cancel: back. F1: return to "
+#~ "the game menu."
+#~ msgstr "Enter / 決定: 選ぶ、または「オプション」を開く。Esc / キャンセル: もどる。F1: ゲームのメニューにもどる。"
 
 #: port/src/extras/shell.cpp
 msgid ""
@@ -1287,9 +1284,8 @@ msgstr "システム"
 msgid "About"
 msgstr "情報"
 
-#: port/src/ui/menu.cpp
-msgid "Cards"
-msgstr "カード"
+#~ msgid "Cards"
+#~ msgstr "カード"
 
 #: port/src/ui/menu.cpp
 msgid "Discs"
@@ -1561,9 +1557,8 @@ msgstr "自動 GPU 上限"
 msgid "Limit GPU time"
 msgstr "GPU 時間に上限を設定"
 
-#: port/src/ui/sections.cpp
-msgid "Auto lowers resolution after sustained GPU load and restores it when there is headroom. Off by default."
-msgstr "GPU の処理が重い状態が続くと自動で解像度を下げ、処理にゆとりがある状態が続くと戻します。標準では無効です。"
+#~ msgid "Auto lowers resolution after sustained GPU load and restores it when there is headroom. Off by default."
+#~ msgstr "GPU の処理が重い状態が続くと自動で解像度を下げ、処理にゆとりがある状態が続くと戻します。標準では無効です。"
 
 #: port/src/ui/sections.cpp
 msgid "The budget covers GPU work per video frame. CPU or display waits can still limit speed."
@@ -1625,12 +1620,11 @@ msgstr "リニア"
 msgid "Edge"
 msgstr "エッジ"
 
-#: port/src/ui/sections.cpp
-msgid ""
-"Texture filters apply with upscaling or subpixel geometry. Linear softens "
-"edges; Edge smooths pixel art. Captures keep their existing detail."
-msgstr ""
-"テクスチャフィルターは高解像度かサブピクセル精度のときに働きます。リニアは縁をやわらげ、エッジはドット絵をなめらかにします。キャプチャは元の細部を保ちます。"
+#~ msgid ""
+#~ "Texture filters apply with upscaling or subpixel geometry. Linear softens "
+#~ "edges; Edge smooths pixel art. Captures keep their existing detail."
+#~ msgstr ""
+#~ "テクスチャフィルターは高解像度かサブピクセル精度のときに働きます。リニアは縁をやわらげ、エッジはドット絵をなめらかにします。キャプチャは元の細部を保ちます。"
 
 #: port/src/ui/sections.cpp
 msgid "Glyphs"
@@ -1640,23 +1634,19 @@ msgstr "文字グリフ"
 msgid "Enhanced text"
 msgstr "くっきり文字"
 
-#: port/src/ui/sections.cpp
-msgid ""
-"Builds crisp 2x glyph edges with the game's live palette. Uses glyph images "
-"from the selected pack when available. Text size and spacing stay the same."
-msgstr ""
-"ゲームの現在のパレットで 2 倍のくっきりした文字の縁を作ります。選んだパックに文字の絵があればそれを使います。文字の大きさと間隔は変わりません。"
+#~ msgid ""
+#~ "Builds crisp 2x glyph edges with the game's live palette. Uses glyph images "
+#~ "from the selected pack when available. Text size and spacing stay the same."
+#~ msgstr ""
+#~ "ゲームの現在のパレットで 2 倍のくっきりした文字の縁を作ります。選んだパックに文字の絵があればそれを使います。文字の大きさと間隔は変わりません。"
 
-#: port/src/ui/sections.cpp
-msgid ""
-"Applies with upscaling or subpixel geometry; Text above controls its "
-"sampling."
-msgstr "高解像度かサブピクセル精度のときに働きます。上の「文字」でサンプリングを選びます。"
+#~ msgid ""
+#~ "Applies with upscaling or subpixel geometry; Text above controls its "
+#~ "sampling."
+#~ msgstr "高解像度かサブピクセル精度のときに働きます。上の「文字」でサンプリングを選びます。"
 
-#: port/src/ui/sections.cpp
-#, c-format
-msgid "%llu overlay draws; %llu pack glyph uses; %.1f MiB cached"
-msgstr "重ね描き %llu 回、パックの文字 %llu 回使用、キャッシュ %.1f MiB"
+#~ msgid "%llu overlay draws; %llu pack glyph uses; %.1f MiB cached"
+#~ msgstr "重ね描き %llu 回、パックの文字 %llu 回使用、キャッシュ %.1f MiB"
 
 #: port/src/ui/sections.cpp
 msgid "Texture pack"
@@ -1682,14 +1672,12 @@ msgid ""
 msgstr ""
 "PNG 読み込み %llu 回、置き換え描画 %llu 回、見つからないキー %llu 個、無効なファイル %llu 個; キャッシュ %.1f MiB"
 
-#: port/src/ui/sections.cpp
-#, c-format
-msgid ""
-"Choose the folder containing %s. Packs apply with upscaling or subpixel "
-"geometry. Reload after editing PNGs. Edge keeps authored detail above 1x."
-msgstr ""
-"%s のあるフォルダを選んでください。パックは高解像度かサブピクセル精度のときに働きます。PNG を編集したら再読み込みしてください。エッジは 1 "
-"倍より大きいとき作者の細部を保ちます。"
+#~ msgid ""
+#~ "Choose the folder containing %s. Packs apply with upscaling or subpixel "
+#~ "geometry. Reload after editing PNGs. Edge keeps authored detail above 1x."
+#~ msgstr ""
+#~ "%s のあるフォルダを選んでください。パックは高解像度かサブピクセル精度のときに働きます。PNG を編集したら再読み込みしてください。エッジは 1 "
+#~ "倍より大きいとき作者の細部を保ちます。"
 
 #: port/src/ui/sections.cpp
 msgid "Discovery"
@@ -2029,11 +2017,10 @@ msgstr "ゲームの作られた言葉のせりふ:英語の台本のつづり�
 msgid "Independent of audio language. Uses the in-game dialogue font."
 msgstr "音声の言語とは別に選べます。ゲーム内の会話フォントを使います。"
 
-#: port/src/ui/sections.cpp
-msgid ""
-"This build has no caption text: the captions transcribe the game's dialogue, "
-"so public builds leave them out."
-msgstr "このビルドには字幕の文がありません。字幕はゲームのせりふを書き起こしたものなので、配られているビルドには入っていません。"
+#~ msgid ""
+#~ "This build has no caption text: the captions transcribe the game's dialogue, "
+#~ "so public builds leave them out."
+#~ msgstr "このビルドには字幕の文がありません。字幕はゲームのせりふを書き起こしたものなので、配られているビルドには入っていません。"
 
 #: port/src/ui/sections.cpp
 msgid "Japanese Disc 1"
@@ -2519,7 +2506,7 @@ msgstr "ボス戦のカメラ修正"
 
 #: port/src/ui/sections.cpp
 msgid "Prevents a camera stall during one late-game boss attack."
-msgstr "終盤のボス戦で、特定の攻撃中にカメラが止まって戦闘が進まなくなる不具合を修正します。"
+msgstr "後半のボス戦で、特定の攻撃中にカメラが止まって戦闘が進まなくなる不具合を修正します。"
 
 #: port/src/ui/sections.cpp
 msgid "Difficulty"
@@ -2529,14 +2516,13 @@ msgstr "難易度"
 msgid "Hard"
 msgstr "ハード"
 
-#: port/src/ui/sections.cpp
-msgid ""
-"Hard starts with 2x enemy HP and 1.5x attack and ether. Character starts "
-"and Gear equipment stay original. Battle changes apply when the next fight "
-"loads."
-msgstr ""
-"ハードは敵の HP 2 倍、攻撃力とエーテル 1.5 "
-"倍で始まります。キャラクターの初期状態とギアの装備は原作のままです。バトルの変更は次の戦闘を読み込むときに適用されます。"
+#~ msgid ""
+#~ "Hard starts with 2x enemy HP and 1.5x attack and ether. Character starts "
+#~ "and Gear equipment stay original. Battle changes apply when the next fight "
+#~ "loads."
+#~ msgstr ""
+#~ "ハードは敵の HP 2 倍、攻撃力とエーテル 1.5 "
+#~ "倍で始まります。キャラクターの初期状態とギアの装備は原作のままです。バトルの変更は次の戦闘を読み込むときに適用されます。"
 
 #: port/src/ui/sections.cpp
 msgid "Enemy HP"
@@ -2658,8 +2644,7 @@ msgid ""
 "enemy before, as the extras' bestiary records it (kept with your settings, "
 "across games: a boss beaten in one game shows its HP in the next). Select "
 "with L1, R1, L2 or R2 is another control (Select + R2: battle speed)."
-msgstr ""
-"SELECT だけを押して離すと戦闘画面の右下にウィンドウを開閉し、各敵の名前、HP、効いている状態をゲームの呼び方で表示します。ターゲットを選んでいる間はカーソル下の敵だけです。隠れている敵は載せず、弱点は表示しません。「倒した敵の HP だけ」では、その種類の敵を一度倒してからでないと HP を表示しません。エクストラの図鑑の記録（設定と一緒に保存され、ゲームをまたいで残ります。あるゲームで倒したボスは次のゲームで HP が見えます）に従います。SELECT と L1、R1、L2、R2 の同時押しは別の操作です（SELECT + R2: 戦闘速度）。"
+msgstr "SELECT だけを押してはなすと戦闘画面の右下にウィンドウを開閉し、各敵の名前、HP、効いている状態をゲームの呼び方で表示します。ターゲットを選んでいる間はカーソル下の敵だけです。隠れている敵は出さず、弱点は表示しません。「倒した敵の HP だけ」では、その種類の敵を一度倒してからでないと HP を表示しません。エクストラの図録の記録(設定と一緒に保存され、ゲームをまたいで残ります。あるゲームで倒したボスは次のゲームで HP が見えます)に従います。SELECT と L1、R1、L2、R2 の同時押しは別の操作です(SELECT + R2: 戦闘速度)。"
 
 #: port/src/ui/sections.cpp
 msgid "Retry lost battles"
@@ -3737,33 +3722,26 @@ msgstr "上"
 msgid "Down"
 msgstr "下"
 
-#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
-msgid "Left"
-msgstr "左"
+#~ msgid "Left"
+#~ msgstr "左"
 
-#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
-msgid "Right"
-msgstr "右"
+#~ msgid "Right"
+#~ msgstr "右"
 
-#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
-msgid "Cross"
-msgstr "バツ"
+#~ msgid "Cross"
+#~ msgstr "バツ"
 
-#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
-msgid "Circle"
-msgstr "マル"
+#~ msgid "Circle"
+#~ msgstr "マル"
 
-#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
-msgid "Square"
-msgstr "シカク"
+#~ msgid "Square"
+#~ msgstr "シカク"
 
-#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
-msgid "Triangle"
-msgstr "サンカク"
+#~ msgid "Triangle"
+#~ msgstr "サンカク"
 
-#. runtime: port/src/system/pad.c padButtonLabel (sections.cpp tr(padButtonLabel(b)))
-msgid "Select"
-msgstr "セレクト"
+#~ msgid "Select"
+#~ msgstr "セレクト"
 
 #: port/src/ui/arena.cpp
 msgid "Party in its Gears"
@@ -3899,9 +3877,8 @@ msgstr "復活"
 msgid "Save states"
 msgstr "ステートセーブ"
 
-#: port/src/ui/menu.cpp
-msgid "States"
-msgstr "ステート"
+#~ msgid "States"
+#~ msgstr "ステート"
 
 #: port/src/ui/states.cpp
 #, c-format
@@ -4284,13 +4261,11 @@ msgstr "すべて"
 msgid "My progress"
 msgstr "自分の進み具合"
 
-#: port/src/extras/bestiary.cpp
-msgid "Catch up from a save"
-msgstr "セーブから追いつく"
+#~ msgid "Catch up from a save"
+#~ msgstr "セーブから追いつく"
 
-#: port/src/extras/bestiary.cpp
-msgid "The game in progress"
-msgstr "進行中のゲーム"
+#~ msgid "The game in progress"
+#~ msgstr "進行中のゲーム"
 
 #: port/src/extras/bestiary.cpp
 msgid "Read the memory cards"
@@ -4298,7 +4273,7 @@ msgstr "メモリーカードを読む"
 
 #: port/src/extras/bestiary.cpp
 msgid "Whose progress"
-msgstr "誰の記録"
+msgstr "だれの記録"
 
 #: port/src/extras/bestiary.cpp
 msgid ""
@@ -4312,12 +4287,12 @@ msgstr "このゲーム"
 
 #: port/src/extras/bestiary.cpp
 msgid "Games saved before ids (the shared record)"
-msgstr "ID より前にセーブしたゲーム（共通の記録）"
+msgstr "ID より前にセーブしたゲーム(共通の記録)"
 
 #: port/src/extras/bestiary.cpp
 #, c-format
 msgid "Slot %d: %s (%s, story %d) - shared record"
-msgstr "スロット %d: %s（%s、ストーリー %d）- 共通の記録"
+msgstr "スロット %d: %s(%s、ストーリー %d)- 共通の記録"
 
 #: port/src/extras/bestiary.cpp
 msgid "Catch up"
@@ -4327,7 +4302,7 @@ msgstr "追いつく"
 msgid ""
 "Marks as met, in the record shown, every enemy whose estimated first "
 "appearance is no later than the story reached."
-msgstr "表示中の記録で、推定初登場が到達したストーリー以前の敵をすべて「会った」にします。"
+msgstr "表示中の記録で、推定初登場が今のストーリーより前の敵をすべて「会った」にします。"
 
 #: port/src/extras/bestiary.cpp
 msgid "To the game in progress"
@@ -4339,39 +4314,39 @@ msgstr "このセーブのストーリーまで"
 
 #: port/src/extras/bestiary.cpp
 msgid "Carry into a new game"
-msgstr "新しいゲームへ引き継ぐ"
+msgstr "新しいゲームへ引きつぐ"
 
 #: port/src/extras/bestiary.cpp
 msgid ""
 "The next new game starts with a copy of the record shown (its own progress "
 "then goes on from there), once that game saves for the first time. Loading a "
 "save instead leaves the choice for a later new game."
-msgstr "次の新しいゲームは、最初にセーブした時点で表示中の記録のコピーから始まります（以後はそのゲーム自身の記録として進みます）。セーブをロードした場合、この選択は後の新しいゲームに残ります。"
+msgstr "次の新しいゲームは、最初にセーブした時点で表示中の記録のコピーから始まります(以後はそのゲーム自身の記録として進みます)。セーブをロードした場合、この選択は後の新しいゲームに残ります。"
 
 #: port/src/extras/bestiary.cpp
 msgid "Carry this record"
-msgstr "この記録を引き継ぐ"
+msgstr "この記録を引きつぐ"
 
 #: port/src/extras/bestiary.cpp
 msgid "The next new game starts with this bestiary"
-msgstr "次の新しいゲームはこの図鑑から始まります"
+msgstr "次の新しいゲームはこの図録から始まります"
 
 #: port/src/extras/bestiary.cpp
 msgid "Pending: the shared record carries into the next new game."
-msgstr "予約中: 共通の記録が次の新しいゲームに引き継がれます。"
+msgstr "予約中: 共通の記録が次の新しいゲームに引きつがれます。"
 
 #: port/src/extras/bestiary.cpp
 #, c-format
 msgid "Pending: record %08x carries into the next new game."
-msgstr "予約中: 記録 %08x が次の新しいゲームに引き継がれます。"
+msgstr "予約中: 記録 %08x が次の新しいゲームに引きつがれます。"
 
 #: port/src/extras/bestiary.cpp
 msgid "Cancel the carry-over"
-msgstr "引き継ぎを取り消す"
+msgstr "引きつぎを取り消す"
 
 #: port/src/extras/bestiary.cpp
 msgid "No record carries into the next new game"
-msgstr "次の新しいゲームに引き継ぐ記録はありません"
+msgstr "次の新しいゲームに引きつぐ記録はありません"
 
 #: port/src/extras/bestiary.cpp
 msgid "Forget this record"
@@ -4379,13 +4354,13 @@ msgstr "この記録を忘れる"
 
 #: port/src/extras/bestiary.cpp
 msgid "Forget every enemy met and defeated in the record shown?"
-msgstr "表示中の記録の、会った敵と倒した敵をすべて忘れますか？"
+msgstr "表示中の記録の、会った敵と倒した敵をすべて忘れますか?"
 
 #: port/src/extras/bestiary.cpp
 msgid ""
 "Records are kept beside settings.ini (bestiary-<id>.txt per game, "
 "bestiary.txt shared), never on a memory card."
-msgstr "記録は settings.ini の隣に保存されます（ゲームごとに bestiary-<id>.txt、共通は bestiary.txt）。メモリーカードには書きません。"
+msgstr "記録は settings.ini の隣に保存されます(ゲームごとに bestiary-<id>.txt、共通は bestiary.txt)。メモリーカードには書きません。"
 
 #: port/src/extras/bestiary.cpp
 #, c-format
@@ -4396,13 +4371,11 @@ msgstr "スロット %d: %s(%s、ストーリー %d)"
 msgid "Start over"
 msgstr "最初から"
 
-#: port/src/extras/bestiary.cpp
-msgid "Forget my progress"
-msgstr "進み具合を忘れる"
+#~ msgid "Forget my progress"
+#~ msgstr "進み具合を忘れる"
 
-#: port/src/extras/bestiary.cpp
-msgid "Forget every enemy met and defeated?"
-msgstr "出会った敵と倒した敵をすべて忘れますか?"
+#~ msgid "Forget every enemy met and defeated?"
+#~ msgstr "出会った敵と倒した敵をすべて忘れますか?"
 
 #: port/src/extras/bestiary.cpp
 msgid "Keep"
@@ -5485,9 +5458,8 @@ msgstr "時間内にだれも参加しませんでした。"
 msgid "No answer from the host: check the address, the port, the host's firewall and the code."
 msgstr "ホストの応答がありません: アドレス、ポート、ホストのファイアウォール、コードを確かめてください。"
 
-#: port/src/ui/arena.cpp
-msgid "The host runs another build of the game: both players need the same one."
-msgstr "ホストのゲームは別のビルドです: 二人とも同じビルドが必要です。"
+#~ msgid "The host runs another build of the game: both players need the same one."
+#~ msgstr "ホストのゲームは別のビルドです: 二人とも同じビルドが必要です。"
 
 #: port/src/ui/arena.cpp
 msgid "The host plays the other region's game (US/JP)."
@@ -5532,9 +5504,8 @@ msgstr "オンライン"
 msgid "This window is an online session. It ends when Battling is left (EXIT), or when either player closes their window."
 msgstr "このウィンドウはオンラインセッションです。バトリングを出る(EXIT)か、どちらかのプレイヤーがウィンドウを閉じると終わります。"
 
-#: port/src/ui/arena.cpp
-msgid "Battling's PLAYER1 VS PLAYER2, or a versus battle, with a player elsewhere: on your network, at an address you share, or over a VPN you both use. The session plays in a window of its own, from power-on; this game waits until it ends. Both players need the same build of the game and the same disc."
-msgstr "バトリングの PLAYER1 VS PLAYER2 か対戦を、別の場所のプレイヤーと: 同じネットワークで、教えたアドレスで、または二人で使う VPN で。セッションは電源オンから自分のウィンドウで動き、このゲームは終わるまで待ちます。二人とも同じビルドのゲームと同じディスクが必要です。"
+#~ msgid "Battling's PLAYER1 VS PLAYER2, or a versus battle, with a player elsewhere: on your network, at an address you share, or over a VPN you both use. The session plays in a window of its own, from power-on; this game waits until it ends. Both players need the same build of the game and the same disc."
+#~ msgstr "バトリングの PLAYER1 VS PLAYER2 か対戦を、別の場所のプレイヤーと: 同じネットワークで、教えたアドレスで、または二人で使う VPN で。セッションは電源オンから自分のウィンドウで動き、このゲームは終わるまで待ちます。二人とも同じビルドのゲームと同じディスクが必要です。"
 
 #: port/src/ui/arena.cpp
 #, c-format
@@ -5596,10 +5567,8 @@ msgstr "入力の遅れ"
 msgid "Vblanks between a press and what it does, the same on both screens: 2 on a home network, 3 to 6 over the internet."
 msgstr "押してから動くまでの vblank、両方の画面で同じ: 家のネットワークで 2、インターネットで 3 から 6。"
 
-#: port/src/ui/arena.cpp
-#, c-format
-msgid "Player 2 commands %s (the formation chosen above) against your party as a new game makes them: their starting levels, equipment and Gears, never anyone's save."
-msgstr "プレイヤー 2 は %s(上で選んだ編成)を操り、ニューゲームのときのあなたのパーティと戦います: 始めのレベル、装備、ギアで、だれのセーブも使いません。"
+#~ msgid "Player 2 commands %s (the formation chosen above) against your party as a new game makes them: their starting levels, equipment and Gears, never anyone's save."
+#~ msgstr "プレイヤー 2 は %s(上で選んだ編成)を操り、ニューゲームのときのあなたのパーティと戦います: 始めのレベル、装備、ギアで、だれのセーブも使いません。"
 
 #: port/src/ui/arena.cpp
 msgid "Choose a formation in the Versus battle list above."
@@ -5717,105 +5686,82 @@ msgstr "フィールドとワールドマップを歩く。"
 msgid "Pictures, movies and story scenes."
 msgstr "絵、ムービー、ストーリーのシーン。"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "South"
-msgstr "下ボタン"
+#~ msgid "South"
+#~ msgstr "下ボタン"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "East"
-msgstr "右ボタン"
+#~ msgid "East"
+#~ msgstr "右ボタン"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "West"
-msgstr "左ボタン"
+#~ msgid "West"
+#~ msgstr "左ボタン"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "North"
-msgstr "上ボタン"
+#~ msgid "North"
+#~ msgstr "上ボタン"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Left trigger"
-msgstr "左トリガー"
+#~ msgid "Left trigger"
+#~ msgstr "左トリガー"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Right trigger"
-msgstr "右トリガー"
+#~ msgid "Right trigger"
+#~ msgstr "右トリガー"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Left shoulder"
-msgstr "左ショルダー"
+#~ msgid "Left shoulder"
+#~ msgstr "左ショルダー"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Right shoulder"
-msgstr "右ショルダー"
+#~ msgid "Right shoulder"
+#~ msgstr "右ショルダー"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Left stick click"
-msgstr "左スティック押しこみ"
+#~ msgid "Left stick click"
+#~ msgstr "左スティック押しこみ"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Right stick click"
-msgstr "右スティック押しこみ"
+#~ msgid "Right stick click"
+#~ msgstr "右スティック押しこみ"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Create"
-msgstr "クリエイト"
+#~ msgid "Create"
+#~ msgstr "クリエイト"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Share"
-msgstr "シェア"
+#~ msgid "Share"
+#~ msgstr "シェア"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Minus"
-msgstr "マイナス"
+#~ msgid "Minus"
+#~ msgstr "マイナス"
 
 #. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
 msgid "View"
 msgstr "ビュー"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Plus"
-msgstr "プラス"
+#~ msgid "Plus"
+#~ msgstr "プラス"
 
 #. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
 msgid "Menu"
 msgstr "メニュー"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "D-pad up"
-msgstr "方向キー上"
+#~ msgid "D-pad up"
+#~ msgstr "方向キー上"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "D-pad down"
-msgstr "方向キー下"
+#~ msgid "D-pad down"
+#~ msgstr "方向キー下"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "D-pad left"
-msgstr "方向キー左"
+#~ msgid "D-pad left"
+#~ msgstr "方向キー左"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "D-pad right"
-msgstr "方向キー右"
+#~ msgid "D-pad right"
+#~ msgstr "方向キー右"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Guide"
-msgstr "ガイド"
+#~ msgid "Guide"
+#~ msgstr "ガイド"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Touchpad"
-msgstr "タッチパッド"
+#~ msgid "Touchpad"
+#~ msgstr "タッチパッド"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Microphone"
-msgstr "マイク"
+#~ msgid "Microphone"
+#~ msgstr "マイク"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Capture"
-msgstr "キャプチャー"
+#~ msgid "Capture"
+#~ msgstr "キャプチャー"
 
-#. runtime: port/src/system/pad.c inputLabelFor (sections.cpp inputLabel, extras/shell.cpp footer)
-msgid "Misc 1"
-msgstr "その他 1"
+#~ msgid "Misc 1"
+#~ msgstr "その他 1"
 
 #: port/src/extras/battle.cpp
 #, c-format
@@ -7007,13 +6953,11 @@ msgstr "R(R がボタンに使われているときは F10)かゲームパッド
 msgid "How far back"
 msgstr "もどる長さ"
 
-#: port/src/ui/states.cpp
-msgid "A capture every N frames"
-msgstr "N フレームごとに記録"
+#~ msgid "A capture every N frames"
+#~ msgstr "N フレームごとに記録"
 
-#: port/src/ui/states.cpp
-msgid "Memory at most"
-msgstr "メモリーの上限"
+#~ msgid "Memory at most"
+#~ msgstr "メモリーの上限"
 
 #: port/src/ui/states.cpp
 #, c-format
@@ -7178,20 +7122,20 @@ msgstr "会話中にも適用します。"
 msgid "Add sets in F1, Display, Portrait packs. Dialogue replacements require enhanced resolution or subpixel geometry."
 msgstr "F1の「表示」にある顔グラフィックパックでセットを追加します。会話中の差し替えには解像度の拡大またはサブピクセル描画が必要です。"
 
-msgid "Original artwork"
-msgstr "オリジナルの画像"
+#~ msgid "Original artwork"
+#~ msgstr "オリジナルの画像"
 
-msgid "Selected set unavailable; using originals"
-msgstr "選択したセットが見つからないため、オリジナルを使用"
+#~ msgid "Selected set unavailable; using originals"
+#~ msgstr "選択したセットが見つからないため、オリジナルを使用"
 
-msgid "Regional set unavailable; using originals"
-msgstr "この地域用のセットが見つからないため、オリジナルを使用"
+#~ msgid "Regional set unavailable; using originals"
+#~ msgstr "この地域用のセットが見つからないため、オリジナルを使用"
 
-msgid "Ready; missing pictures use originals"
-msgstr "準備完了。画像がない場合はオリジナルを使用"
+#~ msgid "Ready; missing pictures use originals"
+#~ msgstr "準備完了。画像がない場合はオリジナルを使用"
 
-msgid "Portraits use their own set, independently of texture and movie packs. Add another named folder to try a new style. Applies with upscaling or subpixel geometry; compare all sets in Extras, Gallery, Pictures."
-msgstr "顔グラフィックはテクスチャやムービーとは別のセットを使います。別の名前のフォルダを追加すると、新しいスタイルを試せます。解像度の拡大またはサブピクセル描画で適用されます。「エクストラ」→「ギャラリー」→「絵」でくらべられます。"
+#~ msgid "Portraits use their own set, independently of texture and movie packs. Add another named folder to try a new style. Applies with upscaling or subpixel geometry; compare all sets in Extras, Gallery, Pictures."
+#~ msgstr "顔グラフィックはテクスチャやムービーとは別のセットを使います。別の名前のフォルダを追加すると、新しいスタイルを試せます。解像度の拡大またはサブピクセル描画で適用されます。「エクストラ」→「ギャラリー」→「絵」でくらべられます。"
 
 msgid "Reload"
 msgstr "再読込"
@@ -7226,10 +7170,10 @@ msgid "Sleep between frames"
 msgstr "フレーム間はスリープ"
 
 msgid "Spin (steady clock)"
-msgstr "スピン（クロック安定）"
+msgstr "スピン(クロック安定)"
 
 msgid "Sleep rests the game thread until its next event, so the CPU may clock down between frames. Spin keeps it busy-waiting: a steady CPU clock and vblanks delivered on time, with one core always busy and more power used."
-msgstr "スリープはゲームスレッドを次のイベントまで休ませるため、フレーム間にCPUのクロックが下がることがあります。スピンはビジーウェイトを続けます。CPUクロックが安定し、VBlankが時間どおりに届きますが、コアを1つ常に占有し、消費電力が増えます。"
+msgstr "スリープはゲームスレッドを次のイベントまで止めておくため、フレーム間にCPUのクロックが下がることがあります。スピンはビジーウェイトを続けます。CPUクロックが安定し、VBlankが時間どおりに届きますが、コアを1つ常に使い続け、電力も多く使います。"
 
 msgid "Interface language"
 msgstr "設定画面の言語"
@@ -7238,10 +7182,10 @@ msgid "Individual text settings"
 msgstr "種類別のテキスト設定"
 
 msgid "Translation sources"
-msgstr "翻訳の読み込み元"
+msgstr "訳文の読み込み元"
 
 msgid "Translation name"
-msgstr "翻訳名"
+msgstr "訳文の名前"
 
 msgid "Remember these images"
 msgstr "このディスクを登録"
@@ -7253,10 +7197,10 @@ msgid "Check the path for Disc %d."
 msgstr "ディスク%dのパスを確認してください。"
 
 msgid " (Disc 1 only)"
-msgstr "（ディスク1のみ）"
+msgstr "(ディスク1のみ)"
 
 msgid " (Disc 2 only)"
-msgstr "（ディスク2のみ）"
+msgstr "(ディスク2のみ)"
 
 msgid "Use the same name to update a saved pair. You can also save a single disc."
 msgstr "同じ名前で登録するとディスクの組み合わせを更新できます。ディスク1枚でも登録できます。"
@@ -7268,7 +7212,7 @@ msgid "This source has no separate movie subtitle track."
 msgstr "この読み込み元にはムービー用の字幕がありません。"
 
 msgid "Movie subtitles use the English translation of the Japanese dialogue."
-msgstr "ムービーの字幕には日本語の台詞の英訳を使います。"
+msgstr "ムービーの字幕には日本語のセリフの英訳を使います。"
 
 msgid "Text pack"
 msgstr "テキストパック"
@@ -7281,34 +7225,34 @@ msgstr "このビルドでムービーに字幕を表示するには、字幕を
 
 #: port/src/ui/options.cpp port/src/ui/sections.cpp
 msgid "First-person look"
-msgstr "一人称視点"
+msgstr "ファーストパーソン視点"
 
 msgid "Allow first-person look in fields and on the world map"
-msgstr "フィールドとワールドマップで一人称視点を使う"
+msgstr "フィールドとワールドマップでファーストパーソン視点を使う"
 
 msgid "Press V or hold L2 and click L3 to enter or leave. Look with the right stick, I/J/K/L, or a right mouse drag."
 msgstr "V キー、または L2 を押しながら L3 を押すと視点が切り替わります。右スティック、I/J/K/L キー、またはマウスの右ドラッグで見回せます。"
 
 msgid "First-person navigation"
-msgstr "一人称視点での移動"
+msgstr "ファーストパーソン視点での移動"
 
 msgid "Move in first-person view"
-msgstr "一人称視点のまま移動する"
+msgstr "ファーストパーソン視点のまま移動する"
 
 msgid "With first-person look enabled, move relative to the view. When navigation is off, moving leaves first-person view."
-msgstr "一人称視点が有効なとき、視線を基準に前後左右に移動できます。この設定がオフのときは、移動すると元の視点に戻ります。"
+msgstr "ファーストパーソン視点が有効なとき、視線に合わせて前後左右に移動できます。この設定がオフのときは、移動すると元の視点にもどります。"
 
 msgid "Binaural (headphones)"
-msgstr "バイノーラル（ヘッドホン）"
+msgstr "バイノーラル(ヘッドホン)"
 
 msgid "Hear instruments and sound effects across a front soundstage on stereo headphones. Movie audio keeps its original mix."
-msgstr "ステレオヘッドホンで、楽器や効果音が前方の異なる方向から聞こえます。ムービーの音声は元のミックスで再生されます。"
+msgstr "ステレオヘッドホンで、音楽や効果音が前方のいろいろな方向から聞こえます。ムービーの音声は元のミックスで再生されます。"
 
 msgid "Binaural headphone measurements"
-msgstr "バイノーラル用の音響測定データ"
+msgstr "バイノーラル用のヘッドホン特性データ"
 
 msgid "Depth of field"
-msgstr "被写界深度"
+msgstr "ピントの奥行き"
 
 msgid "Subtle"
 msgstr "弱"
@@ -7329,28 +7273,1373 @@ msgid "Focus range"
 msgstr "ピントの合う範囲"
 
 msgid "Narrow"
-msgstr "狭い"
+msgstr "せまい"
 
 msgid "Wide"
 msgstr "広い"
 
 msgid "How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far behind or close to the camera."
-msgstr "パーティーの周りでピントが合う奥行きの広さです。「狭い」ほど多くの背景がぼけ、「広い」ではずっと奥かカメラのすぐ近くだけがぼけます。"
+msgstr "パーティーの周りでピントが合う奥行きの広さです。「せまい」ほど多くの背景がぼけ、「広い」ではずっと奥かカメラのすぐ近くだけがぼけます。"
 
 msgid "Lighting"
 msgstr "ライティング"
 
 msgid "In fields, the scenery gets light from above, shade in corners and under overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 picture itself is not changed. Off by default."
-msgstr "フィールドで、背景に上からの光、すみや張り出しの下の陰、ランプや火など明るい部分からの光が加わります。会話、顔グラフィック、HUDには影響せず、PS1の画像そのものは変わりません。初期設定はオフです。"
+msgstr "フィールドで、背景に上からの光、すみや張り出しの下の陰、ランプや火など明るい部分からの光が加わります。会話、顔グラフィック、HUDは変わらず、PS1の画像そのものも変わりません。初期設定はオフです。"
 
 msgid "Glow"
 msgstr "グロー"
 
 msgid "In fields, bright areas such as lamps, fires and windows glow softly. Off by default."
-msgstr "フィールドで、ランプ、火、窓などの明るい部分がやわらかく光ります。初期設定はオフです。"
+msgstr "フィールドで、ランプ、火、まどなどの明るい部分がやわらかく光ります。初期設定はオフです。"
 
 msgid "Shadows"
 msgstr "影"
 
 msgid "In fields, the scenery and the characters cast shadows from a sun set when the room starts. Dialogue, portraits and the HUD are not touched. Off by default."
-msgstr "フィールドで、背景とキャラクターが、部屋に入ったときに決まる太陽の向きから影を落とします。会話、顔グラフィック、HUDには影響しません。初期設定はオフです。"
+msgstr "フィールドで、背景とキャラクターが、部屋に入ったときに決まる日の光の向きから影を落とします。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+
+#: port/src/extras/shell.cpp port/src/ui/sections.cpp
+msgid "Look"
+msgstr "見た目"
+
+#: port/src/ui/options.cpp
+msgid "Stick dead zone"
+msgstr "スティックの遊び"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Automatic"
+msgstr "自動"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Buttons"
+msgstr "ボタン"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Buttons and sticks"
+msgstr "ボタンとスティック"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Touch pad"
+msgstr "タッチパッド"
+
+#: port/src/ui/options.cpp
+msgid "Touch pad layout"
+msgstr "タッチパッドの配置"
+
+#: port/src/ui/options.cpp
+msgid "Touch pad opacity"
+msgstr "タッチパッドの不透明度"
+
+#: port/src/ui/options.cpp
+msgid "Touch pad size"
+msgstr "タッチパッドのサイズ"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Free camera in fields"
+msgstr "フィールドの自由カメラ"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Engine"
+msgstr "エンジン"
+
+#: port/src/ui/options.cpp
+msgid "After restart"
+msgstr "再起動後"
+
+#: port/src/ui/sections.cpp
+msgid "Automatic: shown from your first touch until you use a controller or a keyboard. The menu button opens this menu, the four squares the hotkeys' row (save and load states, the disc, the picture). Back opens and leaves the menu."
+msgstr "自動: 最初に画面に触れたときに表示され、コントローラーかキーボードを使うと消えます。メニューボタンでこのメニューを、四つの四角でホットキーのボタン(ステートのセーブとロード、ディスク、画面)を出します。Android の「戻る」でメニューを開いたり閉じたりします。"
+
+#: port/src/ui/sections.cpp
+msgid "Layout"
+msgstr "配置"
+
+#: port/src/ui/sections.cpp
+msgid "Buttons and sticks adds a left stick, which moves as the D-pad does. In the Enhanced engine, with the free camera or the first-person look turned on (Camera and vibration, below), a right stick turns and tilts the camera and, with L2 held, zooms it; the button over the stick returns to the game's view, and the eye enters and leaves the first-person view."
+msgstr "「ボタンとスティック」では、方向キーと同じように動く左スティックが加わります。強化エンジンで自由カメラかファーストパーソン視点をオンにしているとき(下の「カメラと振動」)は、右スティックでカメラを回したり上下に向けたりし、L2 を押しながらでズームします。スティックの上のボタンでゲームの視点にもどり、目のボタンでファーストパーソン視点に出入りします。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Opacity: %d%%"
+msgstr "不透明度: %d%%"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Size: %d%%"
+msgstr "サイズ: %d%%"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Drawn at %d%%: the largest this layout fits the screen at."
+msgstr "%d%% で表示しています: この配置が画面に収まる一番大きなサイズです。"
+
+#: port/src/ui/sections.cpp
+msgid "The pad shows over the menu while you change it."
+msgstr "変えている間は、メニューの上にパッドが表示されます。"
+
+#: port/src/ui/sections.cpp
+msgid "Stick and mouse"
+msgstr "スティックとマウス"
+
+#: port/src/ui/sections.cpp
+msgid "Left stick"
+msgstr "左スティック"
+
+#: port/src/ui/sections.cpp
+msgid "Camera and vibration"
+msgstr "カメラと振動"
+
+#: port/src/ui/sections.cpp
+msgid "Enhanced engine. Turn and tilt the camera around the party with the right stick; hold L2 and move the stick up or down to zoom (keyboard: J/L turn, I/K tilt, U/O zoom). R3 or Home returns to the game's view. Scenes and rooms with a fixed camera keep the game's."
+msgstr "強化エンジン。右スティックでパーティーの周りのカメラを回したり上下に向けたりし、L2 を押しながらスティックを上下に動かすとズームします(キーボード: J/L で回転、I/K で上下、U/O でズーム)。R3 か Home でゲームの視点にもどります。カメラが固定されたシーンや部屋では、ゲームのカメラのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "By touch: the touch pad's Buttons and sticks layout (Touch pad, above); its right stick is the camera's."
+msgstr "タッチでは: タッチパッドの「ボタンとスティック」の配置(上の「タッチパッド」)で、右スティックがカメラ用です。"
+
+#: port/src/ui/sections.cpp
+msgid "By touch: the eye beside the touch pad's right stick (the Buttons and sticks layout)."
+msgstr "タッチでは: タッチパッドの右スティックの横にある目のボタン(「ボタンとスティック」の配置)。"
+
+#: port/src/ui/sections.cpp
+msgid "Original: the game exactly as the PlayStation ran it, validated frame for frame. Enhanced: the port's own engine, which may change timing, pictures and loading on purpose. Saves on the memory cards are shared; save states and rewinds belong to the engine that made them."
+msgstr "オリジナル: PlayStation と同じ動作のゲームで、1 フレームずつ確かめてあります。強化: 移植版で作ったエンジンで、タイミング、絵、読み込みをあえて変えることがあります。メモリーカードのセーブは共通です。ステートセーブと巻きもどしは、それを作ったエンジンでだけ使えます。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Running: the %s engine"
+msgstr "%sエンジンで動作中"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "The %s engine is not part of this app."
+msgstr "%sエンジンはこのアプリに入っていません。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "The %s engine's executable was not found beside this one (%s)."
+msgstr "%sエンジンの実行ファイルが、この実行ファイルの隣に見つかりません(%s)。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Restart into the %s engine now"
+msgstr "今すぐ%sエンジンで再起動"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Ends this game now: anything not saved to a memory card is lost. Then the app starts again in the %s engine."
+msgstr "今のゲームを終わらせます。メモリーカードにセーブしていない進行は失われます。そのあと、アプリが%sエンジンで起動し直します。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Ends this game now: anything not saved to a memory card is lost. Then %s starts with the same arguments."
+msgstr "今のゲームを終わらせます。メモリーカードにセーブしていない進行は失われます。そのあと、%s が同じ引数で起動します。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%llu PNG loads, %llu missing, %llu invalid files since the last reload"
+msgstr "前回の再読み込みから: PNG の読み込み %llu 件、見つからないもの %llu 件、無効なファイル %llu 件"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s could not be removed whole"
+msgstr "%s を完全には削除できませんでした"
+
+#: port/src/ui/sections.cpp
+msgid "1 GB"
+msgstr "1 GB"
+
+#: port/src/ui/sections.cpp
+msgid "2 GB"
+msgstr "2 GB"
+
+#: port/src/ui/sections.cpp
+msgid "256 MB"
+msgstr "256 MB"
+
+#: port/src/ui/sections.cpp
+msgid "4 GB"
+msgstr "4 GB"
+
+#: port/src/ui/sections.cpp
+msgid "512 MB"
+msgstr "512 MB"
+
+#: port/src/ui/sections.cpp
+msgid "A RetroArch Beetle PSX HW replacement folder (<game>-texture-replacements, its <upload>-<palette>.png files). It applies where Display > Textures and art uses the texture pack (portraits: their Texture pack choice). Textures already in VRAM when it is chosen show it once the game loads them again."
+msgstr "RetroArch の Beetle PSX HW 用の差し替えフォルダです(<game>-texture-replacements、その中の <upload>-<palette>.png ファイル)。「画面 > テクスチャと画像」でテクスチャパックを使うところに適用されます(顔グラフィックは「テクスチャパック」を選んだとき)。選んだときにすでに VRAM にあるテクスチャは、ゲームが読み込み直すと差し替わります。"
+
+#: port/src/ui/sections.cpp
+msgid "A room's sprite pack cels and poses, and the party's poses, decoded in the background as the room loads (the default), or each when it is first drawn (less memory, a hitch where a new one appears). Reloads the packs."
+msgstr "部屋のスプライトパックのセルとポーズ、それにパーティのポーズを、部屋の読み込み中にバックグラウンドでデコードするか(標準)、それぞれ初めて描くときにデコードします(メモリーは少なく済みますが、新しいものが出るところで一瞬止まります)。パックを再読み込みします。"
+
+#: port/src/ui/sections.cpp
+msgid "Adds one game frame of display delay (usually 33 ms; up to 67 ms in slower scenes). Animation pictures, text and lighting retain their original timing."
+msgstr "表示がゲームの 1 フレーム分遅れます(ふつうは 33 ミリ秒、遅い場面では最大 67 ミリ秒)。アニメーションの絵、文字、ライティングは元のタイミングのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Advanced"
+msgstr "詳細設定"
+
+#: port/src/ui/sections.cpp
+msgid "Applies with upscaling or subpixel geometry. Missing pack images use the originals."
+msgstr "解像度の拡大またはサブピクセル描画で適用されます。パックにない画像はオリジナルを使います。"
+
+#: port/src/ui/sections.cpp
+msgid "Arenas, Gears and screen-covering layers drawn at half the upscale; text, the HUD and small things stay at full. Cheaper on handheld GPUs; 2x2 blocks on their edges. Off by default."
+msgstr "闘技場、ギア、画面をおおうレイヤーを拡大の半分の解像度で描きます。文字、HUD、小さなものはフル解像度のままです。ハンドヘルド機の GPU では処理が少なく済みますが、その縁に 2x2 のブロックが出ます。初期設定はオフです。"
+
+#: port/src/ui/sections.cpp
+msgid "At 60 Hz with the field"
+msgstr "フィールドと同じ 60 Hz"
+
+#: port/src/ui/sections.cpp
+msgid "At their authored rate"
+msgstr "本来のフレームレート"
+
+#: port/src/ui/sections.cpp
+msgid "At their first draw"
+msgstr "初めて描くとき"
+
+#: port/src/ui/sections.cpp
+msgid "Auto lowers resolution after sustained GPU load and restores it when there is headroom. Off by default on a discrete GPU; 8 ms on an integrated one (handhelds, laptops), where 12x battles cannot hold the frame rate."
+msgstr "解像度が「自動」のとき、GPU に重い処理が続くと解像度を下げ、余力ができると元にもどします。初期設定は単体の GPU ではオフ、内蔵 GPU(ハンドヘルド機、ノート PC)では 8 ミリ秒です。内蔵 GPU では 12 倍のバトルでフレームレートを保てないためです。"
+
+#: port/src/ui/sections.cpp
+msgid "Back up to a file"
+msgstr "ファイルにバックアップ"
+
+#: port/src/ui/sections.cpp
+msgid "Backup"
+msgstr "バックアップ"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Battle portraits: %s"
+msgstr "バトルの顔グラフィック: %s"
+
+#: port/src/ui/sections.cpp
+msgid "Battles"
+msgstr "バトル"
+
+#: port/src/ui/sections.cpp
+msgid "Battles move every vblank: the Gears' animation, which the game steps every other frame, and what follows it, while the battle itself (turns, damage, random rolls) runs exactly as on the PlayStation. Takes effect at once."
+msgstr "バトルが VBlank ごとに動きます: ゲームが 1 フレームおきに進めるギアのアニメーションと、それに続くものが毎回動き、バトルそのもの(ターン、ダメージ、乱数)は PlayStation とまったく同じに進みます。すぐに反映されます。"
+
+#: port/src/ui/sections.cpp
+msgid "The saves on this card: choose one to export it below."
+msgstr "このカードのセーブです: 一つ選ぶと、下で書き出せます。"
+
+#: port/src/ui/sections.cpp
+msgid "The system's sound driver the game plays through (SDL_AUDIO_DRIVER chooses another)."
+msgstr "ゲームの音を鳴らすシステムのサウンドドライバーです(SDL_AUDIO_DRIVER で別のものを選べます)。"
+
+#: port/src/ui/sections.cpp
+msgid "The world map draws every vblank: the party, vehicles, camera, clouds and dust move every frame, and the game itself (input, random encounters, the rest) runs at its authored cadence, exactly as on the PlayStation. Story scenes on the world map keep 30 frames per second. Takes effect at once."
+msgstr "ワールドマップを VBlank ごとに描きます: パーティ、のりもの、カメラ、雲、砂ぼこりは毎フレーム動き、ゲームそのもの(入力、エンカウント、そのほか)は PlayStation とまったく同じに本来の周期で進みます。ワールドマップのストーリーのシーンは毎秒 30 フレームのままです。すぐに反映されます。"
+
+#: port/src/ui/sections.cpp
+msgid "This build"
+msgstr "このビルド"
+
+#: port/src/ui/sections.cpp
+msgid "This menu"
+msgstr "このメニュー"
+
+#: port/src/ui/sections.cpp
+msgid "While the room loads"
+msgstr "部屋の読み込み中"
+
+#: port/src/ui/sections.cpp
+msgid "While the window is minimised the game waits as while this menu is open: its clock stands still and the sound fades out and back. A handheld's suspend and an app switch always pause it."
+msgstr "ウィンドウが最小化されている間、ゲームはこのメニューを開いているときと同じように待ちます: 時間は止まり、音はフェードアウトして、もどるときにフェードインします。ハンドヘルド機のサスペンドとアプリの切り替えでは、いつも一時停止します。"
+
+#: port/src/ui/sections.cpp
+msgid "With Text -> Enhanced text: the letters' edges blend into the picture and their outline meets the face softly. Off keeps the hard edges of the 8x glyphs."
+msgstr "「文字」が「くっきり文字」のとき: 文字の縁が絵になじみ、ふち取りと文字の面がやわらかくつながります。オフでは 8 倍のグリフのかたい縁のままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Your Japanese disc's image, for its battle voices and cutscene audio."
+msgstr "日本語版ディスクのイメージです。バトルボイスとカットシーン音声に使います。"
+
+#: port/src/ui/sections.cpp
+msgid "performance overlay (perf_overlay_key)"
+msgstr "パフォーマンス表示(perf_overlay_key)"
+
+#: port/src/ui/sections.cpp
+msgid "replacements A/B: the original art shown in place (replacements_ab_key)"
+msgstr "差し替えの A/B: その場所にオリジナルの絵を表示(replacements_ab_key)"
+
+#: port/src/ui/sections.cpp
+msgid "reset the setting the cursor is on (gold: changed)"
+msgstr "カーソルのある設定をリセット(ゴールド色: 変更あり)"
+
+#: port/src/ui/sections.cpp
+msgid "resolution: exact 1x, or back to the upscaled choice (auto at first)"
+msgstr "解像度: 正確な 1 倍、または選んだ拡大にもどす(最初は自動)"
+
+#: port/src/ui/sections.cpp
+msgid "search the settings"
+msgstr "設定を検索"
+
+#: port/src/ui/sections.cpp
+msgid "start or stop the performance log (perf_log_key)"
+msgstr "パフォーマンスのログの開始と停止(perf_log_key)"
+
+#: port/src/ui/sections.cpp
+msgid "the previous and next section"
+msgstr "前と次のセクション"
+
+#: port/src/ui/arena.cpp
+msgid "A name or an IPv4 address, then the port (192.168.1.20:7461); an IPv6 address goes in brackets ([2001:db8::20]:7461)."
+msgstr "名前か IPv4 アドレスのあとにポートを書きます(192.168.1.20:7461)。IPv6 アドレスは [ ] でかこみます([2001:db8::20]:7461)。"
+
+#: port/src/ui/arena.cpp
+msgid "Battling's PLAYER1 VS PLAYER2, or a versus battle, with a player elsewhere: on your network, at an address you share, or over a VPN you both use. The session plays in a window of its own, from power-on; this game waits until it ends. Both players need the same version of the game (a Linux and a Windows build of one version play together) and the same disc."
+msgstr "バトリングの PLAYER1 VS PLAYER2 か対戦を、別の場所のプレイヤーと: 同じネットワークで、教えたアドレスで、または二人で使う VPN で。セッションは電源オンから自分のウィンドウで動き、このゲームは終わるまで待ちます。二人とも同じバージョンのゲーム(同じバージョンなら Linux のビルドと Windows のビルドでも一緒に遊べます)と同じディスクが必要です。"
+
+#: port/src/ui/arena.cpp
+msgid "Each player picks their own side: player 2 the formation they command, you your party."
+msgstr "それぞれが自分の分を選びます: プレイヤー 2 は操る編成を、あなたは自分のパーティを。"
+
+#: port/src/ui/arena.cpp
+msgid "For a versus battle where you choose the formation, pick one in the Versus battle list above."
+msgstr "あなたが編成を選ぶ対戦では、上の対戦のリストで選んでください。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "For a versus battle where you choose: %s (from the Versus battle list above)."
+msgstr "あなたが選ぶ対戦では: %s(上の対戦のリストから)。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 2 chooses the formation"
+msgstr "プレイヤー 2 が編成を選ぶ"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Player 2 commands %s (the formation chosen above)."
+msgstr "プレイヤー 2 は %s(上で選んだ編成)を操ります。"
+
+#: port/src/ui/arena.cpp
+msgid "The connection is lost: the session waits for it to come back (up to a minute), then goes on where it stopped."
+msgstr "接続が切れました: セッションは接続がもどるのを待ち(最大 1 分)、止まったところから続けます。"
+
+#: port/src/ui/arena.cpp
+msgid "The host lets you choose the formation: choose one in the Versus battle list above, then join again."
+msgstr "ホストは編成をあなたに選ばせます: 上の対戦のリストで選んでから、もう一度参加してください。"
+
+#: port/src/ui/arena.cpp
+msgid "The host runs another version of the game: both players need the same one."
+msgstr "ホストは別のバージョンのゲームを動かしています: 二人とも同じものが必要です。"
+
+#: port/src/ui/arena.cpp
+msgid "Your party as a new game makes them: their starting levels, equipment and Gears, never anyone's save."
+msgstr "あなたのパーティはニューゲームのときのままです: 始めのレベル、装備、ギアで、だれのセーブも使いません。"
+
+#: port/src/ui/sections.cpp
+msgid "Square / Delete"
+msgstr "シカク / Delete"
+
+#: port/src/ui/sections.cpp
+msgid "Textures and art"
+msgstr "テクスチャと画像"
+
+#: port/src/ui/sections.cpp
+msgid "The GPU memory texture pack images may take (at most a quarter of the GPU's). 512 MB by default; more keeps more of a large pack ready, less leaves room on a small or shared GPU."
+msgstr "テクスチャパックの画像が使える GPU メモリーです(最大で GPU のメモリーの 4 分の 1)。初期設定は 512 MB です。多くすると大きなパックをより多く用意しておけ、少なくすると小さな GPU や共有の GPU に空きを残せます。"
+
+#: port/src/ui/sections.cpp
+msgid "The Original engine runs battles as the PlayStation did."
+msgstr "オリジナルエンジンは、バトルを PlayStation と同じように動かします。"
+
+#: port/src/ui/sections.cpp
+msgid "The Original engine runs fields as the PlayStation did, at 30 frames per second."
+msgstr "オリジナルエンジンは、フィールドを PlayStation と同じく毎秒 30 フレームで動かします。"
+
+#: port/src/ui/sections.cpp
+msgid "The Original engine runs the world map as the PlayStation did, at 30 frames per second."
+msgstr "オリジナルエンジンは、ワールドマップを PlayStation と同じく毎秒 30 フレームで動かします。"
+
+#: port/src/ui/sections.cpp
+msgid "The disc image in the drive now."
+msgstr "今ドライブに入っているディスクイメージです。"
+
+#: port/src/ui/sections.cpp
+msgid "The few rooms the game draws at 20 or 15 frames per second (with 60 Hz fields): at 60 Hz too, exact against the Original at every native frame (the default), or at their own rate, for a comparison."
+msgstr "ゲームが毎秒 20 か 15 フレームで描く数少ない部屋(60 Hz のフィールドのとき): これらも 60 Hz で動かすか(初期設定。本来の各フレームでオリジナルと正確に一致します)、くらべるために自分の速さのままにします。"
+
+#: port/src/ui/sections.cpp
+msgid "The field and the world map at 2x or 4x, their scenes and dialogue included: the game runs that many of its own frames per picture. Menus, movies and battles keep their own speed (Battle speed above is the battles'). Off and 1x: the original speed."
+msgstr "フィールドとワールドマップを、シーンや会話も含めて 2 倍、4 倍で進めます。1 画面ごとにゲーム自身のフレームをその数だけ進めます。メニュー、ムービー、バトルは自分の速さのままです(バトルの速さは上の「戦闘速度」で決めます)。オフと 1 倍で原作の速度になります。"
+
+#: port/src/ui/sections.cpp
+msgid "The folder that holds your disc images (and a BIOS image), read where it is: nothing is copied. A new folder applies at the next start."
+msgstr "ディスクイメージ(と BIOS イメージ)が入っているフォルダです。その場所のまま読み、何もコピーしません。新しいフォルダは次の起動から使われます。"
+
+#: port/src/ui/sections.cpp
+msgid "The keys and buttons of this menu and the hotkeys that work while the game runs."
+msgstr "このメニューのキーとボタン、そしてゲーム中に使えるホットキーです。"
+
+#: port/src/ui/sections.cpp
+msgid "The largest difference between the display's refresh and the game's vblank rate that Display lock locks. 0.05 Hz by default; a display at exactly 60.00 Hz is 0.17 Hz from the game's rate, so it needs 0.20 or more."
+msgstr "「ディスプレイ同期」が合わせる、ディスプレイのリフレッシュレートとゲームの VBlank の周期の差の最大値です。初期設定は 0.05 Hz です。正確に 60.00 Hz のディスプレイはゲームの周期と 0.17 Hz ちがうので、0.20 以上が必要です。"
+
+#: port/src/ui/sections.cpp
+msgid "The memory card slot the rows below show."
+msgstr "下の行に表示するメモリーカードのスロットです。"
+
+#: port/src/ui/sections.cpp
+msgid "The memory cards, their earlier versions, the save states and the settings, as one .zip file where you choose. Uninstalling the app deletes its own copies; a backup stays."
+msgstr "メモリーカードとその以前の版、ステートセーブ、設定を、選んだ場所に 1 つの .zip ファイルとしてまとめます。アプリをアンインストールするとアプリ自身のコピーは消えますが、バックアップは残ります。"
+
+#: port/src/ui/sections.cpp
+msgid "Beetle PSX pack"
+msgstr "Beetle PSX パック"
+
+#: port/src/ui/sections.cpp
+msgid "Beetle pack first"
+msgstr "Beetle パックを優先"
+
+#: port/src/ui/sections.cpp
+msgid "Bindings"
+msgstr "割り当て"
+
+#: port/src/ui/sections.cpp
+msgid "Button convention"
+msgstr "ボタンの方式"
+
+#: port/src/ui/sections.cpp
+msgid "Cel 2x/4x/8x uses faithful cel redraws of the original HUD and icons. Upscaled 2x/4x retains the original pixel artwork. Sprites -> Cel 8x uses the field sprite cel library (Packs > Sprite packs): redrawn sprites through the game's own palettes. 3D textures -> Cel 8x uses the field texture library (Packs > Texture pack): repainted scenery at 8x."
+msgstr "「セル画 2 倍/4 倍/8 倍」は、元の HUD とアイコンをそのままの形でセル画に描き直したものを使います。「高解像度版 2 倍/4 倍」は元のピクセルアートのままです。「スプライト」→「セル画 8 倍」はフィールドのスプライトのセル画ライブラリー(「パック」>「スプライトパック」)を使います: ゲーム自身のパレットで描く、描き直したスプライトです。「3D テクスチャ」→「セル画 8 倍」はフィールドのテクスチャライブラリー(「パック」>「テクスチャパック」)を使います: 8 倍で描き直した背景です。"
+
+#: port/src/ui/sections.cpp
+msgid "Choose its folder"
+msgstr "そのフォルダを選ぶ"
+
+#: port/src/ui/sections.cpp
+msgid "Choose the disc folder"
+msgstr "ディスクのフォルダを選ぶ"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Choose the folder containing %s. Packs apply with upscaling or subpixel geometry. Reload after editing PNGs. Edge keeps authored detail above 1x. Display > Textures and art chooses where each kind of picture uses it."
+msgstr "%s が入っているフォルダを選んでください。パックは解像度の拡大かサブピクセル精度で適用されます。PNG を編集したら再読み込みしてください。「エッジ」は 1 倍より上で、描かれた細部を保ちます。どの種類の絵にパックを使うかは「画面」>「テクスチャと画像」で選びます。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Copies the pack into %s: a texture pack's, sprite pack's or glyph pack's folder holds SLUS-00664 or SLPS-01160, HUD artwork's cel-2x, cel-4x or cel-8x, a portrait set's portrait.ini. A computer can put packs there over USB too. Packs copied in are used from the next start."
+msgstr "パックを %s にコピーします。選ぶフォルダには、テクスチャパック、スプライトパック、グリフパックなら SLUS-00664 か SLPS-01160、HUD の画像なら cel-2x、cel-4x か cel-8x、顔グラフィックセットなら portrait.ini が入っています。パソコンから USB でそこへパックを入れることもできます。コピーしたパックは次の起動から使われます。"
+
+#: port/src/ui/sections.cpp
+msgid "Copy in a pack"
+msgstr "パックをコピーして追加"
+
+#: port/src/ui/sections.cpp
+msgid "Default keys and Default gamepad (or Reset controller profile) put every binding back."
+msgstr "「標準のキー」と「標準のゲームパッド」(または「コントローラーのプロファイルをリセット」)で、すべての割り当てを元にもどします。"
+
+#: port/src/ui/sections.cpp
+msgid "Diagnostics"
+msgstr "調査"
+
+#: port/src/ui/sections.cpp
+msgid "Disable"
+msgstr "無効にする"
+
+#: port/src/ui/sections.cpp
+msgid "Disc folder"
+msgstr "ディスクのフォルダ"
+
+#: port/src/ui/sections.cpp
+msgid "Discs and BIOS"
+msgstr "ディスクと BIOS"
+
+#: port/src/ui/sections.cpp
+msgid "Display > Textures and art selects dialogue, menu and battle artwork independently. Original is the default for each."
+msgstr "会話、メニュー、バトルの画像は「画面」>「テクスチャと画像」でそれぞれ別に選べます。どれも初期設定は「オリジナル」です。"
+
+#: port/src/ui/sections.cpp
+msgid "Each category uses its selected filter, faithful native upscale or artwork pack. Text controls labels and numbers. Battle portraits also cover results; menu portraits reuse the dialogue artwork."
+msgstr "それぞれの種類が、選んだフィルター、元の絵どおりの高解像度化、または画像のパックを使います。「文字」は見出しと数字を決めます。バトルの顔グラフィックはバトルが終わった後の画面にも使われ、メニューの顔グラフィックは会話の画像を使います。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Engine: %s (%s)"
+msgstr "エンジン: %s(%s)"
+
+#: port/src/extras/shell.cpp
+msgid "(no installed pack covers this)"
+msgstr "(入っているパックはこれに対応していません)"
+
+#: port/src/extras/shell.cpp
+msgid "Enhanced: with the installed replacement packs"
+msgstr "強化: 入っている差し替えパックを使う"
+
+#: port/src/extras/shell.cpp
+msgid "Enter / confirm: open the asset full size. Esc / cancel: back to the list, then out. F1: return to the game menu."
+msgstr "Enter / 決定: 素材を大きく開きます。Esc / キャンセル: 一覧にもどり、もう一度で外に出ます。F1: ゲームのメニューにもどります。"
+
+#: port/src/extras/shell.cpp
+msgid "List"
+msgstr "一覧"
+
+#: port/src/extras/shell.cpp
+msgid "No replacement pack installed"
+msgstr "差し替えパックが入っていません"
+
+#: port/src/extras/shell.cpp
+msgid "Select or F12: Stock / Enhanced, the assets as on the disc or with the installed replacement packs (in the viewers that offer it)."
+msgstr "セレクトか F12: 元のまま / 強化。ディスクにあるとおりの素材か、入っている差し替えパックを使った素材です(切り替えられるビューアーで)。"
+
+#: port/src/extras/shell.cpp
+msgid "Stock or Enhanced (the installed packs): F12, Select"
+msgstr "元のままか強化(入っているパック): F12、セレクト"
+
+#: port/src/extras/shell.cpp
+msgid "Stock: the assets as on the disc"
+msgstr "元のまま: ディスクにあるとおりの素材"
+
+#: port/src/extras/shell.cpp
+msgid "Zoom +"
+msgstr "ズーム +"
+
+#: port/src/extras/shell.cpp
+msgid "Zoom -"
+msgstr "ズーム -"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "0.01 Hz"
+msgstr "0.01 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "0.02 Hz"
+msgstr "0.02 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "0.05 Hz"
+msgstr "0.05 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "0.10 Hz"
+msgstr "0.10 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "0.15 Hz"
+msgstr "0.15 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "0.20 Hz"
+msgstr "0.20 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "0.24 Hz"
+msgstr "0.24 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "120 Hz"
+msgstr "120 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "144 Hz"
+msgstr "144 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "20 and 15 fps rooms"
+msgstr "20 と 15 fps の部屋"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "240 Hz"
+msgstr "240 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "60 Hz"
+msgstr "60 Hz"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Cel 2x"
+msgstr "セル画 2 倍"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Cel 4x"
+msgstr "セル画 4 倍"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Cel 8x"
+msgstr "セル画 8 倍"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Display lock"
+msgstr "ディスプレイ同期"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Field speed"
+msgstr "フィールド速度"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "GPU ordering"
+msgstr "GPU の描画順"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Latency ceiling"
+msgstr "遅延の上限"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Lock tolerance"
+msgstr "同期の許容差"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Motion display rate"
+msgstr "動きの表示レート"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Motion smoothing"
+msgstr "動きの補間"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Native (59.8 Hz)"
+msgstr "ゲーム本来(59.8 Hz)"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Pack GPU memory"
+msgstr "パックの GPU メモリー"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Pause when minimised"
+msgstr "最小化中は一時停止"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Performance"
+msgstr "パフォーマンス"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Presets"
+msgstr "プリセット"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Restore thin surfaces"
+msgstr "細い面を復元"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Sprite preload"
+msgstr "スプライトの先読み"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Text edges"
+msgstr "文字の縁"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Upscaled 2x"
+msgstr "高解像度版 2 倍"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Upscaled 4x"
+msgstr "高解像度版 4 倍"
+
+#: port/src/extras/sprites.cpp
+msgid "Field scene animations"
+msgstr "フィールドのシーンのアニメーション"
+
+#: port/src/extras/sprites.cpp
+msgid "No sprite pack installed"
+msgstr "スプライトパックが入っていません"
+
+#: port/src/extras/sprites.cpp
+msgid "Party (world map)"
+msgstr "パーティ(ワールドマップ)"
+
+#: port/src/ui/options.cpp port/src/ui/states.cpp
+msgid "Capture every N frames"
+msgstr "N フレームごとに記録"
+
+#: port/src/ui/options.cpp port/src/ui/states.cpp
+msgid "Compare threads"
+msgstr "くらべるスレッド数"
+
+#: port/src/ui/options.cpp port/src/ui/states.cpp
+msgid "Rewind memory"
+msgstr "巻きもどしのメモリー"
+
+#: port/src/extras/browser.cpp port/src/extras/models.cpp
+msgid "No texture pack installed"
+msgstr "テクスチャパックが入っていません"
+
+#: port/src/extras/bestiary.cpp
+msgid "Picture only"
+msgstr "絵だけ"
+
+#: port/src/extras/bestiary.cpp port/src/extras/maps.cpp
+msgid "Details"
+msgstr "詳細"
+
+#: port/src/ui/sections.cpp
+msgid "None yet"
+msgstr "まだありません"
+
+#: port/src/ui/sections.cpp
+msgid "Normal, and every enemy multiplier at 100%%."
+msgstr "「ノーマル」にして、敵の倍率をすべて 100%% にします。"
+
+#: port/src/ui/sections.cpp
+msgid "Not during an online session: they could change this side's game alone."
+msgstr "オンラインセッション中は使えません: おまけがこちらのゲームだけを変えてしまうことがあります。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Now: %s"
+msgstr "現在: %s"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Now: %s (the default)."
+msgstr "現在: %s(標準)。"
+
+#: port/src/ui/sections.cpp
+msgid "Now: none, the game's own."
+msgstr "現在: なし(ゲーム本来のもの)。"
+
+#: port/src/ui/sections.cpp
+msgid "Off: 30 frames per second"
+msgstr "オフ: 毎秒 30 フレーム"
+
+#: port/src/ui/sections.cpp
+msgid "Off: the game plays on"
+msgstr "オフ: ゲームは動き続けます"
+
+#: port/src/ui/sections.cpp
+msgid "On: 60 frames per second"
+msgstr "オン: 毎秒 60 フレーム"
+
+#: port/src/ui/sections.cpp
+msgid "On: one vblank per refresh"
+msgstr "オン: リフレッシュごとに VBlank 1 回"
+
+#: port/src/ui/sections.cpp
+msgid "On: the game waits"
+msgstr "オン: ゲームは待ちます"
+
+#: port/src/ui/sections.cpp
+msgid "On: when the display refreshes within the tolerance below of the game's 59.83 Hz, the game runs at the display's rate instead (at most 0.4%% faster or slower, its sound too) and each picture is shown exactly once, with no repeated or dropped frame. Adds the FIFO queue's latency. Off by default. Applies within a second."
+msgstr "オン: ディスプレイのリフレッシュレートとゲームの 59.83 Hz の差が下の許容範囲内なら、ゲームはディスプレイのレートで動き(最大 0.4%% 速くまたは遅く、音も同じ)、どの絵も 1 回ずつだけ表示され、くりかえすフレームも落ちるフレームもありません。FIFO キューの遅延が加わります。初期設定はオフです。1 秒以内に反映されます。"
+
+#: port/src/ui/sections.cpp
+msgid "Our texture pack first"
+msgstr "移植版のテクスチャパックを優先"
+
+#: port/src/ui/sections.cpp
+msgid "Pack folders"
+msgstr "パックのフォルダ"
+
+#: port/src/ui/sections.cpp
+msgid "Packs in the app"
+msgstr "アプリ内のパック"
+
+#: port/src/ui/sections.cpp
+msgid "Portrait set"
+msgstr "顔グラフィックセット"
+
+#: port/src/ui/sections.cpp
+msgid "Quality"
+msgstr "画質"
+
+#: port/src/ui/sections.cpp
+msgid "Rates above your monitor's refresh can be discarded. VRR availability depends on your display and desktop; submission rate does not measure visible refreshes."
+msgstr "モニターのリフレッシュレートを超える設定では、フレームが表示されずに消えることがあります。VRR を使えるかはディスプレイとデスクトップによります。送り出すフレームのレートは、目に見えるリフレッシュの回数を表すものではありません。"
+
+#: port/src/ui/sections.cpp
+msgid "Reload HUD artwork"
+msgstr "HUD の画像を再読み込み"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Remove %s/%s from the app's packs folder? Its files are deleted; a copy elsewhere is not touched."
+msgstr "%s/%s をアプリの packs フォルダから外しますか? そのファイルは削除されます。ほかの場所にあるコピーはそのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Remove the pack"
+msgstr "パックを外す"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Removed %s: used until the next start"
+msgstr "%s を外しました: 次の起動までは使われます"
+
+#: port/src/ui/sections.cpp
+msgid "Removes a pack from the app's packs folder (nothing elsewhere). The game keeps what it already read until the next start."
+msgstr "アプリの packs フォルダからパックを外します(ほかの場所のものには触れません)。すでに読み込んだものは、次の起動までゲームが使い続けます。"
+
+#: port/src/ui/sections.cpp
+msgid "Restore from a file"
+msgstr "ファイルから戻す"
+
+#: port/src/ui/sections.cpp
+msgid "Saves backup"
+msgstr "セーブのバックアップ"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Since the last reload, replacements drawn / pictures missing: dialogue %llu / %llu, menu %llu / %llu, menu 24 px faces %llu / %llu, battle %llu / %llu"
+msgstr "前回の再読み込みから、描画した置き換え / 見つからない絵: 会話 %llu / %llu、メニュー %llu / %llu、メニューの 24 px の顔 %llu / %llu、バトル %llu / %llu"
+
+#: port/src/ui/sections.cpp
+msgid "Smooth Enhanced text"
+msgstr "くっきり文字をなめらかに"
+
+#: port/src/ui/sections.cpp
+msgid "Smooth motion"
+msgstr "動きをなめらかに"
+
+#: port/src/ui/sections.cpp
+msgid "Smooths fields and the world map: models, Gears, terrain, character placement, camera motion, particles, clouds and screen effects. Gameplay, animation events and audio keep their original timing."
+msgstr "フィールドとワールドマップの表示をなめらかにします: モデル、ギア、地形、キャラクターの配置、カメラの動き、パーティクル、雲、画面効果。ゲーム進行、アニメのイベント、音声は原作のタイミングのままです。"
+
+#: port/src/ui/sections.cpp
+msgid "Enhanced engine only (System > Engine)."
+msgstr "強化エンジンのみです(「システム」→「エンジン」)。"
+
+#: port/src/ui/sections.cpp
+msgid "Every change here is written to it at once. XG_<KEY> in the environment overrides a key for one run."
+msgstr "ここでの変更はすべて、すぐにこのファイルに書き込まれます。環境変数の XG_<KEY> は、1 回の実行の間だけそのキーを上書きします。"
+
+#: port/src/ui/sections.cpp
+msgid "Every reward multiplier at 100%%."
+msgstr "経験値とゴールドの倍率をすべて 100%% にします。"
+
+#: port/src/ui/sections.cpp
+msgid "Exact ordered fallback"
+msgstr "正確な描画順の代替処理"
+
+#: port/src/ui/sections.cpp
+msgid "Fields run their logic every vblank: input every vblank, the player, sprites and camera moving every frame at their authored speed, scripts, dialogue, random encounters and effects at their authored cadence. Fields authored at 20 or 15 frames per second keep that. Takes effect at once."
+msgstr "フィールドの処理を VBlank ごとに進めます: 入力は VBlank ごと、プレイヤー、スプライト、カメラは本来の速さで毎フレーム動き、スクリプト、会話、エンカウント、エフェクトは本来の周期で進みます。毎秒 20 または 15 フレームで作られたフィールドはその周期のままです。すぐに反映されます。"
+
+#: port/src/ui/sections.cpp
+msgid "General"
+msgstr "全体"
+
+#: port/src/ui/sections.cpp
+msgid "HUD artwork"
+msgstr "HUD の画像"
+
+#: port/src/ui/sections.cpp
+msgid "HUD packs"
+msgstr "HUD パック"
+
+#: port/src/ui/sections.cpp
+msgid "Half-resolution large surfaces (Enhanced)"
+msgstr "大きな面を半分の解像度で(強化)"
+
+#: port/src/ui/sections.cpp
+msgid "Hard usually uses 2x enemy HP and 1.5x attack and ether, with boss, story and support exceptions. Character starts and Gear equipment stay original. Battle changes apply when the next fight loads. Advanced below has a multiplier for each enemy stat."
+msgstr "ハードでは通常、敵の HP が 2 倍、攻撃力とエーテルが 1.5 倍になります(ボス、ストーリーの戦闘、サポートのキャラクターは別あつかいです)。キャラクターの初期状態とギアの装備は原作のままです。バトルの変更は次の戦闘を読み込むときに反映されます。下の「詳細設定」には敵の能力値ごとの倍率があります。"
+
+#: port/src/ui/sections.cpp
+msgid "How far the queue may grow by itself after the sound ran dry (an underrun): it grows a little each time, up to this, then shrinks back to Latency. 150 ms by default; higher for a busy machine or streaming software."
+msgstr "音がとぎれたとき(アンダーラン)に、キューがひとりでに伸びられる長さの上限です: とぎれるたびに少しずつここまで伸び、そのあと「遅延」の値までもどります。初期設定は 150 ミリ秒です。処理が重いマシンや配信ソフトでは高めにしてください。"
+
+#: port/src/ui/sections.cpp
+msgid "Japanese audio"
+msgstr "日本語版の音声"
+
+#: port/src/ui/sections.cpp
+msgid "Keeps thin terrain, shadows and custom surfaces visible when PS1 pixel rounding would remove them. Off by default."
+msgstr "細い地形、影、カスタムの面が PS1 のピクセルのまるめで消えてしまうときにも、表示したままにします。初期設定はオフです。"
+
+#: port/src/ui/sections.cpp
+msgid "LLVM libc++ and libunwind (Apache 2.0, LLVM exceptions)"
+msgstr "LLVM libc++ と libunwind(Apache 2.0、LLVM exceptions)"
+
+#: port/src/ui/sections.cpp
+msgid "Language and text"
+msgstr "言語と文字"
+
+#: port/src/ui/sections.cpp
+msgid "Large surfaces"
+msgstr "大きな面"
+
+#: port/src/ui/sections.cpp
+msgid "Licences"
+msgstr "ライセンス"
+
+#: port/src/ui/sections.cpp
+msgid "May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. Enabled by default on the Android PowerVR DXT-48-1536."
+msgstr "ハードウェアで描画の順番を守る機能のない GPU で、速くなることがあります。GPU のメモリーを 20 MiB 使います。Android の PowerVR DXT-48-1536 では初期設定でオンです。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Menu portraits: %s"
+msgstr "メニューの顔グラフィック: %s"
+
+#: port/src/ui/sections.cpp
+msgid "None chosen"
+msgstr "選んでいません"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "%d states deleted."
+msgstr "ステートを %d 個消しました。"
+
+#: port/src/ui/states.cpp
+msgid "A capture every N frames: 1 goes back most smoothly, 4 costs least. 2 by default."
+msgstr "N フレームごとに記録します: 1 がいちばんなめらかにもどり、4 がいちばん処理が少なく済みます。初期設定は 2 です。"
+
+#: port/src/ui/states.cpp
+msgid "Delete every state other versions of the app made? This version cannot load them."
+msgstr "アプリのほかのバージョンが作ったステートをすべて消しますか? このバージョンではロードできません。"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Delete the %d states other versions made"
+msgstr "ほかのバージョンが作ったステート %d 個を消す"
+
+#: port/src/ui/states.cpp
+msgid "Delete the state another version made"
+msgstr "別のバージョンが作ったステートを消す"
+
+#: port/src/ui/states.cpp
+msgid "Selected slot"
+msgstr "選んだスロット"
+
+#: port/src/ui/states.cpp
+msgid "States made before an update of the app cannot be loaded by this version: a state holds the program's own memory, which an update moves. Memory card saves carry over."
+msgstr "アプリの更新より前に作ったステートは、このバージョンではロードできません: ステートはプログラム自身のメモリーを持っていて、更新でその場所が変わるためです。メモリーカードのセーブはそのまま使えます。"
+
+#: port/src/ui/states.cpp
+msgid "The memory rewind takes at most: when it is full, the oldest captures go first. 256 MB by default."
+msgstr "巻きもどしが使うメモリーの上限です: いっぱいになると、いちばん古い記録から消えます。初期設定は 256 MB です。"
+
+#: port/src/ui/states.cpp
+msgid "The seconds of play rewind keeps (with Rewind on). 30 s by default."
+msgstr "巻きもどしで残すプレイの秒数です(「巻きもどし」がオンのとき)。初期設定は 30 秒です。"
+
+#: port/src/ui/states.cpp
+msgid "Threads comparing the game's memory at a capture (the game's own thread one of them): more make a capture shorter on a CPU with cores to spare. 4 by default."
+msgstr "記録のときにゲームのメモリーをくらべるスレッドの数です(ゲーム自身のスレッドもその 1 つ): コアのあまっている CPU では、多いほど記録が短く済みます。初期設定は 4 です。"
+
+#: port/src/ui/states.cpp
+#, c-format
+msgid "Version %s's"
+msgstr "バージョン %s のもの"
+
+#: port/src/extras/gallery.cpp
+msgid "+10s"
+msgstr "+10 秒"
+
+#: port/src/extras/gallery.cpp
+msgid "-10s"
+msgstr "-10 秒"
+
+#: port/src/extras/gallery.cpp
+#, c-format
+msgid "CLUT %d/%d"
+msgstr "CLUT %d/%d"
+
+#: port/src/extras/gallery.cpp
+msgid "Movie packs show in the game; here the disc's movie"
+msgstr "ムービーパックはゲーム中に表示されます。ここではディスクのムービーです"
+
+#: port/src/extras/gallery.cpp
+msgid "No movie pack installed"
+msgstr "ムービーパックが入っていません"
+
+#: port/src/extras/gallery.cpp
+msgid "No pack covers these pictures"
+msgstr "この絵を置き換えるパックはありません"
+
+#: port/src/extras/gallery.cpp
+msgid "No portrait pack installed"
+msgstr "顔グラフィックパックが入っていません"
+
+#: port/src/ui/menu.cpp
+msgid " or "
+msgstr " か "
+
+#: port/src/ui/menu.cpp
+msgid "Packs"
+msgstr "パック"
+
+#: port/src/ui/menu.cpp
+msgid "reset"
+msgstr "リセット"
+
+#: port/src/ui/diagnostics.cpp port/src/ui/sections.cpp
+msgid "Field sprites"
+msgstr "フィールドのスプライト"
+
+#: port/src/extras/maps.cpp
+msgid "Hide details"
+msgstr "詳細を隠す"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "%d frames now, %.1f ms on average%s; the bar's end is the ceiling."
+msgstr "今は %d フレーム、平均で %.1f ミリ秒%s。バーがいっぱいになると上限です。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Audio queue"
+msgstr "サウンドのキュー"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Audio target"
+msgstr "サウンドの目標"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "Beside the executable: %s (%s in settings.ini names another)."
+msgstr "実行ファイルの隣: %s(settings.ini の %s が別のフォルダを指しています)。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Cel HUD and icons"
+msgstr "セル画の HUD とアイコン"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Compare replacements"
+msgstr "差し替えをくらべる"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Contents"
+msgstr "内容"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Counted from the pack's files when this page first showed, and after each reload."
+msgstr "このページを最初に表示したときと、再読込のたびに、パックのファイルから数えています。"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "Every texture, sprite, lettering, HUD and portrait replacement off and on again in place (nothing is reloaded), to compare with the original pictures. Hotkey: %s (replacements_ab_key)."
+msgstr "テクスチャ、スプライト、文字グリフ、HUD、顔グラフィックの差し替えをすべて、その場でオフにしたりオンにもどしたりして(何も読み直しません)、元の絵とくらべます。ホットキー: %s(replacements_ab_key)。"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "Every vblank's timing, GPU time, audio queue, field and screen in perf-<date>.log beside settings.ini, with a summary when it stops. Hotkey: %s (perf_log_key)."
+msgstr "vblank ごとのタイミング、GPU 時間、サウンドのキュー、フィールド、画面を settings.ini の隣の perf-<date>.log に記録し、止めたときにまとめを書きます。ホットキー: %s(perf_log_key)。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Field textures"
+msgstr "フィールドのテクスチャ"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Field textures, sprites and lettering are read again together."
+msgstr "フィールドのテクスチャ、スプライト、文字グリフはまとめて読み直されます。"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "From its pack.ini (%s)."
+msgstr "その pack.ini から(%s)。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Hidden: the original pictures"
+msgstr "隠す: 元の絵"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Lettering"
+msgstr "文字グリフ"
+
+#: port/src/ui/diagnostics.cpp
+msgid "No sound output yet."
+msgstr "まだ音が出力されていません。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "On: a panel in the corner"
+msgstr "オン: すみにパネル"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "Over the game while this menu is closed: the last second's frame time, the CPU's time and its parts, the GPU's time and the wait for it, the audio queue, underruns and the pack decodes. Hotkey: %s (perf_overlay_key)."
+msgstr "このメニューを閉じている間、ゲームの上に表示: 直前 1 秒のフレーム時間、CPU の時間とその内訳、GPU の時間とその待ち、サウンドのキュー、アンダーラン、パックのデコード。ホットキー: %s(perf_overlay_key)。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Pack"
+msgstr "パック"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Performance log"
+msgstr "パフォーマンスのログ"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Performance overlay"
+msgstr "パフォーマンス表示"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Read the files again"
+msgstr "ファイルを読み直す"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "Recording %u vblanks to %s"
+msgstr "%u vblank を記録中(書き込み先: %s)"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Shown"
+msgstr "表示"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "Since the game started: the device found the queue empty (a gap). %d pushes found it dry, %d lossy cuts."
+msgstr "ゲームの開始から、デバイスがキューを空で見つけた回数です(音のすき間)。送り込みで空だったのが %d 回、音をけずって縮めたのが %d 回。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Start recording"
+msgstr "記録を始める"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Stop recording"
+msgstr "記録を止める"
+
+#: port/src/ui/diagnostics.cpp
+msgid "The replacement libraries this game finds (beside the executable unless settings.ini names another folder). Each draws only where its category's appearance uses it (Display)."
+msgstr "このゲームが見つけた差し替えのライブラリー(settings.ini が別のフォルダを指していなければ実行ファイルの隣)。それぞれ、その種類の見た目(「画面」)で選ばれたところにだけ描かれます。"
+
+#: port/src/ui/options.cpp
+msgid " (at the next launch)"
+msgstr "(次の起動から)"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "%s %s (%d changed)"
+msgstr "%s %s(変更 %d 件)"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "%s applied: %d settings changed."
+msgstr "%s を適用しました: %d 件の設定を変えました。"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "%s applied: %d settings changed. The engine changes at the next launch (System > Engine can restart now)."
+msgstr "%s を適用しました: %d 件の設定を変えました。エンジンは次の起動から変わります(「システム > エンジン」で今すぐ再起動できます)。"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "%s: every setting it names is already so."
+msgstr "%s: 変える設定はすべて、すでにそのとおりです。"
+
+#: port/src/ui/options.cpp
+msgid "60 Hz battles"
+msgstr "60 Hz のバトル"
+
+#: port/src/ui/options.cpp
+msgid "60 Hz fields"
+msgstr "60 Hz のフィールド"
+
+#: port/src/ui/options.cpp
+msgid "60 Hz world map"
+msgstr "60 Hz のワールドマップ"
+
+#: port/src/ui/options.cpp
+msgid "Apply"
+msgstr "適用"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "Apply %s? It changes:"
+msgstr "%s を適用しますか? 変わる設定:"
+
+#: port/src/ui/options.cpp
+msgid "Automatic disc swap"
+msgstr "ディスクの自動入れ替え"
+
+#: port/src/ui/options.cpp
+msgid "Battle HUD"
+msgstr "バトルの HUD"
+
+#: port/src/ui/options.cpp
+msgid "Battle icons"
+msgstr "バトルのアイコン"
+
+#: port/src/ui/options.cpp
+msgid "Battle portrait art"
+msgstr "バトルの顔グラフィックセット"
+
+#: port/src/ui/options.cpp
+msgid "Battle portraits"
+msgstr "バトルの顔グラフィック"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "Changed from the default (%s): %s resets it."
+msgstr "標準(%s)から変わっています: %s でリセットします。"
+
+#: port/src/ui/options.cpp
+msgid "Choose a preset..."
+msgstr "プリセットを選ぶ..."
+
+#: port/src/ui/options.cpp
+msgid "Choose to hide these settings again."
+msgstr "選ぶと、これらの設定をまた隠します。"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "Choose to open %s at this setting."
+msgstr "選ぶと %s のこの設定を開きます。"
+
+#: port/src/ui/options.cpp
+msgid "Dialogue portrait art"
+msgstr "会話の顔グラフィックセット"
+
+#: port/src/ui/options.cpp
+msgid "Dialogue portraits"
+msgstr "会話の顔グラフィック"
+
+#: port/src/ui/options.cpp
+msgid "Each lists what it changes before it applies. Settings it does not name stay as they are."
+msgstr "どれも、適用する前に変わる設定を見せます。ほかの設定はそのままです。"
+
+#: port/src/ui/options.cpp
+msgid "Enhanced 60 Hz"
+msgstr "強化 60 Hz"
+
+#: port/src/ui/options.cpp
+msgid "Enhanced only"
+msgstr "強化エンジンのみ"
+
+#: port/src/ui/options.cpp
+msgid "Every setting"
+msgstr "すべての設定"
+
+#: port/src/ui/options.cpp
+msgid "Every setting is at its default."
+msgstr "すべての設定が標準のままです。"
+
+#: port/src/ui/options.cpp
+msgid "Faithful"
+msgstr "原作どおり"
+
+#: port/src/ui/options.cpp
+msgid "For integrated GPUs and handhelds: 2x resolution, the large surfaces at half of it, no high-resolution pause blur (a CPU effect), no shader, motion shown at 60 Hz, and the game thread sleeping between frames."
+msgstr "内蔵 GPU やハンドヘルド機向け: 解像度 2 倍、大きな面はその半分、高解像度のポーズぼかしなし(CPU の効果)、シェーダーなし、動きの表示は 60 Hz、フレーム間はゲームスレッドをスリープ。"
+
+#: port/src/ui/options.cpp
+msgid "Half-resolution large surfaces"
+msgstr "大きな面を半分の解像度で"
+
+#: port/src/ui/options.cpp
+msgid "Keeps every setting the presets know as it is now (in settings.ini, preset_mine): the presets' list then has My setup, to come back to it."
+msgstr "プリセットが使う設定をすべて今の値のまま保存します(settings.ini の preset_mine): そのあとプリセットの一覧に「自分の設定」が加わり、そこへもどれます。"
+
+#: port/src/ui/options.cpp
+msgid "Menu portrait art"
+msgstr "メニューの顔グラフィックセット"
+
+#: port/src/ui/options.cpp
+msgid "Menu portraits"
+msgstr "メニューの顔グラフィック"
+
+#: port/src/ui/options.cpp
+msgid "More sound queued ahead (100 ms, growing up to 250 ms), so capture and streaming software and busy machines do not make it crackle."
+msgstr "録画や配信のソフト、処理の重いマシンでも音が途切れないように、音を多めに先に送っておきます(100 ミリ秒、最大 250 ミリ秒まで伸びます)。"
+
+#: port/src/ui/options.cpp
+msgid "My setup"
+msgstr "自分の設定"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "My setup saved: %d settings."
+msgstr "自分の設定を保存しました: 設定 %d 件。"
+
+#: port/src/ui/options.cpp
+msgid "No setting matches."
+msgstr "合う設定はありません。"
+
+#: port/src/ui/options.cpp
+msgid "Only changed"
+msgstr "変更した設定だけ"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "Only changed: the settings that differ from their defaults, wherever they are. %s on a setting resets it."
+msgstr "変更した設定だけ: 標準と違う設定を、どこにあってもすべて出します。設定の上で %s を押すとリセットします。"
+
+#: port/src/ui/options.cpp
+msgid "Only the Enhanced engine has this (System > Engine)."
+msgstr "これは強化エンジンにだけあります(「システム > エンジン」)。"
+
+#: port/src/ui/options.cpp
+msgid "Save my current setup"
+msgstr "今の設定を保存"
+
+#: port/src/ui/options.cpp
+msgid "Save my current setup again"
+msgstr "今の設定をもう一度保存"
+
+#: port/src/ui/options.cpp
+msgid "Search the settings"
+msgstr "設定を検索"
+
+#: port/src/ui/options.cpp
+msgid "Settings most players never need: choose to show them."
+msgstr "ほとんどのプレイヤーには要らない設定です: 選ぶと表示します。"
+
+#: port/src/ui/options.cpp
+msgid "Streaming"
+msgstr "配信"
+
+#: port/src/ui/options.cpp
+msgid "Takes effect the next time the game starts."
+msgstr "次にゲームを起動したときから有効になります。"
+
+#: port/src/ui/options.cpp
+msgid "The Enhanced engine with every 60 Hz mode on: fields (with their 20 and 15 fps rooms), the world map and battles."
+msgstr "強化エンジンで 60 Hz のモードをすべてオン: フィールド(20 fps と 15 fps の部屋も)、ワールドマップ、バトル。"
+
+#: port/src/ui/options.cpp
+msgid "The game as the PlayStation showed it: the Original engine, the 4:3 TV picture in its original framing, every texture, sprite, HUD, text and portrait in its original look (no packs, no redraws), no pack movies, no shader, no motion smoothing and no Speedup."
+msgstr "PlayStation が見せたとおりのゲーム: オリジナルエンジン、元の表示範囲の 4:3 テレビの画面、テクスチャ、スプライト、HUD、文字、顔グラフィックはすべて元の見た目(パックも描き直しもなし)、パックのムービーなし、シェーダーなし、動きの補間なし、高速化なし。"
+
+#: port/src/ui/options.cpp
+msgid "Type in the box (a keyboard), or choose Only changed."
+msgstr "ボックスに入力する(キーボード)か、「変更した設定だけ」を選んでください。"
+
+#: port/src/ui/options.cpp
+msgid "Vibration strength"
+msgstr "振動の強さ"
+
+#: port/src/ui/options.cpp
+msgid "Words of a setting's name or description (all of them). Enter opens the first match; choosing a result's heading opens its section there. Ctrl+F comes here from any section."
+msgstr "設定の名前か説明にある言葉(すべて含むもの)。Enter で最初に合ったものを開き、見つかった設定の見出しを選ぶとそのセクションのその場所を開きます。どのセクションからでも Ctrl+F でここに来ます。"
+
+#: port/src/ui/diagnostics.cpp
+msgid "Underruns"
+msgstr "アンダーラン"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "Written to %s:"
+msgstr "%s に書き込みました:"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "audio_latency %.0f ms, grown %.0f ms by underruns (shrinks again after half a minute without one), up to audio_latency_max %.0f ms."
+msgstr "audio_latency %.0f ミリ秒、アンダーランで %.0f ミリ秒伸びています(アンダーランなしで 30 秒たつとまた縮みます)。最大は audio_latency_max %.0f ミリ秒。"
+
+#: port/src/ui/diagnostics.cpp
+#, c-format
+msgid "audio_latency %.0f ms; underruns grow it up to audio_latency_max %.0f ms."
+msgstr "audio_latency %.0f ミリ秒。アンダーランがあると audio_latency_max %.0f ミリ秒まで伸びます。"
+
+#: port/src/extras/battle.cpp
+msgid "Full view"
+msgstr "大きく表示"
+
+#: port/src/extras/shell.cpp port/src/extras/sprites.cpp
+msgid "Stock"
+msgstr "元のまま"
+
+msgid "no focus point in this view"
+msgstr "この視点ではピントを合わせる位置がありません"
+
+msgid "a movie-backed scene"
+msgstr "ムービーを背景にした場面です"
+
+msgid "no frame"
+msgstr "描く画面がありません"
+
+msgid "no display copy yet"
+msgstr "表示用のコピーがまだありません"
+
+msgid "not available on this device, with GPU ordering, or without memory for it"
+msgstr "このデバイスでは使えないか、GPUの描画順モードか、メモリが足りません"
+
+msgid "the game gave no view for this scene"
+msgstr "この場面ではゲームの視点がありません"

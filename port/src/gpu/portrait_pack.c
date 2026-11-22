@@ -10,6 +10,7 @@
 #include "texture.h"
 #include "system/settings.h"
 #include "system/cputime.h"
+#include "system/hw.h"
 #include "pc_wide.h"
 
 #define SETS 64
@@ -61,7 +62,9 @@ static SDL_EnumerationResult scan(void* userdata, const char* dirname, const cha
     return SDL_ENUM_CONTINUE;
 }
 static int order(const void* a,const void* b) { return strcmp(((const PortraitSet*)a)->id,((const PortraitSet*)b)->id); }
+static void shiftsClear(void);
 static void clear(void) {
+    shiftsClear();
     for(int i=0;i<SLOTS;++i) free((void*)entries[i].image.rgba);
     memset(entries,0,sizeof(entries)); memset(&stats,0,sizeof(stats));
     stats.generation=++generation;
@@ -169,7 +172,7 @@ static int imageForSize(uint64_t texel,uint64_t palette,int size,int thumbnail,P
             /* Which picture a set lacks (xg-j85.40), once: the miss is kept. */
             const char* log=SDL_getenv("XG_TEXTURE_LOG");
             if(log && *log && strcmp(log,"0")) fprintf(stderr,"portrait: %s %s\n",found?"invalid":"missing",path);
-            texturePackAudit("portrait %s %s",found?"invalid":"missing",path+strlen(root));
+            texturePackAudit("portrait %s %s vblank %u",found?"invalid":"missing",path+strlen(root),(unsigned)hwVSyncCount());
         }
         else {
             size_t bytes=(size_t)png->w*png->h*4;
@@ -204,12 +207,82 @@ int portraitPackImage(uint64_t texel,uint64_t palette,PortraitImage* out) {
 int portraitPackSample(const DecodedTexture* d,TextureRequest patch,TextureSample* out) {
     return portraitPackClassSample(d,patch,PC_TEX_PORTRAIT,out);
 }
+/* Whether a set holds the picture, without a lookup's miss count or log: the shifted-face probe below. */
+static int known(uint64_t texel,uint64_t palette,int size,int thumbnail) {
+    int menu=size==48 || thumbnail,battle=size==24 && !menu,category=menu?1:battle?2:0;
+    if(!(menu?stats.menuEnabled:battle?stats.battleEnabled:stats.enabled)) return 0;
+    for(int i=0;i<SLOTS;++i)
+        if(entries[i].used && entries[i].texel==texel && entries[i].palette==palette && entries[i].category==category)
+            return entries[i].image.rgba!=NULL;
+    char path[sizeof(dir)+64]; SDL_PathInfo info;
+    snprintf(path,sizeof(path),"%s/%016" PRIx64 "-%016" PRIx64 ".png",menu?menuDir:battle?battleDir:dir,texel,palette);
+    return SDL_GetPathInfo(path,&info) && info.type==SDL_PATHTYPE_FILE;
+}
+/* A face the game samples a texel or a few off its picture (xg-g0ra.9): the menu's portrait slide draws the 48 px
+ * face from a row low or a column right for some frames (US menu: Fei's 34defcd11fcc5e04 at VRAM 896,0 sampled at
+ * 896,1 and 897,0), so the texture it names is the portrait moved, the edge past it whatever VRAM holds there, and its
+ * key no picture's. Off by up to SHIFT_ROWS rows or columns (or one of each), the rectangle the face really starts at
+ * is keyed from VRAM; when a set has that picture, the redraw is drawn moved the same way, the texels past the
+ * portrait native. Made once per texture and kept (SHIFTS, the oldest goes); a texture no shift explains is
+ * remembered too (NOSHIFT), so it is not searched again every frame. */
+#define SHIFT_ROWS 8
+#define SHIFTS 8
+#define NOSHIFT 32
+static struct { uint64_t texel,palette; int category; PortraitImage image; } shifts[SHIFTS];
+static uint64_t noShift[NOSHIFT][2];
+static int shiftNext, noShiftNext;
+static void shiftsClear(void) {
+    for(int i=0;i<SHIFTS;++i) free((void*)shifts[i].image.rgba);
+    memset(shifts,0,sizeof(shifts)); shiftNext=0; memset(noShift,0,sizeof(noShift)); noShiftNext=0;
+}
+static int shiftedImage(const DecodedTexture* d,int size,int thumbnail,PortraitImage* out) {
+    int category=size==48 || thumbnail?1:size==24?2:0;
+    for(int i=0;i<SHIFTS;++i)
+        if(shifts[i].image.rgba && shifts[i].texel==d->texelKey && shifts[i].palette==d->paletteKey && shifts[i].category==category) {
+            *out=shifts[i].image; return 1;
+        }
+    if(!d->rgba) return 0;
+    for(int i=0;i<NOSHIFT;++i) if(noShift[i][0]==d->texelKey && noShift[i][1]==d->paletteKey) return 0;
+    int offsets[4*SHIFT_ROWS+4][2],count=0;
+    for(int n=1;n<=SHIFT_ROWS;++n) {
+        int o[4][2]={{0,n},{0,-n},{n,0},{-n,0}};
+        for(int j=0;j<4;++j) { offsets[count][0]=o[j][0]; offsets[count][1]=o[j][1]; ++count; }
+    }
+    for(int j=0;j<4;++j) { offsets[count][0]=j&1?1:-1; offsets[count][1]=j&2?1:-1; ++count; }
+    for(int n=0;n<count;++n) {
+        int kx=offsets[n][0],k=offsets[n][1];   /* the face starts kx columns left of and k rows above the sampled rectangle */
+        TextureRequest r=d->request; r.u-=kx; r.v-=k;
+        if(r.v<0 || r.v+r.h>512 || r.u<0) continue;
+        uint64_t texel=textureTexelKey(r);
+        PortraitImage base;
+        if(!known(texel,d->paletteKey,size,thumbnail) || !imageForSize(texel,d->paletteKey,size,thumbnail,&base)) continue;
+        int sc=base.scale,w=size*sc;
+        uint8_t* rgba=malloc((size_t)w*w*4);
+        if(!rgba) return 0;
+        for(int y=0;y<w;++y) for(int x=0;x<w;++x) {
+            int row=y/sc,col=x/sc,fy=row+k,fx=col+kx;   /* the sampled texel, and the face's texel it shows */
+            const uint8_t* from=fy>=0 && fy<size && fx>=0 && fx<size ? base.rgba+(((size_t)fy*sc+y%sc)*w+(size_t)fx*sc+x%sc)*4
+                                                                    : d->rgba+((size_t)row*size+col)*4;
+            memcpy(rgba+((size_t)y*w+x)*4,from,4);
+        }
+        int slot=shiftNext++%SHIFTS;
+        free((void*)shifts[slot].image.rgba);
+        shifts[slot].texel=d->texelKey; shifts[slot].palette=d->paletteKey; shifts[slot].category=category;
+        shifts[slot].image=(PortraitImage){rgba,w,sc,UINT64_C(0x2800000000000000)|++serial};
+        ++stats.shifted;
+        *out=shifts[slot].image; return 1;
+    }
+    noShift[noShiftNext%NOSHIFT][0]=d->texelKey; noShift[noShiftNext%NOSHIFT][1]=d->paletteKey; ++noShiftNext;
+    return 0;
+}
 int portraitPackClassSample(const DecodedTexture* d,TextureRequest patch,int kind,TextureSample* out) {
     PortraitImage image;
     if(!d || d->depth!=8 || (d->request.w!=64 && d->request.w!=48 && d->request.w!=24) || d->request.h!=d->request.w ||
         patch.u<d->request.u || patch.v<d->request.v ||
-        patch.u+patch.w>d->request.u+d->request.w || patch.v+patch.h>d->request.v+d->request.h ||
-        !imageForSize(d->texelKey,d->paletteKey,d->request.w,kind==PC_TEX_MENU_THUMB_PORTRAIT,&image)) return 0;
+        patch.u+patch.w>d->request.u+d->request.w || patch.v+patch.h>d->request.v+d->request.h) return 0;
+    int thumb=kind==PC_TEX_MENU_THUMB_PORTRAIT;
+    if(!(!known(d->texelKey,d->paletteKey,d->request.w,thumb) && shiftedImage(d,d->request.w,thumb,&image)) &&
+       !imageForSize(d->texelKey,d->paletteKey,d->request.w,thumb,&image)) return 0;
     if(!textureReplacementsShown()) return 0; /* the A/B comparison: looked up, not shown */
     *out=(TextureSample){image.rgba,image.revision,d->request.u,d->request.v,d->request.w,d->request.h,image.scale,NULL,1};
     return 1;

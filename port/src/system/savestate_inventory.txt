@@ -97,6 +97,7 @@ cd/regional.c cache derived merged voice files, rebuilt as needed
 cd/regional.c cacheCount derived with cache
 cd/regional.c initialized host voice bundles' files and settings
 cd/regional.c movie state its head (fadeOut lives inside one sector's mixing)
+cd/regional.c packCaption host the movie captions' reader, installed once at startup (a function)
 cd/regional.c sources host voice bundles' files and settings
 cd/stream.c endCallback state
 cd/stream.c endFrame state
@@ -148,6 +149,7 @@ gpu/gp0.c cacheMaybeStale state entries that may no longer equal VRAM while the 
 gpu/gp0.c cacheMaybeStaleCount state
 gpu/gp0.c clutLoads derived counts CLUT cache loads for clutCleanMemo (the memo is invalidated by vramLayoutSerial on a load)
 gpu/gp0.c clutCleanMemo derived memo of cacheRaster's CLUT-cache-equals-VRAM check, revalidated by tile generations
+gpu/gp0.c exact host the XG_CACHE_WALK_READS switch, read once
 gpu/gp0.c gp state the drawing state, a command or load in progress, the texture and CLUT caches
 gpu/gp0.c l derived per-line scratch
 gpu/gp0.c probe host debug switches
@@ -549,6 +551,7 @@ system/freecam.c fc host the free camera's view (the player's, not the game's)
 system/freecam.c fixedRooms host the XG_FREECAM_FIXED switch
 system/freecam.c limits host the XG_FREECAM_LIMITS switch
 system/freecam.c field host log state
+system/freecam.c look host the first-person view (the player's, not the game's), as fc
 system/freecam.c row host log state
 system/freecam.c sw host the XG_FREECAM_SWEEP tool's state
 system/freecam.c walls host the XG_FREECAM_WALLS switch

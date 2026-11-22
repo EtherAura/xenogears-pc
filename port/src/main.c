@@ -57,6 +57,8 @@ int cardCommand(int argc, char** argv);
 void kromInit(const char* discPath);
 /* port/src/extras (weak: a build may leave them out). */
 void extrasInit(void) __attribute__((weak));
+/* port/src/gpu/texture_pack.c (weak: as the extras). */
+void texturePackPrepare(void) __attribute__((weak));
 int extrasMain(void) __attribute__((weak));
 void portStartPrepare(void); /* system/options.c: a start the extras asked for */
 #include "system/netplay.h"
@@ -333,6 +335,9 @@ int main(int argc, char** argv) {
     if (state != NULL) {
         stateRequestLoadFile(state); /* at the game's first VSync, once the boot has set the machine up */
         state = NULL;
+    }
+    if (texturePackPrepare != NULL) {
+        texturePackPrepare(); /* the pack indexes now, while no sound plays (the first push opens it) */
     }
     fprintf(stderr, "xenogears: entering kernelMain\n");
     hwGameStart(); /* the boot is out of the clock: no vblank backlog at the start */

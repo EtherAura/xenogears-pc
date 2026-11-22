@@ -124,6 +124,40 @@ int main(int argc,char** argv) {
     CHECK(image(argv[1],"amber",texel+100,palette,96,50)); portraitPackReload();
     CHECK(portraitPackClassSample(&face,face.request,PC_TEX_MENU_THUMB_PORTRAIT,&sample) && sample.scale==4);
     portraitPackStats(&stats); CHECK(stats.kindDraws[PORTRAIT_MENU_THUMB]==1 && !stats.kindMisses[PORTRAIT_MENU_THUMB]);
+    /* A menu face sampled a row low (the menu's portrait slide, xg-g0ra.9): its texture names no picture, the face's
+     * own rectangle a row up does, so that redraw is drawn moved up a row, the row past the face native. */
+    {
+        const int depth8=0x80; uint16_t clut=0x7fc0;                       /* page 0 at 8 bits, a CLUT at y 511 */
+        for(int i=0;i<256;++i) vramShadow[511][i]=(uint16_t)(i?0x8000|i:0);
+        for(int y=0;y<60;++y) for(int x=0;x<24;++x) vramShadow[y][x]=(uint16_t)((y*7+1)&0xff)|(uint16_t)(((y*7+2)&0xff)<<8);
+        TextureRequest at=(TextureRequest){depth8,clut,0,0,0,48,48,0,0}, low=at; low.v=1;
+        const DecodedTexture* own=textureCacheGet(at);
+        CHECK(own && own->depth==8);
+        uint64_t faceKey=own->texelKey, facePal=own->paletteKey;
+        char path[3600]; snprintf(path,sizeof(path),"%s/amber/%s/%016" PRIx64 "-%016" PRIx64 ".png",argv[1],texturePackVersion(),faceKey,facePal);
+        SDL_Surface* f=SDL_CreateSurface(192,192,SDL_PIXELFORMAT_RGBA32); CHECK(f);
+        for(int y=0;y<192;++y) for(int x=0;x<192;++x) { uint8_t* q=(uint8_t*)f->pixels+(size_t)y*f->pitch+x*4; q[0]=(uint8_t)(y/4*5); q[1]=7; q[2]=9; q[3]=255; }
+        CHECK(SDL_SavePNG(f,path)); SDL_DestroySurface(f); portraitPackReload();
+        const DecodedTexture* slid=textureCacheGet(low);
+        CHECK(slid && slid->texelKey!=faceKey && slid->paletteKey==facePal);
+        PortraitPackStats before; portraitPackStats(&before);
+        CHECK(portraitPackClassSample(slid,slid->request,PC_TEX_MENU_PORTRAIT,&sample) && sample.scale==4 && sample.w==48);
+        CHECK(sample.rgba[0]==5 && sample.rgba[(size_t)46*4*192*4]==47*5);              /* rows 0..46: the face's 1..47 */
+        CHECK(!memcmp(sample.rgba+(size_t)47*4*192*4,slid->rgba+(size_t)47*48*4,4));     /* row 47: past the face, native */
+        portraitPackStats(&stats); CHECK(stats.shifted==before.shifted+1 && stats.kindMisses[PORTRAIT_MENU]==before.kindMisses[PORTRAIT_MENU]);
+        const uint8_t* made=sample.rgba;
+        CHECK(portraitPackClassSample(slid,slid->request,PC_TEX_MENU_PORTRAIT,&sample) && sample.rgba==made); /* kept */
+        CHECK(portraitPackClassSample(own,own->request,PC_TEX_MENU_PORTRAIT,&sample) && sample.rgba[0]==0);   /* its own face */
+        /* a column right (897,0 for Fei's 896,0 in the US menu): the face's columns 1..47, column 47 native */
+        TextureRequest right=at; right.u=1;
+        const DecodedTexture* side=textureCacheGet(right);
+        CHECK(side && side->texelKey!=faceKey && side->paletteKey==facePal);
+        CHECK(portraitPackClassSample(side,side->request,PC_TEX_MENU_PORTRAIT,&sample) && sample.rgba[0]==0 && sample.rgba[(size_t)4*192*4]==5);
+        CHECK(!memcmp(sample.rgba+(size_t)47*4*4,side->rgba+(size_t)47*4,4));                  /* column 47: native */
+        /* no shift explains a texture: drawn native, and not searched again */
+        TextureRequest far=at; far.v=30; const DecodedTexture* other=textureCacheGet(far);
+        CHECK(other && !portraitPackClassSample(other,other->request,PC_TEX_MENU_PORTRAIT,&sample));
+    }
     CHECK(!strcmp(portraitPackSelected(),"amber") && portraitPackEnabled());
     portraitPackShutdown(); CHECK(!strcmp(portraitPackSelected(),"amber")); CHECK(portraitPackEnabled());
     portraitPackShutdown(); texturePackShutdown(); SDL_Quit(); printf("portraitpacktest: %d checks\n",checks); return 0;

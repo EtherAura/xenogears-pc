@@ -14,6 +14,7 @@ typedef struct {
     /* Since the last reload: each distinct missing picture once (misses are
      * remembered), each replacement draw. */
     uint64_t kindDraws[PORTRAIT_KINDS], kindMisses[PORTRAIT_KINDS];
+    uint64_t shifted; /* faces drawn from a picture a few rows off (the menu's portrait slide, xg-g0ra.9) */
     char message[256], battleMessage[256], menuMessage[256];
 } PortraitPackStats;
 typedef struct {

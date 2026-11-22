@@ -477,6 +477,11 @@ typedef struct {
     /* The scene's lighting: the same for light.comp's set. */
     VkDescriptorSet sceneLightSet[3];
     VkImageView sceneLightViews[3][2 + SCENE_LIGHT_IMAGES];
+    /* First-person look's focus (sceneFocusRead): the depth round the view's
+     * centre, copied here and read when this context comes round again. */
+    HostBuffer focusRead;
+    size_t focusBytes;
+    int focusPending, focusN;
 } FrameCtx;
 
 static struct {
@@ -574,6 +579,10 @@ static struct {
         /* [wide][coarse][unordered] */
         VkPipeline draw[2][2][2];
         int insetX, insetY;        /* the copy of VRAM's frame inside the wide one, 1x */
+        /* The colour image's first PS1 pixel in the game's frame, for the
+         * 15-bit modes' dither (scene_color.glsl): smooth motion's canvas
+         * sets it while its passes are recorded, the copies are at 0. */
+        int ditherX, ditherY;
         VkSampler sampler;
         VkPipeline dof;
         VkPipelineLayout dofLayout;
@@ -2580,6 +2589,31 @@ static FrameCtx* frame(void) {
     return &vk.frames[vk.cur];
 }
 
+/* First-person look focuses where the view's centre is (scene.c,
+ * PC_SCENE_FOCUS_CENTRE): FOCUS_SPAN x FOCUS_SPAN PS1 pixels of the copy's
+ * depth image round that centre are copied out with the frame
+ * (sceneFocusRead), and once the device is done with it the median of what
+ * was drawn there, the sky and flat pictures left out, is the next focus. One
+ * texel per PS1 pixel, its middle one, so every resolution measures alike. */
+#define FOCUS_SPAN 9
+static void focusHarvest(FrameCtx* f) {
+    if (!f->focusPending) return;
+    f->focusPending = 0;
+    const uint32_t* t = (const uint32_t*)f->focusRead.map;
+    int n = f->focusN, side = FOCUS_SPAN * n, count = 0;
+    uint32_t z[FOCUS_SPAN * FOCUS_SPAN];
+    for (int j = 0; j < FOCUS_SPAN; j++)
+        for (int i = 0; i < FOCUS_SPAN; i++) {
+            uint32_t raw = t[(size_t)(j * n + n / 2) * side + i * n + n / 2];
+            if (raw == 0u || raw == 0xFFFFFFFFu) continue; /* a flat picture, or nothing drawn (dof.comp) */
+            raw &= ~0x40000000u;                          /* a figure's mark */
+            int k = count++;
+            for (; k > 0 && z[k - 1] > raw; k--) z[k] = z[k - 1];
+            z[k] = raw;
+        }
+    if (count > 0) sceneFocusMeasured((float)z[count / 2] / 16.0f);
+}
+
 static void waitFrame(FrameCtx* f) {
     if (f->submitted) {
         CPU_TIME_BEGIN(CPU_GPUWAIT);
@@ -2614,6 +2648,7 @@ static VkCommandBuffer recording(void) {
         /* Done with (or idle since a wait that cleared `submitted`). */
         gtHarvest(f);
         autoTimeHarvest(f);
+        focusHarvest(f);
         hiFrameDone((int)(f - vk.frames));
         VK_CHECK(vkResetFences(vk.device, 1, &f->fence));
         VK_CHECK(vkResetCommandBuffer(f->cmd, 0));
@@ -3208,7 +3243,9 @@ static int resMake(void) {
     }
     vk.resLimitWords = (uint32_t)(((VkDeviceSize)mb << 20)/4);
     resIdle();
-    for (mb = mb < 4 ? mb : 4; mb >= 1; mb /= 2) {
+    /* resGrow's floor from the start: its first growth would come mid-room, a device idle and a
+     * full re-upload in one vblank (about 80 ms on the game thread: xg-2fy.2). */
+    for (mb = mb < 64 ? mb : 64; mb >= 1; mb /= 2) {
         if (deviceBuffer(&vk.resBuf, &vk.resMem, (VkDeviceSize)mb << 20,
                          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
             vk.resCapWords = (uint32_t)(((VkDeviceSize)mb << 20) / 4);
@@ -4603,18 +4640,24 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
             }
         }
         /* A scene blurred by its depth (scene.c): the picture between gets the
-         * same, at the same point of the replay. Only a plain snapshot
-         * (no captures, frozen sources or copies); the rest show the native
-         * picture, which has its blur. The images first: making them can
-         * hand the frame over, which must not happen once the replay is
-         * being recorded. */
+         * same, at the same point of the replay. The scene itself must be
+         * plain: no captures, and no frozen source, copy or triangle that
+         * reads one before the scene's end. A frozen picture laid over it
+         * afterwards (the transition a room starts under, black until the
+         * room fades in: its triangles and their frozen source, all in the
+         * UI) is drawn over the lit and blurred scene, as in the native
+         * frame. The rest show the native picture,
+         * which has its effects. The images first: making them can hand the
+         * frame over, which must not happen once the replay is being
+         * recorded. */
         int blurAt = -1;
         DofParams blur = f->fx.dof;
         LightParams lit = f->fx.light;
         if (f->sceneBlur || f->sceneLight) {
-            int plain = !f->capture && !f->frozen && !f->opCount && vk.hiN != 0 && !vk.orderedEnabled &&
-                        f->sceneEnd <= (uint32_t)count;
-            for (int i = 0; plain && i < count; i += 3)
+            int plain = !f->capture && vk.hiN != 0 && !vk.orderedEnabled && f->sceneEnd <= (uint32_t)count;
+            for (uint32_t o = 0; plain && o < f->opCount; o++)
+                if (f->ops[o].kind != INTERP_OP_FROZEN || f->ops[o].vertex < f->sceneEnd) plain = 0;
+            for (uint32_t i = 0; plain && i < f->sceneEnd; i += 3)
                 if (vk.interpolationVertices[i].sample[3] & (INTERP_SAMPLE_CAPTURE | INTERP_SAMPLE_EVOLVING | INTERP_SAMPLE_NATIVE_CACHE)) plain = 0;
             if (!plain || !sceneMake() ||
                 !sceneDepthImage(SCENE_REPLAY, vk.interpolationCanvasW * vk.interpolationN, vk.interpolationCanvasH * vk.interpolationN) ||
@@ -4816,11 +4859,13 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 interpolationBarrier(cmd); first = end;
                 if (inScene && first >= (uint32_t)blurAt) {
                     /* The canvas is the frame's view: the game's frame starts at its origin inside it. */
+                    vk.scene.ditherX = c.ditherX; vk.scene.ditherY = c.ditherY; /* as the canvas's draws */
                     if (f->sceneLight)
                         sceneLightRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &lit,
                                          lit.centerX + (float)f->originX, lit.centerY + (float)f->originY);
                     if (f->sceneBlur)
                         sceneBlurRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &blur);
+                    vk.scene.ditherX = vk.scene.ditherY = 0;
                     interpolationBarrier(cmd);
                     vkCmdBindVertexBuffers(cmd,0,1,&ctx->vertices.buffer,&offset);
                 }
@@ -5411,6 +5456,7 @@ typedef struct {
     int32_t workW, workH;
     int32_t layerX, layerY;
     float focus, band, gain, radius;
+    int32_t color, colorPad, ditherX, ditherY; /* scene_color.glsl */
 } DofConstants;
 
 /* light.comp's passes: the shadows' (14-17), and the last, the composite at
@@ -5426,6 +5472,7 @@ typedef struct {
     float up[3], screenZ;
     float centerX, centerY, focus, block; /* block: the vec4 lightBlock wrote, or -1 */
     float top, shade, bounce, glow;
+    int32_t color, colorPad, ditherX, ditherY; /* scene_color.glsl */
 } LightConstants;
 
 static void sceneDestroy(void) {
@@ -5834,6 +5881,8 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
     /* The prefilter's samples per PS1 pixel: all of them up to 3x, nine beyond. */
     DofConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->figures ? 2 : 0) | (p->debug == 2 ? 4 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
                       p->focus * 16.0f, p->band, p->gain, p->radius};
+    c.color = vk.hiColor;
+    c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
     for (int pass = 0; pass < 6; pass++) {
         c.pass = pass;
         vkCmdPushConstants(cmd, vk.scene.dofLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
@@ -5889,6 +5938,8 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
     LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
                         {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, (float)block,
                         p->top, p->shade, p->bounce, p->glow};
+    c.color = vk.hiColor;
+    c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
     /* Only the passes the parts in use need (all of them when asked: the
      * checks, the debug colours). The composite reads nothing of a part
      * that is off. */
@@ -5946,6 +5997,39 @@ static void sceneLight(int primary, int x, int y, int w, int h, int second, int 
     sceneLightRecord(cmd, ctx, primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p, centerX, centerY);
 }
 
+/* The copy of VRAM's depth round (cx, cy), PS1 pixels from its frame's
+ * corner, into this context's focusRead (focusHarvest). */
+static void sceneFocusRead(float cx, float cy, int frameW, int frameH) {
+    int n = vk.hiN, side = FOCUS_SPAN * n;
+    int x = ((int)cx - FOCUS_SPAN / 2) * n, y = ((int)cy - FOCUS_SPAN / 2) * n;
+    if (n <= 0 || x < 0 || y < 0 || x + side > frameW * n || y + side > frameH * n) return;
+    VkCommandBuffer cmd = recording();
+    FrameCtx* f = frame();
+    size_t bytes = (size_t)side * side * 4;
+    if (bytes > f->focusBytes) {
+        /* This context's earlier work is done: recording() waited for it. */
+        destroyHostBuffer(&f->focusRead);
+        if (!tryHostBufferMemory(&f->focusRead, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 1, 0)) {
+            f->focusBytes = 0;
+            return;
+        }
+        f->focusBytes = bytes;
+    }
+    rasterBarrier(cmd); /* the scene's batches wrote the depth */
+    VkBufferImageCopy c = {0};
+    c.imageSubresource = colorLayers;
+    c.imageOffset.x = x;
+    c.imageOffset.y = y;
+    c.imageExtent.width = (uint32_t)side;
+    c.imageExtent.height = (uint32_t)side;
+    c.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(cmd, vk.scene.depth[SCENE_NARROW], VK_IMAGE_LAYOUT_GENERAL, f->focusRead.buffer, 1, &c);
+    hostReadBarrier(cmd);
+    vk.needBarrier = 1;
+    f->focusPending = 1;
+    f->focusN = n;
+}
+
 void gvkSceneEnd(const SceneParams* p) {
     if (!vk.scene.active) return;
     endBatch(); /* the scene's batches, with their depth */
@@ -5955,6 +6039,7 @@ void gvkSceneEnd(const SceneParams* p) {
     if (!blur && !light) return;
     VRect a = vk.scene.rect[SCENE_NARROW];
     int aw = a.x1 - a.x0 + 1, ah = a.y1 - a.y0 + 1;
+    if (blur && p->measureFocus) sceneFocusRead(p->centreX, p->centreY, aw, ah);
     if (vk.scene.targets == 2 && vk.hiWide != VK_NULL_HANDLE) {
         /* Inside what the copy holds: the wide target's copy is only as wide
          * as the columns used so far. */
@@ -8336,6 +8421,7 @@ void gvkShutdown(void) {
         destroyHostBuffer(&f->movieStaging);
         destroyHostBuffer(&f->movieHiStaging);
         destroyHostBuffer(&f->resStage);
+        destroyHostBuffer(&f->focusRead);
         free(f->resCopies);
         destroyImage(&f->movieImage, &f->movieMemory, &f->movieView);
         vkDestroyFence(vk.device, f->fence, NULL);

@@ -1010,14 +1010,18 @@ def targets(build: Path) -> list[str]:
 
 
 def default_jobs() -> int:
-    """The CPUs this process may use, at most DEFAULT_JOBS_CAP."""
+    """The CPUs this process may use, at most DEFAULT_JOBS_CAP (or tools/yield.sh's XG_YIELD_JOBS)."""
     if hasattr(os, "process_cpu_count"):
         cpus = os.process_cpu_count()
     elif hasattr(os, "sched_getaffinity"):
         cpus = len(os.sched_getaffinity(0))
     else:
         cpus = os.cpu_count()
-    return max(1, min(DEFAULT_JOBS_CAP, cpus or 1))
+    try:
+        cap = int(os.environ.get("XG_YIELD_JOBS") or DEFAULT_JOBS_CAP)
+    except ValueError:
+        cap = DEFAULT_JOBS_CAP
+    return max(1, min(cap, DEFAULT_JOBS_CAP, cpus or 1))
 
 
 def job_count(text: str) -> int:

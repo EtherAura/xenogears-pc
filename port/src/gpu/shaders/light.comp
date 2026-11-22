@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Scene lighting over one frame of the hi-res copy (port/src/gpu/scene.c,
 // vk.c sceneLightRecord; docs/PORT_HD2D.md sections 14, 15). It runs where
@@ -106,7 +107,12 @@ layout(push_constant) uniform Light {
     vec4 view;     // xyz: the room's up in view space; w: the projection distance
     vec4 lens;     // xy: the projection centre in the frame, PS1 pixels; z: the focus depth; w: the shadows' block, or -1
     vec4 strength; // top light, shade, bounce, glow
+    int color;     // the copy's colour mode (scene_color.glsl)
+    int colorPad;
+    ivec2 ditherOrigin; // scene_color.glsl
 } pc;
+
+#include "scene_color.glsl"
 
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
@@ -726,7 +732,9 @@ void composite(ivec2 l) {
     uvec3 o = uvec3(clamp(sqrt(max(c, 0.0)), 0.0, 1.0) * 255.0 + 0.5);
     uint packed = o.r | o.g << 8 | o.b << 16;
     // A pixel nothing changed is not written: it stays bit for bit what was drawn.
-    if (packed != (word & 0xFFFFFFu)) imageStore(color, p, uvec4((word & 0xFF000000u) | packed));
+    if (packed == (word & 0xFFFFFFu)) return;
+    o = sceneColorMode(o, p, pc.n, pc.color, pc.ditherOrigin);
+    imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
 }
 
 void main() {

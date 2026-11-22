@@ -2,7 +2,9 @@
  * layouts on screens of several shapes and at several sizes (every control on
  * the screen, none over another), then fingers: the left stick's directions,
  * the right stick and the camera's buttons, and what shows with which of the
- * camera's features. Settings stay in memory (XG_SETTINGS=none). */
+ * camera's features; last, display cutouts (XG_TOUCH_CUTOUT): no control on
+ * one, the layout's rules kept, nothing moved by one that covers nothing.
+ * Settings stay in memory (XG_SETTINGS=none). */
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -63,6 +65,20 @@ static int overlap(const TouchControl* a, const TouchControl* b) {
         return dx * dx + dy * dy < a->w / 2 * a->w / 2;
     }
     return fabsf(a->x - b->x) < (a->w + b->w) / 2 && fabsf(a->y - b->y) < (a->h + b->h) / 2;
+}
+
+/* Whether a control's figure (a round one's circle, the D-pad's plus, a box) meets a rectangle. */
+static int onRect(const TouchControl* c, float x0, float y0, float x1, float y1) {
+    if (isRound(c->kind)) {
+        float nx = fmaxf(x0, fminf(c->x, x1)), ny = fmaxf(y0, fminf(c->y, y1));
+        return (c->x - nx) * (c->x - nx) + (c->y - ny) * (c->y - ny) < c->w / 2 * c->w / 2;
+    }
+    if (c->kind == TOUCH_DPAD) {
+        float arm = c->w * 0.175f, half = c->w / 2;
+        return (c->x + arm > x0 && c->x - arm < x1 && c->y + half > y0 && c->y - half < y1) ||
+               (c->x + half > x0 && c->x - half < x1 && c->y + arm > y0 && c->y - arm < y1);
+    }
+    return c->x + c->w / 2 > x0 && c->x - c->w / 2 < x1 && c->y + c->h / 2 > y0 && c->y - c->h / 2 < y1;
 }
 
 static const TouchControl* find(const TouchControl* cs, int n, int kind) {
@@ -262,6 +278,86 @@ int main(void) {
         }
     }
     context[0] = '\0';
+
+    /* ---- display cutouts: a camera hole at the middle of a short edge (as the Pixel 10 Pro XL's
+     * in landscape, either way round), a notch at the top middle ---- */
+    finger(SDL_EVENT_FINGER_DOWN, 0, row->x, row->y); /* the hotkeys' row closed again */
+    finger(SDL_EVENT_FINGER_UP, 0, row->x, row->y);
+    static const char* const holes[] = {"0.010,0.46,0.034,0.08", "0.956,0.46,0.034,0.08", "0.44,0,0.12,0.06",
+                                        "0.010,0.46,0.034,0.08;0.956,0.46,0.034,0.08"};
+    static const float boxes[][2][4] = {{{0.010f, 0.46f, 0.044f, 0.54f}}, {{0.956f, 0.46f, 0.990f, 0.54f}},
+                                        {{0.44f, 0.0f, 0.56f, 0.06f}},
+                                        {{0.010f, 0.46f, 0.044f, 0.54f}, {0.956f, 0.46f, 0.990f, 0.54f}}};
+    TouchControl plain[32];
+    for (unsigned k = 0; k < sizeof holes / sizeof holes[0]; k++) {
+        testSetEnv("XG_TOUCH_CUTOUT", holes[k]);
+        SDL_Event changed;
+        SDL_zero(changed);
+        changed.type = SDL_EVENT_WINDOW_SAFE_AREA_CHANGED;
+        touchInputSeen(&changed);
+        touchVBlank(); /* reads them */
+        for (int layout = 0; layout < 2; layout++) {
+            touchSetLayout(layout);
+            for (unsigned z = 0; z < sizeof sizes / sizeof sizes[0]; z++) {
+                touchSetSizePercent(sizes[z]);
+                for (unsigned sc = 0; sc < sizeof screens / sizeof screens[0]; sc++) {
+                    float sw = screens[sc][0], sh = screens[sc][1];
+                    snprintf(context, sizeof context, "cutout %s, layout %d size %d on %.0f x %.0f", holes[k], layout,
+                             sizes[z], sw, sh);
+                    layoutChecks(sw, sh);
+                    n = touchControls(cs, 32, sw, sh);
+                    for (int i = 0; i < n; i++)
+                        for (int b = 0; b < 2 && boxes[k][b][2] > 0; b++) {
+                            const float* c = boxes[k][b];
+                            EXPECTF(!onRect(&cs[i], c[0] * sw, c[1] * sh, c[2] * sw, c[3] * sh),
+                                    "kind %d at %.0f,%.0f on the cutout", cs[i].kind, cs[i].x, cs[i].y);
+                        }
+                }
+            }
+        }
+    }
+    context[0] = '\0';
+    /* the Pixel's hole, a little lower, on the stick layout's D-pad arm: it moves (so the checks above
+     * are not met by chance) and clears it */
+    {
+        testSetEnv("XG_TOUCH_CUTOUT", "0.010,0.50,0.034,0.08");
+        SDL_Event changed;
+        SDL_zero(changed);
+        changed.type = SDL_EVENT_WINDOW_SAFE_AREA_CHANGED;
+        touchInputSeen(&changed);
+        touchVBlank();
+        touchSetLayout(1);
+        touchSetSizePercent(100);
+        n = touchControls(cs, 32, 2992, 1344);
+        const TouchControl* d = find(cs, n, TOUCH_DPAD);
+        testSetEnv("XG_TOUCH_CUTOUT", "");
+        touchInputSeen(&changed);
+        touchVBlank();
+        int m = touchControls(plain, 32, 2992, 1344);
+        const TouchControl* before = find(plain, m, TOUCH_DPAD);
+        CHECK(d != NULL && before != NULL);
+        EXPECT(onRect(before, 0.010f * 2992, 0.50f * 1344, 0.044f * 2992, 0.58f * 1344));
+        EXPECT(d->x > before->x && !onRect(d, 0.010f * 2992, 0.50f * 1344, 0.044f * 2992, 0.58f * 1344));
+        EXPECT(d->x - before->x < 0.06f * 2992); /* clear of it, not across the screen */
+    }
+    /* a cutout that covers no control moves none */
+    touchSetSizePercent(100);
+    touchSetLayout(0);
+    testSetEnv("XG_TOUCH_CUTOUT", "0.01,0.01,0.001,0.001");
+    {
+        SDL_Event changed;
+        SDL_zero(changed);
+        changed.type = SDL_EVENT_WINDOW_SAFE_AREA_CHANGED;
+        touchInputSeen(&changed);
+        touchVBlank();
+        n = touchControls(cs, 32, W, H);
+        testSetEnv("XG_TOUCH_CUTOUT", "");
+        touchInputSeen(&changed);
+        touchVBlank();
+        int m = touchControls(plain, 32, W, H);
+        EXPECT(n == m);
+        for (int i = 0; i < n && i < m; i++) EXPECT(cs[i].x == plain[i].x && cs[i].y == plain[i].y);
+    }
 
     SDL_DestroyWindow(window);
     SDL_Quit();

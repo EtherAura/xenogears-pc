@@ -444,6 +444,10 @@ typedef struct {
 typedef struct {
     DofParams dof;
     LightParams light;
+    /* Measure the depth at the picture's centre for the next scenes' focus
+     * (first-person look): where that centre is in the game's frame, PS1 pixels. */
+    int measureFocus;
+    float centreX, centreY;
 } SceneParams;
 /* libgpu.c's walk: a registered scene is being drawn (sceneWalkTag at each tag). */
 extern int sceneWalkOn;
@@ -467,6 +471,9 @@ int gp0SceneRects(VRect* narrow, VRect* wide, int inset[2]);
  * stop, and with `effects` the copy's two rectangles are lit and blurred. */
 int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY);
 void gvkSceneEnd(const SceneParams* effects);
+/* scene.c: the depth at a picture's centre, measured (vk.c reads it back a
+ * few frames later, when the frame's buffers come round again). */
+void sceneFocusMeasured(float z);
 int gvkSceneActive(void);
 /* interpolation.c: the scene of the snapshot being recorded ended here. */
 void interpolationSceneEnd(const SceneParams* effects);

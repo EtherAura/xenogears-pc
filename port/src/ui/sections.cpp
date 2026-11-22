@@ -843,6 +843,14 @@ void displaySection() {
 
     // The first piece of the HD-2D-style look (port/src/gpu/scene.c): the
     // Enhanced engine's fields only.
+    // The reasons the scene effects give when they show nothing (port/src/gpu/scene.c),
+    // named here for the catalogs (tools/l10n.py reads the UI's sources); hint() shows
+    // them through tr().
+    static const char* const sceneReasons[] = {
+        N_("no focus point in this view"), N_("a movie-backed scene"), N_("no frame"), N_("no display copy yet"),
+        N_("not available on this device, with GPU ordering, or without memory for it"),
+        N_("the game gave no view for this scene")};
+    (void)sceneReasons;
     if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
         // "Subtle", not "Light": the catalogs have no contexts and "Light" is the model viewer's lamp.
         static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
@@ -879,7 +887,8 @@ void displaySection() {
         hint("In fields, the scenery gets light from above, shade in corners and under overhangs, and light from "
              "bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 "
              "picture itself is not changed. Off by default.");
-        if (sceneLightingStatus() != nullptr) hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        if ((sceneLighting() || sceneGlow()) && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("lighting");
     }
     if (row("Glow", "glow", opt::ENHANCED)) {
@@ -902,6 +911,8 @@ void displaySection() {
         if (chosen != level) sceneSetShadows(chosen);
         hint("In fields, the scenery and the characters cast shadows from a sun set when the room starts. Dialogue, "
              "portraits and the HUD are not touched. Off by default.");
+        if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("shadows");
     }
 

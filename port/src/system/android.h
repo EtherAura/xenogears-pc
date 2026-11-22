@@ -25,6 +25,10 @@ void androidEndTask(void);
 /* The app again, in a new process (XgActivity.restartApp; engine.c, a change of engine): the
  * loader then picks the game library anew. Returns only when the activity cannot do it. */
 void androidRestart(void);
+/* The display cutouts' rectangles (x0 y0 x1 y1 each, at most max) in the pixels of the app's
+ * view, *w x *h (XgActivity.cutoutRects); their count, or -1 before the activity has had its
+ * window's insets. For the touch pad (touch.c). */
+int androidCutouts(float* rects, int max, float* w, float* h);
 /* XgActivity's method(String arg), no result: e.g. "copyPack", "texture". */
 void androidActivityActionText(const char* method, const char* arg);
 /* The packs copied into the app's packs folder: each library's folders. */

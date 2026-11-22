@@ -2129,14 +2129,19 @@ static void pcFieldPictureLog(void) {
  * background as big as the screen is a picture, kept sharp (the same test
  * as renderBackgroundPolyIfEnabled). The 1x picture is not involved.
  * looking: the frame was drawn from eye level (first-person look), where the
- * look-at point is the game camera's and no depth of that picture; it is
- * registered with no focus, so nothing is blurred and the port can say why. */
+ * look-at point is the game camera's: it is registered with the eye-level view
+ * (saved before the game's matrices are put back) and a focus the port takes
+ * from the picture's depth at its centre. */
+static MATRIX pcEyeProjection; /* the eye-level view a first-person picture was drawn with */
+
 static void pcFieldSceneDepth(int looking) {
     MATRIX* m = &fieldSceneState.m1E4_projectionMatrix;
     s32 x = fieldSceneState.m10_cameraAt.vx >> 16;
     s32 y = fieldSceneState.m10_cameraAt.vy >> 16;
     s32 z = fieldSceneState.m10_cameraAt.vz >> 16;
-    s32 focus = looking ? 0 : ((m->m[2][0] * x + m->m[2][1] * y + m->m[2][2] * z) >> 12) + m->t[2];
+    /* First-person look focuses where the view's centre is (carl,);
+     * the port measures it in the picture's depth. */
+    s32 focus = looking ? PC_SCENE_FOCUS_CENTRE : ((m->m[2][0] * x + m->m[2][1] * y + m->m[2][2] * z) >> 12) + m->t[2];
     s32 picture = -1;
 
     if (OPX_80Params.m32_OPX_82Param4 != 0 && D_800ADB50 == 0 && OPX_80Params.m0_OPX_80Params[2] <= 0x140 &&
@@ -2146,6 +2151,7 @@ static void pcFieldSceneDepth(int looking) {
     /* The scenery's rotation and projection, for the scene lighting (xg-rgcf.5.1):
      * the frame's centre and distance are the ones the field sets for its
      * scene (SetGeomOffset(0xA0, 0x70), SetGeomScreen(sceneSCRZ)). */
+    if (looking) m = &pcEyeProjection; /* the picture's own view, not the game's restored one */
     pcSceneView(m->m, m->t, fieldSceneState.m178_sceneSCRZ, 0xA0, 0x70, fieldMapNumber & 0xFFF);
     pcSceneDepth(pCurrentFieldRenderingContext->mCC_OT, 0x1000,
                  fieldUseGroundOT != 0 ? pCurrentFieldRenderingContext->m40D0_secondaryOT : 0, 0x1000,
@@ -2212,6 +2218,7 @@ void updateAndRenderField(void) {
     if (looking) {
         /* The next script tick projects actors to place dialogue. Leave the game's
          * view in all three matrices after the eye-level picture is submitted. */
+        pcEyeProjection = fieldSceneState.m1E4_projectionMatrix; /* Enhanced: for the scene effects (pcFieldSceneDepth) */
         fieldSceneState.m110_cameraMatrix = gameCamera;
         fieldSceneState.m1E4_projectionMatrix = gameProjection;
         if (renderCharsDisabled != 1) setCurrentRenderingMatrix(&gameProjection);

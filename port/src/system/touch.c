@@ -18,6 +18,21 @@
  * with a button that holds the camera's way back to the game's view and one
  * that enters and leaves the first-person view at a touch.
  *
+ * A display cutout (xg-mrj.3.13: a phone's camera hole, which the app draws
+ * around: SDL lays the window into the cutout area) moves the controls that
+ * would sit on it: the group they belong to (the left side, the right side,
+ * the top middle, the bottom middle) moves as one, inward from its edge or
+ * away from its border, as far as clears the cutout and a margin. Only the
+ * cutout's own shape counts, not the whole band beside it that the safe area
+ * gives, so a hole at the middle of a short edge moves nothing that is not
+ * at that height. The shapes come from the activity on Android
+ * (android.c androidCutouts) and from XG_TOUCH_CUTOUT elsewhere (tests:
+ * "x,y,w,h[;x,y,w,h...]" in fractions of the window), read where the layout
+ * is made (drawing, touches: a game run from a pad script has no touch
+ * vblanks), again when the window, its safe area or the display's
+ * orientation changes, and every two seconds besides (an event another loop
+ * took, a phone turned half round).
+ *
  * While the pad is in use the touches' mouse events (SDL makes a mouse of
  * the first finger) are dropped, or a tap would also be a click to the
  * mouse's pad (mouse.c). With the pad off, they go there as before. The
@@ -37,6 +52,9 @@
 extern void padHotkey(int scancode, int mod) __attribute__((weak));
 extern int padCameraFeatures(void) __attribute__((weak)); /* 1 the free camera, 2 the first-person view allowed, 4 on */
 extern void padFirstPerson(void) __attribute__((weak));
+/* system/android.c: the display cutouts' rectangles (x0 y0 x1 y1 each) in the pixels of a view
+ * of *w x *h; their count, or -1 while the activity has not reported its window's yet. */
+extern int androidCutouts(float* rects, int max, float* w, float* h) __attribute__((weak));
 extern void uiRequestToggle(void) __attribute__((weak));
 extern int uiIsOpen(void) __attribute__((weak));
 extern unsigned hwVSyncCount(void) __attribute__((weak));
@@ -80,6 +98,12 @@ static struct {
 
 static int autoShown, rowOpen;
 static float winW, winH;
+
+/* The display cutouts, x0 y0 x1 y1 in fractions of the window (cutouts above). */
+#define MAX_CUTOUTS 8
+static float cutouts[MAX_CUTOUTS][4];
+static int cutoutCount, cutoutsStale = 1;
+static Uint64 cutoutsReadAt;
 
 /* ---- settings ---------------------------------------------------------------------- */
 
@@ -224,7 +248,119 @@ int touchFittedSizePercent(float w, float h) {
     return full > 0 ? (int)(unitOf(w, h, touchLayout()) / full * 100 + 0.5f) : touchSizePercent();
 }
 
+/* XG_TOUCH_CUTOUT's rectangles, or the activity's (Android), as fractions of the window; said on
+ * stderr when they change. */
+static void readCutouts(void) {
+    float before[MAX_CUTOUTS][4];
+    int had = cutoutCount;
+    memcpy(before, cutouts, sizeof before);
+    cutoutsStale = 0;
+    cutoutCount = 0;
+    const char* env = SDL_getenv("XG_TOUCH_CUTOUT");
+    if (env != NULL && env[0] != '\0') {
+        const char* p = env;
+        while (*p != '\0' && cutoutCount < MAX_CUTOUTS) {
+            float x, y, cw, ch;
+            if (sscanf(p, "%f,%f,%f,%f", &x, &y, &cw, &ch) == 4 && cw > 0 && ch > 0) {
+                float* c = cutouts[cutoutCount++];
+                c[0] = x, c[1] = y, c[2] = x + cw, c[3] = y + ch;
+            }
+            const char* next = strchr(p, ';');
+            if (next == NULL) break;
+            p = next + 1;
+        }
+    } else if (androidCutouts != NULL) {
+        float rects[MAX_CUTOUTS * 4], vw = 0, vh = 0;
+        int n = androidCutouts(rects, MAX_CUTOUTS, &vw, &vh);
+        if (n < 0) cutoutsStale = 1; /* not reported yet: asked again at the next layout */
+        if (vw <= 0 || vh <= 0) vw = winW, vh = winH;
+        for (int i = 0; i < n && vw > 0 && vh > 0; i++) {
+            float* c = cutouts[cutoutCount++];
+            c[0] = rects[4 * i] / vw, c[1] = rects[4 * i + 1] / vh, c[2] = rects[4 * i + 2] / vw, c[3] = rects[4 * i + 3] / vh;
+        }
+    }
+    if (cutoutCount != had || memcmp(before, cutouts, sizeof before) != 0) {
+        fprintf(stderr, "touch: %d display cutout%s", cutoutCount, cutoutCount == 1 ? "" : "s");
+        for (int i = 0; i < cutoutCount; i++)
+            fprintf(stderr, "%s%.3f,%.3f-%.3f,%.3f", i ? "; " : ": ", cutouts[i][0], cutouts[i][1], cutouts[i][2], cutouts[i][3]);
+        fputc('\n', stderr);
+    }
+}
+
+/* The cutouts as the layout needs them: read when stale, else every two seconds. */
+static void refreshCutouts(void) {
+    Uint64 now = SDL_GetTicks();
+    if (!cutoutsStale && now - cutoutsReadAt < 2000) return;
+    cutoutsReadAt = now;
+    readCutouts();
+}
+
+/* The layout's groups, each moved as one: 0 the left side, 1 the right side, 2 the top middle,
+ * 3 the bottom middle. */
+static int groupOf(const TouchControl* c, float w, float h) {
+    if (c->x < w * 0.3f) return 0;
+    if (c->x > w * 0.7f) return 1;
+    return c->y < h / 2 ? 2 : 3;
+}
+
+static int isRoundKind(int kind) {
+    return isFace(kind) || isStick(kind) || kind == TOUCH_MENU || kind == TOUCH_HOTKEYS || kind == TOUCH_VIEW ||
+           kind == TOUCH_RECENTRE;
+}
+
+/* Whether a control's own figure at (x, y) meets the rectangle c0..c1 x d0..d1: a round one's
+ * circle, the D-pad's two arms (its square's corners are empty), the others' boxes. */
+static int meets(const TouchControl* c, float x, float y, float c0, float c1, float d0, float d1) {
+    if (isRoundKind(c->kind)) {
+        float nx = x < c0 ? c0 : x > c1 ? c1 : x, ny = y < d0 ? d0 : y > d1 ? d1 : y, r = c->w / 2;
+        return (x - nx) * (x - nx) + (y - ny) * (y - ny) < r * r;
+    }
+    float hw = c->w / 2, hh = c->h / 2;
+    if (c->kind == TOUCH_DPAD) {
+        float arm = c->w * 0.175f; /* touchpad.cpp's arm half width */
+        return (x + arm > c0 && x - arm < c1 && y + hh > d0 && y - hh < d1) ||
+               (x + hw > c0 && x - hw < c1 && y + arm > d0 && y - arm < d1);
+    }
+    return x + hw > c0 && x - hw < c1 && y + hh > d0 && y - hh < d1;
+}
+
+/* Each group as far from its edge or border as clears every cutout by margin (a move can meet
+ * another cutout: a few rounds). */
+static void avoidCutouts(TouchControl* cs, int n, float w, float h, float margin) {
+    float shift[4] = {0, 0, 0, 0};
+    for (int round = 0; round < 4 && cutoutCount > 0; round++) {
+        int moved = 0;
+        for (int i = 0; i < n; i++) {
+            int g = groupOf(&cs[i], w, h);
+            float x = cs[i].x + (g == 0 ? shift[0] : g == 1 ? -shift[1] : 0);
+            float y = cs[i].y + (g == 2 ? shift[2] : g == 3 ? -shift[3] : 0);
+            float x0 = x - cs[i].w / 2, x1 = x + cs[i].w / 2, y0 = y - cs[i].h / 2, y1 = y + cs[i].h / 2;
+            for (int k = 0; k < cutoutCount; k++) {
+                float c0 = cutouts[k][0] * w - margin, c1 = cutouts[k][2] * w + margin;
+                float d0 = cutouts[k][1] * h - margin, d1 = cutouts[k][3] * h + margin;
+                if (!meets(&cs[i], x, y, c0, c1, d0, d1)) continue;
+                /* clear of the figure's whole box: simple, and never back onto the cutout */
+                float need = g == 0 ? c1 - x0 : g == 1 ? x1 - c0 : g == 2 ? d1 - y0 : y1 - d0;
+                if (need > 0) {
+                    shift[g] += need;
+                    moved = 1;
+                    break;
+                }
+            }
+        }
+        if (!moved) break;
+    }
+    for (int i = 0; i < n; i++) {
+        int g = groupOf(&cs[i], w, h);
+        if (g == 0) cs[i].x += shift[0];
+        else if (g == 1) cs[i].x -= shift[1];
+        else if (g == 2) cs[i].y += shift[2];
+        else cs[i].y -= shift[3];
+    }
+}
+
 static int buildLayout(TouchControl* out, int max, float w, float h) {
+    refreshCutouts();
     int n = 0, sticks = touchLayout();
     int camera = sticks && padCameraFeatures != NULL ? padCameraFeatures() : 0;
     float u = unitOf(w, h, sticks);
@@ -271,6 +407,7 @@ static int buildLayout(TouchControl* out, int max, float w, float h) {
         for (int i = 0; i < HOTKEYS; i++)
             add(out, &n, max, TOUCH_HOTKEY, i, w / 2 - total / 2 + bw / 2 + i * (bw + gap), 17 * u, bw, 7.5f * u);
     }
+    avoidCutouts(out, n, w, h, 1.5f * u);
     for (int i = 0; i < n; i++)
         if (out[i].kind == TOUCH_VIEW) out[i].on = (camera & 4) != 0;
     return n;
@@ -454,6 +591,12 @@ int touchEvent(const SDL_Event* e) {
 
 void touchInputSeen(const SDL_Event* e) {
     switch (e->type) {
+    case SDL_EVENT_WINDOW_SAFE_AREA_CHANGED: /* the cutouts, read again at the next vblank */
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+    case SDL_EVENT_DISPLAY_ORIENTATION:
+        cutoutsStale = 1;
+        windowSize(0);
+        break;
     case SDL_EVENT_KEY_DOWN:
         /* a keyboard (a key of the game's or a hotkey); the system's Back stays with the touches */
         if (e->key.scancode != SDL_SCANCODE_AC_BACK) autoShown = 0;

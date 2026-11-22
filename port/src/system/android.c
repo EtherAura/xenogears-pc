@@ -293,6 +293,19 @@ void androidRestart(void) {
     _exit(0);
 }
 
+int androidCutouts(float* rects, int max, float* w, float* h) {
+    char text[512];
+    androidActivityText("cutoutRects", text, sizeof text);
+    *w = *h = 0;
+    if (sscanf(text, "%f,%f", w, h) != 2) return -1; /* no insets yet */
+    int n = 0;
+    for (const char* p = strchr(text, ';'); p != NULL && n < max; p = strchr(p + 1, ';')) {
+        float* r = rects + 4 * n;
+        if (sscanf(p + 1, "%f,%f,%f,%f", &r[0], &r[1], &r[2], &r[3]) == 4 && r[2] > r[0] && r[3] > r[1]) n++;
+    }
+    return n;
+}
+
 void androidActivityActionText(const char* method, const char* arg) {
     activityCall(method, "(Ljava/lang/String;)V", arg, NULL);
 }

@@ -294,7 +294,7 @@ extern s32 fieldPolyCount2;
 extern BattlingKernelState battlingProgress;
 /* 0x80088BFC is a one-entry function table {battlingMainTask} (data in .text,
  * still inside the INCLUDE_ASM of battlingMainTaskTable); the VSync callback
- * func_80088C00 follows it. */
+ * recordBattlingGpuTime follows it. */
 extern void* battlingMainTaskTable[];
 extern s32 battlingDebugEnabled;
 extern LoadingBatchCommand battlingStartupLoads[6];

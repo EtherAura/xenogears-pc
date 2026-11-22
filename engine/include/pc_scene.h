@@ -12,10 +12,12 @@
  * mainCount entries, groundOt of groundCount or NULL), each slot zPerSlot
  * view depth units apart; uiTag, the first tag the walk reaches after the
  * scene (the effect runs there, before anything linked from it is drawn);
- * focusZ, the view depth to keep sharp (0 or less: none, nothing is
- * blurred); pictureSlot, a slot of groundOt whose packets are a flat
+ * focusZ, the view depth to keep sharp (PC_SCENE_FOCUS_CENTRE: wherever the
+ * picture's centre is, measured by the port; 0 or less otherwise: none,
+ * nothing is blurred); pictureSlot, a slot of groundOt whose packets are a flat
  * picture kept sharp, or -1. Call it right before that DrawOTag, each frame
  * the scene is drawn. */
+#define PC_SCENE_FOCUS_CENTRE (-1)
 void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int groundCount, int zPerSlot,
                   const void* uiTag, int focusZ, int pictureSlot);
 

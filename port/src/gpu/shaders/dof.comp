@@ -1,4 +1,5 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 
 // Depth of field over one frame of the hi-res copy (port/src/gpu/scene.c,
 // vk.c gvkSceneEnd; docs/PORT_HD2D.md). Written from the thin-lens circle of
@@ -57,7 +58,12 @@ layout(push_constant) uniform Dof {
     float band;    // the focus range, in relative depth
     float gain;    // radius per unit of relative depth beyond it (as a share of `radius`)
     float radius;  // the largest radius, PS1 pixels
+    int color;     // the copy's colour mode (scene_color.glsl)
+    int colorPad;
+    ivec2 ditherOrigin; // scene_color.glsl
 } pc;
+
+#include "scene_color.glsl"
 
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
@@ -193,6 +199,9 @@ void composite(ivec2 l) {
     }
     if (mixNear > 0.0) c = mix(c, near.rgb / near.a, mixNear);
     uvec3 o = uvec3(clamp(sqrt(max(c, 0.0)), 0.0, 1.0) * 255.0 + 0.5);
+    uint packed = o.r | o.g << 8 | o.b << 16;
+    if (packed == (word & 0xFFFFFFu)) return; // unchanged: as drawn, in every colour mode
+    o = sceneColorMode(o, p, pc.n, pc.color, pc.ditherOrigin);
     imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
 }
 

@@ -23,6 +23,11 @@
  * XG_TOUCH_SCRIPT=file: lines "<vblank> down|move|up <finger> <x> <y>" (x, y
  * from 0 to 1 across the window), through the same path as the system's
  * touches, for tests and frame dumps.
+ *
+ * The controls keep off the display's cutouts (xg-mrj.3.13: a camera hole;
+ * on Android the activity's, elsewhere XG_TOUCH_CUTOUT="x,y,w,h[;...]" in
+ * fractions of the window, for tests): the group a covered control belongs
+ * to moves clear of it.
  */
 #ifndef PORT_TOUCH_H
 #define PORT_TOUCH_H

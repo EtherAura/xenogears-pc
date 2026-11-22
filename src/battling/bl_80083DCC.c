@@ -310,10 +310,10 @@ extern CVECTOR fogNearColor;
 extern s32 fieldPolyCount2;
 extern BattlingKernelState battlingProgress;
 /* 0x80088BFC is a one-entry function table {battlingMainTask} (data in .text,
- * defined in bl_80083DCC.c); the DrawSync callback func_80088C00 follows
+ * defined in bl_80083DCC.c); the DrawSync callback recordBattlingGpuTime follows
  * it. */
 extern void* battlingMainTaskTable[];
-void func_80088C00(void);
+void recordBattlingGpuTime(void);
 extern s32 battlingDebugEnabled;
 extern LoadingBatchCommand battlingStartupLoads[6];
 extern s32 battlingPlaysOwnMusic;
@@ -2292,7 +2292,7 @@ void markBattlingGearDefeated(s32 gearId) {
 void* battlingMainTaskTable[1] __attribute__((section(".text"))) = { battlingMainTask };
 
 /* DrawSync callback (initBattlingSystem): the VSync count when the GPU finished. */
-void func_80088C00(void) {
+void recordBattlingGpuTime(void) {
     battlingGpuTime = VSync(1);
 }
 #endif
@@ -2321,7 +2321,7 @@ void initBattlingCursorSprite(s32 arg0) {
 void initBattlingSystem(void) {
     RECT unused; /* unused 8-byte local: retail's frame has the slot */
 
-    DrawSyncCallback(func_80088C00);
+    DrawSyncCallback(recordBattlingGpuTime);
     InitGeom();
     resetMemoryAllocStats(6, (sptr)battlingHeapTypeNames);
     setCurrentDirectory(0x30, 0);

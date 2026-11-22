@@ -201,10 +201,13 @@ static void unchain(Entry* e) {
     while (*at && *at != idx) at = &chain[*at - 1];
     if (*at == idx) *at = chain[idx - 1];
 }
+/* No slot below freeHint is free (touched 0, not pending: what drop leaves). */
+static int freeHint;
 static void drop(Entry* e) {
     if (e->touched) { unchain(e); --stats.entries; }
     stats.bytes -= e->bytes;
     free(e->rgba); free(e->indices); memset(e,0,sizeof(*e));
+    if (e - entries < freeHint) freeHint = (int)(e - entries);
 }
 void texturePackSetGpu(int on) { gpuKeeps = on != 0; }
 static uint64_t newRevision(void) { return UINT64_C(0x8000000000000000) | ++revision; }
@@ -639,6 +642,9 @@ void texturePackReload(void) {
 #endif
 }
 static void load(void) { if (!loaded) texturePackReload(); }
+/* The libraries' indexes read before the game starts (main.c), not at the first textured draw:
+ * that is the boot logo's, with the sound already playing (about 70 ms: xg-2fy.2). */
+void texturePackPrepare(void) { load(); }
 const char* texturePackRoot(void) { load(); return root; }
 int texturePackEnabled(void) { load(); return stats.enabled; }
 /* A pack the user chose (texture_pack): the legacy appearance applies it to every category; the
@@ -707,6 +713,11 @@ SDL_Surface* texturePackReadPng(const char* path, int w, int h, int* scale, int*
 /* The least recently used slot (an empty one first); one whose load is still running only when every
  * other is (a room's pages queued at its field load are older than the cels queued after them). */
 static Entry* oldest(Entry* keep) {
+    /* A free slot first, from freeHint up: the scan below would pick the same one (touched 0 is
+     * the oldest, the lowest index wins), but it reads the whole table, and a room's preload asks
+     * hundreds of times (about 47 ms on the game thread at a room change: xg-2fy.2). */
+    for (; !keep && freeHint<PACK_SLOTS; ++freeHint)
+        if (!entries[freeHint].touched && !entries[freeHint].pending) return &entries[freeHint];
     Entry *out=NULL, *busy=NULL;
     for (int i=0;i<PACK_SLOTS;++i) {
         Entry* e=&entries[i];
@@ -1003,7 +1014,10 @@ static Entry* entryFind(uint64_t texel, uint64_t palette, int indexed, int w, in
 static Entry* entryNew(uint64_t texel, uint64_t palette, int indexed, int w, int h, int limit) {
     uint32_t hash=keyHash(texel,palette,indexed,w,h);
     Entry* e=oldest(NULL);
-    if (e->touched) { ++stats.evictions; drop(e); }
+    if (e->touched) {   /* the table was full (no free slot: oldest found none), and is again once e is used */
+        int full=freeHint;
+        ++stats.evictions; drop(e); freeHint=full;
+    }
     e->texel=texel; e->palette=palette; e->indexed=indexed;
     e->w=w; e->h=h; e->touched=++useClock; e->serial=++serials; ++stats.entries;
     chain[e-entries]=bucket[hash]; bucket[hash]=(int32_t)(e-entries)+1;

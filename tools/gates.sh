@@ -4,6 +4,7 @@
 #   tools/gates.sh              # every gate
 #   tools/gates.sh --no-ninja   # skip the PS1 build (it was just run)
 #   tools/gates.sh --no-tests   # skip the port's unit tests
+#   tools/yield.sh tools/gates.sh  # beside the user's game: nice 19, capped jobs
 #
 # Gates:
 #   ninja       the PS1 build: every image hash-matches retail (run under
@@ -129,11 +130,11 @@ gate() {
 
 if [ "$NINJA" = 1 ]; then
     if command -v ninja > /dev/null && [ -f build.ninja ]; then
-        flock "$LOCK" ninja > "$OUT/ninja.txt" 2>&1
+        flock "$LOCK" ninja ${XG_YIELD_JOBS:+-j "$XG_YIELD_JOBS"} > "$OUT/ninja.txt" 2>&1
         st=$?
         if [ "$st" = 0 ]; then
             # A second run must have nothing left to do.
-            flock "$LOCK" ninja > "$OUT/ninja2.txt" 2>&1
+            flock "$LOCK" ninja ${XG_YIELD_JOBS:+-j "$XG_YIELD_JOBS"} > "$OUT/ninja2.txt" 2>&1
             grep -q "no work to do" "$OUT/ninja2.txt" || st=1
         fi
         n=$(grep -c '^build .*: check ' build.ninja)

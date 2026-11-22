@@ -319,6 +319,6 @@ static void pcBattlingMainTask(void) {
 void* battlingMainTaskTable[1] = { (void*)pcBattlingMainTask };
 
 /* The PS1 passes &battlingMainTaskTable[1] (this code) to DrawSyncCallback. */
-void func_80088C00(void) {
+void recordBattlingGpuTime(void) {
     battlingGpuTime = VSync(1);
 }

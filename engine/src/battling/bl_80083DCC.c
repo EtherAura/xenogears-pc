@@ -300,9 +300,9 @@ extern s32 fieldPolyCount2;
 extern BattlingKernelState battlingProgress;
 /* 0x80088BFC is a one-entry function table {battlingMainTask} (data in .text,
  * still inside the INCLUDE_ASM of battlingMainTaskTable); the VSync callback
- * func_80088C00 follows it. */
+ * recordBattlingGpuTime follows it. */
 extern void* battlingMainTaskTable[];
-void func_80088C00(void); /* port/src/game/battling/thread.c */
+void recordBattlingGpuTime(void); /* port/src/game/battling/thread.c */
 extern s32 battlingDebugEnabled;
 extern LoadingBatchCommand battlingStartupLoads[6];
 extern s32 battlingPlaysOwnMusic;
@@ -2248,7 +2248,7 @@ void initBattlingCursorSprite(s32 arg0) {
 void initBattlingSystem(void) {
     RECT unused; /* unused 8-byte local: retail's frame has the slot */
 
-    DrawSyncCallback(func_80088C00);
+    DrawSyncCallback(recordBattlingGpuTime);
     InitGeom();
     resetMemoryAllocStats(6, (sptr)battlingHeapTypeNames);
     setCurrentDirectory(0x30, 0);

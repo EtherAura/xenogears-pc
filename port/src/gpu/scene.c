@@ -136,6 +136,12 @@ static struct {
     int lightDebug, haveLightGain;
     float lightGain;
 
+    /* Focus where the view's centre is (PC_SCENE_FOCUS_CENTRE, first-person
+     * look): the depth there, measured a few frames back and eased toward;
+     * autoValid while such scenes follow one another. */
+    int focusCentre, autoValid, lastFocus;
+    float autoFocus;
+
     /* The view pcSceneView gave for the scene pcSceneDepth registers next. */
     int viewGiven, viewArmed;
     float up[3], screenZ, centerX, centerY;
@@ -351,6 +357,13 @@ static void params(SceneParams* p) {
     l->debug = sc.lightDebug;
 }
 
+void sceneFocusMeasured(float z) {
+    /* One read after the view went back to the game's belongs to no scene. */
+    if (!(z > 0) || !sc.autoValid) return;
+    /* Eased, as a camera's focus moves: a third of the way each time. */
+    sc.autoFocus += (z - sc.autoFocus) / 3.0f;
+}
+
 void pcSceneFigure(int x, int y, int z) {
     uint32_t vblank = hwVSyncCount();
     if (vblank != sc.figureVblank) {
@@ -416,6 +429,16 @@ void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int g
     sc.viewGiven = 0;
     if (!sceneWantsCopy() || gpuCapturing()) return;
     if (mainOt == NULL || mainCount <= 0 || uiTag == NULL || zPerSlot <= 0) return;
+    sc.focusCentre = focusZ == PC_SCENE_FOCUS_CENTRE;
+    if (sc.focusCentre) {
+        /* From where the game's view last focused, eased to what the centre holds. */
+        if (!sc.autoValid) sc.autoFocus = sc.lastFocus > 0 ? (float)sc.lastFocus : 3000.0f;
+        sc.autoValid = 1;
+        focusZ = (int)(sc.autoFocus + 0.5f);
+    } else {
+        sc.autoValid = 0;
+        if (focusZ > 0) sc.lastFocus = focusZ;
+    }
     sc.table[0] = mainOt;
     sc.count[0] = mainCount;
     sc.table[1] = groundOt;
@@ -439,7 +462,7 @@ void sceneWalkBegin(void) {
     sc.drawing = 0;
     sc.status = NULL;
     if (sc.focusZ <= 0) {
-        /* The look-at point is behind the view, or the game gave none (first-person look). */
+        /* The look-at point is behind the view, or the game gave none. */
         sc.status = "no focus point in this view";
     } else if (wideBlockReasons() & PC_WIDE_BLOCK_MOVIE) {
         sc.status = "a movie-backed scene";
@@ -475,13 +498,16 @@ static void finish(int reached) {
     gp0SceneDepth(0, SCENE_Z_NONE);
     SceneParams p;
     params(&p);
+    p.measureFocus = sc.focusCentre;
+    p.centreX = sc.centerX;
+    p.centreY = sc.centerY;
     /* A walk that never reached the UI tag drew something else: no effect. */
     gvkSceneEnd(reached ? &p : NULL);
     interpolationSceneEnd(reached ? &p : NULL);
     sc.scenes++;
     if (sc.log) {
-        gpuLog("scene: %u focus %d band %.3f radius %.2f%s", sc.scenes, sc.focusZ, p.dof.band, p.dof.radius,
-               reached ? "" : " (no UI tag: not blurred)");
+        gpuLog("scene: %u focus %d%s band %.3f radius %.2f%s", sc.scenes, sc.focusZ, sc.focusCentre ? " (centre)" : "",
+               p.dof.band, p.dof.radius, reached ? "" : " (no UI tag: not blurred)");
         if (p.light.on)
             gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f up %.3f %.3f %.3f screen %.0f", sc.scenes,
                    p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.up[0], p.light.up[1], p.light.up[2],

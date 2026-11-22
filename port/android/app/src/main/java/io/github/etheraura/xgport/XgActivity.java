@@ -45,6 +45,7 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.UriPermission;
 import android.database.Cursor;
+import android.graphics.Rect;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -53,8 +54,11 @@ import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
 import android.provider.DocumentsContract.Document;
 import android.util.Log;
+import android.view.DisplayCutout;
 import android.view.Surface;
 import android.view.SurfaceHolder;
+import android.view.View;
+import android.view.WindowInsets;
 import android.widget.Toast;
 
 import java.io.File;
@@ -101,10 +105,34 @@ public class XgActivity extends SDLActivity {
         return new GameSurface(context);
     }
 
+    // The display cutouts (xg-mrj.3.13), "W,H;l,t,r,b;..." in the surface's pixels: the touch pad
+    // keeps its controls off them (port/src/system/touch.c). Kept here when the window's insets
+    // arrive, on the UI thread, before SDL learns of the change; the game reads the text
+    // (cutoutRects), never these objects.
+    static volatile String cutouts = "";
+
+    public String cutoutRects() {
+        return cutouts;
+    }
+
     /** SDL's surface, asking for the game's 60 Hz whenever it is (re)made. */
     static class GameSurface extends SDLSurface {
         GameSurface(Context context) {
             super(context);
+        }
+
+        @Override
+        public WindowInsets onApplyWindowInsets(View v, WindowInsets insets) {
+            StringBuilder text = new StringBuilder();
+            text.append(v.getWidth()).append(',').append(v.getHeight());
+            DisplayCutout cut = insets.getDisplayCutout();
+            if (cut != null) {
+                for (Rect r : cut.getBoundingRects()) {
+                    text.append(';').append(r.left).append(',').append(r.top).append(',').append(r.right).append(',').append(r.bottom);
+                }
+            }
+            cutouts = text.toString();
+            return super.onApplyWindowInsets(v, insets);
         }
 
         @Override
