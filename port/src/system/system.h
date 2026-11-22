@@ -54,6 +54,7 @@ void slowdownVSync(int32_t arg);     /* each VSync call, before it does anything
 void slowdownVSyncReturn(const void* site); /* each VSync call, as it returns (site: its caller) */
 void slowdownModeEntry(int mode);    /* bootGame starts a game mode (memory.c) */
 int slowdownLogVBlank(int64_t* vblank); /* lined up: this vblank on the log's clock */
+int slowdownMatched(void);           /* lined up, and the last VSync call found its line in the log */
 int slowdownBiosMissed(void);        /* lined up: the PS1's BIOS pad/card handler skipped this vblank */
 void slowdownSafePoint(void);        /* each safe point that can deliver interrupts */
 void slowdownBoot(void);             /* the game installs its vsync callback (libetc.c) */

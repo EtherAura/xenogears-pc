@@ -112,6 +112,7 @@
 #include <string.h>
 
 #include "system.h"
+#include "ps1time.h"
 
 #define LOOKAHEAD 8   /* log runs skipped at most to find the PC's argument */
 #define MAX_HOLD 10.0 /* seconds: a sector held longer means the two runs went apart */
@@ -575,6 +576,7 @@ void slowdownSafePoint(void) {
 
 void slowdownModeEntry(int mode) {
     initOnce();
+    ps1timeMode(mode);
     curMode = mode;
     inRun = 0;
     midSince = -1;
@@ -650,6 +652,14 @@ static int waits(int32_t arg) {
     return arg == 0 || arg > 1;
 }
 
+/* Whether the replay's last VSync call found its line in the log (the PS1 time
+ * log's training rows, ps1time.c: after a call the log lacks, the runs went apart). */
+static int lastMatched = 1;
+
+int slowdownMatched(void) {
+    return active && lastMatched;
+}
+
 void slowdownVSync(int32_t arg) {
     initOnce();
     int first = !(inRun && runArg == arg);
@@ -692,12 +702,14 @@ void slowdownVSync(int32_t arg) {
                 }
             }
             matched++;
+            lastMatched = 1;
             pos = j + 1;
             runRec = j;
             runCalls = 0;
             planMidFrame(j);
         } else {
             unmatched++;
+            lastMatched = 0;
             runRec = -1;
         }
     } else if (active && runRec >= 0 && waits(arg) && runCalls < recs[runRec].calls) {

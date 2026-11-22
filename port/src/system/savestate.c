@@ -1140,6 +1140,8 @@ static void harnessCheck(uint32_t vblank) {
 
 /* ---- the park and the serve ----------------------------------------------------------- */
 
+int vramBookkeepingHeld(void) __attribute__((weak)); /* port/src/gpu/vram.c */
+
 void stateVBlankPoint(void) {
     finishJob(0);
     harnessCheck(hwVSyncCount());
@@ -1162,11 +1164,16 @@ void stateVBlankPoint(void) {
         req.kind = REQ_NONE;
         return;
     }
-    if (cardBusy(0) || cardBusy(1) || portSavedModuleOnHeap()) {
+    /* Battling's picture between drawn and not yet put back (its VRAM and bookkeeping go back
+     * after the wait, from host memory no state carries: between.c pcBattling60WaitDone): a state
+     * taken now would hold the picture's tile generations and wide arena, and one put back now
+     * would be undone by that put-back (xg-9mlq). Later, as for a card access. */
+    if (cardBusy(0) || cardBusy(1) || portSavedModuleOnHeap() ||
+        (vramBookkeepingHeld != NULL && vramBookkeepingHeld())) {
         if (req.kind == REQ_REWIND) {
             req.kind = REQ_NONE; /* no capture now (the next park tries again) */
         }
-        return; /* a memory card access or file in progress: at its end */
+        return; /* a memory card access or file in progress, or a picture between: at its end */
     }
     gameStackPark();
 }

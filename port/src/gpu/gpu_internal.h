@@ -439,6 +439,9 @@ typedef struct {
     float sun[3];  /* towards the room's sun, in view space */
     int figures;   /* the actors' ground points (view space) the characters' shadows start from */
     float figure[SCENE_FIGURES][3];
+    /* Fog: the most of a pixel's colour the haze takes, and how quickly it
+     * thickens past the focus (0: no fog). The colour grade's amount (0: none). */
+    float fogMost, fogDensity, grade;
 } LightParams;
 /* What is done to a scene when it ends: the lighting, then the blur. */
 typedef struct {

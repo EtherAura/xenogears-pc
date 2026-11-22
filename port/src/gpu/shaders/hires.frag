@@ -55,6 +55,9 @@ layout(location = 12) flat in uint vOrder;
 #include "prompt.glsl"
 #ifdef ORDERED_LIST
 #define ORDERED_COLLECT
+#ifdef DEPTH
+#define ORDERED_DEPTH
+#endif
 #include "ordered.glsl"
 #endif
 
@@ -569,7 +572,21 @@ void main() {
             }
             front=uint(f.r)|uint(f.g)<<5|uint(f.b)<<10;flags|=ORD_QUANT5;
         }
-        orderedAppend(p,front,flags);
+#ifdef DEPTH
+        // The interlocked pass's rule (below): a fragment that replaces the
+        // pixel owns its depth; ordered.comp keeps the last one that does.
+        ivec2 zp = p - pc.depthOrigin;
+        uint z = 0u;
+        if (vInvZ != 0.0 && !semi && textCover >= 1.0 &&
+            all(greaterThanEqual(zp, ivec2(0))) && all(lessThan(zp, pc.depthSize))) {
+            z = vInvZ > 1.5 ? DEPTH_SHARP
+              : uint(clamp(16.0 / abs(vInvZ) + 0.5, 1.0, 1.0e9)) | (vInvZ < 0.0 ? DEPTH_FIGURE : 0u);
+            flags |= ORD_DEPTH;
+        }
+        orderedAppend(p,front,flags,z);
+#else
+        orderedAppend(p,front,flags,0u);
+#endif
     }
 #elif defined(TILE_IMAGE)
     // As draw.frag's: a fragment that writes nothing leaves the attachment

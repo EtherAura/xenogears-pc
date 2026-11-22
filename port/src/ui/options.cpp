@@ -34,6 +34,7 @@ extern "C" {
 #include "system/gameplay.h"
 #include "system/hw.h"
 #include "system/mouse.h"
+#include "system/ps1time.h"
 #include "system/pad.h"
 #include "system/rewind.h"
 #include "system/rumble.h"
@@ -223,6 +224,8 @@ std::vector<Spec>& table() {
         dofLevels, 4);
     add("glow", N_("Glow"), [](int) { return sceneGlow(); }, [](int, int v) { sceneSetGlow(v); }, 0, dofLevels, 4);
     add("shadows", N_("Shadows"), [](int) { return sceneShadows(); }, [](int, int v) { sceneSetShadows(v); }, 0, dofLevels, 4);
+    add("fog", N_("Fog"), [](int) { return sceneFog(); }, [](int, int v) { sceneSetFog(v); }, 0, dofLevels, 4);
+    add("color_grade", N_("Colour grade"), [](int) { return sceneGrade(); }, [](int, int v) { sceneSetGrade(v); }, 0, dofLevels, 4);
     add("present_filter", N_("Filter"), [](int) { return presentFilter(); }, [](int, int v) { presentSetFilter(v); }, 0,
         filterNames, 5);
     add("present_movie_filter", N_("Movies"), [](int) { return presentMovieFilter() - PRESENT_FILTER_SAME; },
@@ -417,6 +420,8 @@ std::vector<Spec>& table() {
     // Gameplay
     add("speedup", N_("Speedup"), [](int) { return speedupEnabled() != 0 ? 1 : 0; },
         [](int, int v) { speedupSetEnabled(v); }, 0);
+    add("ps1_frame_rate", N_("PS1 frame rate"), [](int) { return ps1timeFrameRateOn() != 0 ? 1 : 0; },
+        [](int, int v) { ps1timeSetFrameRate(v); }, 0);
     static const char* const battleSpeedNames[] = {N_("Off"), "1x", "2x", "4x"};
     static const int battleSpeedValues[] = {0, 1, 2, 4};
     add("battle_speed", N_("Battle speed"), [](int) { return battleSpeedChosen(); },

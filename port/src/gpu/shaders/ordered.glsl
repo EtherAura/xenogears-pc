@@ -10,6 +10,9 @@ const uint ORD_SURFACE = 128u;
 const uint ORD_FRINGE = 256u;
 const uint ORD_CLEAR = 512u;
 const uint ORD_QUARTER5 = 1024u;
+// The operation replaces the scene's depth there (a DEPTH build: hires.frag's
+// rule) with its entry in OrderedDepths; the resolve keeps the last such.
+const uint ORD_DEPTH = 2048u;
 // Bits 16-23: smooth text's coverage of the pixel in 255ths (0: whole);
 // the resolved colour is blended over the destination by it.
 const uint ORD_COVER_SHIFT = 16u;
@@ -24,8 +27,13 @@ layout(set=ORDERED_SET,binding=0,std430) coherent buffer Operations {
     uvec4 operation[]; // next, primitive order, foreground, operation flags
 } ordered;
 layout(set=ORDERED_SET,binding=1,std430) coherent buffer Heads { uint head[]; };
+#ifdef ORDERED_DEPTH
+// Each operation's view depth, as hires.frag's DEPTH build stores it, beside
+// its node: read only where the operation's flags have ORD_DEPTH.
+layout(set=ORDERED_SET,binding=2,std430) buffer OrderedDepths { uint opDepth[]; };
+#endif
 #ifdef ORDERED_COLLECT
-void orderedAppend(ivec2 pixel,uint front,uint flags) {
+void orderedAppend(ivec2 pixel,uint front,uint flags,uint depth) {
     ivec2 q=pixel-ordered.origin;
     if(any(lessThan(q,ivec2(0)))||any(greaterThanEqual(q,ordered.grid)))return;
     uint triangle=vOrder-ordered.firstOrder;
@@ -39,6 +47,9 @@ void orderedAppend(ivec2 pixel,uint front,uint flags) {
     if(any(lessThan(local,ivec2(0)))||uint(local.x)>=width||uint(local.y)>=height||slot>=ordered.capacity){atomicAdd(ordered.overflow,1u);return;}
     uint at=uint(q.y*ordered.grid.x+q.x);
     uint next=atomicExchange(head[at],slot);
+#ifdef ORDERED_DEPTH
+    if((flags&ORD_DEPTH)!=0u)opDepth[slot]=depth;
+#endif
     ordered.operation[slot]=uvec4(next,vOrder,front,flags);
 }
 uint orderedFlags(uint mode,bool semi,uint semiMode,bool mask) {

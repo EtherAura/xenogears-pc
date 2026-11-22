@@ -35,6 +35,7 @@
 #include "pc_geometry.h"
 #include "system/cputime.h"
 #include "../system/savestate.h"
+#include "../system/ps1time.h"
 
 typedef struct {
     int x, y;
@@ -3825,10 +3826,147 @@ static void executeDraw(uint32_t op) {
     }
 }
 
+/* ---- the PS1 time model's counters (system/ps1time.h, xg-wv9t) ------------------------------ */
+
+/* What the PS1's GPU had to draw: each native command's kind and pixels,
+ * from its words as the GPU reads them (vertex + drawing offset, inside the
+ * drawing area). The port's own extras (wide-only and geometry-only packets)
+ * are no PS1 work. */
+Ps1timeGpu ps1timeGpu;
+int ps1timeGpuOn;
+
+/* A triangle's area inside the drawing area (Sutherland-Hodgman, then the
+ * shoelace formula), in pixels. */
+static double clippedTriangle(const double* x, const double* y) {
+    double px[12], py[12], qx[12], qy[12];
+    int n = 3;
+    for (int k = 0; k < 3; k++) {
+        px[k] = x[k];
+        py[k] = y[k];
+    }
+    const double lim[4] = {gp.clipX0, gp.clipX1 + 1.0, gp.clipY0, gp.clipY1 + 1.0};
+    for (int edge = 0; edge < 4 && n > 0; edge++) {
+        int m = 0;
+        for (int k = 0; k < n; k++) {
+            int j = (k + 1) % n;
+            double a = edge < 2 ? px[k] : py[k], b = edge < 2 ? px[j] : py[j];
+            double l = lim[edge];
+            int inA = (edge & 1) ? a <= l : a >= l, inB = (edge & 1) ? b <= l : b >= l;
+            if (inA) {
+                qx[m] = px[k];
+                qy[m++] = py[k];
+            }
+            if (inA != inB && m < 12) {
+                double t = (l - a) / (b - a);
+                qx[m] = px[k] + (px[j] - px[k]) * t;
+                qy[m++] = py[k] + (py[j] - py[k]) * t;
+            }
+        }
+        n = m;
+        memcpy(px, qx, sizeof(double) * (size_t)n);
+        memcpy(py, qy, sizeof(double) * (size_t)n);
+    }
+    double area = 0;
+    for (int k = 0; k < n; k++) {
+        int j = (k + 1) % n;
+        area += px[k] * py[j] - px[j] * py[k];
+    }
+    return fabs(area) / 2;
+}
+
+static double clippedRect(int x, int y, int w, int h) {
+    int x0 = x > gp.clipX0 ? x : gp.clipX0, y0 = y > gp.clipY0 ? y : gp.clipY0;
+    int x1 = x + w - 1 < gp.clipX1 ? x + w - 1 : gp.clipX1, y1 = y + h - 1 < gp.clipY1 ? y + h - 1 : gp.clipY1;
+    return x1 < x0 || y1 < y0 ? 0 : (double)(x1 - x0 + 1) * (y1 - y0 + 1);
+}
+
+static void ps1timeAdd(int kind, double pixels, int semi, int shadedTex) {
+    ps1timeGpu.count[kind] += 1;
+    ps1timeGpu.pixels[kind] += pixels;
+    if (semi) {
+        ps1timeGpu.semiPixels += pixels;
+    }
+    if (shadedTex) {
+        ps1timeGpu.shadedTexPixels += pixels;
+    }
+}
+
+void ps1timeGpuRect(int kind, int w, int h) {
+    if (ps1timeGpuOn && w > 0 && h > 0) {
+        ps1timeAdd(kind, (double)w * h, 0, 0);
+    }
+}
+
+static void ps1timeCommand(uint32_t op) {
+    if (gp.pkt != NULL && ((gp.pkt->flags & PC_WIDE_ONLY) || gp.pkt->geometry == PC_GEOMETRY_ONLY)) {
+        return;
+    }
+    const uint32_t* c = gp.cmd;
+    int semi = (op & 0x02) != 0;
+    if (op >= 0x20 && op < 0x40) {
+        int gouraud = (op & 0x10) != 0, quad = (op & 0x08) != 0, textured = (op & 0x04) != 0;
+        int n = quad ? 4 : 3, i = 1;
+        double x[4], y[4];
+        uint32_t tpage = 0;
+        for (int k = 0; k < n; k++) {
+            if (k > 0 && gouraud) {
+                i++; /* the vertex's colour */
+            }
+            x[k] = sext11(c[i]) + gp.offX;
+            y[k] = sext11(c[i] >> 16) + gp.offY;
+            i++;
+            if (textured) {
+                if (k == 1) {
+                    tpage = c[i] >> 16;
+                }
+                i++;
+            }
+        }
+        double pixels = clippedTriangle(x, y);
+        if (quad) {
+            pixels += clippedTriangle(x + 1, y + 1);
+        }
+        int depth = (int)((tpage >> 7) & 3);
+        int kind = !textured ? (gouraud ? PT_POLY_GOURAUD : PT_POLY_FLAT)
+                             : depth == 0 ? PT_POLY_TEX4 : depth == 1 ? PT_POLY_TEX8 : PT_POLY_TEX15;
+        ps1timeAdd(kind, pixels, semi, textured && (gouraud || !(op & 0x01)));
+    } else if (op >= 0x40 && op < 0x60 && !(op & 0x08)) {
+        int gouraud = (op & 0x10) != 0;
+        int x0 = sext11(c[1]), y0 = sext11(c[1] >> 16);
+        int x1 = sext11(c[gouraud ? 3 : 2]), y1 = sext11(c[gouraud ? 3 : 2] >> 16);
+        int dx = abs(x1 - x0), dy = abs(y1 - y0);
+        ps1timeAdd(PT_LINE, (dx > dy ? dx : dy) + 1, semi, 0);
+    } else if (op >= 0x60 && op < 0x80) {
+        int textured = (op & 0x04) != 0, size = (op >> 3) & 3;
+        int x = sext11(c[1]) + gp.offX, y = sext11(c[1] >> 16) + gp.offY;
+        int w = size == 1 ? 1 : size == 2 ? 8 : 16, h = w;
+        if (size == 0) {
+            uint32_t wh = c[textured ? 3 : 2];
+            w = (int)(wh & 0x3FF);
+            h = (int)((wh >> 16) & 0x1FF);
+        }
+        int depth = (int)((gp.e1 >> 7) & 3);
+        int kind = !textured ? PT_RECT_FLAT : depth == 0 ? PT_RECT_TEX4 : depth == 1 ? PT_RECT_TEX8 : PT_RECT_TEX15;
+        ps1timeAdd(kind, clippedRect(x, y, w, h), semi, textured && !(op & 0x01));
+    } else if (op == 0x02) {
+        int w = (int)(((c[2] & 0x3FF) + 0xF) & ~0xFu), h = (int)((c[2] >> 16) & 0x1FF);
+        ps1timeAdd(PT_FILL, (double)w * h, 0, 0);
+    } else if (op >= 0x80 && op < 0xA0) {
+        int w = (int)(c[3] & 0x3FF), h = (int)((c[3] >> 16) & 0x1FF);
+        ps1timeAdd(PT_COPY, (double)(w ? w : 0x400) * (h ? h : 0x200), 0, 0);
+    } else if (op >= 0xA0 && op < 0xC0) {
+        int w = (int)(c[2] & 0x3FF), h = (int)((c[2] >> 16) & 0x1FF);
+        ps1timeAdd(PT_LOAD, (double)(w ? w : 0x400) * (h ? h : 0x200), 0, 0);
+    }
+}
+
 static void execute(void) {
     uint32_t word = gp.cmd[0];
     uint32_t op = word >> 24;
     uint32_t nativeE1 = gp.e1;
+    if (ps1timeGpuOn) {
+        ps1timeCommand(op);
+    }
     if (op >= 0x20 && op < 0x80) {
         /* A polyline's first command only starts it: its segments come word
          * by word (polylineWord). */

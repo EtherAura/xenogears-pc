@@ -72,6 +72,11 @@
  *                             (settings.ini only)
  *   shadows=off               off (default), subtle, medium or strong: cast
  *                             shadows from the room's sun (xg-rgcf.5.2)
+ *   fog=off                   off (default), subtle, medium or strong: haze
+ *                             past the focus, at most 35, 50 or 70% of a
+ *                             pixel's colour (xg-rgcf.5.4)
+ *   color_grade=off           off (default), subtle, medium or strong: the
+ *                             warm and cool grade (xg-rgcf.5.4)
  * The Enhanced engine only: the Original has no hook and never arms a scene.
  *
  * Env: XG_DOF_DEBUG=1: the blur amounts as colours instead of the blur (red
@@ -118,6 +123,12 @@ static const float lightBounce[] = {0, 0.6f, 1.0f, 1.5f};
 static const float glowGain[] = {0, 0.6f, 1.0f, 1.5f};
 /* How dark a full shadow makes what it falls on, by level. */
 static const float shadowDark[] = {0, 0.25f, 0.45f, 0.6f};
+/* Fog (docs/PORT_HD2D.md section 27): the most it takes and how quickly it
+ * thickens, Medium and Strong the prototype's "fog" and "fog, strong"; the
+ * grade's amount, Medium the prototype's "warm/cool". */
+static const float fogMost[] = {0, 0.35f, 0.5f, 0.7f};
+static const float fogDensity[] = {0, 0.8f, 1.1f, 1.4f};
+static const float gradeAmount[] = {0, 0.5f, 1.0f, 1.5f};
 /* The sun: this far above the ground, from the camera's left and a little
  * from beyond the scene, when the room starts. */
 #define SUN_ELEVATION 55.0f
@@ -131,7 +142,7 @@ static struct {
     int debug, log;
     float bandOverride;
     int haveBand;
-    int lighting, glow, shadows; /* levels, 0 off */
+    int lighting, glow, shadows, fog, grade; /* levels, 0 off */
     int shadePart, bouncePart;
     int lightDebug, haveLightGain;
     float lightGain;
@@ -223,6 +234,12 @@ static void load(void) {
     settingsDescribe("shadows", "shadows: off (default), subtle, medium or strong: shadows cast by the scenery and the "
                                 "characters in fields, from a sun set per room (the Enhanced engine)");
     sc.shadows = levelOf("shadows");
+    settingsDescribe("fog", "fog: off (default), subtle, medium or strong: haze that thickens past the characters in "
+                            "fields, toward the colour of the room's farthest scenery (the Enhanced engine)");
+    sc.fog = levelOf("fog");
+    settingsDescribe("color_grade", "color_grade: off (default), subtle, medium or strong: shadows a little cool and "
+                                    "highlights a little warm in fields (the Enhanced engine)");
+    sc.grade = levelOf("color_grade");
     s = settingsGet("lighting_shade");
     sc.shadePart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     s = settingsGet("lighting_bounce");
@@ -292,12 +309,28 @@ void sceneSetLighting(int level) { setLevel("lighting", &sc.lighting, level); }
 void sceneSetGlow(int level) { setLevel("glow", &sc.glow, level); }
 void sceneSetShadows(int level) { setLevel("shadows", &sc.shadows, level); }
 
+int sceneFog(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.fog : 0;
+}
+
+int sceneGrade(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.grade : 0;
+}
+
+void sceneSetFog(int level) { setLevel("fog", &sc.fog, level); }
+void sceneSetGrade(int level) { setLevel("color_grade", &sc.grade, level); }
+
 const char* sceneLightingStatus(void) {
-    if (!sceneLighting() && !sceneGlow() && !sceneShadows()) return NULL;
+    if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && !sceneGrade()) return NULL;
     return sc.status != NULL ? sc.status : sc.lightStatus;
 }
 
-int sceneWantsCopy(void) { return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0; }
+int sceneWantsCopy(void) {
+    return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0 || sceneFog() != 0 ||
+           sceneGrade() != 0;
+}
 
 static void normalize3(float v[3]) {
     float length = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
@@ -315,9 +348,9 @@ static void params(SceneParams* p) {
 
     LightParams* l = &p->light;
     memset(l, 0, sizeof(*l));
-    int lighting = sceneLighting(), glow = sceneGlow(), shadows = sceneShadows();
+    int lighting = sceneLighting(), glow = sceneGlow(), shadows = sceneShadows(), fog = sceneFog(), grade = sceneGrade();
     sc.lightStatus = NULL;
-    if (!lighting && !glow && !shadows) return;
+    if (!lighting && !glow && !shadows && !fog && !grade) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
         return;
@@ -330,6 +363,9 @@ static void params(SceneParams* p) {
     l->bounce = sc.bouncePart ? lightBounce[lighting] * gain : 0;
     l->glow = glowGain[glow] * gain;
     l->shadow = shadowDark[shadows] * gain;
+    l->fogMost = fogMost[fog] * gain;
+    l->fogDensity = fogDensity[fog];
+    l->grade = gradeAmount[grade] * gain;
     if (sc.sunSet) {
         /* The room's sun in this frame's view. */
         for (int i = 0; i < 3; i++)
@@ -478,7 +514,7 @@ void sceneWalkBegin(void) {
                 sc.drawing = 1;
             } else {
                 sc.status = gvkHiScale() == 0 ? "no display copy yet"
-                                              : "not available on this device, with GPU ordering, or without memory for it";
+                                              : "not available on this device, or without memory for it";
             }
         }
     }
@@ -509,9 +545,9 @@ static void finish(int reached) {
         gpuLog("scene: %u focus %d%s band %.3f radius %.2f%s", sc.scenes, sc.focusZ, sc.focusCentre ? " (centre)" : "",
                p.dof.band, p.dof.radius, reached ? "" : " (no UI tag: not blurred)");
         if (p.light.on)
-            gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f up %.3f %.3f %.3f screen %.0f", sc.scenes,
-                   p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.up[0], p.light.up[1], p.light.up[2],
-                   p.light.screenZ);
+            gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f fog %.2f grade %.2f up %.3f %.3f %.3f screen %.0f",
+                   sc.scenes, p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.fogMost, p.light.grade,
+                   p.light.up[0], p.light.up[1], p.light.up[2], p.light.screenZ);
     }
 }
 

@@ -344,6 +344,7 @@ int main(int argc, char** argv) {
             gpuPackPrepare(); /* and their GPU cache and upload room */
         }
     }
+    uiPrepare(); /* the touch pad's first picture's set-up now, not in that vblank */
     fprintf(stderr, "xenogears: entering kernelMain\n");
     hwGameStart(); /* the boot is out of the clock: no vblank backlog at the start */
     gameStackRun(kernelMain); /* on a stack of its own (system/gamestack.h: save states) */

@@ -32,6 +32,15 @@ typedef struct {
 
 /* ---- ordering tables ------------------------------------------------------------- */
 
+/* include/psyq.h's addPrim counts each link for the PS1 time model (system/ps1time.c),
+ * while it asks (pcPrimLinkOn). */
+uint32_t pcPrimLinkCount;
+int pcPrimLinkOn;
+
+void pcPrimLinked(void) {
+    pcPrimLinkCount += (uint32_t)pcPrimLinkOn;
+}
+
 void AddPrim(void* ot, void* p) {
     addPrim(ot, p);
 }

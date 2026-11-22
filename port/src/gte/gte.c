@@ -20,6 +20,7 @@
 
 #include "gte_pc.h"
 #include "../system/savestate.h"
+#include "../system/ps1time.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -103,6 +104,10 @@ static u32 ctrlRegs[32] = {
     0x01400000, 0x00F00000, 0x00000400, 0xFFFFF9E9, 0x01400000, 0x00000155, 0x00000100, 0x00600000,
 };
 static u32 flag; /* FLAG while a command runs */
+uint32_t gteCommandCount[64]; /* the PS1 time model's counter (system/ps1time.h) */
+int gteCountOn;
+const char* gteCaller; /* include/gte_pc.h's GTE_RUN */
+void gteCountSite(const char* caller) __attribute__((weak)); /* ps1time.c */
 static GtePrecise precise[3];
 
 void gteSave(GteState* s) {
@@ -759,6 +764,13 @@ static void runGpfGpl(int withBase) {
 }
 
 void gteCommand(u32 command) {
+    if (gteCountOn) {
+        gteCommandCount[command & 0x3F]++;
+        if (gteCountOn > 1 && gteCountSite != NULL) {
+            gteCountSite(gteCaller);
+        }
+    }
+    gteCaller = NULL;
     flag = 0; /* "all bits are automatically reset at the begin of a new GTE command" */
     cmdShift = (command >> 19) & 1 ? 12 : 0;
     cmdIrMin = (command >> 10) & 1 ? 0 : -0x8000;

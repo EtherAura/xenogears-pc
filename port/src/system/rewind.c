@@ -543,6 +543,7 @@ static struct {
     Delta own;
     int assemble;   /* this capture's delta to assemble into buf */
     int chunkCount; /* its chunks */
+    size_t warm;    /* the bytes a whole image's record takes (warmDelta) */
 } packing;
 
 static void diffInto(Delta* d, int i, const StateChunkRef* r);
@@ -704,6 +705,17 @@ static void assembleDelta(void) {
     }
 }
 
+/* A delta buffer ready for a whole image, its pages written once, here on the worker. A capture
+ * whose chunks changed (a room's load) copies the whole image into buf on the game thread: into
+ * a buffer grown then, its 18 MB first touched page by page took about 9 ms of that vblank. The
+ * job owns both buffers (packing.d, buf); bytes past their size are free to write. */
+static void warmDelta(Delta* d, size_t want) {
+    if (want <= d->cap) return;
+    d->raw = xrealloc(d->raw, want);
+    memset(d->raw + d->size, 0, want - d->size);
+    d->cap = want;
+}
+
 static void packDelta(void) {
     if (packing.hasDelta) {
         for (int k = 0; k < packing.lateCount; k++) {
@@ -723,6 +735,10 @@ static void packDelta(void) {
             o->len = packing.own.size - o->at;
         }
         assembleDelta();
+    }
+    if (packing.thread && packing.warm) { /* not on the game thread (the synchronous fallback) */
+        warmDelta(&packing.d, packing.warm);
+        warmDelta(&buf, packing.warm);
     }
 }
 
@@ -768,9 +784,15 @@ static void packCollect(void) {
     }
 }
 
-/* The job started: the delta prepared (packStart) and the compare's rest. */
+/* Delta buffers short of a whole image: a job of its own warms them (warmDelta), as the first
+ * capture makes no delta and a room's load parks no more until the capture that needs them. */
+static int warmWanted(void) {
+    return packing.warm && (buf.cap < packing.warm || packing.d.cap < packing.warm);
+}
+
+/* The job started: the delta prepared (packStart) and the compare's rest, or the warming. */
 static void packKick(void) {
-    if (packing.active || (!packing.hasDelta && !packing.assemble)) return;
+    if (packing.active || (!packing.hasDelta && !packing.assemble && !warmWanted())) return;
     packInit();
     packing.active = 1;
     if (packing.thread) SDL_SignalSemaphore(packing.ready);
@@ -1044,6 +1066,8 @@ static void capture(void) {
     }
     img.meta = now;
     pend.active = 1;
+    /* wholeImage's record: the chunks' bytes and, per chunk, its tag and two words (generously) */
+    packing.warm = img.bytes + (size_t)img.count * 64 + (1u << 20);
     packKick();
     CPU_TIME_END(CPU_STATE);
     pend.ns = SDL_GetTicksNS() - t0;

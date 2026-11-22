@@ -23,6 +23,10 @@ u32 gteMfc2(int reg);
 void gteCtc2(int reg, u32 value);
 u32 gteCfc2(int reg);
 void gteCommand(u32 command);
+/* The game function a command macro ran in (__func__), for the PS1 time model's
+ * cost per function (port/src/system/ps1time.h); NULL after each command. */
+extern const char* gteCaller;
+#define GTE_RUN(c) (gteCaller = __func__, gteCommand(c))
 
 /* The whole register file, saved and put back around GTE work the PS1 does
  * not do (the wide picture's extra geometry, include/pc_wide.h). */
@@ -93,27 +97,27 @@ void gteCopySxy(void* dst, const void* src);
 #define gte_ldsxy3(r0, r1, r2) (gteMtc2(12, (u32)(r0)), gteMtc2(14, (u32)(r2)), gteMtc2(13, (u32)(r1)))
 
 /* Commands */
-#define gte_rtps() gteCommand(GTE_RTPS)
-#define gte_rtpt() gteCommand(GTE_RTPT)
-#define gte_nclip() gteCommand(GTE_NCLIP)
-#define gte_avsz3() gteCommand(GTE_AVSZ3)
-#define gte_avsz4() gteCommand(GTE_AVSZ4)
-#define gte_gpf0() gteCommand(GTE_GPF(0))
-#define gte_gpf12() gteCommand(GTE_GPF(1))
-#define gte_gpl0() gteCommand(GTE_GPL(0))
-#define gte_gpl12() gteCommand(GTE_GPL(1))
-#define gte_ncds() gteCommand(GTE_NCDS)
-#define gte_nccs() gteCommand(GTE_NCCS)
-#define gte_ncs() gteCommand(GTE_NCS)
-#define gte_dpcs() gteCommand(GTE_DPCS)
-#define gte_intpl() gteCommand(GTE_INTPL)
-#define gte_sqr0() gteCommand(GTE_SQR(0))
-#define gte_sqr12() gteCommand(GTE_SQR(1))
-#define gte_rtv0() gteCommand(GTE_MVMVA(1, 0, 0, 3, 0))
-#define gte_rtir() gteCommand(GTE_MVMVA(1, 0, 3, 3, 0))
-#define gte_rt() gteCommand(GTE_MVMVA(1, 0, 0, 0, 0))
-#define gte_op12() gteCommand(GTE_OP(1))
-#define gte_op0() gteCommand(GTE_OP(0))
+#define gte_rtps() GTE_RUN(GTE_RTPS)
+#define gte_rtpt() GTE_RUN(GTE_RTPT)
+#define gte_nclip() GTE_RUN(GTE_NCLIP)
+#define gte_avsz3() GTE_RUN(GTE_AVSZ3)
+#define gte_avsz4() GTE_RUN(GTE_AVSZ4)
+#define gte_gpf0() GTE_RUN(GTE_GPF(0))
+#define gte_gpf12() GTE_RUN(GTE_GPF(1))
+#define gte_gpl0() GTE_RUN(GTE_GPL(0))
+#define gte_gpl12() GTE_RUN(GTE_GPL(1))
+#define gte_ncds() GTE_RUN(GTE_NCDS)
+#define gte_nccs() GTE_RUN(GTE_NCCS)
+#define gte_ncs() GTE_RUN(GTE_NCS)
+#define gte_dpcs() GTE_RUN(GTE_DPCS)
+#define gte_intpl() GTE_RUN(GTE_INTPL)
+#define gte_sqr0() GTE_RUN(GTE_SQR(0))
+#define gte_sqr12() GTE_RUN(GTE_SQR(1))
+#define gte_rtv0() GTE_RUN(GTE_MVMVA(1, 0, 0, 3, 0))
+#define gte_rtir() GTE_RUN(GTE_MVMVA(1, 0, 3, 3, 0))
+#define gte_rt() GTE_RUN(GTE_MVMVA(1, 0, 0, 0, 0))
+#define gte_op12() GTE_RUN(GTE_OP(1))
+#define gte_op0() GTE_RUN(GTE_OP(0))
 
 /* Stores */
 #define gte_stsxy(r0) gteSwc2(14, GTE_AT(r0, 0))

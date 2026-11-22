@@ -300,8 +300,13 @@ s32 SetRCnt(u32 spec, u16 target, s32 mode) {
     return 1;
 }
 
+void ps1timeTimeRead(void) __attribute__((weak)); /* ps1time.c: its clock caught up before a timer read */
+
 s32 GetRCnt(u32 spec) {
     hwSafePoint();
+    if (ps1timeTimeRead != NULL) {
+        ps1timeTimeRead();
+    }
     int n = spec & 0xFFFF;
 
     if (n >= 3) {

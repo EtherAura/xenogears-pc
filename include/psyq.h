@@ -93,7 +93,14 @@ typedef struct {
 
 #define setlen(p, _len) (((P_TAG*)(p))->len = (u8)(_len))
 #define setcode(p, _code) (((P_TAG*)(p))->code = (u8)(_code))
+#ifdef PLATFORM_PC
+/* Each primitive linked into an ordering table: work the PS1 time model counts
+ * (port/src/system/ps1time.c). */
+void pcPrimLinked(void);
+#define addPrim(ot, p) (pcPrimLinked(), setaddr(p, getaddr(ot)), setaddr(ot, p))
+#else
 #define addPrim(ot, p) setaddr(p, getaddr(ot)), setaddr(ot, p)
+#endif
 
 #define setRGB0(p, _r0, _g0, _b0) ((p)->r0 = (_r0), (p)->g0 = (_g0), (p)->b0 = (_b0))
 #define setRGB1(p, _r1, _g1, _b1) ((p)->r1 = (_r1), (p)->g1 = (_g1), (p)->b1 = (_b1))

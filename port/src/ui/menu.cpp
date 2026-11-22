@@ -2141,6 +2141,52 @@ extern "C" void uiVulkanReady(const UiVulkan* dev) {
     sectionsVulkan(dev->physical, dev->getInstanceProcAddr, dev->instance);
 }
 
+// The overlay's pipeline for a target of format f: the first target's, or a
+// swapchain of another format.
+static void ensurePipeline(VkFormat f) {
+    if (f == st.pipelineFormat) return;
+    if (st.pipelineFormat != VK_FORMAT_UNDEFINED) {
+        PFN_vkDeviceWaitIdle waitIdle = (PFN_vkDeviceWaitIdle)loadVk("vkDeviceWaitIdle", &st.dev);
+        waitIdle((VkDevice)st.dev.device);
+    }
+    ImGui_ImplVulkan_PipelineInfo pi = {};
+    pi.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    pi.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+    pi.PipelineRenderingCreateInfo.pColorAttachmentFormats = &f;
+    ImGui_ImplVulkan_CreateMainPipeline(&pi);
+    st.pipelineFormat = f;
+}
+
+// Before the game starts (main.c), where the touch pad can show over it: the
+// menu's look read from the disc, ImGui's device objects and the overlay's
+// pipeline made, and the font atlas uploaded, all while the GPU is idle.
+// Left to the pad's first picture they cost that vblank 33-48 ms on the
+// Pixel (a Gear battle's start), most of it the atlas's upload, which waits
+// for the queue to go idle (imgui_impl_vulkan.cpp UpdateTexture) behind the
+// picture being drawn (xg-mrj.3.25).
+extern "C" void uiPrepare(void) {
+    if (touchMode() == 0) return;
+    Uint64 from = SDL_GetTicksNS();
+    if (!begin()) return;
+    int format = gpuPresentFormat();
+    if (format != 0) ensurePipeline((VkFormat)format);
+    int w = 0, h = 0;
+    SDL_GetWindowSizeInPixels(presentWindow(), &w, &h);
+    if (w > 0 && h > 0) {
+        // A frame with nothing in it: what ImGui's first frame makes (the atlas).
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGuiIO& io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(float(w), float(h));
+        io.DisplayFramebufferScale = ImVec2(1, 1);
+        ImGui::NewFrame();
+        ImGui::Render();
+        for (ImTextureData* tex : ImGui::GetPlatformIO().Textures)
+            if (tex->Status != ImTextureStatus_OK) ImGui_ImplVulkan_UpdateTexture(tex);
+    }
+    fprintf(stderr, "ui: ready before the game (the touch pad): %.1f ms\n", (double)(SDL_GetTicksNS() - from) * 1e-6);
+}
+
 extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture) {
     if (!st.open) {
         // Over the game: a movie's captions, the touch pad (touchpad.cpp).
@@ -2174,21 +2220,7 @@ extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture
     if (dd == NULL || dd->DisplaySize.x <= 0 || dd->DisplaySize.y <= 0) {
         return;
     }
-    if ((VkFormat)format != st.pipelineFormat) {
-        // The first target, or a swapchain of another format: its pipeline.
-        if (st.pipelineFormat != VK_FORMAT_UNDEFINED) {
-            PFN_vkDeviceWaitIdle waitIdle =
-                (PFN_vkDeviceWaitIdle)loadVk("vkDeviceWaitIdle", &st.dev);
-            waitIdle((VkDevice)st.dev.device);
-        }
-        VkFormat f = (VkFormat)format;
-        ImGui_ImplVulkan_PipelineInfo pi = {};
-        pi.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-        pi.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-        pi.PipelineRenderingCreateInfo.pColorAttachmentFormats = &f;
-        ImGui_ImplVulkan_CreateMainPipeline(&pi);
-        st.pipelineFormat = f;
-    }
+    ensurePipeline((VkFormat)format);
     // The game's picture darkened as its own menu darkens it: 0x80 of 0xFF
     // off each channel of its 5-bit colours (16 of 31: 132 of 255 in 8 bits).
     if (st.open) dim::record((VkCommandBuffer)cmd, w, h, (VkFormat)format, 132.0f / 255.0f);

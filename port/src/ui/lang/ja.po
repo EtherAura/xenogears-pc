@@ -7299,6 +7299,18 @@ msgstr "影"
 msgid "In fields, the scenery and the characters cast shadows from a sun set when the room starts. Dialogue, portraits and the HUD are not touched. Off by default."
 msgstr "フィールドで、背景とキャラクターが、部屋に入ったときに決まる日の光の向きから影を落とします。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
+msgid "Fog"
+msgstr "フォグ"
+
+msgid "In fields, a haze that thickens past the characters, in the colour of the room's farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールドで、キャラクターより奥ほどこくなるもやを、部屋のいちばん奥の背景の色でかけます。小さな部屋ではほとんど変わりません。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+
+msgid "Colour grade"
+msgstr "カラーグレード"
+
+msgid "In fields, shadows a little cool and highlights a little warm, with a touch more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールドで、暗い部分を少しつめたい色に、明るい部分を少しあたたかい色にして、色とコントラストを少し強めます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+
 #: port/src/extras/shell.cpp port/src/ui/sections.cpp
 msgid "Look"
 msgstr "見た目"
@@ -8638,8 +8650,8 @@ msgstr "描く画面がありません"
 msgid "no display copy yet"
 msgstr "表示用のコピーがまだありません"
 
-msgid "not available on this device, with GPU ordering, or without memory for it"
-msgstr "このデバイスでは使えないか、GPUの描画順モードか、メモリが足りません"
+msgid "not available on this device, or without memory for it"
+msgstr "このデバイスでは使えないか、メモリが足りません"
 
 msgid "the game gave no view for this scene"
 msgstr "この場面ではゲームの視点がありません"

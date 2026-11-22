@@ -956,6 +956,9 @@ void vramBookkeepingKeep(void) {
     kept.on = 1;
 }
 
+/* A picture between is drawn and its bookkeeping not yet put back (savestate.c stateVBlankPoint). */
+int vramBookkeepingHeld(void) { return kept.on; }
+
 void vramBookkeepingPutBack(void) {
     if (!kept.on) return;
     kept.on = 0;

@@ -241,7 +241,7 @@ void main() {
 #ifdef ORDERED_LIST
     if(write) {
         uint flags=orderedFlags(mode,semi,semiMode,maskOut!=0u)|ORD_QUANT5;
-        orderedAppend(p,(mode&DRAW_FILL)!=0u?fill:pack5(uvec3(front)),flags);
+        orderedAppend(p,(mode&DRAW_FILL)!=0u?fill:pack5(uvec3(front)),flags,0u);
     }
 #elif defined(TILE_IMAGE)
     // A fragment that writes nothing must leave the attachment alone, and

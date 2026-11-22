@@ -557,3 +557,14 @@ system/freecam.c sw host the XG_FREECAM_SWEEP tool's state
 system/freecam.c walls host the XG_FREECAM_WALLS switch
 system/freecam.c wc host the world map free camera's tilt and zoom (the player's view)
 system/freecam.c start host the XG_WORLDCAM test start
+
+system/ps1time.c * derived the PS1 frame rate's stretch of work under way and its GPU deadline (restarted when the clock goes back: clockCheck), cost caches, the setting's cached value and the XG_PS1TIME_* logs
+gpu/gp0.c ps1timeGpu derived the PS1 time model's primitive counters (ps1time.c takes differences)
+gpu/gp0.c ps1timeGpuOn derived whether those count, set by ps1time.c's refresh
+gte/gte.c gteCommandCount derived the PS1 time model's GTE command counters (ps1time.c takes and clears them)
+gte/gte.c gteCountOn derived whether those count, set by ps1time.c's refresh
+gte/gte.c gteCaller derived the function of the command under way (GTE_RUN), NULL between commands
+system/hw.c hwGameSafePoints derived the game's own safe points, a counter ps1time.c takes differences of
+system/hw.c ps1timeSitesOn host XG_PS1TIME_SITES
+gpu/prim.c pcPrimLinkCount derived the PS1 time model's addPrim count (ps1time.c takes and clears it)
+gpu/prim.c pcPrimLinkOn derived whether that counts, set by ps1time.c's refresh

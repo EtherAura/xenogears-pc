@@ -55,6 +55,7 @@ extern "C" {
 #include "system/gametext.h"
 #include "system/hw.h"
 #include "system/speedup.h"
+#include "system/ps1time.h"
 #include "system/battlespeed.h"
 #include "system/fieldspeed.h"
 #include "system/mouse.h"
@@ -848,7 +849,7 @@ void displaySection() {
     // them through tr().
     static const char* const sceneReasons[] = {
         N_("no focus point in this view"), N_("a movie-backed scene"), N_("no frame"), N_("no display copy yet"),
-        N_("not available on this device, with GPU ordering, or without memory for it"),
+        N_("not available on this device, or without memory for it"),
         N_("the game gave no view for this scene")};
     (void)sceneReasons;
     if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
@@ -914,6 +915,33 @@ void displaySection() {
         if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("shadows");
+    }
+    // Fog and the colour grade (docs/PORT_HD2D.md section 27), made with the lighting.
+    if (row("Fog", "fog", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneFog();
+        int chosen = listChoice("##fog", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetFog(chosen);
+        hint("In fields, a haze that thickens past the characters, in the colour of the room's farthest scenery. Small "
+             "rooms barely change. Dialogue, portraits and the HUD are not touched. Off by default.");
+        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        overrideNote("fog");
+    }
+    if (row("Colour grade", "color_grade", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneGrade();
+        int chosen = listChoice("##color_grade", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetGrade(chosen);
+        hint("In fields, shadows a little cool and highlights a little warm, with a touch more colour and contrast. "
+             "Dialogue, portraits and the HUD are not touched. Off by default.");
+        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        overrideNote("color_grade");
     }
 
     if (row("Filter", "present_filter")) {
@@ -2449,6 +2477,15 @@ void gameplaySection() {
              "of its own frames per picture. Menus, movies and battles keep their own speed (Battle speed above "
              "is the battles'). Off and 1x: the original speed.");
         overrideNote("field_speed");
+    }
+    if (row("PS1 frame rate", "ps1_frame_rate")) {
+        bool ps1Rate = ps1timeFrameRateOn() != 0;
+        if (offOnList("##ps1_frame_rate", &ps1Rate)) ps1timeSetFrameRate(ps1Rate);
+        hint("Draws heavy scenes as slowly as the PS1 did: each picture takes the vblanks the console's CPU and "
+             "GPU needed for it, from a model of their time (an idle Gear battle shows a new picture every third "
+             "vblank). The game keeps its speed. Original engine only; Speedup, Battle speed, Field speed and "
+             "online play leave it off. Off: every picture the game asks for, as fast as the PC draws it.");
+        overrideNote("ps1_frame_rate");
     }
     if (row("Original-game bug fixes", "original_bug_fixes")) {
         bool originalFixes = pcGameplayOriginalBugFixes() != 0;

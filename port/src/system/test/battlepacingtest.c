@@ -26,6 +26,8 @@ uint32_t hwWaitVSyncSince(uint32_t previous) {
 void hwVSyncResume(void) { resumes++; }
 void slowdownVSync(int mode) { (void)mode; }
 void slowdownVSyncReturn(const void* site) { lastSite = site; }
+void ps1timeVSync(int32_t arg) { (void)arg; }
+void ps1timeVSyncDone(int32_t arg) { (void)arg; }
 void hwPresentPoll(void) { presents++; }
 int hwVBlankIdle(void) { return 0; }
 int slowdownLogVBlank(int64_t* at) { *at=count; return replay; }

@@ -157,6 +157,10 @@ typedef struct {
 void uiVulkanReady(const UiVulkan* dev);
 void uiRecord(void* cmd, int w, int h, int format, const int* movieRect);
 void uiVulkanShutdown(void);
+/* port/src/main.c, before the game starts: where the touch pad can show, what
+ * its first picture needs (the menu's look, ImGui's device objects, the
+ * overlay's pipeline, the font atlas) made now, not in that picture's vblank. */
+void uiPrepare(void);
 
 #ifdef __cplusplus
 }

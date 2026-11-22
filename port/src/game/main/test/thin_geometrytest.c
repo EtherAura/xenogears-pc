@@ -55,6 +55,7 @@ void SetDrawTPage(DR_TPAGE* p, s32 dfe, s32 dtd, s32 page) {
     (void)dfe; (void)dtd; p->code[0] = 0xe1000000 | page; setlen(p, 1);
 }
 void AddPrim(void* entry, void* p) { OTag* ot = entry; *(OTag*)p = (*ot & OT_LINK_MASK) | (*(OTag*)p & ~OT_LINK_MASK); *ot = OT_LINK(p); }
+void pcPrimLinked(void) {} /* the PS1 time model's count (system/ps1time.c), not linked here */
 void renderLitFlatQuads(void*, s32);
 void renderBattlingShadowTris(u8*, s32);
 void renderBattlingShadowQuads(u8*, s32);

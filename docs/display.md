@@ -96,6 +96,16 @@ lights such as windows and lamps stay as bright as they are painted. The
 Enhanced engine only (F1 > System > Engine).
 F1 > Display > Shadows (Off, Subtle, Medium, Strong).
 
+## Fog and colour grade
+
+In fields, Fog lays a haze that thickens past the characters, in the colour
+of the room's farthest scenery, so distant hills, seas and skies recede.
+Small rooms barely change. Colour grade makes shadows a little cool and
+highlights a little warm, with a touch more colour and contrast. Dialogue,
+portraits and the HUD are not touched. The Enhanced engine only (F1 > System
+> Engine). F1 > Display > Fog and Colour grade (each Off, Subtle, Medium,
+Strong).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -130,6 +140,8 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Lighting | Off |
 | Glow | Off |
 | Shadows | Off |
+| Fog | Off |
+| Colour grade | Off |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

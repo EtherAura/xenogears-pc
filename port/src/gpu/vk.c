@@ -236,6 +236,22 @@ static const uint32_t hires_wide_ordered_fragSpv[] =
 static const uint32_t ordered_compSpv[] =
 #include "ordered.comp.spv.inc"
     ;
+/* A registered scene's batches in GPU ordering mode (orderedDepthMake). */
+static const uint32_t hiresOrderedDepthVertSpv[] =
+#include "hires_ordered_depth.vert.spv.inc"
+    ;
+static const uint32_t hiresOrderedDepthFragSpv[] =
+#include "hires_ordered_depth.frag.spv.inc"
+    ;
+static const uint32_t hiresWideOrderedDepthVertSpv[] =
+#include "hires_wide_ordered_depth.vert.spv.inc"
+    ;
+static const uint32_t hiresWideOrderedDepthFragSpv[] =
+#include "hires_wide_ordered_depth.frag.spv.inc"
+    ;
+static const uint32_t orderedDepthCompSpv[] =
+#include "ordered_depth.comp.spv.inc"
+    ;
 /* The scene's depth image and the depth of field (scene.c): made on first use. */
 static const uint32_t hiresDepthVertSpv[] =
 #include "hires_depth.vert.spv.inc"
@@ -411,8 +427,9 @@ VK_DEVICE_FUNCS(VK_DECLARE)
  * scene's sun and actors' ground points (lightBlock). */
 #define SCENE_LIGHT_BINDINGS (2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED + 1)
 /* That block: a vec4 of the sun and the shadow's darkness, a vec4 of the
- * count, then one vec4 per ground point. */
-#define LIGHT_BLOCK_BYTES ((2 + SCENE_FIGURES) * 16 + 16)
+ * count, one vec4 per ground point, then the fog's colour, which light.comp's
+ * fog pass writes there (FOG_SLOT). */
+#define LIGHT_BLOCK_BYTES ((3 + SCENE_FIGURES) * 16 + 16)
 enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_LIGHT, GT_KINDS };
 #define GT_QUERIES 4096
 
@@ -749,9 +766,15 @@ static struct {
     VkPipelineLayout orderedResolveLayout;
     VkDescriptorPool orderedPool;
     VkDescriptorSet orderedSet;
-    VkBuffer orderedNodes, orderedHeads;
-    VkDeviceMemory orderedNodesMemory, orderedHeadsMemory;
+    VkBuffer orderedNodes, orderedHeads, orderedDepths;
+    VkDeviceMemory orderedNodesMemory, orderedHeadsMemory, orderedDepthsMemory;
     VkPipeline orderedDraw, orderedWide, orderedHi, orderedHiWide, orderedResolve;
+    /* A registered scene's batches (orderedDepthMake, at the first scene in
+     * this mode): the lists with each operation's depth, the resolve that
+     * stores the last writer's (shaders/ordered.comp DEPTH). */
+    int orderedDepthState; /* 0 not tried, 1 made, -1 cannot */
+    VkPipelineLayout orderedResolveDepthLayout;
+    VkPipeline orderedHiDepth, orderedHiWideDepth, orderedResolveDepth;
     uint64_t orderedPasses;
     /* VK_EXT_shader_tile_image: the device has it (and no interlock), and the
      * passes that use it, made with the ordered fallback: the native one
@@ -1710,15 +1733,18 @@ static void createLayouts(void) {
     li.pBindings = b;
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &li, NULL, &vk.setLayout));
     /* Set 1: a movie pack's picture (present.frag's src 4). */
-    VkDescriptorSetLayoutBinding mb = {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+    /* (also the scene's depth image: hires.frag DEPTH, ordered.comp DEPTH) */
+    VkDescriptorSetLayoutBinding mb = {0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, NULL};
     li.bindingCount = 1;
     li.pBindings = &mb;
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device, &li, NULL, &vk.movieSetLayout));
 
-    VkDescriptorSetLayoutBinding ob[2] = {
+    /* The ordered lists: nodes, heads, and each node's depth (ordered.glsl). */
+    VkDescriptorSetLayoutBinding ob[3] = {
         {0,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,1,VK_SHADER_STAGE_FRAGMENT_BIT|VK_SHADER_STAGE_COMPUTE_BIT,NULL},
-        {1,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,1,VK_SHADER_STAGE_FRAGMENT_BIT|VK_SHADER_STAGE_COMPUTE_BIT,NULL}};
-    li.bindingCount=2;li.pBindings=ob;
+        {1,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,1,VK_SHADER_STAGE_FRAGMENT_BIT|VK_SHADER_STAGE_COMPUTE_BIT,NULL},
+        {2,VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,1,VK_SHADER_STAGE_FRAGMENT_BIT|VK_SHADER_STAGE_COMPUTE_BIT,NULL}};
+    li.bindingCount=3;li.pBindings=ob;
     VK_CHECK(vkCreateDescriptorSetLayout(vk.device,&li,NULL,&vk.orderedLayout));
     VkPushConstantRange pr = {VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PresentConstants)};
     VkDescriptorSetLayout sets[3] = {vk.setLayout, vk.movieSetLayout, vk.orderedLayout};
@@ -1736,9 +1762,14 @@ static void createLayouts(void) {
     pi.pPushConstantRanges = &hr;
     VK_CHECK(vkCreatePipelineLayout(vk.device, &pi, NULL, &vk.hiLayout));
 
-    VkDescriptorSetLayout resolveSets[2]={vk.setLayout,vk.orderedLayout};
+    VkDescriptorSetLayout resolveSets[3]={vk.setLayout,vk.orderedLayout,vk.movieSetLayout};
     pi.setLayoutCount=2;pi.pSetLayouts=resolveSets;pi.pushConstantRangeCount=0;
     VK_CHECK(vkCreatePipelineLayout(vk.device,&pi,NULL,&vk.orderedResolveLayout));
+    /* The resolve of a scene's batches: set 2 the scene's depth image, and
+     * where the target's pixels fall in it (ordered.comp DEPTH). */
+    VkPushConstantRange dr={VK_SHADER_STAGE_COMPUTE_BIT,0,16};
+    pi.setLayoutCount=3;pi.pushConstantRangeCount=1;pi.pPushConstantRanges=&dr;
+    VK_CHECK(vkCreatePipelineLayout(vk.device,&pi,NULL,&vk.orderedResolveDepthLayout));
 
     VkDescriptorPoolSize ps[2] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, (SET_BINDINGS - 1) * FRAMES},
                                   {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2 * FRAMES}};
@@ -2754,12 +2785,19 @@ static size_t pendingBytes(void) {
 /* Fragment arrival order is arbitrary. Each bounded pass collects at most
  * 64 triangles, then one compute invocation resolves each pixel in order.
  * Scissors only partition pixels, preserving hardware interpolation. */
+/* depthSet (or VK_NULL_HANDLE): a registered scene's batch (hi-res kinds
+ * only, orderedDepthMake), its depth image's set; depth: where the target's
+ * pixels fall in that image (x, y, width, height, hi-res pixels), as the
+ * constants' depthX..depthH. Each pixel's depth is then the last writer's,
+ * as in the interlocked pass. */
 static void drawOrdered(FrameCtx* f,const void* src,size_t stride,VkDeviceSize offset,
                         uint32_t first,uint32_t count,int scale,int w,int h,int kind,
-                        const void* constants,uint32_t constantBytes) {
+                        const void* constants,uint32_t constantBytes,
+                        VkDescriptorSet depthSet,const int32_t* depth) {
     VkCommandBuffer cmd=f->cmd;
     offset+=(VkDeviceSize)first*stride;first=0;
     VkPipeline graphics=kind==0?vk.orderedDraw:kind==1?vk.orderedWide:kind==2?vk.orderedHi:vk.orderedHiWide;
+    if(depthSet)graphics=kind==2?vk.orderedHiDepth:vk.orderedHiWideDepth;
     VkPipelineLayout layout=kind<2?vk.pipelineLayout:vk.hiLayout;
     /* No overlapping invocations: keep the original one-pass shader. This
      * matters for small sprites and individual field faces between texture
@@ -2770,8 +2808,10 @@ static void drawOrdered(FrameCtx* f,const void* src,size_t stride,VkDeviceSize o
         ri.renderArea.extent=(VkExtent2D){(uint32_t)w,(uint32_t)h};ri.layerCount=1;
         vkCmdBeginRendering(cmd,&ri);
         VkPipeline p=kind==0?vk.drawPipeline:kind==1?vk.wideDrawPipeline:kind==2?vk.hiDrawPipeline:vk.hiWidePipeline;
+        if(depthSet)p=vk.scene.draw[kind==3][0][1]; /* no overlap: the plain depth pass */
         vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,p);
         vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,0,1,&f->set,0,NULL);
+        if(depthSet)vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,1,1,&depthSet,0,NULL);
         vkCmdBindVertexBuffers(cmd,0,1,&f->vertices.buffer,&offset);
         VkViewport vp={0,0,(float)w,(float)h,0,1};VkRect2D sc={{0,0},{(uint32_t)w,(uint32_t)h}};
         vkCmdSetViewport(cmd,0,1,&vp);vkCmdSetScissor(cmd,0,1,&sc);
@@ -2792,7 +2832,7 @@ static void drawOrdered(FrameCtx* f,const void* src,size_t stride,VkDeviceSize o
         if(clippedPerspective) {
             for(int t=0;t<triangles;t++) {
                 size_t step=(start+3*t)*stride;
-                drawOrdered(f,(const char*)src+step,stride,offset+step,0,3,scale,w,h,kind,constants,constantBytes);
+                drawOrdered(f,(const char*)src+step,stride,offset+step,0,3,scale,w,h,kind,constants,constantBytes,depthSet,depth);
             }
             continue;
         }
@@ -2839,6 +2879,7 @@ static void drawOrdered(FrameCtx* f,const void* src,size_t stride,VkDeviceSize o
                 vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,graphics);
                 vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,0,1,&f->set,0,NULL);
                 vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,2,1,&vk.orderedSet,0,NULL);
+                if(depthSet)vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_GRAPHICS,layout,1,1,&depthSet,0,NULL);
                 vkCmdBindVertexBuffers(cmd,0,1,&f->vertices.buffer,&offset);
                 VkViewport vp={0,0,(float)w,(float)h,0,1};
                 VkRect2D scissor={{x,y},{width,height}};
@@ -2847,9 +2888,15 @@ static void drawOrdered(FrameCtx* f,const void* src,size_t stride,VkDeviceSize o
                 vkCmdDraw(cmd,(uint32_t)triangles*3,1,first+start,0);
                 vkCmdEndRendering(cmd);
                 fullBarrier(cmd);
-                vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,vk.orderedResolve);
-                VkDescriptorSet sets[2]={f->set,vk.orderedSet};
-                vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,vk.orderedResolveLayout,0,2,sets,0,NULL);
+                VkDescriptorSet sets[3]={f->set,vk.orderedSet,depthSet};
+                if(depthSet) {
+                    vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,vk.orderedResolveDepth);
+                    vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,vk.orderedResolveDepthLayout,0,3,sets,0,NULL);
+                    vkCmdPushConstants(cmd,vk.orderedResolveDepthLayout,VK_SHADER_STAGE_COMPUTE_BIT,0,16,depth);
+                } else {
+                    vkCmdBindPipeline(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,vk.orderedResolve);
+                    vkCmdBindDescriptorSets(cmd,VK_PIPELINE_BIND_POINT_COMPUTE,vk.orderedResolveLayout,0,2,sets,0,NULL);
+                }
                 vkCmdDispatch(cmd,(width+7)/8,(height+7)/8,1);
                 fullBarrier(cmd);
                 vk.orderedPasses++;
@@ -2960,7 +3007,7 @@ static void drawWideBatch(FrameCtx* f) {
         VkDeviceSize offset=f->vertexUsed;
         memcpy(f->vertices.map+offset,wideBuf,(size_t)vk.wideCount*sizeof(GpuVertex));
         if(vk.tileWideDraw)tileWidePass(f,wideBuf,(uint32_t)(offset/sizeof(GpuVertex)),vk.wideCount);
-        else drawOrdered(f,wideBuf,sizeof(GpuVertex),offset,0,vk.wideCount,1,WIDE_W,WIDE_H,1,NULL,0);
+        else drawOrdered(f,wideBuf,sizeof(GpuVertex),offset,0,vk.wideCount,1,WIDE_W,WIDE_H,1,NULL,0,VK_NULL_HANDLE,NULL);
         f->vertexUsed+=(size_t)vk.wideCount*sizeof(GpuVertex);vk.wideCount=0;
         vk.wideScanned=0;vk.wideDependent=0;
         gtStop(f->cmd,q);return;
@@ -3042,7 +3089,7 @@ static void finishBatch(int nativeOnly) {
         if(vk.orderedEnabled && vk.tileDraw) {
             drawTile(f,vk.batchFirst,count);
         } else if(vk.orderedEnabled) {
-            drawOrdered(f,f->vertices.map+vk.batchFirst*sizeof(GpuVertex),sizeof(GpuVertex),0,vk.batchFirst,count,1,VRAM_W,VRAM_H,0,NULL,0);
+            drawOrdered(f,f->vertices.map+vk.batchFirst*sizeof(GpuVertex),sizeof(GpuVertex),0,vk.batchFirst,count,1,VRAM_W,VRAM_H,0,NULL,0,VK_NULL_HANDLE,NULL);
         } else {
             VkRenderingInfo ri={.sType=VK_STRUCTURE_TYPE_RENDERING_INFO,
                 .renderArea={{0,0},{VRAM_W,VRAM_H}},.layerCount=1};
@@ -3182,9 +3229,11 @@ static void resIdle(void) {
 }
 
 static void orderedDestroy(void) {
-    VkPipeline* pipelines[9]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw,
-                              &vk.tileWideDraw,&vk.tileHiDraw,&vk.tileHiWideDraw};
-    for(int i=0;i<9;i++) {
+    VkPipeline* pipelines[12]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw,
+                              &vk.tileWideDraw,&vk.tileHiDraw,&vk.tileHiWideDraw,
+                              &vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth};
+    vk.orderedDepthState=0;
+    for(int i=0;i<12;i++) {
         if(*pipelines[i])vkDestroyPipeline(vk.device,*pipelines[i],NULL);
         *pipelines[i]=VK_NULL_HANDLE;
     }
@@ -3192,10 +3241,12 @@ static void orderedDestroy(void) {
     vk.orderedPool=VK_NULL_HANDLE;vk.orderedSet=VK_NULL_HANDLE;
     if(vk.orderedNodes)vkDestroyBuffer(vk.device,vk.orderedNodes,NULL);
     if(vk.orderedHeads)vkDestroyBuffer(vk.device,vk.orderedHeads,NULL);
+    if(vk.orderedDepths)vkDestroyBuffer(vk.device,vk.orderedDepths,NULL);
     if(vk.orderedNodesMemory)vkFreeMemory(vk.device,vk.orderedNodesMemory,NULL);
     if(vk.orderedHeadsMemory)vkFreeMemory(vk.device,vk.orderedHeadsMemory,NULL);
-    vk.orderedNodes=vk.orderedHeads=VK_NULL_HANDLE;
-    vk.orderedNodesMemory=vk.orderedHeadsMemory=VK_NULL_HANDLE;
+    if(vk.orderedDepthsMemory)vkFreeMemory(vk.device,vk.orderedDepthsMemory,NULL);
+    vk.orderedNodes=vk.orderedHeads=vk.orderedDepths=VK_NULL_HANDLE;
+    vk.orderedNodesMemory=vk.orderedHeadsMemory=vk.orderedDepthsMemory=VK_NULL_HANDLE;
 }
 static int orderedMake(void) {
     if(vk.orderedState)return vk.orderedState>0;
@@ -3216,18 +3267,21 @@ static int orderedMake(void) {
     if(bytes>vk.limits.maxStorageBufferRange)return 0;
     VkBufferUsageFlags usage=VK_BUFFER_USAGE_STORAGE_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT|VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     if(!deviceBuffer(&vk.orderedNodes,&vk.orderedNodesMemory,bytes,usage)||
-       !deviceBuffer(&vk.orderedHeads,&vk.orderedHeadsMemory,(VkDeviceSize)vk.orderedCapacity*4,usage))goto fail;
-    VkDescriptorPoolSize size={VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,2};
+       !deviceBuffer(&vk.orderedHeads,&vk.orderedHeadsMemory,(VkDeviceSize)vk.orderedCapacity*4,usage)||
+       !deviceBuffer(&vk.orderedDepths,&vk.orderedDepthsMemory,(VkDeviceSize)vk.orderedCapacity*4,usage))goto fail;
+    VkDescriptorPoolSize size={VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,3};
     VkDescriptorPoolCreateInfo pi={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     pi.maxSets=1;pi.poolSizeCount=1;pi.pPoolSizes=&size;
     if(vkCreateDescriptorPool(vk.device,&pi,NULL,&vk.orderedPool)!=VK_SUCCESS)goto fail;
     VkDescriptorSetAllocateInfo ai={.sType=VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
     ai.descriptorPool=vk.orderedPool;ai.descriptorSetCount=1;ai.pSetLayouts=&vk.orderedLayout;
     if(vkAllocateDescriptorSets(vk.device,&ai,&vk.orderedSet)!=VK_SUCCESS)goto fail;
-    VkDescriptorBufferInfo bi[2]={{vk.orderedNodes,0,bytes},{vk.orderedHeads,0,(VkDeviceSize)vk.orderedCapacity*4}};
-    VkWriteDescriptorSet writes[2]={{.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},{.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
-    for(int i=0;i<2;i++){writes[i].dstSet=vk.orderedSet;writes[i].dstBinding=(uint32_t)i;writes[i].descriptorCount=1;writes[i].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;writes[i].pBufferInfo=&bi[i];}
-    vkUpdateDescriptorSets(vk.device,2,writes,0,NULL);
+    VkDescriptorBufferInfo bi[3]={{vk.orderedNodes,0,bytes},{vk.orderedHeads,0,(VkDeviceSize)vk.orderedCapacity*4},
+                                  {vk.orderedDepths,0,(VkDeviceSize)vk.orderedCapacity*4}};
+    VkWriteDescriptorSet writes[3]={{.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},{.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET},
+                                    {.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET}};
+    for(int i=0;i<3;i++){writes[i].dstSet=vk.orderedSet;writes[i].dstBinding=(uint32_t)i;writes[i].descriptorCount=1;writes[i].descriptorType=VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;writes[i].pBufferInfo=&bi[i];}
+    vkUpdateDescriptorSets(vk.device,3,writes,0,NULL);
     vk.orderedDraw=createPipeline(draw_ordered_vertSpv,sizeof(draw_ordered_vertSpv),draw_ordered_fragSpv,sizeof(draw_ordered_fragSpv),3,VK_FORMAT_UNDEFINED);
     vk.orderedWide=createPipeline(draw_wide_ordered_vertSpv,sizeof(draw_wide_ordered_vertSpv),draw_wide_ordered_fragSpv,sizeof(draw_wide_ordered_fragSpv),4,VK_FORMAT_UNDEFINED);
     vk.orderedHi=createHiPipeline(hires_ordered_vertSpv,sizeof(hires_ordered_vertSpv),hires_ordered_fragSpv,sizeof(hires_ordered_fragSpv),3);
@@ -3256,13 +3310,42 @@ static int orderedMake(void) {
     VkCommandBuffer commands=recording();
     fullBarrier(commands);vkCmdFillBuffer(commands,vk.orderedNodes,4,4,0);fullBarrier(commands);
     vk.orderedState=1;
-    gpuLog("vulkan: exact ordered fallback ready (%u operations, %.1f MiB)%s",vk.orderedCapacity,(double)(bytes+vk.orderedCapacity*4)/(1<<20),
+    gpuLog("vulkan: exact ordered fallback ready (%u operations, %.1f MiB)%s",vk.orderedCapacity,(double)(bytes+vk.orderedCapacity*8)/(1<<20),
            !vk.tileDraw?"":vk.tileWideDraw&&vk.tileHiDraw&&vk.tileHiWideDraw?"; every target's draws in one tile image pass per batch":
            "; native draws in one tile image pass per batch");
     return 1;
 fail:
     orderedDestroy();return 0;
 }
+/* A registered scene's batches in GPU ordering mode: the lists' depth
+ * variants and the resolve that stores it, at the first scene in this mode
+ * (the scene's own pipelines first: sceneMake). */
+static int orderedDepthMake(void) {
+    if(vk.orderedDepthState)return vk.orderedDepthState>0;
+    vk.orderedDepthState=-1;
+    if(vk.orderedState<=0||vk.scene.state<=0)return 0;
+    hiPipelineDepth=1;
+    vk.orderedHiDepth=createHiPipeline(hiresOrderedDepthVertSpv,sizeof(hiresOrderedDepthVertSpv),hiresOrderedDepthFragSpv,sizeof(hiresOrderedDepthFragSpv),3);
+    vk.orderedHiWideDepth=createHiPipeline(hiresWideOrderedDepthVertSpv,sizeof(hiresWideOrderedDepthVertSpv),hiresWideOrderedDepthFragSpv,sizeof(hiresWideOrderedDepthFragSpv),4);
+    hiPipelineDepth=0;
+    VkShaderModule module=shaderModule(orderedDepthCompSpv,sizeof(orderedDepthCompSpv));
+    VkComputePipelineCreateInfo ci={.sType=VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    ci.stage=(VkPipelineShaderStageCreateInfo){.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_COMPUTE_BIT,.module=module,.pName="main"};
+    ci.layout=vk.orderedResolveDepthLayout;
+    VkResult result=vkCreateComputePipelines(vk.device,VK_NULL_HANDLE,1,&ci,NULL,&vk.orderedResolveDepth);
+    vkDestroyShaderModule(vk.device,module,NULL);
+    if(result!=VK_SUCCESS)vk.orderedResolveDepth=VK_NULL_HANDLE;
+    if(!vk.orderedHiDepth||!vk.orderedHiWideDepth||!vk.orderedResolveDepth) {
+        VkPipeline* made[3]={&vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth};
+        for(int i=0;i<3;i++){if(*made[i])vkDestroyPipeline(vk.device,*made[i],NULL);*made[i]=VK_NULL_HANDLE;}
+        gpuLog("scene: no depth in GPU ordering mode on this device");
+        return 0;
+    }
+    vk.orderedDepthState=1;
+    gpuLog("scene: depth in GPU ordering mode ready");
+    return 1;
+}
+
 void gvkSetOrderedFallback(int on) {
     if(!vk.device)return;
     endBatch();
@@ -3280,6 +3363,7 @@ uint32_t gvkOrderedOverflow(void) {
     uint32_t result;memcpy(&result,read.map,4);destroyHostBuffer(&read);return result;
 }
 int gvkOrderedWrites(void) {return vk.interlock||vk.orderedEnabled;}
+int gpuPresentFormat(void) { return (int)vk.swapchainFormat; }
 const char* gpuOrderedStatus(void) {
     if(!vk.device)return "Renderer has not started.";
     if(vk.interlock)return "Hardware ordered rendering is active.";
@@ -4753,7 +4837,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         DofParams blur = f->fx.dof;
         LightParams lit = f->fx.light;
         if (f->sceneBlur || f->sceneLight) {
-            int plain = !f->capture && vk.hiN != 0 && !vk.orderedEnabled && f->sceneEnd <= (uint32_t)count;
+            int plain = !f->capture && vk.hiN != 0 && f->sceneEnd <= (uint32_t)count;
             for (uint32_t o = 0; plain && o < f->opCount; o++)
                 if (f->ops[o].kind != INTERP_OP_FROZEN || f->ops[o].vertex < f->sceneEnd) plain = 0;
             for (uint32_t i = 0; plain && i < f->sceneEnd; i += 3)
@@ -4779,6 +4863,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 lit.screenZ += a * (to->screenZ - lit.screenZ);
                 lit.top += a * (to->top - lit.top); lit.shade += a * (to->shade - lit.shade);
                 lit.bounce += a * (to->bounce - lit.bounce); lit.glow += a * (to->glow - lit.glow);
+                lit.fogMost += a * (to->fogMost - lit.fogMost); lit.grade += a * (to->grade - lit.grade);
                 lit.shadow += a * (to->shadow - lit.shadow);
                 float sun[3]; length = 0;
                 for (int k = 0; k < 3; k++) { sun[k] = lit.sun[k] + a * (to->sun[k] - lit.sun[k]); length += sun[k] * sun[k]; }
@@ -4824,7 +4909,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         size_t vb = (size_t)count*sizeof(HiVertex), pb = (size_t)f->pixelCount*4, sb = (size_t)spanCount*4;
         endBatch();
         if (vb > VERTEX_BYTES || pb+sb > SPAN_BYTES) return 0;
-        size_t lb = f->sceneLight && (f->fx.light.all || f->fx.light.shadow > 0) ? 16 + LIGHT_BLOCK_BYTES : 0; /* lightBlock's */
+        size_t lb = f->sceneLight && (f->fx.light.all || f->fx.light.shadow > 0 || f->fx.light.fogMost > 0) ? 16 + LIGHT_BLOCK_BYTES : 0; /* lightBlock's */
         if (frame()->vertexUsed+vb > VERTEX_BYTES || frame()->spanUsed+pb+sb+lb > SPAN_BYTES) {
             if(vk.presentAcquired)return 0;
             submitFrame(NULL,NULL);
@@ -5561,7 +5646,8 @@ typedef struct {
 /* light.comp's passes: the shadows' (14-17), and the last, the composite at
  * the copy's resolution. */
 #define LIGHT_SHADOWS 14
-#define LIGHT_COMPOSITE 18
+#define LIGHT_FOG 18
+#define LIGHT_COMPOSITE 19
 /* light.comp's push constants. */
 typedef struct {
     int32_t pass, n, taps, flags;
@@ -5572,6 +5658,7 @@ typedef struct {
     float centerX, centerY, focus, block; /* block: the vec4 lightBlock wrote, or -1 */
     float top, shade, bounce, glow;
     int32_t color, colorPad, ditherX, ditherY; /* scene_color.glsl */
+    float fogMost, fogDensity, grade, atmosPad; /* 128 bytes: Vulkan's least push constant room */
 } LightConstants;
 
 static void sceneDestroy(void) {
@@ -5920,7 +6007,7 @@ int gvkSceneActive(void) { return vk.scene.active; }
 
 int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY) {
     vk.scene.active = 0;
-    if (vk.device == VK_NULL_HANDLE || vk.hiN == 0 || vk.orderedEnabled || !sceneMake()) return 0;
+    if (vk.device == VK_NULL_HANDLE || vk.hiN == 0 || !sceneMake() || (vk.orderedEnabled && !orderedDepthMake())) return 0;
     endBatch();
     int n = vk.hiN;
     if (!sceneDepthImage(SCENE_NARROW, (narrow.x1 - narrow.x0 + 1) * n, (narrow.y1 - narrow.y0 + 1) * n)) return 0;
@@ -6031,14 +6118,15 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.light);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
     /* prepare's samples per PS1 pixel: all of them up to 3x, nine beyond. */
-    int shadows = p->all || p->shadow > 0;
-    int32_t block = shadows ? lightBlock(ctx, p) : -1;
-    if (block < 0) shadows = 0; /* no room for the block: no shadows in this picture */
+    int shadows = p->all || p->shadow > 0, fog = p->all || p->fogMost > 0;
+    int32_t block = shadows || fog ? lightBlock(ctx, p) : -1;
+    if (block < 0) shadows = fog = 0; /* no room for the block: no shadows or fog in this picture */
     LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
                         {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, (float)block,
                         p->top, p->shade, p->bounce, p->glow};
     c.color = vk.hiColor;
     c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
+    c.fogMost = fog ? p->fogMost : 0; c.fogDensity = p->fogDensity; c.grade = p->grade;
     /* Only the passes the parts in use need (all of them when asked: the
      * checks, the debug colours). The composite reads nothing of a part
      * that is off. */
@@ -6051,7 +6139,8 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
                      (pass >= 5 && pass <= 7 && surface) ||                   /* normals, top light, shade */
                      ((pass == 8 || pass == 9) && shade) ||
                      ((pass == 12 || pass == 13) && glow) ||
-                     (pass >= LIGHT_SHADOWS && pass < LIGHT_COMPOSITE && shadows); /* cast shadows */
+                     (pass >= LIGHT_SHADOWS && pass < LIGHT_FOG && shadows) ||  /* cast shadows */
+                     (pass == LIGHT_FOG && fog);                               /* the fog's colour */
         if (!needed) continue;
         c.pass = pass;
         vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
@@ -6060,8 +6149,9 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
          * copy's own for the composite. */
         int quarter = (pass >= 1 && pass <= 3) || pass == 10 || pass == 11;
         /* (the shadows' passes, 14-17, run on the PS1's grid) */
-        int gw = pass == LIGHT_COMPOSITE ? w * n : quarter ? (w + 3) / 4 : w;
-        int gh = pass == LIGHT_COMPOSITE ? h * n : quarter ? (h + 3) / 4 : h;
+        /* (the fog's colour: one group, summing the whole grid) */
+        int gw = pass == LIGHT_COMPOSITE ? w * n : pass == LIGHT_FOG ? 1 : quarter ? (w + 3) / 4 : w;
+        int gh = pass == LIGHT_COMPOSITE ? h * n : pass == LIGHT_FOG ? 1 : quarter ? (h + 3) / 4 : h;
         vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
         rasterBarrier(cmd);
     }
@@ -6087,7 +6177,7 @@ static void sceneLight(int primary, int x, int y, int w, int h, int second, int 
     cpuResolveFlush();
     endBatch();
     /* Room for the shadows' block in this frame's span buffer. */
-    if ((p->all || p->shadow > 0) && frame()->spanUsed + 16 + LIGHT_BLOCK_BYTES > SPAN_BYTES && !vk.presentAcquired)
+    if ((p->all || p->shadow > 0 || p->fogMost > 0) && frame()->spanUsed + 16 + LIGHT_BLOCK_BYTES > SPAN_BYTES && !vk.presentAcquired)
         submitFrame(NULL, NULL);
     VkCommandBuffer cmd = recording();
     FrameCtx* ctx = frame();
@@ -6599,7 +6689,7 @@ static void drawHiBatch(FrameCtx* f, int wide) {
     }
     /* A registered scene's batches also store depth (scene.c): the wide
      * target's only when it has a depth image of its own. */
-    int sceneDepth = vk.scene.active && !vk.orderedEnabled && (!wide || vk.scene.targets == 2);
+    int sceneDepth = vk.scene.active && (!wide || vk.scene.targets == 2) && (!vk.orderedEnabled || vk.orderedDepthState > 0);
     if (sceneDepth) sceneSets(f, wide ? SCENE_WIDE : SCENE_NARROW);
     /* This pass reads the native VRAM and the copies written by the
      * preceding passes, including when there was no wide draw. */
@@ -6610,8 +6700,16 @@ static void drawHiBatch(FrameCtx* f, int wide) {
         for (uint32_t i = 0; i < count; i++) ((HiVertex*)src)[i].rasterShift = 0; /* the ordered list rasterises in place */
         memcpy(f->vertices.map+offset,src,(size_t)count*sizeof(HiVertex));
         HiDrawConstants c={n,vk.hiColor,tw,th,vk.hiWideW*n,WIDE_H*n,0,0,1,0,0,0,0,0};
-        if(wide?vk.tileHiWideDraw:vk.tileHiDraw)tileHiPass(f,wide,src,offset,count,tw,th,&c);
-        else drawOrdered(f,src,sizeof(HiVertex),offset,0,count,n,tw,th,wide?3:2,&c,sizeof(c));
+        /* A registered scene's batches take the lists, which carry its depth
+         * (the tile pass stores none: xg-mrj.3.10.2); everything else the
+         * tile pass where the device has it. */
+        if (sceneDepth) {
+            VRect r = vk.scene.rect[wide];
+            c.depthX = r.x0 * n; c.depthY = r.y0 * n;
+            c.depthW = (r.x1 - r.x0 + 1) * n; c.depthH = (r.y1 - r.y0 + 1) * n;
+            drawOrdered(f,src,sizeof(HiVertex),offset,0,count,n,tw,th,wide?3:2,&c,sizeof(c),f->sceneDepthSet[wide],&c.depthX);
+        } else if(wide?vk.tileHiWideDraw:vk.tileHiDraw)tileHiPass(f,wide,src,offset,count,tw,th,&c);
+        else drawOrdered(f,src,sizeof(HiVertex),offset,0,count,n,tw,th,wide?3:2,&c,sizeof(c),VK_NULL_HANDLE,NULL);
         f->vertexUsed+=(size_t)count*sizeof(HiVertex);
         f->vertexUsed=(f->vertexUsed+sizeof(GpuVertex)-1)/sizeof(GpuVertex)*sizeof(GpuVertex);
         gtStop(f->cmd,q);return;
@@ -8591,6 +8689,7 @@ void gvkShutdown(void) {
     freeTransferImage(&vk.movieHiSrc, &vk.movieHiSrcMemory);
     freeTransferImage(&vk.movieHiDst, &vk.movieHiDstMemory);
     vkDestroyPipelineLayout(vk.device,vk.orderedResolveLayout,NULL);
+    vkDestroyPipelineLayout(vk.device,vk.orderedResolveDepthLayout,NULL);
     vkDestroyDescriptorSetLayout(vk.device,vk.orderedLayout,NULL);
     vkDestroyPipelineLayout(vk.device, vk.pipelineLayout, NULL);
     vkDestroyDescriptorSetLayout(vk.device, vk.setLayout, NULL);

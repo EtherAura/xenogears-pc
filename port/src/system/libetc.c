@@ -17,6 +17,7 @@
 #include "settings.h"
 #include "speedup.h"
 #include "netplay.h"
+#include "ps1time.h"
 
 void ExitCriticalSection(void);
 
@@ -140,6 +141,7 @@ void pcVSyncBetween(void (*draw)(void)) {
 static s32 vsyncWork(s32 mode, int catchUp) {
     hwSafePoint();
     slowdownVSync(mode);
+    ps1timeVSync(mode);
     s32 lines = (s32)((hwNow() - lastVSyncTime) * hwHBlankRate()) & 0xFFFF;
 
     if (mode < 0) {
@@ -196,6 +198,7 @@ static s32 vsyncWork(s32 mode, int catchUp) {
     lastVSync = hwVSyncCount();
     lastVSyncTime = hwNow();
     hwVSyncResume();
+    ps1timeVSyncDone(mode);
     return lines;
 }
 

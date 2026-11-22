@@ -30,6 +30,15 @@
 #include "portrait_pack.h"
 #include "gte_pc.h"
 #include "pc_geometry.h"
+#include "../system/ps1time.h"
+/* system/ps1time.c (weak: the GPU tests link this file without it). */
+void ps1timeDrawSync(void) __attribute__((weak));
+void ps1timeGpuQueued(char what) __attribute__((weak));
+static void queued(char what) {
+    if (ps1timeGpuQueued != NULL) {
+        ps1timeGpuQueued(what);
+    }
+}
 
 /* ---- logging -------------------------------------------------------------------- */
 
@@ -385,7 +394,9 @@ static void requestDone(void) {
 
 s32 DrawSync(s32 mode) {
     hwSafePoint();
-    (void)mode;
+    if (mode == 0 && ps1timeDrawSync != NULL) {
+        ps1timeDrawSync();
+    }
     return 0;
 }
 
@@ -738,6 +749,7 @@ void DrawOTag(OTag* p) {
     walk(p);
     widePacketsDone();
     interpolationPacketsDone();
+    queued('O');
     requestDone();
 }
 
@@ -755,6 +767,7 @@ void DrawOTagEnv(void* ot, DRAWENV* env) {
     widePacketsDone();
     interpolationPacketsDone();
     memcpy(&g.drawEnv, env, sizeof(DRAWENV));
+    queued('O');
     requestDone();
 }
 
@@ -778,6 +791,7 @@ void DrawPrim(void* p) {
     if (wp != NULL) {
         gp0SetPacket(NULL);
     }
+    queued('P');
 }
 
 /* ---- VRAM transfers ---------------------------------------------------------------------- */
@@ -1080,7 +1094,9 @@ void LoadImage(RECT* rect, void* data) {
         gp0ClearCache(); /* retail _dws emits GP0(01h) before the upload */
         gpuLoad(rect->x, rect->y, rect->w, rect->h, data);
         textureGlyphUpload(rect->x, rect->y, rect->w, rect->h, data);
+        ps1timeGpuRect(PT_LOAD, rect->w, rect->h);
     }
+    queued('L');
     requestDone();
 }
 
@@ -1113,6 +1129,8 @@ s32 StoreImage(RECT* rect, u32* data) {
         if (!drawQuiet) hiresStore(pc->r); /* the hi-res copy keeps a stash (round trips) */
     }
     if (!drawQuiet) vramStoreCapture(rect->x, rect->y, rect->w, rect->h, out); /* the Battling between's keep: no capture of the frame's */
+    ps1timeGpuRect(PT_LOAD, rect->w, rect->h);
+    queued('S');
     requestDone();
     return 0;
 }
@@ -1133,6 +1151,8 @@ s32 MoveImage(RECT* rect, s32 x, s32 y) {
     /* GP0(80h) sizes count from 1 and wrap like the hardware's. */
     gpuMove(rect->x & 0x3FF, rect->y & 0x1FF, x & 0x3FF, y & 0x1FF, ((rect->w - 1) & 0x3FF) + 1,
             ((rect->h - 1) & 0x1FF) + 1);
+    ps1timeGpuRect(PT_COPY, ((rect->w - 1) & 0x3FF) + 1, ((rect->h - 1) & 0x1FF) + 1);
+    queued('M');
     requestDone();
     return 0;
 }
@@ -1153,9 +1173,11 @@ void ClearImage(RECT* rect, s32 r, s32 g_, s32 b) {
     if (clampRect(rect, VRAM_W - 1, VRAM_H - 1)) {
         uint32_t rgb = (uint32_t)(b & 0xFF) << 16 | (uint32_t)(g_ & 0xFF) << 8 | (uint32_t)(r & 0xFF);
         gp0ClearImage(rect->x, rect->y, rect->w, rect->h, rgb);
+        ps1timeGpuRect(PT_FILL, rect->w, rect->h);
     }
     /* LIBGPU's clear packet leaves the mask settings at 0. */
     gp0SetMaskBits(0);
+    queued('C');
     requestDone();
 }
 

@@ -178,6 +178,7 @@ void presentSetExpandedVertical(int on);
 int presentSetFullscreen(int on);          /* 0 if the window could not change */
 void presentSetWindowSize(int w, int h);   /* the window when not fullscreen */
 struct SDL_Window* presentWindow(void);
+int gpuPresentFormat(void); /* the VkFormat the present pass draws in (the swapchain's); 0 before there is one */
 /* A point of the window's target (pixels) in the last picture's display
  * area: 0,0 its top left, its width x height the 4:3 picture; a wide
  * picture's margins below 0 and beyond the width (mouse.c). 0: no picture. */
@@ -243,6 +244,10 @@ int sceneGlow(void);
 void sceneSetGlow(int level);
 int sceneShadows(void);          /* shadows: 0 off (default) .. 3 strong */
 void sceneSetShadows(int level);
+int sceneFog(void);              /* fog: 0 off (default) .. 3 strong */
+void sceneSetFog(int level);
+int sceneGrade(void);            /* color_grade: 0 off (default) .. 3 strong */
+void sceneSetGrade(int level);
 const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class

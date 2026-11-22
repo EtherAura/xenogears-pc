@@ -567,8 +567,20 @@ void hwClockSettle(void) {
     }
 }
 
+void ps1timeSite(const void* site) __attribute__((weak)); /* ps1time.c's XG_PS1TIME_SITES */
+int ps1timeSitesOn;
+/* Safe points the game's own code reached, outside interrupt callbacks: the PS1 time
+ * model's count of platform calls (ps1time.c). */
+uint32_t hwGameSafePoints;
+
 void hwSafePoint(void) {
     beat();
+    if (!inDelivery()) {
+        hwGameSafePoints++;
+    }
+    if (ps1timeSitesOn && ps1timeSite != NULL) {
+        ps1timeSite(__builtin_return_address(0));
+    }
     gapCheck();
     quitPoll(0);
     if (clockHold > 0) {
