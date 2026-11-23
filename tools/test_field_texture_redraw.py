@@ -148,6 +148,12 @@ class TextureGateTests(unittest.TestCase):
         r = self.check(paint)
         self.assertFalse(r['ok']); self.assertGreater(r['painted'], ftr.TEX_BLANK)
 
+    def test_a_piece_one_texel_wide_is_measured(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d, st = self.plan(tmp, lambda a: a)
+            st['pieces'][0]['box'] = [0, 0, 1, 40]
+            self.assertTrue(ftr.texture_check(d, st, st['canvases'][0], d / 'raw' / '001.try1.png')['ok'])
+
     def test_one_refused_try_ingests_nothing_and_writes_the_fix(self):
         with tempfile.TemporaryDirectory() as tmp:
             d, st = self.plan(tmp, lambda a: a * 1.35)

@@ -164,7 +164,9 @@ const float TOP_UP = 0.55, TOP_DOWN = 0.9, TOP_RESPONSE = 3.0;
 // depth, its steps, and how far behind a caster a step may be and still be
 // shadowed (a share of the reach). Characters: how far from its foot a
 // sprite's pixel may be (PS1 pixels at the foot; depth as a share), and how
-// near the ground there must be to the shadow's depth. The most dark.
+// near the ground there must be to the shadow's depth; how high up the sprite
+// (PS1 pixels at the foot) its shadow has faded from the feet, and to what
+// (xg-rgcf.5.7: carl chose the fading shadow). The most dark.
 const float SHADOW_REACH = 48.0, SHADOW_THICK = 0.25, SHADOW_MOST = 0.85;
 // What is painted this bright (light, the squared 8-bit value) is a light: no shadow from here, none at all from there.
 const float SHADOW_KEEP_FROM = 0.45, SHADOW_KEEP_TO = 0.75;
@@ -177,6 +179,7 @@ const int FOG_SLOT = 2 + MAX_FIGURES;
 const float FOG_FAR_FROM = 1.2, FOG_FAR_TO = 3.0;
 const vec3 FOG_NEUTRAL = vec3(0.66, 0.70, 0.76);
 const float FIGURE_HEIGHT = 96.0, FIGURE_WIDTH = 32.0, FIGURE_DEPTH = 0.15, GROUND_DEPTH = 0.05;
+const float FIGURE_FADE = 0.8 * FIGURE_HEIGHT, FIGURE_FADE_TO = 0.15;
 
 vec3 light(uint word) {
     vec3 c = vec3(float(word & 255u), float((word >> 8) & 255u), float((word >> 16) & 255u)) / 255.0;
@@ -597,7 +600,8 @@ void shadowMarch(ivec2 t) {
 // point is nearest (across the screen and in depth) and below it; it is laid
 // on the ground from there as if the sprite turned to face the sun: its
 // offset across the sprite runs across the sun, its height along the sun's
-// way, shortened by the sun's height.
+// way, shortened by the sun's height. Darkest at the feet, fading toward the
+// head's end, as under a soft light.
 void silhouettes(ivec2 t) {
     int b = int(pc.lens.w);
     float code = imageLoad(geo, t).a;
@@ -613,7 +617,7 @@ void silhouettes(ivec2 t) {
     vec3 cardX = normalize(vec3(1.0, 0.0, 0.0) - up.x * up); // the sprite's width, on the ground
     vec3 p = place(middleAt(t), -code);
     int best = -1;
-    float bestScore = 1.0e9, bw = 0.0, bh = 0.0;
+    float bestScore = 1.0e9, bw = 0.0, bh = 0.0, bs = 1.0;
     for (int k = 0; k < count; k++) {
         vec3 f = block[b + 2 + k].xyz;
         if (f.z <= 1.0) continue;
@@ -622,11 +626,12 @@ void silhouettes(ivec2 t) {
         float h = dot(d, up), w = dot(d, cardX), dz = abs(p.z - f.z);
         if (h < -4.0 * scale || h > FIGURE_HEIGHT * scale || abs(w) > FIGURE_WIDTH * scale || dz > FIGURE_DEPTH * f.z) continue;
         float score = abs(w) / scale + dz / (0.01 * f.z);
-        if (score < bestScore) { bestScore = score; best = k; bw = w; bh = max(h, 0.0); }
+        if (score < bestScore) { bestScore = score; best = k; bw = w; bh = max(h, 0.0); bs = scale; }
     }
     if (best < 0) return;
     vec3 s = block[b + 2 + best].xyz + bw * across + bh * cot * along;
     if (s.z <= 1.0) return;
+    float fade = mix(1.0, FIGURE_FADE_TO, clamp(bh / (FIGURE_FADE * bs), 0.0, 1.0));
     ivec2 g0 = ivec2(floor(s.xy * pc.view.w / s.z + pc.lens.xy - 0.5));
     for (int k = 0; k < 4; k++) {
         ivec2 g = g0 + ivec2(k & 1, k >> 1);
@@ -634,7 +639,7 @@ void silhouettes(ivec2 t) {
         float rc = imageLoad(geo, g).a;
         // Only on what is drawn there at about the shadow's depth: the ground.
         if (rc <= 0.0 || abs(rc - s.z) > GROUND_DEPTH * s.z) continue;
-        imageStore(shadowImg, g, vec4(backdropFade(rc), 0.0, rc, 0.0));
+        imageStore(shadowImg, g, vec4(backdropFade(rc) * fade, 0.0, rc, 0.0));
     }
 }
 

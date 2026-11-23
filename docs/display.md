@@ -94,7 +94,8 @@ sun (and in fields and battles the characters too), which is
 set from the camera a room starts with and then stays put in the room, so
 the shadows don't swing when the camera turns. Walls, furniture and props
 cast through the picture's depth; each character's sprite is laid on the
-ground away from the sun, beside the game's own shadow under it. Painted
+ground away from the sun, beside the game's own shadow under it, darkest at
+the feet and fading toward the head's end. Painted
 lights such as windows and lamps stay as bright as they are painted. The
 Enhanced engine only (F1 > System > Engine).
 F1 > Display > Shadows (Off, Subtle, Medium, Strong).
