@@ -95,6 +95,13 @@ class Schema:
         spans = sorted((v["addr"], v["addr"] + max(v["size"], 1), i) for i, v in enumerate(self.vars))
         self.span_lo = [s0 for s0, _, _ in spans]
         self.spans = spans
+        self.scratch = []  # (lo, hi): memory no state carries (scratch64): left out of comparisons
+        for v in self.vars:
+            t = self.types.get(v["tid"], {})
+            while t.get("k") == "arr":
+                t = self.types.get(t.get("of"), {})
+            if t.get("k") == "scratch":
+                self.scratch.append((v["addr"], v["addr"] + v["size"]))
         self.funcs = {f["addr"]: f for f in s["functions"]}
         self.func_by_id = {}
         for f in s["functions"]:
@@ -292,7 +299,7 @@ class Encoder:
             break
         return path, off
 
-    def pointer(self, v):
+    def pointer(self, v, quiet=False):
         if v == 0:
             return None
         for name, key in (("heapArena", "heap"), ("gameStack", "stack"), ("pcScratchpad", "scratchpad")):
@@ -320,8 +327,9 @@ class Encoder:
                 if hint is not None:
                     out["at"] = hint[0]; out["o"] = v - hint[1]
                 return out
-        self.warn["pointer to nothing known (kept as a number: same build only)"] += 1
-        self.unknown[(self.current, v)] += 1
+        if not quiet:
+            self.warn["pointer to nothing known (kept as a number: same build only)"] += 1
+            self.unknown[(self.current, v)] += 1
         return {"raw": v}
 
     def value(self, tid, mem, off):
@@ -334,6 +342,14 @@ class Encoder:
             return int.from_bytes(mem[off:off + n], "little", signed=t.get("signed", False))
         if k == "float":
             return {"f": mem[off:off + t["size"]].hex()}
+        if k == "addr":  # an integer that holds an address (uptr, sptr): moved as a pointer when it is one
+            v = int.from_bytes(mem[off:off + t["size"]], "little")
+            p = self.pointer(v, quiet=True) if v else None
+            if p is None or "raw" in p:
+                return v  # zero, or a number after all (an offset, a count)
+            return {"a": p}
+        if k == "scratch":
+            return {"z": t["size"]}
         if k == "otag":
             tag = int.from_bytes(mem[off:off + t["size"]], "little")
             bits = 8 * t["size"] - 8
@@ -356,6 +372,8 @@ class Encoder:
             if of not in self.s.types or n == 0:
                 return {"x": bytes(mem[off:off + t["size"]]).hex()}
             et = self.s.types[of]; es = et["size"]
+            if et["k"] == "scratch":
+                return {"z": t["size"]}
             if et["k"] == "int":  # scalars: little-endian bytes, the same in every build (not OT links)
                 return {"x": bytes(mem[off:off + es * n]).hex(), "w": es}
             return [self.value(of, mem, off + i * es) for i in range(n)]
@@ -471,6 +489,11 @@ class Decoder:
             buf[off:off + n] = (val & ((1 << (8 * n)) - 1)).to_bytes(n, "little")
         elif k == "float":
             b = bytes.fromhex(val["f"]); buf[off:off + len(b)] = b
+        elif k == "addr":
+            v = self.pointer(val["a"]) if isinstance(val, dict) else val
+            buf[off:off + t["size"]] = (v & ((1 << (8 * t["size"])) - 1)).to_bytes(t["size"], "little")
+        elif k == "scratch":
+            buf[off:off + t["size"]] = bytes(t["size"])
         elif k == "otag":
             bits = 8 * t["size"] - 8
             link = (1 << bits) - 1 if val["l"] == "end" else self.pointer(val["l"]) & ((1 << bits) - 1)
@@ -478,7 +501,9 @@ class Decoder:
         elif k == "ptr":
             buf[off:off + 8] = (self.pointer(val) & MASK64).to_bytes(8, "little")
         elif k == "arr":
-            if isinstance(val, dict):
+            if isinstance(val, dict) and "z" in val:
+                buf[off:off + t["size"]] = bytes(t["size"])
+            elif isinstance(val, dict):
                 b = bytes.fromhex(val["x"]); n = min(len(b), t["size"]); buf[off:off + n] = b[:n]
             else:
                 es = self.s.size(t["of"])
@@ -687,6 +712,7 @@ def compare(a: bytes, b: bytes, schema: Schema, limit=12) -> list[str]:
         m = re.fullmatch(r"mem\.(\w+)\.(data|bss)", tag)
         if m:
             lo = schema.sections[f"{m.group(1)}.{m.group(2)}"][0]
+            diff = [i for i in diff if not any(a <= lo + i < b for a, b in schema.scratch)]
             for i in diff:
                 v = schema.var_at(lo + i)
                 where[f"{tag} {v['name'] if v else '(no variable)'}"] += 1
@@ -726,6 +752,8 @@ def crosscheck(a_state: Path, a: Schema, b_state: Path, b: Schema, limit=25) -> 
         lo = b.sections[f"{m.group(1)}.{m.group(2)}"][0] if m else None
         for i in range(n):
             if x[i] != y[i]:
+                if lo is not None and any(sa <= lo + i < sb for sa, sb in b.scratch):
+                    continue
                 if lo is not None:
                     v = b.var_at(lo + i)
                     where[field_path(b, v, lo + i - v["addr"]) if v else f"{tag} (outside variables)"] += 1

@@ -239,9 +239,9 @@ static void load(void) {
     settingsDescribe("lighting_bounce", "lighting_bounce: on (default) or off: the light from bright spots, as part of lighting");
     sc.lighting = levelOf("lighting");
     sc.glow = levelOf("glow");
-    settingsDescribe("shadows", "shadows: off (default), subtle, medium or strong: shadows cast by the scenery in fields, "
-                                "battles and on the world map and by the characters in fields and battles, from a sun "
-                                "set per place (the Enhanced engine)");
+    settingsDescribe("shadows", "shadows: off (default), subtle, medium or strong: shadows cast by the scenery and the "
+                                "characters in fields, battles and on the world map, from a sun set per place (the "
+                                "Enhanced engine)");
     sc.shadows = levelOf("shadows");
     settingsDescribe("fog", "fog: off (default), subtle, medium or strong: haze that thickens past the characters in "
                             "fields, toward the colour of the room's farthest scenery (the Enhanced engine)");

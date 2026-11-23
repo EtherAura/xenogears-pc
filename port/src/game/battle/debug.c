@@ -13,7 +13,8 @@
 #include "common.h"
 #include "main/debug_font.h"
 
-static u64 selectorFont[0x18000 / 8]; /* DebugFont + 2 x 1000 SPRT_8 */
+/* DebugFont + 2 x 1000 SPRT_8, laid out by initDebugFont; freed before the battle loads (scratch). */
+static scratch64 selectorFont[0x18000 / 8];
 
 int portSweepEnabled(void);
 

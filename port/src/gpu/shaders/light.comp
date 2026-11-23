@@ -601,7 +601,9 @@ void shadowMarch(ivec2 t) {
 // on the ground from there as if the sprite turned to face the sun: its
 // offset across the sprite runs across the sun, its height along the sun's
 // way, shortened by the sun's height. Darkest at the feet, fading toward the
-// head's end, as under a soft light.
+// head's end, as under a soft light: by how far along the sun's way the ground
+// pixel lies from the nearest foot, so every sprite pixel that lands on it
+// writes the same value (whichever writes last, the picture is the same).
 void silhouettes(ivec2 t) {
     int b = int(pc.lens.w);
     float code = imageLoad(geo, t).a;
@@ -617,7 +619,7 @@ void silhouettes(ivec2 t) {
     vec3 cardX = normalize(vec3(1.0, 0.0, 0.0) - up.x * up); // the sprite's width, on the ground
     vec3 p = place(middleAt(t), -code);
     int best = -1;
-    float bestScore = 1.0e9, bw = 0.0, bh = 0.0, bs = 1.0;
+    float bestScore = 1.0e9, bw = 0.0, bh = 0.0;
     for (int k = 0; k < count; k++) {
         vec3 f = block[b + 2 + k].xyz;
         if (f.z <= 1.0) continue;
@@ -626,12 +628,11 @@ void silhouettes(ivec2 t) {
         float h = dot(d, up), w = dot(d, cardX), dz = abs(p.z - f.z);
         if (h < -4.0 * scale || h > FIGURE_HEIGHT * scale || abs(w) > FIGURE_WIDTH * scale || dz > FIGURE_DEPTH * f.z) continue;
         float score = abs(w) / scale + dz / (0.01 * f.z);
-        if (score < bestScore) { bestScore = score; best = k; bw = w; bh = max(h, 0.0); bs = scale; }
+        if (score < bestScore) { bestScore = score; best = k; bw = w; bh = max(h, 0.0); }
     }
     if (best < 0) return;
     vec3 s = block[b + 2 + best].xyz + bw * across + bh * cot * along;
     if (s.z <= 1.0) return;
-    float fade = mix(1.0, FIGURE_FADE_TO, clamp(bh / (FIGURE_FADE * bs), 0.0, 1.0));
     ivec2 g0 = ivec2(floor(s.xy * pc.view.w / s.z + pc.lens.xy - 0.5));
     for (int k = 0; k < 4; k++) {
         ivec2 g = g0 + ivec2(k & 1, k >> 1);
@@ -639,7 +640,21 @@ void silhouettes(ivec2 t) {
         float rc = imageLoad(geo, g).a;
         // Only on what is drawn there at about the shadow's depth: the ground.
         if (rc <= 0.0 || abs(rc - s.z) > GROUND_DEPTH * s.z) continue;
-        imageStore(shadowImg, g, vec4(backdropFade(rc) * fade, 0.0, rc, 0.0));
+        vec3 q = place(vec2(g) + 0.5, rc);
+        int closest = 0;
+        float nearest = 1.0e30;
+        for (int j = 0; j < count; j++) {
+            vec3 d = q - block[b + 2 + j].xyz;
+            float apart = dot(d, d) - dot(d, up) * dot(d, up); // squared, on the ground
+            if (block[b + 2 + j].z > 1.0 && apart < nearest) { nearest = apart; closest = j; }
+        }
+        vec3 f = block[b + 2 + closest].xyz;
+        float way = max(dot(q - f, along), 0.0) / max(cot, 1.0e-3); // the height that lands here
+        float fade = mix(1.0, FIGURE_FADE_TO, clamp(way / (FIGURE_FADE * f.z / pc.view.w), 0.0, 1.0));
+        // The darker of this and the scenery's shadow there (pass 14), so a
+        // faded end never lightens a wall's shadow it falls in.
+        float was = imageLoad(shadowImg, g).r;
+        imageStore(shadowImg, g, vec4(max(was, backdropFade(rc) * fade), 0.0, rc, 0.0));
     }
 }
 

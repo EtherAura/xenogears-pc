@@ -9,6 +9,7 @@
 #include "psyq.h"
 #include "pc_camera.h"
 #include "pc_interpolation.h"
+#include "pc_scene.h"
 #include "gte.h"
 #include "ot.h"
 #include "main/memory.h"
@@ -1180,8 +1181,15 @@ void worldmapDrawSpriteActors(void) {
     e = gWorldmapState->m0_entries;
     for (i = 0; i < 0x40; i++, e++) {
         if ((e->m24_hidden == 0) & (e->m4C_sprite != NULL) & (sp->m18_depths[i] < 0xB00)) {
-            if (firstPersonDrawSprite(i))
+            if (firstPersonDrawSprite(i)) {
                 renderSpriteActor(e->m4C_sprite, &pCurrentWorldmapRenderingStruct->m70_OT[sp->m18_depths[i] >> 4]);
+                /* Enhanced (xg-rgcf.5.8): the sprite's feet, where it stands, for the
+                 * display copy's cast shadows (these sprites draw no squashed shadow,
+                 * which gives the point in fields and battles); in the matrix it is
+                 * drawn with, the view's, first person's eye included. */
+                pcSceneFigure(e->m4C_sprite->m0_position.vx >> 16, e->m4C_sprite->m0_position.vy >> 16,
+                              e->m4C_sprite->m0_position.vz >> 16);
+            }
             if (pcWm60On()) {
                 continue; /* Enhanced, 60 Hz: the turn and the animation below, as the tick decided */
             }

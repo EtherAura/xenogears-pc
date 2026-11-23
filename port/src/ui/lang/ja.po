@@ -7334,8 +7334,8 @@ msgstr "フィールド、戦闘、ワールドマップで、ランプ、火、
 msgid "Shadows"
 msgstr "影"
 
-msgid "In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, and in fields and battles the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by default."
-msgstr "フィールド、戦闘、ワールドマップで、背景が、場面に入ったときに決まる日の光の向きから影を落とします。フィールドと戦闘ではキャラクターも影を落とします。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, and the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、背景が、場面に入ったときに決まる日の光の向きから影を落とします。キャラクターも影を落とします。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
 msgid "Fog"
 msgstr "フォグ"

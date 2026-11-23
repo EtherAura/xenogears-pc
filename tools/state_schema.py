@@ -305,9 +305,27 @@ def main() -> int:
             return None
         return d["attrs"].get("DW_AT_type")
 
+    def meaningful(off):
+        """A declared type that says more than the definition's integer: a pointer, or uptr/sptr/OTag."""
+        d = dies.get(off)
+        while d is not None and d["tag"] in ("DW_TAG_const_type", "DW_TAG_volatile_type"):
+            off = d["attrs"].get("DW_AT_type"); d = dies.get(off)
+        if d is None:
+            return False
+        if d["tag"] == "DW_TAG_typedef" and types.name(off) in ("uptr", "sptr", "OTag"):
+            return True
+        return dies.get(types.strip(off), {}).get("tag") == "DW_TAG_pointer_type"
+
     retyped = 0
     for v in variables:
         t = v["type"]
+        st = dies.get(types.strip(t)) if t is not None else None
+        if st is not None and st["tag"] == "DW_TAG_base_type":
+            for cand in declared.get(v["name"], []):
+                if meaningful(cand) and types.size(cand) == v["size"]:
+                    t = cand
+                    retyped += 1
+                    break
         if t is not None and is_bytes(t):
             for cand in declared.get(v["name"], []):
                 if not is_bytes(cand) and types.size(cand) == v["size"]:
@@ -316,7 +334,8 @@ def main() -> int:
                     break
                 elem = open_array_elem(cand)
                 es = types.size(elem) if elem is not None else 0
-                if es and v["size"] % es == 0 and not is_bytes(elem if elem is not None else cand):
+                scalar = dies.get(types.strip(elem), {}).get("tag") == "DW_TAG_base_type" if elem is not None else True
+                if es and v["size"] % es == 0 and not scalar:  # extern T x[] of a struct or pointer type
                     v["elem"], v["count"] = elem, v["size"] // es  # completed below, in the schema's table
                     retyped += 1
                     break
@@ -461,11 +480,13 @@ def main() -> int:
         """A type's id in the schema (its DIE offset), described in `table` once; typedefs and qualifiers
         are looked through, a struct keeps its typedef's name for messages."""
         shown = types.name(off)
-        if shown == "OTag" and off in dies and dies[off]["tag"] == "DW_TAG_typedef":
-            # an ordering table's link (include/psyq.h): the length in the top byte, an address below it
-            key = "OTag"
-            table.setdefault(key, {"k": "otag", "size": types.size(off), "name": "OTag"})
-            return key
+        if off in dies and dies[off]["tag"] == "DW_TAG_typedef" and shown in ("OTag", "uptr", "sptr", "scratch64"):
+            # typedefs with a meaning for a state (include/common.h, include/psyq.h): an ordering table's link
+            # (the length in the top byte, an address below it), an integer that holds an address (uptr,
+            # sptr), a work area's word that no state carries (scratch64)
+            kind = {"OTag": "otag", "uptr": "addr", "sptr": "addr", "scratch64": "scratch"}[shown]
+            table.setdefault(shown, {"k": kind, "size": types.size(off), "name": shown})
+            return shown
         off = types.strip(off)
         if off is None or off not in dies:
             return None
