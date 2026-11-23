@@ -35,6 +35,7 @@
 #include "system/rewind.h"
 #include "system/settings.h"
 #include "system/engine.h"
+#include "system/release.h"
 #include "system/android.h"
 #include "system/system.h"
 #include "ui/ui.h"
@@ -243,6 +244,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
     }
+    releaseLog(); /* which release this is and how it was installed (system/release.h) */
     /* Size, position and fullscreen from settings.ini (port/src/gpu/present.c). */
     SDL_Window* window = presentCreateWindow("Xenogears");
     if (window == NULL) {

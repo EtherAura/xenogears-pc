@@ -5,8 +5,9 @@
 #   cmake -S port -B <build> -G Ninja -DCMAKE_BUILD_TYPE=Release -DXG_VERSION=US -DXG_EXTRAS=ON \
 #       -DXG_PACKAGE_VERSION=<release version without the v>
 #   cmake --build <build> && (cd <build> && cpack -G DEB)
-# gives xenogears-pc_<version>_amd64.deb: the executable in /usr/bin and the
-# licences in /usr/share/doc/xenogears-pc (tools/check_deb_package.py checks it).
+# gives xenogears-pc_<version>_amd64.deb: the executable in /usr/bin, the
+# licences in /usr/share/doc/xenogears-pc and the release file in
+# /usr/share/xenogears-pc (tools/check_deb_package.py checks it).
 # SDL3, glslang and dav1d come from the system's packages, with their licences;
 # Depends is worked out by dpkg-shlibdeps from what the executable links. The
 # release's Depends must come from building in an Ubuntu 26.04 container (its
@@ -25,6 +26,23 @@ endif()
 if(NOT XG_PACKAGE_VERSION MATCHES "^[0-9][A-Za-z0-9.+~]*(-[A-Za-z0-9.+~]+)?$")
     message(FATAL_ERROR "XG_PACKAGE_VERSION '${XG_PACKAGE_VERSION}' is not a Debian version "
         "(digits first, then letters, digits and . + ~; a release tag's v left out)")
+endif()
+
+# A release's file of what it is (port/src/system/release.h: the in-app updater
+# reads it, xg-4oq.14): its version and the kind of package that installed it.
+# deb by default (this file's package); the PKGBUILD and the ebuild name their
+# own (-DXG_INSTALL_KIND=arch, gentoo); the Linux tarball is the .deb's files
+# with tarball written in (packaging/linux_release.py). A build of any other
+# version (0~dev, a test package's) installs none: it is never offered an update.
+set(XG_INSTALL_KIND "deb" CACHE STRING "The package a release's install is (release.txt's kind): deb, arch, gentoo")
+set_property(CACHE XG_INSTALL_KIND PROPERTY STRINGS deb arch gentoo)
+if(NOT XG_INSTALL_KIND MATCHES "^(deb|arch|gentoo)$")
+    message(FATAL_ERROR "XG_INSTALL_KIND '${XG_INSTALL_KIND}' is not deb, arch or gentoo")
+endif()
+if(XG_PACKAGE_VERSION MATCHES "^20[0-9][0-9]\\.(0[1-9]|1[0-2])\\.(0|[1-9][0-9]*)$")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/release.txt.new" "version=${XG_PACKAGE_VERSION}\nkind=${XG_INSTALL_KIND}\n")
+    configure_file("${CMAKE_CURRENT_BINARY_DIR}/release.txt.new" "${CMAKE_CURRENT_BINARY_DIR}/release.txt" COPYONLY)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/release.txt" DESTINATION share/xenogears-pc)
 endif()
 
 install(TARGETS xenogears RUNTIME DESTINATION bin)

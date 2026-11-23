@@ -1,6 +1,7 @@
 /* Circle warp: bends a 128x128 screen area of 2x16x16 triangles into a circle.
  * gcc-2.7.2-cdk, ASPSX 2.56. */
 #include "common.h"
+#include "pc_state.h"
 #include "psyq.h"
 #include "main/task.h"
 #include "battle/battle.h"
@@ -87,7 +88,7 @@ void createFxCircleWarp(void) {
     s32 r, a;
 
     gDepthDivider = 0;
-    e = (Fx02Effect*)allocateTaskPair(sizeof(Fx02Effect), NULL, fxCircleWarp_update, fxCircleWarp_draw, fxCircleWarp_delete);
+    e = (Fx02Effect*)allocateTaskPair(PC_HEAP_OF(Fx02Effect, sizeof(Fx02Effect)), NULL, fxCircleWarp_update, fxCircleWarp_draw, fxCircleWarp_delete);
     e->m38_frameCounter = 0;
     for (i = 0; i != 2; i++) {
         for (j = 0; j < 16; j++) {

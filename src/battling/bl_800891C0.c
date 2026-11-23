@@ -851,7 +851,7 @@ BattlingLayer* createBattlingLayer(u16 otSize) {
     traceNextAlloc(0xC);
     layer = allocateHeap((s32)sizeof(BattlingLayer), 0);
     traceNextAlloc(0xC);
-    layer->m4_ot[0] = allocateHeap(otSize * (2 * (s32)sizeof(OTag)), 0);
+    layer->m4_ot[0] = allocateHeap(PC_HEAP_OF(OTag, otSize * (2 * (s32)sizeof(OTag))), 0);
     layer->m4_ot[1] = layer->m4_ot[0] + otSize;
     layer->m16_flags = 1;
     layer->m17_otShift = 0xE;
@@ -1209,11 +1209,12 @@ void initBattlingAnim(BattlingAnimRecord* rec, BattlingAnim* anim, BattlingNode*
     anim->m0_data = data;
     base = (sptr)data;
     traceNextAlloc(0x10);
-    ch = allocateHeap(data->m4_channelCount * (s32)sizeof(BattlingAnimChannel) + data->m6_trackCount * (s32)sizeof(BattlingAnimTrack), 0);
+    ch = allocateHeap(PC_HEAP_OF(BattlingAnimChannel, data->m4_channelCount * (s32)sizeof(BattlingAnimChannel) + data->m6_trackCount * (s32)sizeof(BattlingAnimTrack)), 0);
     do {
         anim->m4_channels = ch;
         rec = data->m8_records;
         track = (BattlingAnimTrack*)(ch + data->m4_channelCount);
+        PC_STATE_AT(track, BattlingAnimTrack, data->m6_trackCount);
         anim->m8_tracks = track;
         for (i = 0; i < data->m4_channelCount; i++) {
             node = bones[rec->m1_bone];
@@ -1306,7 +1307,7 @@ BattlingNode* loadBattlingSkeleton(BattlingDataFile* file) {
     bones = (BattlingBoneData*)(data + 1);
     fieldModelRelocation((Model*)ptr);
     traceNextAlloc(0x12);
-    nodes = allocateHeap(count * (s32)sizeof(BattlingNode*), 0);
+    nodes = allocateHeap(PC_HEAP_OF(BattlingNode*, count * (s32)sizeof(BattlingNode*)), 0);
     skel = createBattlingSkeleton();
     root = createBattlingNode();
     setBattlingNodeSkeleton(root, skel);

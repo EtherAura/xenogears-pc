@@ -1330,7 +1330,7 @@ void battleSpriteEffect_3A_sub(s32 target, s32 duration, s32 arg2, s16 arg3, s16
     u8* stack;
 
     if (battleSpriteEffect_3A_sub_entity == 0) {
-        p = (BattleRamp*)allocateTaskPair((s32)sizeof(BattleRamp), 0, (void (*)(TaskHeader*))sBattleSpriteEffect_3A_sub_entity_update, sBattleSpriteEffect_3A_sub_entity_draw, (void (*)(TaskHeader*))sBattleSpriteEffect_3A_sub_entity_delete);
+        p = (BattleRamp*)allocateTaskPair(PC_HEAP_OF(BattleRamp, (s32)sizeof(BattleRamp)), 0, (void (*)(TaskHeader*))sBattleSpriteEffect_3A_sub_entity_update, sBattleSpriteEffect_3A_sub_entity_draw, (void (*)(TaskHeader*))sBattleSpriteEffect_3A_sub_entity_delete);
         battleSpriteEffect_3A_sub_entity = p;
         stack = allocateHeap(0x1000, 1);
         STACK_SWITCH(stack + 0xC00);

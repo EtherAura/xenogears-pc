@@ -572,7 +572,7 @@ void saveMusicInstanceSnapshot(SoundInstance* inst) {
     DisableEvent(audioTickEvent);
     size = getSoundInstanceSize(inst->m14_trackCount);
     if (inst->m4_snapshot == NULL) {
-        copy = allocateFromSoundArena(size);
+        copy = allocateFromSoundArena(PC_HEAP_OF(SoundInstance, size));
     }
     if (copy == NULL) {
         EnableEvent(audioTickEvent);
@@ -687,7 +687,7 @@ SoundInstance* initSoundEffectInstances(s32 n) {
 
     n &= ~1;
     numMaxSoundEffectInstances = n;
-    inst = allocateFromSoundArena(getSoundInstanceSize(n));
+    inst = allocateFromSoundArena(PC_HEAP_OF(SoundInstance, getSoundInstanceSize(n)));
     if (inst == NULL) {
         setSoundError(0x1E);
         return NULL;

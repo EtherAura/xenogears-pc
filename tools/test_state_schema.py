@@ -30,7 +30,8 @@ def main() -> int:
         src = d / "thing.c"
         src.write_text(SOURCE)
         subprocess.run(["cc", "-g", "-O0", "-o", str(d / "xenogears"), str(src)], check=True)
-        out = subprocess.run([sys.executable, str(ROOT / "tools/state_schema.py"), str(d)], capture_output=True, text=True)
+        out = subprocess.run([sys.executable, str(ROOT / "tools/state_schema.py"), str(d), "--source", str(d)],
+                             capture_output=True, text=True)
         checks = 0
 
         def check(cond, what):

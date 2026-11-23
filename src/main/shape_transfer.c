@@ -157,6 +157,14 @@ void clearShapeTransfertTableEntry(s32 index) {
         freeHeap(p->m0_data);
     }
     shapeTransfertTemporaryBuffersLinkedLists[index] = NULL;
+#ifdef PLATFORM_PC
+    /* this half's primitives and entries are rebuilt from here: start them from
+     * zeros, not from what the frame before last left (an earlier entry's 64-bit
+     * pointers in the primitives' pads would make the bytes depend on the build) */
+    if (shapeTransfertTableStart != NULL) {
+        __builtin_memset(shapeTransfertTableStart, 0, shapeTransfertTableSize);
+    }
+#endif
 }
 
 /* Noah: clearShapeTransferEntry (free `data` when this arena half is next reused). */

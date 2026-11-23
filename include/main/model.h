@@ -7,6 +7,7 @@
 
 #include "common.h"
 #include "psyq.h"
+#include "pc_state.h"
 
 typedef struct {
     s32 m0_count;
@@ -18,6 +19,8 @@ typedef struct {
     s32 m0_count;
     ModelDynVertEntry m4_entries[1];
 } ModelDynVerts;
+/* the last entry lists the vertices to restore */
+PC_STATE_COUNTED(ModelDynVerts, m4_entries, m0_count, 1)
 
 /* Noah: sModelBlock */
 typedef struct ModelBlock {
@@ -44,6 +47,7 @@ typedef struct Model {
     /* 0x0C */ s32 mC;
     /* 0x10 */ ModelBlock m10_blocks[1];
 } Model;
+PC_STATE_COUNTED(Model, m10_blocks, m0_numBlocks, 0)
 
 /* src/main/model.c. setupOverrideTPage/setupOverrideClut (u16 x, u16 y) stay
  * declared by their callers: the PS1 callers pass s16 (their code depends on

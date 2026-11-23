@@ -3,6 +3,7 @@
 #define MAIN_SOUND_H
 
 #include "common.h"
+#include "pc_state.h"
 
 typedef struct {
     s16 left;
@@ -158,6 +159,7 @@ typedef struct Wds {
     /* 0x2C */ struct Wds* m2C_next;
     /* 0x30 */ WdsInstrument m30_instruments[1];
 } Wds;
+PC_STATE_TAIL(Wds, m30_instruments)
 
 extern Wds* pLoadedWdsLinkedList;
 
@@ -301,6 +303,7 @@ typedef struct SoundInstance {
     /* 0x88 */ AudioParam m88_pan;
     /* 0x94 */ SoundTrack m94_tracks[1];
 } SoundInstance;
+PC_STATE_COUNTED(SoundInstance, m94_tracks, m14_trackCount, 0)
 
 /* Driver state the game modes share (main). */
 extern SoundInstance* pMusic;                 /* the current music */

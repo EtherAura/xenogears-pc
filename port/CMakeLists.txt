@@ -225,7 +225,15 @@ add_executable(state_codectest EXCLUDE_FROM_ALL src/system/test/statecodectest.c
 add_executable(rewindpacktest EXCLUDE_FROM_ALL src/system/test/rewindpacktest.c src/system/statecodec.c)
 # The state file's header (the engine id, region, disc, app version), thumbnail and body round trip.
 add_executable(statefiletest EXCLUDE_FROM_ALL src/system/test/statefiletest.c src/system/statefile.c
-    src/system/statecodec.c src/system/settings.c)
+    src/system/statecodec.c src/system/settings.c src/system/release.c)
+# Which release a copy is (release.c, xg-4oq.14.1): versions, release files, the state header's version.
+add_executable(releasetest EXCLUDE_FROM_ALL src/system/test/releasetest.c src/system/release.c
+    src/system/statefile.c src/system/statecodec.c src/system/settings.c)
+# A release's update manifest and its Ed25519 signature (update/update_manifest.c, xg-4oq.14.2;
+# Monocypher, port/third_party/monocypher): RFC 8032's vectors, a signed fixture, refusals.
+add_executable(updatemanifesttest EXCLUDE_FROM_ALL src/update/test/updatemanifesttest.c src/update/update_manifest.c
+    src/system/release.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)
+target_include_directories(updatemanifesttest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/monocypher")
 add_executable(seamreusetest EXCLUDE_FROM_ALL src/gpu/test/seamreusetest.c)
 add_executable(spansteptest EXCLUDE_FROM_ALL src/gpu/test/spansteptest.c)
 add_executable(battlepacingtest EXCLUDE_FROM_ALL src/system/test/battlepacingtest.c
@@ -247,7 +255,7 @@ add_executable(stallwatchtest EXCLUDE_FROM_ALL src/system/test/stallwatchtest.c 
 # The dialogue backlog's capture (backlog.c, xg-htn.57): the printer's calls
 # as dialog.c makes them, the screens, captions, its controls.
 add_executable(backlogtest EXCLUDE_FROM_ALL src/system/test/backlogtest.c src/system/backlog.c src/system/settings.c)
-foreach(tool rewindpacktest statefiletest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest stallwatchtest backlogtest)
+foreach(tool rewindpacktest statefiletest releasetest updatemanifesttest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest stallwatchtest backlogtest)
     target_include_directories(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
     target_compile_definitions(${tool} PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
     target_compile_options(${tool} PRIVATE -fno-strict-aliasing)

@@ -24,6 +24,7 @@ typedef struct ArenaBlock {
     /* 0x4 */ s32 m4;
     /* 0x8 */ u8* m8_end;
     /* 0xC */ struct ArenaBlock* mC_next;
+    u32 pcType; /* what the block holds, for save states (include/pc_state.h) */
 } ArenaBlock;
 
 /* The arena's block header: 0x10 bytes on the PS1, two pointers more on the PC. */
@@ -213,7 +214,7 @@ void initSoundSystem(u16 mode) {
     SpuInitMalloc(4, spuMallocTable);
     initSoundArena(SOUND_ARENA, SOUND_ARENA_SIZE);
     initLoadedSampleTable();
-    loadWdsSub0SubVar1 = allocateFromSoundArena(8 * sizeof(SpuXfer));
+    loadWdsSub0SubVar1 = allocateFromSoundArena(PC_HEAP_OF(SpuXfer, 8 * sizeof(SpuXfer)));
     clearSpuVoiceOwners();
     lfoRandomSeed = 0x12345678;
     pPlayingSoundsLinkedList = 0;
@@ -337,7 +338,7 @@ Wds* loadWds(Wds* wds, s32 addr) {
         return NULL;
     }
     loadWdsSub0(spu, (u8*)wds + wds->m18_headerSize2, wds->m14_adpcmSize, 0);
-    copy = allocateFromSoundArenaTop(WDS_COPY_SIZE(wds));
+    copy = allocateFromSoundArenaTop(PC_HEAP_OF(Wds, WDS_COPY_SIZE(wds)));
     if (copy == NULL) {
         freeSamples(spu);
         setSoundError(0x1E);
@@ -377,7 +378,7 @@ Wds* playMusic2(Wds* wds, s32 size, s32 addr) {
     }
     setupSamplesPtr(spu, wds->m14_adpcmSize);
     sendSamples2((u8*)wds + wds->m18_headerSize2, size - wds->m10_headerSize1);
-    copy = allocateFromSoundArenaTop(WDS_COPY_SIZE(wds));
+    copy = allocateFromSoundArenaTop(PC_HEAP_OF(Wds, WDS_COPY_SIZE(wds)));
     if (copy == NULL) {
         freeSamples(spu);
         setSoundError(0x1E);
@@ -858,6 +859,7 @@ void initSoundArena(u8* buf, s32 size) {
     b->m4 = 0;
     b->m8_end = buf + ARENA_HEADER;
     b->mC_next = NULL;
+    b->pcType = 0;
 }
 
 /* Sound arena allocation, first fit, zeroed. */
@@ -867,6 +869,7 @@ void* allocateFromSoundArena(u32 size) {
     u32 need;
     u8* data;
     u8* end;
+    u32 pcType = pcHeapTakeType(); /* PC_HEAP_OF */
 
     DisableEvent(audioTickEvent);
     need = ((size + 0xF) & ~0xF) + ARENA_HEADER;
@@ -888,6 +891,7 @@ void* allocateFromSoundArena(u32 size) {
         blk->m4 = 0;
         blk->m0_flags = 2;
         blk->m2 = 0;
+        blk->pcType = pcType;
         blk->mC_next = p->mC_next;
         p->mC_next = blk;
         EnableEvent(audioTickEvent);
@@ -907,6 +911,7 @@ void* allocateFromSoundArenaTop(s32 size) {
     u8* bestEnd;
     s32 need;
     u8* data;
+    u32 pcType = pcHeapTakeType(); /* PC_HEAP_OF */
 
     DisableEvent(audioTickEvent);
     need = ((size + 0xF) & ~0xF) + ARENA_HEADER;
@@ -940,6 +945,7 @@ void* allocateFromSoundArenaTop(s32 size) {
     blk->m4 = 0;
     blk->m0_flags = 2;
     blk->m2 = 0;
+    blk->pcType = pcType;
     blk->mC_next = best->mC_next;
     best->mC_next = blk;
     EnableEvent(audioTickEvent);
@@ -1296,7 +1302,7 @@ SoundInstance* createMusicInstance(void* data) {
     if (((SeqFile*)data)->u14.s.m15_percussionCount) {
         size += 0x180;
     }
-    inst = allocateFromSoundArena(size);
+    inst = allocateFromSoundArena(PC_HEAP_OF(SoundInstance, size));
     if (inst == NULL) {
         err = 0x1E;
     error:

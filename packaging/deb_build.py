@@ -29,9 +29,11 @@ The steps, each named in the failure message when it fails:
              name; dpkg-deb reads its Package, Version and Architecture, and
              its files must be exactly the executable (/usr/bin/xenogears, or
              xenogears-enhanced for XG_ENGINE=enhanced; mode 0755, owned by
-             root) and the licences in /usr/share/doc/xenogears-pc (COPYING,
+             root), the licences in /usr/share/doc/xenogears-pc (COPYING,
              LICENSE-Jukebox-font.txt, LICENSE-imgui.txt, and LICENSE-glslang.txt
-             and LICENSE-dav1d.txt when the cache links them), nothing else
+             and LICENSE-dav1d.txt when the cache links them) and
+             /usr/share/xenogears-pc/release.txt, exactly "version=<version>"
+             and "kind=deb" (what the in-app updater reads), nothing else
   payload    with --audit-source, check the executable bytes taken from the .deb
              against the extracted retail modules with tools/payloadcheck.py
              --dist before making any release assets
@@ -82,6 +84,12 @@ HERE = Path(__file__).resolve().parent
 ASSETS = HERE / "deb_assets.py"
 DOC = "usr/share/doc/xenogears-pc"
 LICENCES = ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt")
+RELEASE = "usr/share/xenogears-pc/release.txt"  # port/cmake/deb.cmake: what the in-app updater reads
+
+
+def release_text(version: str) -> bytes:
+    """The .deb's release.txt (port/src/system/release.h)."""
+    return f"version={version}\nkind=deb\n".encode()
 CACHE_WANT = {"CMAKE_BUILD_TYPE": "Release", "XG_VERSION": "US", "XG_EXTRAS": "ON"}
 TOOLS = ("cmake", "cpack", "dpkg-deb", "dpkg")
 
@@ -136,7 +144,7 @@ def check_build(build: Path, version: str, package: str, arch: str) -> tuple[dic
 def expected_files(cache: dict[str, str]) -> tuple[str, set[str]]:
     """The executable's path and every file the package must hold (port/cmake/deb.cmake's install rules)."""
     exe = "usr/bin/xenogears-enhanced" if cache.get("XG_ENGINE") == "enhanced" else "usr/bin/xenogears"
-    need = {exe} | {f"{DOC}/{name}" for name in LICENCES}
+    need = {exe, RELEASE} | {f"{DOC}/{name}" for name in LICENCES}
     if not cache.get("glslang_DIR", "NOTFOUND").endswith("NOTFOUND") and cache.get("XG_GLSLANG", "ON") == "ON":
         need.add(f"{DOC}/LICENSE-glslang.txt")
     if not cache.get("XG_DAV1D_LIBRARY", "NOTFOUND").endswith("NOTFOUND") and cache.get("XG_DAV1D", "ON") == "ON":
@@ -173,7 +181,7 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
         if fields.get(field) != want:
             raise StepError("package", f"{deb.name}: {field} is {fields.get(field)!r}, not {want!r}")
     members = {}
-    payload = b""
+    payload = release = b""
     try:
         with tarfile.open(fileobj=io.BytesIO(dpkg_deb(tool, "--fsys-tarfile", deb)), mode="r:") as tar:
             for member in tar:
@@ -184,6 +192,8 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
                     members[path] = member
                     if path == exe and member.isfile():
                         payload = tar.extractfile(member).read()
+                    if path == RELEASE and member.isfile():
+                        release = tar.extractfile(member).read()
     except tarfile.TarError as error:
         raise StepError("package", f"{deb.name}: its file archive cannot be read ({error})") from error
     problems = [f"missing {path}" for path in sorted(need - set(members))]
@@ -192,8 +202,11 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
     binary = members.get(exe)
     if binary is not None and binary.isfile() and (binary.mode & 0o7777 != 0o755 or binary.uid != 0 or binary.gid != 0):
         problems.append(f"{exe} is mode {binary.mode & 0o7777:04o} owner {binary.uid}:{binary.gid}, not 0755 root")
+    if RELEASE in members and members[RELEASE].isfile() and release != release_text(version):
+        problems.append(f"{RELEASE} is {release[:80]!r}, not {release_text(version)!r}")
     if problems:
-        raise StepError("package", f"{deb.name} does not hold the executable and licences alone: " + "; ".join(problems))
+        raise StepError("package", f"{deb.name} does not hold the executable, licences and release file alone: "
+                        + "; ".join(problems))
     return payload
 
 

@@ -1479,7 +1479,7 @@ sBattleSpriteActor* allocateBattleSpriteActor(AnimationBundle* bundle, s16 clutX
     sBattleSpriteActor* task;
     SpriteActor* actor;
 
-    task = (sBattleSpriteActor*)allocateTaskPair((s32)sizeof(sBattleSpriteActor), NULL, battleSpriteUpdate, battleSpriteRender, battleSpriteDelete);
+    task = (sBattleSpriteActor*)allocateTaskPair(PC_HEAP_OF(sBattleSpriteActor, (s32)sizeof(sBattleSpriteActor)), NULL, battleSpriteUpdate, battleSpriteRender, battleSpriteDelete);
     actor = &task->m38_spriteActor;
     task->m0_updateTask.m4_data = actor;
     task->m1C_drawTask.m4_data = actor;
@@ -1733,7 +1733,7 @@ void initMechaForBattle(u32 arg0) {
     if (battleBssBlock.m8C8C_spriteActorCores[arg0] == NULL) {
         saved = spriteBytecode2ExtendedE0_Var0;
         spriteBytecode2ExtendedE0_Var0 = 0;
-        task = (sBattleSpriteActor*)allocateTaskPair((s32)sizeof(sBattleSpriteActor), NULL, battleMechaUpdate, battleMechaDraw, battleMechaDelete);
+        task = (sBattleSpriteActor*)allocateTaskPair(PC_HEAP_OF(sBattleSpriteActor, (s32)sizeof(sBattleSpriteActor)), NULL, battleMechaUpdate, battleMechaDraw, battleMechaDelete);
         actor = &task->m38_spriteActor;
         actor->m0_spriteActorCore.m6C_owner = task;
         task->m0_updateTask.m4_data = actor;
@@ -2657,7 +2657,7 @@ void createSpinningEnemySelectionCursor(sBattleSpriteActor* arg0) {
     u8* buffer2;
 
     actor = arg0->m0_updateTask.m4_data;
-    cursor = (sBattleSpinningEnemySelectionCursor*)allocateTaskPair((s32)sizeof(sBattleSpinningEnemySelectionCursor), &arg0->m0_updateTask, updateSpinningEnemySelectionCursor, drawSpinningEnemySelectionCursor, deleteSpinningEnemySelectionCursor);
+    cursor = (sBattleSpinningEnemySelectionCursor*)allocateTaskPair(PC_HEAP_OF(sBattleSpinningEnemySelectionCursor, (s32)sizeof(sBattleSpinningEnemySelectionCursor)), &arg0->m0_updateTask, updateSpinningEnemySelectionCursor, drawSpinningEnemySelectionCursor, deleteSpinningEnemySelectionCursor);
     cursor->m38_actor = actor;
     cursor->m54_actorHeight = (u16)actor->m36_height;
     if (spriteBytecode2ExtendedE0_Var0 != 0) {

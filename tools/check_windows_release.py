@@ -182,8 +182,11 @@ def check_script(text: str, version: str, nsis: str, setup: str, files: dict[str
           and not any(s.startswith("/") for s in sources),
           f"script: one relative File line for each of the {len(files)} staged files")
     deleted = set(re.findall(r'^  Delete "\$INSTDIR\\([^"]+)"$', text, re.M))
-    check(deleted == {n.replace("/", "\\") for n in files} | {"uninstall.exe"},
-          "script: a Delete line for each staged file and the uninstaller, nothing else in $INSTDIR")
+    check(deleted == {n.replace("/", "\\") for n in files} | {"uninstall.exe", "release.txt"},
+          "script: a Delete line for each staged file, the release file and the uninstaller, nothing else in $INSTDIR")
+    check(re.search(r'^  FileOpen \$0 "\$INSTDIR\\release\.txt" w\n  FileWrite \$0 "version='
+                    + re.escape(version) + r'\$\\nkind=setup\$\\n"\n  FileClose \$0$', text, re.M) is not None,
+          f"script: the install writes release.txt, version {version} and kind setup (the in-app updater's)")
     check(re.findall(r'^  RMDir "\$INSTDIR\\([^"]+)"$', text, re.M) == ["extra\\notes", "extra"]
           and 'RMDir "$INSTDIR"' in text and not re.search(r"RMDir\s+/", text),
           "script: each folder removed only if empty, deepest first, never recursively")
@@ -201,12 +204,14 @@ def check_script(text: str, version: str, nsis: str, setup: str, files: dict[str
 
 
 def check_zip(path: Path, folder: str, files: dict[str, bytes]) -> None:
+    version = folder.removeprefix("xenogears-pc-").removesuffix("-windows-x64")
+    want = dict(files, **{"release.txt": f"version={version}\nkind=zip\n".encode()})  # the in-app updater's
     with zipfile.ZipFile(path) as z:
         check(z.testzip() is None, f"{path.name}: every entry's CRC is right")
         entries = {i.filename: i for i in z.infolist()}
         inside = {n[len(folder) + 1:]: z.read(n) for n, i in entries.items() if not i.is_dir()}
         check(all(n.startswith(folder + "/") for n in entries), f"{path.name}: everything under {folder}/")
-        check(inside == files, f"{path.name}: exactly the stage's {len(files)} files with their bytes")
+        check(inside == want, f"{path.name}: exactly the stage's {len(files)} files with their bytes, and release.txt")
         check({n for n, i in entries.items() if i.is_dir()}
               == {f"{folder}/", f"{folder}/extra/", f"{folder}/extra/notes/"}, f"{path.name}: its folders")
     if shutil.which("unzip"):
@@ -336,6 +341,8 @@ def refusals(public: Path, work: Path, good: Path) -> None:
     bad("a reserved name", "Windows reserves", extra=["CON.txt"])
     bad("a name clashing in case", "only in case", extra=["copying.TXT"])
     bad("the uninstaller's name", "uninstaller's name", extra=["Uninstall.exe"])
+    bad("a release file of its own", "each asset's own", extra=["release.txt"])
+    bad("a release file in another case", "each asset's own", extra=["Release.TXT"])
     bad("a .cue sheet", "game data", extra=["Xenogears-Disc-1.cue"])
     bad("a .bin image in a folder", "game data", extra=["bin/track.bin"])
     bad("the disc's executable name", "game data", extra=["SLUS_006.64"])

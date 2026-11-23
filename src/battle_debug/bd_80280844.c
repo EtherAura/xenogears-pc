@@ -518,7 +518,7 @@ void createDebugLoadMeter(void);
 void createDebugLoadMeter(void) {
     BattleDebugMeter* m;
 
-    m = (BattleDebugMeter*)allocateTaskPair(sizeof(BattleDebugMeter), NULL, updateDebugLoadMeter, drawDebugLoadMeter, NULL);
+    m = (BattleDebugMeter*)allocateTaskPair(PC_HEAP_OF(BattleDebugMeter, sizeof(BattleDebugMeter)), NULL, updateDebugLoadMeter, drawDebugLoadMeter, NULL);
     m->m54_gpuPeakTimer = 1;
     m->m50_cpuPeakTimer = 1;
     m->m4C_gpuPeak = 0;

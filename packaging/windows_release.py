@@ -16,9 +16,14 @@ spelled as the tag spells it; the assets are
   xenogears-pc-<version>-windows-x64.zip         the same files, in one folder
   <asset>.sha256                                 sha256sum format
 
+Each asset also holds release.txt beside xenogears.exe, what the in-app
+updater reads (port/src/system/release.h): "version=<version>" and
+"kind=zip" in the .zip; setup.exe writes its own at install, "kind=setup",
+and its uninstaller deletes it.
+
 The stage is a folder `cmake --install` filled (the executables, the runtime
 DLLs, the licences, a README). It must hold xenogears.exe, SDL3.dll and
-COPYING.txt; it is refused if it holds a symbolic link, an empty folder, a name
+COPYING.txt; it is refused if it holds release.txt (each asset's own), a symbolic link, an empty folder, a name
 Windows or NSIS cannot take as it is, two names that differ only in case, or
 anything that looks like the game's data or a player's files (disc images, PS-X
 EXE headers, CD sectors, memory cards, settings.ini). Nothing of the game is
@@ -72,6 +77,12 @@ TAG = re.compile(r"v(20\d\d)\.(0[1-9]|1[0-2])\.(0|[1-9]\d*)")
 NSIS_PART_MAX = 0xFFFF  # each part of VIProductVersion is a 16-bit number
 TEMPLATE = Path(__file__).resolve().parent / "xenogears-pc-installer.nsi.in"
 REQUIRED = ("xenogears.exe", "SDL3.dll", "COPYING.txt")
+RELEASE_FILE = "release.txt"  # beside xenogears.exe: what the in-app updater reads (port/src/system/release.h)
+
+
+def release_text(version: str, kind: str) -> bytes:
+    """An asset's release.txt: the .zip's (kind zip); setup.exe writes the same with kind setup."""
+    return f"version={version}\nkind={kind}\n".encode()
 LICENSE_FILE = "COPYING.txt"
 SHORTCUTS = (("xenogears.exe", "Xenogears"), ("xenogears-enhanced.exe", "Xenogears (Enhanced engine)"))
 PLACEHOLDERS = frozenset({"VERSION", "NSIS_VERSION", "SETUP_NAME", "LICENSE_FILE", "INSTALL_FILES",
@@ -163,6 +174,8 @@ def read_stage(stage: Path) -> list[dict]:
     present = {f["rel"].as_posix() for f in files}
     if "uninstall.exe" in {p.casefold() for p in present}:
         raise ReleaseError("stage: uninstall.exe is the setup's own uninstaller's name")
+    if RELEASE_FILE in {p.casefold() for p in present}:
+        raise ReleaseError(f"stage: {RELEASE_FILE} is each asset's own (the .zip's and setup.exe's), never the stage's")
     missing = [n for n in REQUIRED if n not in present]
     if missing:
         raise ReleaseError(f"stage: no {', '.join(missing)} (not a cmake --install of the port)")
@@ -272,6 +285,10 @@ def zip_stage(tag: str, stage: Path, out_dir: Path) -> Path:
                 if hashlib.sha256(data).hexdigest() != f["sha256"]:
                     raise ReleaseError(f"--stage {stage}: {f['rel']} changed while it was packaged")
                 z.writestr(info, data, compresslevel=9)
+            info = zipfile.ZipInfo((top / RELEASE_FILE).as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system, info.external_attr = 3, 0o100644 << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(info, release_text(names["version"], "zip"), compresslevel=9)
         unchanged(stage, files)
         os.replace(tmp, target)
     finally:

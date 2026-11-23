@@ -415,7 +415,8 @@ def renders(helper: Path, scratch: Path) -> dict[str, Path]:
             args, flags = capture
             captured[version] = capture
             want = ["-DCMAKE_C_FLAGS_RELEASE=-O3 -DNDEBUG", "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG",
-                    "-DBUILD_SHARED_LIBS=OFF", "-DXG_VERSION=US", "-DXG_EXTRAS=ON", f"-DXG_PACKAGE_VERSION={version}"]
+                    "-DBUILD_SHARED_LIBS=OFF", "-DXG_VERSION=US", "-DXG_EXTRAS=ON", f"-DXG_PACKAGE_VERSION={version}",
+                    "-DXG_INSTALL_KIND=gentoo"]
             check(args == want, f"{tag}: src_configure's arguments ({args})")
             check(flags == dict.fromkeys(FLAG_NAMES), f"{tag}: the user's {', '.join(FLAG_NAMES)} are unset ({flags})")
 
@@ -542,7 +543,7 @@ def release_flags(ebuilds: dict[str, Path], scratch: Path) -> None:
     initial.write_text(eclass_like_cache("Release"))
 
     # 1. The contract: the port's documented release configure (port/cmake/deb.cmake), plain CMake.
-    port_args = ["-DXG_VERSION=US", "-DXG_EXTRAS=ON", f"-DXG_PACKAGE_VERSION={version}"]
+    port_args = ["-DXG_VERSION=US", "-DXG_EXTRAS=ON", f"-DXG_PACKAGE_VERSION={version}", "-DXG_INSTALL_KIND=gentoo"]
     release = cmake_build(source, root / "plain-release", port_args, dict.fromkeys(FLAG_NAMES), "Release", None)
     check(release is not None, "fixture: a plain CMake Release build of the fixture project")
     if release is None:
@@ -658,6 +659,8 @@ def port_rules(text: str) -> None:
             check('-DXG_PACKAGE_VERSION="${PV}"' in text, "src_configure passes the release's version")
         else:
             check(re.search(rf"^\t\t{re.escape(flag)}$", text, re.M) is not None, f"src_configure passes {flag} as the Ubuntu release does")
+    check(re.search(r"^\t\t-DXG_INSTALL_KIND=gentoo$", text, re.M) is not None and "XG_INSTALL_KIND" in deb,
+          "src_configure names the package gentoo (release.txt's kind, port/cmake/deb.cmake)")
     for option in ("XG_SHARED", "XG_PIE", "XG_LTO", "XG_MARCH", "XG_ENGINE", "XG_GLSLANG", "XG_DAV1D"):
         check(f"-D{option}" not in text, f"the ebuild leaves {option} at the port's default")
     check("install(TARGETS xenogears RUNTIME DESTINATION bin)" in deb and "set(XG_DOC_DIR share/doc/xenogears-pc)" in deb

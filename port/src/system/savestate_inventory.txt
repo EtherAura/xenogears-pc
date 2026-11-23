@@ -546,6 +546,7 @@ system/spu.c transferCallback state
 system/spu.c transferMode state
 system/stall.c * host the stall watchdog
 system/statefile.c * host save state files
+system/release.c * host which release this copy is and how it was installed (its release.txt, read once at start)
 system/sweeplog.c * host sweep logs
 system/todo.c * host PORT_TODO reports
 system/world.c * host the extras' worlds (states wait until none is entered)

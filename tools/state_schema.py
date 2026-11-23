@@ -43,6 +43,70 @@ FIELD_TAG = re.compile(r"^m([0-9A-Fa-f]+)(?:_|$)")  # m1C_actor, and m15D8 (no n
 ADDR_NAME = re.compile(r"^[DF]_([0-9A-Fa-f]{8})$")  # splat labels carry their retail address
 
 
+def type_id(name: str) -> int:
+    """A heap type's identity, as the PC computes it (port/src/game/main/statetypes.c pcStateTypeId): FNV-1a
+    (32 bits) of the name without its blanks; 0 means untyped, so 0 becomes 1."""
+    h = 0x811C9DC5
+    for c in name.encode():
+        if c not in b" \t\n":
+            h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF
+    return h or 1
+
+
+def macro_args(text: str, start: int) -> list[str] | None:
+    """The top-level arguments of the macro call whose "(" is at start."""
+    depth = 0; args = []; cur = start + 1
+    for i in range(start, len(text)):
+        c = text[i]
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                args.append(text[cur:i].strip()); return args
+        elif c == "," and depth == 1:
+            args.append(text[cur:i].strip()); cur = i + 1
+    return None
+
+
+STATE_MACRO = re.compile(r"\b(PC_HEAP_OF|PC_STATE_AT|PC_STATE_NAME|PC_STATE_COUNTED|PC_STATE_TAIL|PC_STATE_UNION)\s*\(")
+
+
+def state_annotations(roots: list[Path]):
+    """include/pc_state.h's annotations in the C a build compiles: the heap type names (PC_HEAP_OF,
+    PC_STATE_AT, PC_STATE_NAME) and the counted arrays (PC_STATE_COUNTED), each with where it is."""
+    names = defaultdict(list); counted = []; unions = []
+    for root in roots:
+        for f in sorted(list(root.rglob("*.c")) + list(root.rglob("*.h"))):
+            if f.name == "pc_state.h":
+                continue
+            text = f.read_text(errors="replace")
+            if "PC_HEAP_OF" not in text and "PC_STATE_" not in text:
+                continue
+            for m in STATE_MACRO.finditer(text):
+                line = text.count("\n", 0, m.start()) + 1
+                if text[text.rfind("\n", 0, m.start()) + 1:m.start()].lstrip().startswith(("#define", "*", "//")):
+                    continue
+                args = macro_args(text, m.end() - 1)
+                if not args:
+                    continue
+                where = f"{f.relative_to(ROOT).as_posix() if ROOT in f.parents else f}:{line}"
+                kind = m.group(1)
+                if kind == "PC_STATE_COUNTED" and len(args) == 4:
+                    counted.append({"type": args[0], "array": args[1], "count": args[2], "extra": int(args[3], 0),
+                                    "at": where})
+                elif kind == "PC_STATE_TAIL" and len(args) == 2:  # the array fills the rest of the block
+                    counted.append({"type": args[0], "array": args[1], "count": None, "extra": 0, "at": where})
+                elif kind == "PC_STATE_UNION" and len(args) == 4:  # the view a selector member names
+                    views = [v.strip() for v in args[3].strip().strip("()").split(",")]
+                    unions.append({"type": args[0], "member": args[1], "selector": args[2], "views": views, "at": where})
+                elif kind == "PC_STATE_AT" and len(args) == 3:
+                    names[args[1]].append(where)
+                elif kind in ("PC_HEAP_OF", "PC_STATE_NAME") and args:
+                    names[args[0]].append(where)
+    return names, counted, unions
+
+
 def dwarfdump() -> str:
     for c in ("llvm-dwarfdump", *sorted(Path.home().glob("Android/sdk/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-dwarfdump"))):
         p = shutil.which(str(c)) if isinstance(c, str) else (str(c) if c.exists() else None)
@@ -207,6 +271,9 @@ def main() -> int:
     ap.add_argument("build", type=Path)
     ap.add_argument("--json", type=Path, help="write the schema here (default BUILD/state_schema.json.gz)")
     ap.add_argument("--top", type=int, default=12, help="examples listed per finding")
+    ap.add_argument("--source", type=Path, action="append",
+                    help="read the heap annotations (include/pc_state.h) from this folder instead of the build's game C "
+                         "and port/src (tests)")
     args = ap.parse_args()
     build = args.build.resolve()
     cache = (build / "CMakeCache.txt").read_text() if (build / "CMakeCache.txt").exists() else ""
@@ -566,6 +633,55 @@ def main() -> int:
                 named_types.setdefault(n, d["attrs"]["DW_AT_type"])
     type_names = {n: tid(off) for n, off in named_types.items()}
 
+    # ---- what the heap's blocks hold (include/pc_state.h), from the source this build compiles ---------
+    engine = (re.search(r"^XG_ENGINE:\w+=(\w+)", cache, re.M) or [None, "original"])[1]
+    game_root = ROOT / "engine" if engine == "enhanced" else ROOT
+    heap_names, counted_src, unions_src = state_annotations([r.resolve() for r in args.source] if args.source else
+                                                [game_root / "src", game_root / "include", ROOT / "port" / "src"])
+    any_named = dict(named_types)  # typedefs and base types too (u8, OTag, uptr)
+    for off, d in dies.items():
+        if d["tag"] in ("DW_TAG_typedef", "DW_TAG_base_type"):
+            n = d["attrs"].get("DW_AT_name")
+            if n and n not in any_named:
+                any_named[n] = off
+    heap_types = {}; heap_problems = []
+    for name, wheres in sorted(heap_names.items()):
+        bare = re.sub(r"\s+", "", name)
+        if bare == "PC_PRIMS":
+            spec = "prims"
+        elif bare.endswith("*"):
+            spec = "ptrs"
+        elif bare.removeprefix("struct").removeprefix("union") in any_named:
+            t = tid(any_named[bare.removeprefix("struct").removeprefix("union")])
+            k = table.get(t, {}).get("k")
+            spec = {"tid": t} if k in ("struct", "union") else "otags" if k == "otag" else \
+                "ptrs" if k in ("addr", "ptr") else None  # scalars: bytes, the same in every build
+        else:
+            heap_problems.append(f"{name} ({wheres[0]}): no such type in this build")
+            continue
+        h = f"{type_id(name):08x}"
+        if h in heap_types and heap_types[h]["name"] != bare:
+            heap_problems.append(f"{name} and {heap_types[h]['name']}: one hash ({h})")
+        heap_types[h] = {"name": bare, "spec": spec}
+    counted = {}
+    for r in counted_src:
+        t = tid(any_named[r["type"]]) if r["type"] in any_named else None
+        fields = {f["name"]: f for f in table.get(t, {}).get("fields", [])} if t else {}
+        if r["array"] not in fields or (r["count"] is not None and r["count"] not in fields):
+            heap_problems.append(f"PC_STATE_COUNTED({r['type']}, {r['array']}, {r['count']}) ({r['at']}): no such fields")
+            continue
+        counted[t] = {"name": r["type"], "array": r["array"], "count": r["count"], "extra": r["extra"]}
+    union_rules = {}
+    for r in unions_src:
+        t = tid(any_named[r["type"]]) if r["type"] in any_named else None
+        fields = {f["name"]: f for f in table.get(t, {}).get("fields", [])} if t else {}
+        m = fields.get(r["member"])
+        views = {f["name"] for f in table.get(m["type"], {}).get("fields", [])} if m else set()
+        if m is None or r["selector"] not in fields or not set(r["views"]) <= views:
+            heap_problems.append(f"PC_STATE_UNION({r['type']}, {r['member']}, {r['selector']}) ({r['at']}): no such fields")
+            continue
+        union_rules[t] = {"name": r["type"], "member": r["member"], "selector": r["selector"], "views": r["views"]}
+
     for v in variables:
         if v.get("elem") is not None:
             e = tid(v["elem"])
@@ -600,14 +716,23 @@ def main() -> int:
         "sections": {f"{mod}.{kind}": [lo, hi] for lo, hi, mod, kind in modsec},
         "regions": {v["name"]: [v["addr"], v["addr"] + v["size"]] for v in variables
                     if v["name"] in ("heapArena", "gameStack", "pcScratchpad")},
-        "functions": funcs, "allocation_sites": site_list}
+        "functions": funcs, "allocation_sites": site_list,
+        # PC_HEAP_OF and PC_STATE_AT's types by the hash a block's header (HeapBlock mC_pcType) or a range keeps
+        "heap_types": heap_types, "counted": counted,
+        # a union member's live view by another member's value (PC_STATE_UNION): struct tid -> rule
+        "unions": union_rules}
     with gzip.open(out, "wt") as fh:
         json.dump(schema, fh)
     print(f"  schema: {out} ({out.stat().st_size} bytes)")
+    print(f"  heap types named in the source (include/pc_state.h): {len(heap_types)}; counted arrays: {len(counted)}; "
+          f"unions with a selector: {len(union_rules)}")
+    for p_ in heap_problems:
+        print(f"    PROBLEM {p_}")
     game_untagged = sum(len(set(v)) for (o, _), v in untagged.items() if o == "game")
     print(f"state-schema: {len(gj)} of {len(game)} game variables with a retail address, {game_untagged} game "
-          f"fields untagged, {len(unions)} unions, {sites - annotated} of {sites} heap allocation calls unsized")
-    return 0
+          f"fields untagged, {len(unions)} unions, {sites - annotated} of {sites} heap allocation calls unsized, "
+          f"{len(heap_types)} heap types named" + (f", {len(heap_problems)} PROBLEMS" if heap_problems else ""))
+    return 1 if heap_problems else 0
 
 
 if __name__ == "__main__":

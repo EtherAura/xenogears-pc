@@ -337,7 +337,7 @@ void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pDa
     if (battleMechas[entryId] != NULL) {
         return;
     }
-    pMecha = allocateHeap((s32)offsetof(sLoadedMechas, m11C_previousTranslation), 0);
+    pMecha = allocateHeap(PC_HEAP_OF(sLoadedMechas, (s32)offsetof(sLoadedMechas, m11C_previousTranslation)), 0);
     /* The bytes stay as loaded, so every user converts (flag 1: the PS1
      * relocated them for an earlier mecha); freed at the end. */
     pData1 = pcConvertMechaData1(pData1);

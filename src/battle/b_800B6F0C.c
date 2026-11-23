@@ -366,7 +366,7 @@ void deleteBattleStartEffectTask(TaskHeader* task) {
 
 sBattleStartEffect* createBattleStartEffectTask(void);
 sBattleStartEffect* createBattleStartEffectTask(void) {
-    return initBattleStartEffect((sBattleStartEffect*)allocateTaskPair(sizeof(sBattleStartEffect), NULL, updateBattleStartEffect, drawBattleStartEffectTask, deleteBattleStartEffectTask));
+    return initBattleStartEffect((sBattleStartEffect*)allocateTaskPair(PC_HEAP_OF(sBattleStartEffect, sizeof(sBattleStartEffect)), NULL, updateBattleStartEffect, drawBattleStartEffectTask, deleteBattleStartEffectTask));
 }
 
 sBattleStartEffect* createBattleStartEffect(void) {

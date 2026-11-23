@@ -2,6 +2,7 @@
  * across the screen.
  * gcc-2.7.2-cdk, ASPSX 2.56. */
 #include "common.h"
+#include "pc_state.h"
 #include "psyq.h"
 #include "main/task.h"
 #include "main/sprite.h"
@@ -331,7 +332,7 @@ void fxTiledSprite_draw(TaskHeader* task) {
 }
 
 void createFxTiledSprite(SpriteActorCore* actor) {
-    Fx06Effect* e = (Fx06Effect*)allocateTaskPair(sizeof(Fx06Effect), actor->m6C_owner, fxTiledSprite_update, fxTiledSprite_draw, NULL);
+    Fx06Effect* e = (Fx06Effect*)allocateTaskPair(PC_HEAP_OF(Fx06Effect, sizeof(Fx06Effect)), actor->m6C_owner, fxTiledSprite_update, fxTiledSprite_draw, NULL);
 
     e->m48_actor = actor;
     actor->mAC_x5 = 1;

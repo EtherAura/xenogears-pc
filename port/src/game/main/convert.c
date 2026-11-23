@@ -9,7 +9,7 @@
 #include "pc_convert.h"
 
 void** pcRelocTable(u32* data) {
-    return pcRelocTableInto(allocateHeap(PC_HEAP_NATIVE((s32)((data[0] + 1) * sizeof(uptr))), 1), data);
+    return pcRelocTableInto(allocateHeap(PC_HEAP_OF(uptr, PC_HEAP_NATIVE((s32)((data[0] + 1) * sizeof(uptr)))), 1), data);
 }
 
 void** pcRelocTableInto(void** out, u32* data) {
@@ -76,7 +76,7 @@ void pcConvertModel(void* model) {
         for (i = 0; i < n; i++) {
             size += dynVertsSize(raw, d[i].m1C_dynamicVertices);
         }
-        m = allocateHeap(PC_HEAP_NATIVE(size), 1);
+        m = allocateHeap(PC_HEAP_OF(Model, PC_HEAP_NATIVE(size)), 1);
         m->m0_numBlocks = n;
         m->m4_flags = *(s32*)(raw + 4);
         m->m8 = 0;
@@ -117,10 +117,12 @@ void pcConvertModel(void* model) {
                 dv->m4_entries[j].m8_normals = raw + e[j].m8_normals;
             }
             b->m1C_dynamicVertices = dv;
+            PC_STATE_AT(dv, ModelDynVerts, 1);
             extra += dynVertsSize(raw, d->m1C_dynamicVertices);
         }
     }
     memcpy(raw + 8, &m, sizeof(m));
+    PC_STATE_AT(raw + 8, Model*, 1); /* the file's bytes keep the native model */
 }
 
 void* pcModelBlocks(void* model) {

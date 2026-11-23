@@ -6311,13 +6311,12 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
      * that is off. */
     int glow = p->all || p->glow > 0, bounce = p->all || p->bounce > 0, shade = p->all || p->shade > 0;
     int surface = shade || p->top > 0;
-    if (shade) c.flags |= 4; /* light.comp SMOOTHED: pass 7 writes tempB, the shade's smoothing pass terms */
     for (int pass = 0; pass <= LIGHT_COMPOSITE; pass++) {
         int needed = pass == 0 || pass == LIGHT_COMPOSITE ||
                      (pass >= 1 && pass <= 3 && (glow || bounce)) ||          /* the surroundings, the glow's wide spreads */
                      ((pass == 4 || pass == 10 || pass == 11) && bounce) ||
-                     ((pass == 5 || pass == 7) && surface) ||                 /* normals (a pass for both halves), top light, shade */
-                     (pass == 8 && shade) ||                                    /* the shade smoothed (both halves) */
+                     (pass >= 5 && pass <= 7 && surface) ||                   /* normals, top light, shade */
+                     ((pass == 8 || pass == 9) && shade) ||
                      ((pass == 12 || pass == 13) && glow) ||
                      (pass >= LIGHT_SHADOWS && pass < LIGHT_FOG && shadows) ||  /* cast shadows */
                      (pass == LIGHT_FOG && fog);                               /* the fog's colour */

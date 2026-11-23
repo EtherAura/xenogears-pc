@@ -350,7 +350,7 @@ void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pDa
     if (battleMechas[entryId] != NULL) {
         return;
     }
-    pMecha = allocateHeap((s32)offsetof(sLoadedMechas, m11C_previousTranslation), 0);
+    pMecha = allocateHeap(PC_HEAP_OF(sLoadedMechas, (s32)offsetof(sLoadedMechas, m11C_previousTranslation)), 0);
 #ifndef PLATFORM_PC
     if (!(flags & 1)) {
         doPointerRelocation((u32*)pData1);

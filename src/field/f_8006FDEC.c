@@ -730,7 +730,7 @@ void initFieldData(void) {
         /* n is block-local (its multiply chain shares one callee-saved reg);
          * the loop bound is the function-wide `size`. */
         s32 n = count * sizeof(sFieldEntity) / 4;
-        s32* q = allocateHeap(PC_HEAP_SIZED(n * 4, count * 0x5C), 0);
+        s32* q = allocateHeap(PC_HEAP_OF(sFieldEntity, PC_HEAP_SIZED(n * 4, count * 0x5C)), 0);
         fieldSceneState.m290_actorArray = (sFieldEntity*)q;
         size = n;
         for (i = 0; i < size; i++) {

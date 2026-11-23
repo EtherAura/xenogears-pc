@@ -58,6 +58,7 @@ VERSION = TAG[1:]
 DEB = f"xenogears-pc_{VERSION}_amd64.deb"
 SET = [DEB, f"{DEB}.sha256", f"{DEB}.cdx.json"]
 DOC = "usr/share/doc/xenogears-pc"
+RELEASE = "usr/share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
 FV = "1.0~fixture"  # fixture Depends versions: arbitrary, not any distribution's
 GOOD_DEPENDS = f"libc6 (>= {FV}), libsdl3-0 (>= {FV}), libvulkan1"
 REAL_TOOLS = ("dpkg-deb", "dpkg", "tar", "gtar", "xz", "zstd", "gzip")
@@ -194,6 +195,7 @@ def good_files(**changes) -> dict[str, tuple[str, int]]:
     files = {"usr/bin/xenogears": ("#!/bin/sh\necho fixture executable, not the game\n", 0o755)}
     for name in ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt"):
         files[f"{DOC}/{name}"] = (f"fixture licence text ({name})\n", 0o644)
+    files[RELEASE] = (f"version={VERSION}\nkind=deb\n", 0o644)
     for path, value in changes.items():
         path = path.replace("__", "/")
         if value is None:
@@ -389,6 +391,11 @@ def check_fixtures(work: Path) -> None:
             ("no COPYING", good_files(**{f"{DOC}/COPYING".replace("/", "__"): None}), VERSION, f"missing {DOC}/COPYING"),
             ("no imgui licence", good_files(**{f"{DOC}/LICENSE-imgui.txt".replace("/", "__"): None}), VERSION,
              "missing usr/share/doc/xenogears-pc/LICENSE-imgui.txt"),
+            ("no release file", good_files(**{RELEASE.replace("/", "__"): None}), VERSION, f"missing {RELEASE}"),
+            ("a release file of the tarball", good_files(**{RELEASE.replace("/", "__"): (
+                f"version={VERSION}\nkind=tarball\n", 0o644)}), VERSION, f"{RELEASE} is b'version={VERSION}\\nkind=tarball"),
+            ("a release file of another version", good_files(**{RELEASE.replace("/", "__"): (
+                "version=2026.11.1\nkind=deb\n", 0o644)}), VERSION, f"{RELEASE} is b'version=2026.11.1"),
             ("executable mode 0644", good_files(usr__bin__xenogears=("fixture\n", 0o644)), VERSION, "mode 0644"),
             ("an extra file", good_files(usr__share__xenogears__disc__bin=("fixture: not game data\n", 0o644)),
              VERSION, "unexpected usr/share/xenogears/disc/bin"),

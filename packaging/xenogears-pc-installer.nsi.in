@@ -66,6 +66,10 @@ FunctionEnd
 Section "Install"
 @INSTALL_FILES@
   SetOutPath "$INSTDIR"
+  ; What the in-app updater reads (port/src/system/release.h): this release, installed by its setup.
+  FileOpen $0 "$INSTDIR\release.txt" w
+  FileWrite $0 "version=@VERSION@$\nkind=setup$\n"
+  FileClose $0
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\${PRODUCT}"
@@ -86,6 +90,7 @@ SectionEnd
 
 Section "Uninstall"
 @UNINSTALL_FILES@
+  Delete "$INSTDIR\release.txt"
   Delete "$INSTDIR\uninstall.exe"
 @UNINSTALL_DIRS@
   RMDir "$INSTDIR"

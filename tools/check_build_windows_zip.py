@@ -334,9 +334,12 @@ def success(run: Run) -> None:
     data = (out / ZIP).read_bytes()
     with zipfile.ZipFile(out / ZIP) as z:
         names = z.namelist()
-        check(names == [f"{FOLDER}/"] + [f"{FOLDER}/{n}" for n in sorted(want)],
-              f"{ZIP}: entries are {FOLDER}/ and the stage's {len(want)} files")
+        check(names == [f"{FOLDER}/"] + [f"{FOLDER}/{n}" for n in sorted(want)] + [f"{FOLDER}/release.txt"],
+              f"{ZIP}: entries are {FOLDER}/, the stage's {len(want)} files and its release.txt")
         got = {n[len(FOLDER) + 1:]: z.read(n) for n in names if not n.endswith("/")}
+    release = got.pop("release.txt", None)
+    check(release == f"version={FOLDER.split('-')[2]}\nkind=zip\n".encode(),
+          f"{ZIP}: release.txt names its version and kind zip (the in-app updater's): {release!r}")
     check(got == want, f"{ZIP}: every entry holds the expected stage bytes (the executables the stripped, "
                        f"audited bytes)")
     check(not any(n.endswith((".map", ".payload.json")) for n in names), f"{ZIP}: no link map or seal")

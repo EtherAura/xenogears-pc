@@ -63,6 +63,7 @@ ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "tools/publish/repo-port/packaging/linux_release.py"
 AUDITOR_FILES = ("payloadcheck.py", "payload_pe.py", "payload_elf.py", "payload_allow.txt")
 DOC = "share/doc/xenogears-pc"
+RELEASE = "share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
 LICENCES = ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt", "LICENSE-glslang.txt", "LICENSE-dav1d.txt")
 ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}  # main() adds a private TMPDIR
 FAILURES: list[str] = []
@@ -145,10 +146,15 @@ def fake_elf(marker: bytes, machine: int = 62, e_type: int = 3, interp: bool = T
     return head + ph + b"SYNTHETIC FIXTURE, not a release executable: " + marker + b"\n"
 
 
-def make_stage(path: Path, enhanced: bool = True, optional: bool = True) -> Path:
-    """SYNTHETIC FIXTURE: the layout cmake --install gives the Linux build (port/cmake/deb.cmake)."""
+def make_stage(path: Path, enhanced: bool = True, optional: bool = True, release: str | None = "2026.11.0") -> Path:
+    """SYNTHETIC FIXTURE: the layout cmake --install gives the Linux build (port/cmake/deb.cmake); with release,
+    the .deb's release.txt of that version (the release's stage is the .deb's files)."""
     (path / "bin").mkdir(parents=True)
     (path / DOC).mkdir(parents=True)
+    if release is not None:
+        (path / RELEASE).parent.mkdir(parents=True)
+        (path / RELEASE).write_text(f"version={release}\nkind=deb\n", encoding="utf-8")
+        os.chmod(path / RELEASE, 0o644)
     exes = ["xenogears"] + (["xenogears-enhanced"] if enhanced else [])
     for exe in exes:
         (path / "bin" / exe).write_bytes(fake_elf(exe.encode()))
@@ -269,6 +275,10 @@ def inspect(archive: Path, stage: Path, folder: str, label: str) -> None:
             rel = (Path(here) / name).relative_to(stage).as_posix()
             want[f"{folder}/{rel}"] = ("file", 0o755 if rel.startswith("bin/") else 0o644,
                                        (Path(here) / name).read_bytes())
+    # The tarball's own release.txt, whatever the stage's: its version, kind=tarball.
+    version = folder.removeprefix("xenogears-pc-").removesuffix("-linux-x86_64")
+    want[f"{folder}/share/xenogears-pc"] = ("dir", 0o755, None)
+    want[f"{folder}/{RELEASE}"] = ("file", 0o644, f"version={version}\nkind=tarball\n".encode())
     seen = []
     with tarfile.open(archive, "r:gz") as tar:
         for m in tar.getmembers():
@@ -513,7 +523,7 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
         check(sorted(os.listdir(again)) == sorted([tarball, sidecar]), "made more than the two assets")
 
     # A later counter, and the original engine alone with no optional licence; --build relative to the cwd.
-    solo = make_stage(base / "stage-solo", enhanced=False, optional=False)
+    solo = make_stage(base / "stage-solo", enhanced=False, optional=False, release=None)  # no release.txt: one written
     f2, t2, s2 = names_of("2026.12.7")
     out2 = base / "nested" / "release-later"
     stub.set(watch=[str(out2)])
@@ -694,6 +704,12 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
     bad("dangling-link", link("bin/xenogears-enhanced", "missing"), "symbolic link")
     bad("folder-link", lambda st: shutil.rmtree(st / "share/doc") or os.symlink("/usr/share/doc", st / "share/doc"),
         "symbolic link")
+    bad("release-other-version", put(RELEASE, b"version=2026.11.1\nkind=deb\n"), "names another version")
+    bad("release-arch", put(RELEASE, b"version=2026.11.0\nkind=arch\n"), "not a release file of the .deb")
+    bad("release-junk", put(RELEASE, b"fixture\n"), "not a release file of the .deb")
+    bad("release-binary", put(RELEASE, b"version=2026.11.0\x00\nkind=deb\n"), "not a release file")
+    bad("release-long", put(RELEASE, b"#" * 5000), "longer than")
+    bad("release-elsewhere", put("share/xenogears-pc/notes.txt", b"fixture\n"), "not a file the port's install makes")
     bad("fifo", lambda st: os.mkfifo(st / DOC / "LICENSE-glslang.txt.fifo"), None)
     bad("fifo-named", lambda st: (st / DOC / "LICENSE-dav1d.txt").unlink()
         or os.mkfifo(st / DOC / "LICENSE-dav1d.txt"), "not a regular file")
@@ -764,7 +780,8 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
     check(r.returncode == 0 or snapshot(st) != snap,
           "the overlap guard disabled: the out-inside-stage check would not notice")
     m = mutant(base, layout, "tag", "(0|[1-9][0-9]*)", "([0-9]+)")
-    r = m("package", "--tag", "v2026.11.00", "--stage", stage, "--out-dir", base / "mutant-tag-out", *both)
+    plain = make_stage(base / "mutant-tag-stage", release=None)  # the .deb's release.txt names 2026.11.0
+    r = m("package", "--tag", "v2026.11.00", "--stage", plain, "--out-dir", base / "mutant-tag-out", *both)
     check(r.returncode == 0, "the tag rule loosened: the leading-zero check would not notice")
     r = cli("names", "--tag", "v2026.11.00")
     check(r.returncode == 1, "the real helper accepts v2026.11.00")
@@ -822,7 +839,7 @@ def compile_exe(cc: str, folder: Path, name: str, payload: bytes | None, text: s
 
 
 def real_stage(path: Path, original: bytes, enhanced: bytes | None) -> Path:
-    make_stage(path, enhanced=enhanced is not None)
+    make_stage(path, enhanced=enhanced is not None, release=None)  # packaged under several tags
     (path / "bin" / "xenogears").write_bytes(original)
     if enhanced is not None:
         (path / "bin" / "xenogears-enhanced").write_bytes(enhanced)

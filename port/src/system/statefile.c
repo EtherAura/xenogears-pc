@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "release.h"
 #include "settings.h"
 #include "statecodec.h"
 
@@ -159,7 +160,12 @@ const char* stateAppVersion(void) {
         snprintf(full, sizeof full, "%s", v != NULL ? v : "");
         char* dot = strstr(full, ".changes"); /* a development build's mark: no room for it */
         if (dot != NULL) *dot = '\0';
-        snprintf(version, sizeof version, "%s", full);
+        /* Elsewhere the release file's version (release.h; "" for a development build). */
+        const char* chosen = full[0] != '\0' ? full : releaseVersion();
+        size_t n = strlen(chosen);
+        if (n >= sizeof version) n = sizeof version - 1; /* as the header holds it */
+        memcpy(version, chosen, n);
+        version[n] = '\0';
     }
     return version;
 }

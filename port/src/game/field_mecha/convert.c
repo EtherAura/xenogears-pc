@@ -17,7 +17,7 @@
 sMechaDataTable1* pcConvertMechaData1(void* data) {
     u32* t1 = data;
     u32* gear = AT(t1, 4);
-    void** out = allocateHeap(PC_HEAP_NATIVE((s32)((SLOTS(t1) + SLOTS(gear)) * sizeof(void*))), 1);
+    void** out = allocateHeap(PC_HEAP_OF(uptr, PC_HEAP_NATIVE((s32)((SLOTS(t1) + SLOTS(gear)) * sizeof(void*)))), 1);
 
     pcRelocTableInto(out, t1);
     out[4] = pcRelocTableInto(out + SLOTS(t1), gear);
@@ -32,7 +32,7 @@ sMechaDataTable2* pcConvertMechaData2(void* data) {
     u32* anim = AT(t2, 1);
     u32* sound = AT(t2, 2);
     u32* keyframes = AT(anim, 1);
-    void** block = allocateHeap(PC_HEAP_NATIVE((s32)((1 + SLOTS(t2) + SLOTS(anim) + SLOTS(sound) + SLOTS(keyframes)) * sizeof(void*))), 1);
+    void** block = allocateHeap(PC_HEAP_OF(uptr, PC_HEAP_NATIVE((s32)((1 + SLOTS(t2) + SLOTS(anim) + SLOTS(sound) + SLOTS(keyframes)) * sizeof(void*)))), 1);
     void** out2 = block + 1;
     void** outAnim = out2 + SLOTS(t2);
     void** outSound = outAnim + SLOTS(anim);

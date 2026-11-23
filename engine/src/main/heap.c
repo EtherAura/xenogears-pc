@@ -18,6 +18,7 @@
 #include "pc_retail_heap.h"
 #include "pc_glyph.h"
 #include "pc_interpolation.h"
+#include "pc_state.h"
 
 /* ---- dynamic (morphing) vertices: Noah kernel/modelDynamicVertices.cpp ---- */
 
@@ -191,6 +192,7 @@ void resetHeapTraceState(void) {
 
 void initHeap(HeapBlock* start, HeapBlock* end) {
     pcHeapInvalidate(); /* sandbox/unknown arenas do not inherit game mappings */
+    pcStateForget(start, end); /* nor its typed ranges */
     start = (HeapBlock*)((uptr)start & ~3);
     end = (HeapBlock*)((uptr)end & ~3);
     heapFirstBlockData = start + 1;
@@ -199,11 +201,13 @@ void initHeap(HeapBlock* start, HeapBlock* end) {
     heapNextAllocType = 0x20;
     start->m4_user = 0;
     start->m4_type = 0x21;
+    start->mC_pcType = 0;
     currentHeapUser = 10;
     end[-1].m0_next = end;
     heapSymbolFileStart = 0;
     end[-1].m4_user = 1;
     end[-1].m4_type = 0x20;
+    end[-1].mC_pcType = 0;
     heapSymbolFileEnd = 0;
     delayedFreeListHead.m0_next = NULL;
     resetHeapTraceState();
@@ -221,6 +225,7 @@ void resetHeap(HeapBlock* start) {
     start->m0_next = old[-1].m0_next;
     start->m4_user = 0;
     start->m4_type = 0x21;
+    start->mC_pcType = 0;
     delayedFreeListHead.m0_next = NULL;
 }
 
@@ -242,6 +247,13 @@ s32 setHeapAllowFailure(s32 flag) {
 void getLastAllocRequest(s32* caller, s32* size) {
     *caller = heapLastRequestCaller;
     *size = heapLastRequestSize;
+}
+
+/* A new block starts zeroed on the PC: what its memory held before (an
+ * earlier block's 64-bit pointers) would otherwise depend on the build, and a
+ * save state would carry it (include/pc_state.h). The PS1 keeps leftovers. */
+static void pcFreshBlock(HeapBlock* data) {
+    __builtin_memset(data, 0, (uptr)data[-1].m0_next - HEAP_HEADER - (uptr)data);
 }
 
 /* Allocate size bytes; mode 0 first fit, 1 top-down (last fit), 2 best fit. */
@@ -275,6 +287,7 @@ void* allocateHeap(s32 size, s32 mode) {
     HeapBlock* p;
     s32 nativeSize = size;
     s32 retailSize = pcHeapTakeRequest();
+    u32 pcType = pcHeapTakeType(); /* PC_HEAP_OF */
 
     GET_RA(&ra);
     ra -= 8;
@@ -312,10 +325,12 @@ void* allocateHeap(s32 size, s32 mode) {
     alloc_exact:
         blk->m4_user = currentHeapUser;
         blk->m4_type = heapNextAllocType;
+        blk->mC_pcType = pcType;
         blk->m4_pinned = 0;
         blk->m4_caller = ra;
         heapNextAllocType = 0x20;
         pcHeapAllocated(blk + 1, nativeSize, retailSize, mode);
+        pcFreshBlock(blk + 1);
         return blk + 1;
     }
     if (diff >= 5) {
@@ -369,11 +384,13 @@ end:
         p[-1].m0_next = best->m0_next;
         p[-1].m4_user = currentHeapUser;
         p[-1].m4_type = heapNextAllocType;
+        p[-1].mC_pcType = pcType;
         p[-1].m4_pinned = 0;
         p[-1].m4_caller = ra;
         heapNextAllocType = 0x20;
         best->m0_next = p;
         pcHeapAllocated(p, nativeSize, retailSize, mode);
+        pcFreshBlock(p);
         return p;
     }
 split:
@@ -383,13 +400,16 @@ split:
     nb->m4_type = best->m4_type;
     nb->m4_pinned = best->m4_pinned;
     nb->m4_caller = best->m4_caller;
+    nb->mC_pcType = best->mC_pcType;
     best->m4_type = heapNextAllocType;
+    best->mC_pcType = pcType;
     best->m0_next = nb + 1;
     best->m4_user = currentHeapUser;
     best->m4_pinned = 0;
     best->m4_caller = ra;
     heapNextAllocType = 0x20;
     pcHeapAllocated(bestData, nativeSize, retailSize, mode);
+    pcFreshBlock(bestData);
     return bestData;
 }
 
@@ -405,10 +425,12 @@ HeapBlock* shrinkAllocation(HeapBlock* p, u32 size) {
         return 0;
     }
     nb = (HeapBlock*)((u8*)p + size);
+    pcStateForget(nb, next); /* typed ranges past the new end */
     nb->m0_next = next;
     heapNeedsMerge = 1;
     nb->m4_user = 0;
     nb->m4_type = 0x21;
+    nb->mC_pcType = 0;
     nb->m4_caller = 0;
     nb->m4_pinned = 0;
     p[-1].m0_next = nb + 1;
@@ -458,8 +480,10 @@ s32 freeHeap(void* p) {
     }
     pcGlyphClearRAM(p, (s32)((uptr)((HeapBlock*)p)[-1].m0_next - (uptr)p) - HEAP_HEADER, 3);
     pcInterpolationHeapFree(p, (s32)((uptr)((HeapBlock*)p)[-1].m0_next - (uptr)p) - HEAP_HEADER);
+    pcStateHeapFree(p, (s32)((uptr)((HeapBlock*)p)[-1].m0_next - (uptr)p) - HEAP_HEADER);
     pcHeapFreed(p);
     ((HeapBlock*)p)[-1].m4_type = 0x21;
+    ((HeapBlock*)p)[-1].mC_pcType = 0;
     ((HeapBlock*)p)[-1].m4_user = 0;
     ((HeapBlock*)p)[-1].m4_caller = 0;
     heapNeedsMerge = 1;

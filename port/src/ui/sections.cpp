@@ -49,6 +49,7 @@ extern "C" {
 #include "spu/output.h"
 #include "system/engine.h"
 #include "system/pad.h"
+#include "system/release.h"
 #include "system/settings.h"
 #include "system/system.h"
 #include "system/gameplay.h"
@@ -3224,6 +3225,16 @@ void aboutRows() {
 #endif
         ImGui::TextWrapped(tr("Xenogears PC port, %s"), game);
         ImGui::TextWrapped(tr("Build %s, %s, %s"), XG_BUILD_REV, XG_BUILD_DAY, XG_BUILD_TYPE);
+        // How this copy was installed (system/release.h): what an update of it would replace.
+        static const char* const kindTitle[RELEASE_KINDS] = {
+            N_("a development build"), N_("Linux tarball"),  N_("Windows zip"),    N_("Windows installer"),
+            N_("Android app"),         N_("Ubuntu package"), N_("Arch package"),   N_("Gentoo package"),
+        };
+        if (releaseKind() == RELEASE_DEV) {
+            ImGui::TextWrapped("%s", tr("Not a release: a development build"));
+        } else {
+            ImGui::TextWrapped(tr("Release %s, %s"), releaseVersion(), tr(kindTitle[releaseKind()]));
+        }
         ImGui::TextWrapped(tr("Engine: %s (%s)"), tr(engineTitle(engineThis())),
                            engineThis() == ENGINE_ENHANCED ? "xenogears-enhanced, engine/" : "xenogears, src/");
 #if defined(__clang__)

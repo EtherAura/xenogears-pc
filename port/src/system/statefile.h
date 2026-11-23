@@ -48,8 +48,9 @@ typedef struct {
 const uint8_t* stateBuildId(void);
 const char* stateBuildText(void); /* the same in hex, for messages */
 /* The app's version as players know it (XG_APP_VERSION: the Android app's versionName,
- * set by its loader), at most 15 characters; "" elsewhere. States record it, so a state
- * another build refuses can say which version made it. */
+ * set by its loader; elsewhere the release file's version, release.h), at most 15
+ * characters; "" for a development build. States record it, so a state another build
+ * refuses can say which version made it. */
 const char* stateAppVersion(void);
 /* Where this build's image sits against its link addresses (its ELF load
  * bias: 0 for a non-PIE executable and on Windows), as states record it for

@@ -4,6 +4,7 @@
 /* Kernel heap ("Ls" memory manager: LsGetMem / LsFreeMem, MCB log). */
 
 #include "common.h"
+#include "pc_state.h"
 
 /* Memory control block in front of every allocation: 8 bytes on the PS1,
  * 16 on the PC (64-bit pointer). */
@@ -13,6 +14,7 @@ typedef struct HeapBlock {
     u32 m4_user : 4;            /* 0 = free, 1 = end marker, else owner id */
     u32 m4_pinned : 1;          /* locked: freeHeap refuses */
     u32 m4_type : 6;            /* content type (0x20 = default) */
+    u32 mC_pcType;              /* what the block holds, for save states (include/pc_state.h) */
 } HeapBlock;
 
 /* Header size, and the allocation granule: 4 bytes on the PS1; 16 on the PC

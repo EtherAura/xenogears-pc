@@ -271,7 +271,7 @@ sMechaInitVar4* sMechaModel_init_battle(sModel* model, sMechaInitVar4* out) {
 
     resetMemoryAllocStats(4, 0);
     n = fieldModelRelocation(model);
-    out->m0_blocks = allocateHeap(n * (s32)sizeof(sModelBlock*), 0);
+    out->m0_blocks = allocateHeap(PC_HEAP_OF(sModelBlock*, n * (s32)sizeof(sModelBlock*)), 0);
     out->m4_count = n;
     if (out->m0_blocks != NULL) {
         for (i = 0; i < n; i++) {

@@ -31,6 +31,12 @@ exactly these files, and the folders they are in, nothing else:
   share/doc/xenogears-pc/LICENSE-imgui.txt         required
   share/doc/xenogears-pc/LICENSE-glslang.txt       optional (when linked)
   share/doc/xenogears-pc/LICENSE-dav1d.txt         optional (when linked)
+  share/xenogears-pc/release.txt                   optional (the .deb's; never packaged as it is)
+
+The tarball always holds its own share/xenogears-pc/release.txt, written here
+from the tag: "version=<version>" and "kind=tarball", what the in-app updater
+reads (port/src/system/release.h). The stage's, if it has one (the .deb's,
+kind=deb), must be such a file of the same version and is left out.
 
 Each executable must be an x86-64 ELF executable (not a shared library or an
 object) with its owner's execute bit set; each licence must be UTF-8 text. The
@@ -144,7 +150,9 @@ DOC = "share/doc/xenogears-pc"
 EXECUTABLES = {"bin/xenogears": True, "bin/xenogears-enhanced": False}  # name: required
 LICENCES = {f"{DOC}/COPYING": True, f"{DOC}/LICENSE-Jukebox-font.txt": True, f"{DOC}/LICENSE-imgui.txt": True,
             f"{DOC}/LICENSE-glslang.txt": False, f"{DOC}/LICENSE-dav1d.txt": False}
-FOLDERS = ("bin", "share", "share/doc", DOC)
+RELEASE = "share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
+RELEASE_MAX = 4096  # bytes: the port reads no longer file
+FOLDERS = ("bin", "share", "share/doc", DOC, "share/xenogears-pc")
 EXE_MODE, FILE_MODE, DIR_MODE = 0o755, 0o644, 0o755
 
 # The game's data and a player's own files: never in a release.
@@ -216,6 +224,34 @@ def check_licence(data: bytes, rel: str) -> None:
         raise ReleaseError(f"stage: {rel} is not UTF-8 text") from error
 
 
+def release_text(version: str) -> bytes:
+    """The tarball's release.txt (port/src/system/release.h)."""
+    return f"version={version}\nkind=tarball\n".encode()
+
+
+def check_release_file(data: bytes, rel: str) -> None:
+    """A stage's release.txt: short UTF-8 text of version= and kind= lines (port/cmake/deb.cmake writes it)."""
+    if len(data) > RELEASE_MAX or b"\x00" in data:
+        raise ReleaseError(f"stage: {rel} is not a release file (longer than {RELEASE_MAX} bytes, or binary)")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ReleaseError(f"stage: {rel} is not UTF-8 text") from error
+    if not re.fullmatch(r"version=[0-9.]+\nkind=(deb|tarball)\n", text):
+        raise ReleaseError(f"stage: {rel} is not a release file of the .deb or the tarball: {text[:80]!r}")
+
+
+def tarball_files(files: list[dict], version: str) -> list[dict]:
+    """The files the tarball holds: the stage's, its release.txt (of the same version) replaced by the tarball's."""
+    staged = next((f for f in files if f["rel"] == RELEASE), None)
+    if staged is not None and not staged["data"].decode().startswith(f"version={version}\n"):
+        raise ReleaseError(f"stage: {RELEASE} names another version than the tag's {version}: "
+                           f"{staged['data'][:80]!r}; nothing written")
+    data = release_text(version)
+    own = {"rel": RELEASE, "data": data, "sha256": hashlib.sha256(data).hexdigest(), "mode": FILE_MODE}
+    return sorted([f for f in files if f["rel"] != RELEASE] + [own], key=lambda f: f["rel"])
+
+
 def check_game_data(data: bytes, rel: str) -> None:
     head = data[:max(ISO_MARKS) + 5]
     if head.startswith(b"PS-X EXE") or head.startswith(CD_SYNC) or any(head[o:o + 5] == b"CD001" for o in ISO_MARKS):
@@ -244,15 +280,17 @@ def read_stage(stage: Path) -> list[dict]:
                 continue
             if not stat.S_ISREG(mode):
                 raise ReleaseError(f"stage: {rel} is not a regular file")
-            if rel not in EXECUTABLES and rel not in LICENCES:
-                raise ReleaseError(f"stage: {rel} is not a file the port's install makes (only {', '.join(EXECUTABLES)} "
-                                   f"and the licences in {DOC})")
+            if rel not in EXECUTABLES and rel not in LICENCES and rel != RELEASE:
+                raise ReleaseError(f"stage: {rel} is not a file the port's install makes (only {', '.join(EXECUTABLES)}, "
+                                   f"the licences in {DOC} and {RELEASE})")
             data = path.read_bytes()
             check_game_data(data, rel)
             if rel in EXECUTABLES:
                 check_elf(data, rel)
                 if not mode & stat.S_IXUSR:
                     raise ReleaseError(f"stage: {rel} is not executable")
+            elif rel == RELEASE:
+                check_release_file(data, rel)
             else:
                 check_licence(data, rel)
             files.append({"rel": rel, "data": data, "sha256": hashlib.sha256(data).hexdigest(),
@@ -505,6 +543,7 @@ def package(tag: str, stage: Path, out_dir: Path, ver: str, build: Path,
     """The tarball of one stage and its .sha256, written into out_dir as new files once every executable passed."""
     names = release_names(tag)
     files = read_stage(stage)
+    packed = tarball_files(files, names["version"])
     if ver not in VERSIONS:
         raise ReleaseError(f"--ver {ver!r} is not one of {', '.join(VERSIONS)}; nothing written")
     staged = [f["rel"] for f in files if f["rel"] in EXECUTABLES]
@@ -541,7 +580,7 @@ def package(tag: str, stage: Path, out_dir: Path, ver: str, build: Path,
         out_dir.mkdir(parents=True, exist_ok=True)
         fd, tmp = new_temp(out_dir, names["tarball"], temps)
         with os.fdopen(fd, "wb") as f:
-            write_tarball(f, names["folder"], files)
+            write_tarball(f, names["folder"], packed)
             f.flush()
             os.fsync(f.fileno())
         unchanged(stage, files)

@@ -9,6 +9,7 @@
  */
 
 #include "common.h"
+#include "pc_state.h"
 #include "psyq.h"
 #include "main/model.h"
 
@@ -926,6 +927,7 @@ typedef struct BattlingEffect {
         BattlingEffectBeam beam;
     } m60_view;
 } BattlingEffect; /* 0x7C */
+PC_STATE_UNION(BattlingEffect, m60_view, m53_type, (anim, trail, beam))
 
 /* Scratchpad (0x1F800000) layout used by the effect and line renderers. */
 typedef struct BattlingScratch {

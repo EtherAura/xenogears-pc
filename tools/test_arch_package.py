@@ -247,6 +247,8 @@ def port_rules(text: str) -> None:
           and "-DCMAKE_INSTALL_PREFIX=/usr" in text and 'DESTDIR="$pkgdir" cmake --install' in text
           and 'ln -s "../doc/$pkgname" "$pkgdir/usr/share/licenses/$pkgname"' in text,
           "package() installs by the port's install rules into /usr, licences under /usr/share/licenses")
+    check(re.search(r"^\s+-DXG_INSTALL_KIND=arch$", text, re.M) is not None,
+          "build() names the package arch (release.txt's kind, port/cmake/deb.cmake)")
     check("pc_link links each module with ld -r" in cmake and "options=('!lto'" in text,
           "makepkg's LTO off: the game C's per-module partial link needs ordinary objects")
     check("python tools/pc_sources.py" in text and "XG_SOURCES_CMAKE" in cmake,

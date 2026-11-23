@@ -331,8 +331,12 @@ def zipcheck(root, tag, archive, sidecar, stagedir, audited):
         if z.testzip() is not None:
             fail(f"{archive.name}: a damaged entry")
         listed = z.namelist()
-        if listed != [f"{top}/"] + [f"{top}/{f}" for f in files]:
-            fail(f"{archive.name}: entries {listed} are not the stage's")
+        own = release(root).RELEASE_FILE  # the .zip's own release.txt, after the stage's files
+        if listed != [f"{top}/"] + [f"{top}/{f}" for f in files] + [f"{top}/{own}"]:
+            fail(f"{archive.name}: entries {listed} are not the stage's and its {own}")
+        if z.read(f"{top}/{own}") != release(root).release_text(n["version"], "zip"):
+            fail(f"{archive.name}: {own} is not version {n['version']}, kind zip")
+        print(f"zip: {top}/{own} version {n['version']}, kind zip")
         if any(e.endswith((".map", ".payload.json")) for e in listed):
             fail(f"{archive.name}: holds a link map or seal")
         for f in files:

@@ -34,6 +34,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "xenogears-pc"
 DOC = "usr/share/doc/xenogears-pc"
+RELEASE = "usr/share/xenogears-pc/release.txt"
+RELEASE_VERSION = re.compile(r"20[0-9][0-9]\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)")  # a release's (port/cmake/deb.cmake)
 LICENCES = {"COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt"}
 OPTIONAL_LICENCES = {"LICENSE-glslang.txt": "glslang", "LICENSE-dav1d.txt": "dav1d"}
 
@@ -93,6 +95,8 @@ def expected_files(build: Path) -> tuple[str, set[str]]:
     cache = cmake_sets(build / "CMakeCache.txt")
     exe = "usr/bin/xenogears-enhanced" if cache.get("XG_ENGINE") == "enhanced" else "usr/bin/xenogears"
     need = {exe} | {f"{DOC}/{name}" for name in LICENCES}
+    if RELEASE_VERSION.fullmatch(cache.get("XG_PACKAGE_VERSION", "")):
+        need.add(RELEASE)  # a release's version: what the in-app updater reads (port/cmake/deb.cmake)
     linked = {"glslang": not cache.get("glslang_DIR", "NOTFOUND").endswith("NOTFOUND")
               and cache.get("XG_GLSLANG", "ON") == "ON",
               "dav1d": not cache.get("XG_DAV1D_LIBRARY", "NOTFOUND").endswith("NOTFOUND")

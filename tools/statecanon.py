@@ -21,7 +21,7 @@ build only"): the round trip checks the encoding of everything else, which a lat
 
 The canonical file (.xgc) is gzipped JSON: {"format", "header", "records": [...], "raw": [...]}."""
 import argparse, base64, bisect, gzip, json, re, struct, subprocess, sys
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -71,6 +71,18 @@ class Schema:
         s = json.load(gzip.open(path, "rt"))
         self.types = s["types"]
         self.type_names = s.get("type_names", {})
+        # what heap blocks and recorded ranges hold, by the hash of the type's name (include/pc_state.h)
+        self.heap_types = {int(k, 16): v for k, v in s.get("heap_types", {}).items()}
+        self.counted = s.get("counted", {})  # struct tid -> its counted array (PC_STATE_COUNTED)
+        # the source's rules by type name too: each compile unit has its own DWARF entry for a struct
+        self.counted_by_name = {r["name"]: r for r in self.counted.values()}
+        self.unions = s.get("unions", {})  # struct tid -> its union member's selector (PC_STATE_UNION)
+        self.unions_by_name = {r["name"]: r for r in self.unions.values()}
+        # a heap part's type by name, the same in every build (a DWARF offset is not): tid -> name
+        self.tid_name = {}
+        for name, t in sorted(self.type_names.items()):
+            if self.types.get(t, {}).get("name") == name or t not in self.tid_name:
+                self.tid_name[t] = name
         # one object per address (DWARF can describe one twice: a definition and LTO's copy)
         seen_addr = {}
         for v in s["variables"]:
@@ -274,6 +286,7 @@ class Encoder:
         self.warn = Counter()
         self.heap = None      # the heap's blocks (encode_heap), for pointers into them
         self.heap_lo = []
+        self.arena = None     # the sound arena's (arena_blocks)
         self.current = ""
         self.unknown = Counter()  # (holder, value's symbol) of pointers to nothing known
 
@@ -330,27 +343,44 @@ class Encoder:
         return path, off
 
     def heap_pointer(self, v):
-        """A pointer into a heap block: the block's index, then by the block's type the element and field path
-        (a struct array), the word (pointers, OT links), or the byte (primitives, raw)."""
-        i = bisect.bisect_right(self.heap_lo, v + HEAP_HEADER) - 1
+        return self.block_pointer("hb", self.heap, self.heap_lo, v)
+
+    def block_pointer(self, key, blocks, lo, v):
+        """A pointer into a block of the heap ("hb") or the sound arena ("sb"): the block's index, the part of
+        it (block_layout), and by the part's type the element and field path (structs), the word (pointers, OT
+        links), or the byte (primitives, raw); a header's bytes relative to the block's data."""
+        i = bisect.bisect_right(lo, v + HEAP_HEADER if key == "hb" else v + ARENA_HEADER) - 1
         if i < 0:
             return None
-        b = self.heap[i]
+        b = blocks[i]
         off = v - b["data"]
-        if off > b["size"] or off < -HEAP_HEADER:
+        head = HEAP_HEADER if key == "hb" else ARENA_HEADER
+        if off > b["size"] or off < -head:
             return None
-        spec = b.get("spec")
-        if isinstance(spec, dict) and 0 <= off < b["size"]:
-            es = self.s.size(spec["tid"])
-            if es and off < (b["size"] // es) * es:
-                path, rest = self.path_of(spec["tid"], off % es)
-                out = {"hb": i, "e": off // es, "p": path}
-                if rest:
-                    out["b"] = rest
-                return out
-        if spec in ("ptrs", "otags") and 0 <= off < b["size"]:
-            return {"hb": i, "e": off // 8, "b": off % 8}
-        return {"hb": i, "o": off}
+        parts = b.get("parts")
+        if not parts or not 0 <= off < b["size"]:
+            return {key: i, "o": off}
+        k = bisect.bisect_right(b["part_lo"], off) - 1
+        p = parts[k]; rel = off - p["off"]; spec = p["spec"]
+        if isinstance(spec, dict):
+            e = bisect.bisect_right(p["eo"], rel) - 1
+            tid = spec["tid"]; rel -= p["eo"][e]
+            path, rest = [], rel
+            cr = counted_rule(self.s, tid) if p["cnt"][e] is not None else None
+            if cr and rel >= cr[1]["off"]:  # in the counted array: past its declared length
+                a = cr[1]; of = self.s.types[a["type"]]["of"]; es = self.s.size(of)
+                j = (rel - a["off"]) // es
+                sub, rest = self.path_of(of, (rel - a["off"]) % es)
+                path = [array_key(self.s, tid, a), j] + sub
+            else:
+                path, rest = self.path_of(tid, rel)
+            out = {key: i, "pt": k, "e": e, "p": path}
+            if rest:
+                out["b"] = rest
+            return out
+        if spec in ("ptrs", "otags"):
+            return {key: i, "pt": k, "e": rel // 8, "b": rel % 8}
+        return {key: i, "pt": k, "o": rel}
 
     def pointer(self, v, quiet=False):
         if v == 0:
@@ -365,6 +395,10 @@ class Encoder:
             lo, hi = self.s.regions.get(name, (0, 0))
             if lo <= v <= hi:
                 return {key: v - lo}
+        if self.arena is not None and self.arena["base"] <= v < self.arena["base"] + self.arena["var"]["size"]:
+            bp = self.block_pointer("sb", self.arena["blocks"], self.arena["lo"], v)
+            if bp is not None:
+                return bp
         f = self.s.fn_identity(v)
         if f is not None:
             return {"fn": f}
@@ -438,6 +472,7 @@ class Encoder:
             return [self.value(of, mem, off + i * es) for i in range(n)]
         if k == "struct":
             out = {}; seen = set()
+            ur = rule_for(self.s, self.s.unions, self.s.unions_by_name, tid)
             gaps = self.s.gaps(tid)
             if gaps:
                 pad = bytes(b for lo_, hi_ in gaps for b in mem[off + lo_:off + hi_])
@@ -452,6 +487,13 @@ class Encoder:
                     raw = int.from_bytes(mem[off + base:off + base + span], "little")
                     out[key] = (raw >> (bit % 8)) & ((1 << nb) - 1)
                     continue
+                if ur is not None and f["name"] == ur["member"]:
+                    view = selected_view(self.s, t, ur, mem, off)
+                    if view is not None:  # the live view on the bytes (the others' bytes are leftovers)
+                        n = self.s.size(f["type"])
+                        out[key] = {"x": bytes(mem[off + f["off"]:off + f["off"] + n]).hex(), "sel": view["name"],
+                                    "v": self.value(view["type"], mem, off + f["off"] + view["off"])}
+                        continue
                 out[key] = self.value(f["type"], mem, off + f["off"])
             return out
         if k == "union":
@@ -471,6 +513,7 @@ class Decoder:
         self.s = schema
         self.warn = Counter()
         self.heap = None  # the target layout's blocks (decode_heap_layout)
+        self.arena = None  # the sound arena's (decode_arena_layout)
 
     def offset_of(self, tid, path):
         off = 0
@@ -508,21 +551,34 @@ class Decoder:
             return 0
         if "raw" in p:
             return p["raw"]
-        if "hb" in p:
-            if self.heap is None or p["hb"] >= len(self.heap):
+        if "hb" in p or "sb" in p:
+            key = "hb" if "hb" in p else "sb"
+            blocks = self.heap if key == "hb" else (self.arena or {}).get("blocks")
+            if blocks is None or p[key] >= len(blocks):
                 self.warn["pointer into a heap block not in the state"] += 1
                 return 0
-            b = self.heap[p["hb"]]
+            b = blocks[p[key]]
+            if "pt" not in p:
+                return b["data"] + p.get("o", 0)
+            if p["pt"] >= len(b.get("parts", [])):
+                self.warn["pointer into a heap part not in the state"] += 1
+                return b["data"]
+            lay = b["parts"][p["pt"]]; base = b["data"] + lay["off"]
             if "o" in p:
-                return b["data"] + p["o"]
-            spec = b.get("spec")
-            if isinstance(spec, dict):
-                o = self.offset_of(spec["tid"], p.get("p", []))
+                return base + p["o"]
+            part = b["rec"]["parts"][p["pt"]]
+            t = part.get("t")
+            if isinstance(t, dict):
+                if lay.get("tid") is None:
+                    self.warn["heap pointer path not in this build"] += 1
+                    return base
+                o = self.offset_of(lay["tid"], p.get("p", []))
                 if o is None:
                     self.warn["heap pointer path not in this build"] += 1
                     o = 0
-                return b["data"] + p["e"] * self.s.size(spec["tid"]) + o + p.get("b", 0)
-            return b["data"] + p["e"] * 8 + p.get("b", 0)
+                eo = lay["eo"][p["e"]] if p["e"] < len(lay["eo"]) else p["e"] * self.s.size(lay["tid"])
+                return base + eo + o + p.get("b", 0)
+            return base + p["e"] * 8 + p.get("b", 0)
         for name, key in (("heapArena", "heap"), ("gameStack", "stack"), ("pcScratchpad", "scratchpad")):
             if key in p:
                 return self.s.regions[name][0] + p[key]
@@ -608,6 +664,15 @@ class Decoder:
                     raw = (raw & ~m) | ((val[key] << (bit % 8)) & m)
                     buf[off + base:off + base + span] = raw.to_bytes(span, "little")
                     continue
+                if isinstance(val[key], dict) and "sel" in val[key]:
+                    v = val[key]; n = self.s.size(f["type"]); x = bytes.fromhex(v["x"])[:n]
+                    buf[off + f["off"]:off + f["off"] + len(x)] = x
+                    view = next((m for m in self.s.types.get(f["type"], {}).get("fields", []) if m["name"] == v["sel"]), None)
+                    if view is None:
+                        self.warn["union view not in this build (bytes kept)"] += 1
+                    else:
+                        self.put(view["type"], v["v"], buf, off + f["off"] + view["off"])
+                    continue
                 self.put(f["type"], val[key], buf, off + f["off"])
         elif k == "union" and isinstance(val, dict) and "u" in val:
             for f in union_views(self.s, t):  # least typed first: the fully typed view writes last
@@ -635,6 +700,19 @@ def typed_bytes(schema: "Schema", tid, depth=0) -> int:
         return sum(typed_bytes(schema, f["type"], depth + 1) if schema.types.get(f["type"], {}).get("k") in ("arr", "struct", "ptr", "union")
                    else schema.size(f["type"]) for f in t["fields"])
     return 0
+
+
+def selected_view(schema: "Schema", t: dict, rule: dict, mem, off: int):
+    """The union member's view its selector names (PC_STATE_UNION), or None (another value: every view)."""
+    sf = next((f for f in t["fields"] if f["name"] == rule["selector"]), None)
+    mf = next((f for f in t["fields"] if f["name"] == rule["member"]), None)
+    if sf is None or mf is None or sf.get("bits") is not None:
+        return None
+    n = schema.size(sf["type"])
+    sel = int.from_bytes(mem[off + sf["off"]:off + sf["off"] + n], "little")
+    if not 0 <= sel < len(rule["views"]):
+        return None
+    return next((v for v in schema.types.get(mf["type"], {}).get("fields", []) if v["name"] == rule["views"][sel]), None)
 
 
 def union_views(schema: "Schema", t: dict) -> list:
@@ -711,7 +789,10 @@ def encode(state: Path, schema: Schema, heap: bool = True) -> tuple[dict, Encode
                 if v.get("module") == m.group(1) and lo <= v["addr"] < hi:
                     o = v["addr"] - lo
                     enc.current = v["name"]
-                    records.append({"id": v["id"], "v": enc.value(v["tid"], data, o)})
+                    if enc.arena is not None and v is enc.arena["var"]:
+                        records.append({"id": v["id"], "arena": encode_arena(enc, data, o)})
+                    else:
+                        records.append({"id": v["id"], "v": enc.value(v["tid"], data, o)})
                     for i in range(o, min(o + v["size"], size)):
                         mask[i] = 1
             gaps = bytes(b if not mask[i] else 0 for i, b in enumerate(bytes(data)))
@@ -745,6 +826,9 @@ def decode(doc: dict, schema: Schema, template: Path) -> tuple[bytes, Decoder]:
     raws = {r["tag"]: r for r in doc["raw"]}
     if doc.get("heap"):
         decode_heap_layout(doc["heap"], schema, dec)
+    for r in doc["records"]:
+        if "arena" in r and r["id"] in schema.by_id:
+            decode_arena_layout(r["arena"], schema, schema.by_id[r["id"]], dec)
     out = bytearray()
     for tag, at, size in sc.chunks(tbody):
         buf = bytearray(size)
@@ -763,6 +847,9 @@ def decode(doc: dict, schema: Schema, template: Path) -> tuple[bytes, Decoder]:
                     r = by_id.get(v["id"])
                     if r is None:
                         dec.warn["variable not in the state (left zero)"] += 1
+                        continue
+                    if "arena" in r:
+                        put_arena(dec, r["arena"], buf, v["addr"] - lo, v["size"])
                         continue
                     dec.put(v["tid"], r["v"], buf, v["addr"] - lo)
         elif tag in by_part:
@@ -813,13 +900,23 @@ def masked_heap(schema: Schema, body: bytes) -> bytes:
             continue
         bits = int.from_bytes(out[hdr + 8:hdr + 12], "little") & ~0x1FFFFF
         out[hdr + 8:hdr + 12] = bits.to_bytes(4, "little")
-        out[hdr + 12:hdr + 16] = bytes(4)
         if not b["user"]:
+            out[hdr + 12:hdr + 16] = bytes(4)  # a free block names no type (states before HeapBlock mC_pcType: a pad)
             d = o0 + b["data"] - heap_lo
             out[d:d + b["size"]] = bytes(b["size"])
     if blocks:  # after the end marker: unused
         e = o0 + blocks[-1]["data"] - heap_lo
         out[e:o0 + n0] = bytes(max(0, o0 + n0 - e))
+    arena = arena_blocks(schema, {t: body[o:o + n] for t, (o, n) in chunks.items()})
+    if arena is not None:  # the sound arena: what lies outside its blocks, and the headers' pads
+        a = chunks["mem." + arena["sec"]][0] + arena["off"]
+        keep = bytearray(arena["var"]["size"])
+        for b in arena["blocks"]:
+            keep[b["hdr"]:b["hdr"] + 28] = b"\1" * 28
+            keep[b["hdr"] + ARENA_HEADER:b["hdr"] + ARENA_HEADER + b["size"]] = b"\1" * b["size"]
+        for i, k in enumerate(keep):
+            if not k:
+                out[a + i] = 0
     return bytes(out)
 
 
@@ -895,11 +992,48 @@ def crosscheck(a_state: Path, a: Schema, b_state: Path, b: Schema, limit=25) -> 
 # ---- the game heap (phase P2) -----------------------------------------------------------------
 
 HEAP_HEADER = 16  # sizeof(HeapBlock) on the PC (include/main/memory.h)
+# The sound arena's block header on the PC (src/main/sound.c ArenaBlock, rounded to 16): u16 m0_flags, u16 m2,
+# s32 m4, u8* m8_end (the data's end), ArenaBlock* mC_next (the next used block), u32 pcType (PC_HEAP_OF)
+ARENA_HEADER = 32
+
+
+def arena_blocks(schema: Schema, chunks: dict):
+    """The sound arena (pcSoundArena, src/main/sound.c: a second allocator in main's BSS): its head block at
+    its start, then the used blocks in their chain, each with its header's offset, data address, size
+    (m8_end - data), flags, m2, m4 and type. None when the build or the state has no arena."""
+    v = schema.by_name.get("pcSoundArena")
+    if v is None:
+        return None
+    sec = next((k for k, (lo, hi) in schema.sections.items() if lo <= v["addr"] < hi), None)
+    if sec is None or "mem." + sec not in chunks:
+        return None
+    mem = chunks["mem." + sec]; base = v["addr"] - schema.sections[sec][0]; a0 = v["addr"]
+    blocks = []; o = 0
+    for _ in range(1 << 12):
+        h = base + o
+        end = int.from_bytes(mem[h + 8:h + 16], "little"); nxt = int.from_bytes(mem[h + 16:h + 24], "little")
+        data = a0 + o + ARENA_HEADER
+        size = end - data if end else 0
+        if not 0 <= o + ARENA_HEADER + size <= v["size"]:
+            size = 0
+        blocks.append({"hdr": o, "data": data, "size": size, "user": 1, "flags": int.from_bytes(mem[h:h + 2], "little"),
+                       "m2": int.from_bytes(mem[h + 2:h + 4], "little"),
+                       "m4": int.from_bytes(mem[h + 4:h + 8], "little", signed=True),
+                       "pctype": int.from_bytes(mem[h + 24:h + 28], "little")})
+        if not nxt or not 0 <= nxt - a0 <= v["size"] - ARENA_HEADER:
+            break
+        o = nxt - a0
+    return {"var": v, "sec": sec, "off": base, "base": a0, "blocks": blocks, "lo": [b["data"] for b in blocks]}
+
+
+def align16(v: int) -> int:
+    return (v + 15) & ~15
 
 
 def heap_blocks(schema: Schema, chunks: dict) -> list[dict]:
     """The heap's blocks from heapFirstBlockData, in order: data address, size, owner (0 free), caller (the
-    allocating call's return address: HeapBlock m4_caller keeps it >> 2 in 21 bits), type, pinned."""
+    allocating call's return address: HeapBlock m4_caller keeps it >> 2 in 21 bits), type, pinned, and the
+    type the allocation named (HeapBlock mC_pcType: PC_HEAP_OF's hash, 0 for none)."""
     heap_lo = schema.regions["heapArena"][0]
     heap = chunks["mem.heap"]
     v = schema.by_name["heapFirstBlockData"]
@@ -918,7 +1052,8 @@ def heap_blocks(schema: Schema, chunks: dict) -> list[dict]:
             break
         caller = (bits & 0x1FFFFF) << 2
         blocks.append({"data": data, "size": nxt - HEAP_HEADER - data, "user": user, "caller": caller,
-                       "pinned": (bits >> 25) & 1, "type": (bits >> 26) & 0x3F, "bits": bits})
+                       "pinned": (bits >> 25) & 1, "type": (bits >> 26) & 0x3F, "bits": bits,
+                       "pctype": int.from_bytes(heap[o + 12:o + 16], "little")})
         data = nxt
     return blocks
 
@@ -935,10 +1070,16 @@ class Sites:
         # 21 bits of address >> 2 keep 8 MiB: this executable's text (from 0x400000) is unique in it
         return caller + (1 << 23) if caller < 0x400000 else caller
 
+    @staticmethod
+    def call_of(a):
+        # allocateHeap keeps (return address - 8) & ~3 (the PS1's jal): the return address is 8 to 11 bytes
+        # on, and the call instruction (5 bytes) holds a + 7
+        return a + 7
+
     def lookup(self, callers):
         todo = sorted({self.full(c) for c in callers} - set(self.cache))
         if todo:
-            out = subprocess.run(["addr2line", "-f", "-i", "-e", str(self.s.exe)] + [hex(a - 1) for a in todo],
+            out = subprocess.run(["addr2line", "-f", "-i", "-e", str(self.s.exe)] + [hex(self.call_of(a)) for a in todo],
                                  capture_output=True, text=True).stdout.splitlines()
             # -i prints inlined frames too: the first pair is the innermost (the call's own line)
             it = iter(out); rows = []
@@ -955,7 +1096,7 @@ class Sites:
             # inlined frames shift the pairing: redo one by one where needed
             if len(rows) != len(todo):
                 for a in todo:
-                    o = subprocess.run(["addr2line", "-f", "-e", str(self.s.exe), hex(a - 1)], capture_output=True,
+                    o = subprocess.run(["addr2line", "-f", "-e", str(self.s.exe), hex(self.call_of(a))], capture_output=True,
                                        text=True).stdout.splitlines()
                     f, _, line = (o[1] if len(o) > 1 else "?:0").rpartition(":")
                     self.cache[a] = (o[0] if o else "?", f, int(re.match(r"\d+", line).group(0)) if re.match(r"\d+", line) else 0)
@@ -981,7 +1122,10 @@ class Sites:
             text = Path(f).read_text(errors="replace").splitlines()
         except OSError:
             return None
-        stmt = " ".join(text[max(0, line - 1):line + 1])
+        stmt = text[line - 1] if 0 < line <= len(text) else ""
+        k = line
+        while ";" not in stmt and k < min(len(text), line + 3):  # a call over several lines
+            stmt += " " + text[k]; k += 1
         m = re.search(r"sizeof\s*\(\s*(?:struct\s+)?(\w+)\s*\)", stmt)
         if m and m.group(1) in self.names:
             return m.group(1)
@@ -1038,9 +1182,13 @@ def heap_report(state: Path, schema: Schema, other=None, top: int = 40) -> None:
     by = {}
     for b in blocks:
         site = where[b["caller"]]
-        t = sites.type_of(site)
-        if isinstance(t, dict):
-            t = schema.types[t["tid"]].get("name") or f"<{t['tid']}>"
+        named = schema.heap_types.get(b["pctype"]) if b["pctype"] else None
+        if named is not None:  # the allocation named it (PC_HEAP_OF)
+            t = named["name"] + " (source)"
+        else:
+            t = sites.type_of(site)
+            if isinstance(t, dict):
+                t = schema.types[t["tid"]].get("name") or f"<{t['tid']}>"
         key = (site[0], Path(site[1]).name, site[2], t)
         st = by.setdefault(key, [0, 0, 0])
         st[0] += 1; st[1] += b["size"]; st[2] += ptrs.get(b["data"], 0)
@@ -1058,8 +1206,9 @@ PRIM_LINK = (1 << 56) - 1
 
 
 def type_spec(schema: Schema, sites: "Sites", site) -> object:
-    """A block's type for the encoder: {"tid"} for a struct (an array of them), or "prims", "ptrs", "otags",
-    or None (raw bytes)."""
+    """A block's type by its allocation site, where its header names none (the prototype's inference: the
+    tool's table, sizeof(T), T* x = ...): {"tid"} for a struct (an array of them), or "prims", "ptrs",
+    "otags", or None (raw bytes)."""
     t = sites.type_of(site)
     if isinstance(t, dict):
         tt = schema.types.get(t["tid"], {})
@@ -1101,54 +1250,311 @@ def put_prims(dec: "Decoder", val, buf, off: int, size: int):
     x = bytes.fromhex(val["x"]); buf[off + o:off + o + len(x)] = x[:max(0, size - o)]
 
 
+def state_ranges(schema: Schema, chunks: dict) -> tuple[list, int]:
+    """The typed ranges the game recorded (PC_STATE_AT: port/src/game/main/statetypes.c pcStateRanges): (address,
+    type hash, count), and whether one was not recorded (overflow)."""
+    v = schema.by_name.get("pcStateRanges")
+    if v is None:
+        return [], 0
+    sec = next((k for k, (lo, hi) in schema.sections.items() if lo <= v["addr"] < hi), None)
+    if sec is None or "mem." + sec not in chunks:
+        return [], 0
+    data = chunks["mem." + sec]; base = v["addr"] - schema.sections[sec][0]
+    t = schema.types[v["tid"]]; f = {x["name"]: x for x in t["fields"]}
+    count = int.from_bytes(data[base + f["count"]["off"]:][:4], "little", signed=True)
+    over = int.from_bytes(data[base + f["overflow"]["off"]:][:4], "little")
+    arr = schema.types[f["ranges"]["type"]]; et = schema.types[arr["of"]]; es = et["size"]
+    ef = {x["name"]: x for x in et["fields"]}
+    out = []
+    for i in range(max(0, min(count, arr["n"]))):
+        o = base + f["ranges"]["off"] + i * es
+        out.append((int.from_bytes(data[o + ef["at"]["off"]:][:8], "little"),
+                    int.from_bytes(data[o + ef["type"]["off"]:][:4], "little"),
+                    int.from_bytes(data[o + ef["count"]["off"]:][:4], "little", signed=True)))
+    return out, over
+
+
+def spec_of(schema: Schema, h: int):
+    """A type hash's encoder spec (the schema's heap_types), or False when the schema does not know it."""
+    e = schema.heap_types.get(h)
+    return False if e is None else e["spec"]
+
+
+def field_named(schema: Schema, tid, name):
+    return next((f for f in schema.types.get(tid, {}).get("fields", []) if f["name"] == name), None)
+
+
+def rule_for(schema: Schema, by_tid: dict, by_name: dict, tid):
+    r = by_tid.get(tid)
+    if r is None and by_name:
+        n = schema.types.get(tid, {}).get("name")
+        r = by_name.get(n) or by_name.get(schema.tid_name.get(tid))
+    return r
+
+
+def counted_rule(schema: Schema, tid):
+    """A counted array's rule for a struct (PC_STATE_COUNTED; PC_STATE_TAIL: no count field, the array fills the
+    block), with its fields: (rule, array field, count field or None)."""
+    r = rule_for(schema, schema.counted, schema.counted_by_name, tid)
+    if r is None:
+        return None
+    a = field_named(schema, tid, r["array"])
+    c = field_named(schema, tid, r["count"]) if r.get("count") is not None else None
+    return (r, a, c) if a and (c or r.get("count") is None) else None
+
+
+def element_size(schema: Schema, tid, mem, off, room=None):
+    """A struct element's size at off: its type's, or with a counted array the array's count of elements (a
+    tail array: as many as fit in room)."""
+    cr = counted_rule(schema, tid)
+    if cr is None:
+        return schema.size(tid), None
+    r, a, c = cr
+    es = schema.size(schema.types[a["type"]]["of"])
+    if c is None:
+        n = (room - a["off"]) // es if room is not None and es else 0
+    else:
+        n = int.from_bytes(mem[off + c["off"]:off + c["off"] + schema.size(c["type"])], "little", signed=True) + r["extra"]
+    return a["off"] + max(0, n) * es, max(0, n)
+
+
+def layout_part(schema: Schema, mem, off, room, spec, count=None):
+    """One part of a block in the saving build: spec's elements from off, as many as fit in room (or count of
+    them). A dict with the part's size, its elements' offsets and sizes, or None when nothing fits."""
+    if spec in ("ptrs", "otags"):
+        n = room // 8 if count is None else min(count, room // 8)
+        return {"spec": spec, "size": 8 * n, "n": n} if n else None
+    if spec == "prims":
+        return {"spec": spec, "size": room} if room else None
+    if not isinstance(spec, dict) or spec["tid"] not in schema.types:
+        return None
+    tid = spec["tid"]; es0 = schema.size(tid)
+    eo, esz, cnt = [], [], []; o = 0
+    while o < room and (count is None or len(eo) < count):
+        es, n = element_size(schema, tid, mem, off + o, room - o)
+        if es <= 0:
+            break
+        if o + es > room:
+            if not eo and n is None and es0 > room:  # a T's first fields only (allocateHeap(offsetof(T, m)))
+                return {"spec": spec, "size": room, "eo": [0], "esz": [room], "cnt": [None], "partial": True}
+            break
+        eo.append(o); esz.append(es); cnt.append(n); o += es
+        if n is not None and count is None:  # a counted struct: one, then what follows is another part
+            break
+    if not eo:
+        return None
+    return {"spec": spec, "size": o, "eo": eo, "esz": esz, "cnt": cnt}
+
+
+def block_layout(schema: Schema, mem, off: int, size: int, spec, ranges) -> list:
+    """A block's parts in the saving build, in order: its own type from the start, the recorded ranges in it,
+    bytes between and after. Each part: {"off", "size", "spec", ...} (spec None: bytes)."""
+    parts = []; cur = 0
+    starts = sorted(ranges)
+    first = starts[0][0] if starts else size
+    if spec is not None:
+        p = layout_part(schema, mem, off, first, spec)
+        if p is not None:
+            p["off"] = 0; parts.append(p); cur = p["size"]
+    for ro, rspec, n in starts:
+        if ro < cur or rspec is False or rspec is None:
+            continue  # overlapping, unknown or plain bytes: the bytes part keeps them
+        nxt = next((r[0] for r in starts if r[0] > ro), size)
+        p = layout_part(schema, mem, off + ro, nxt - ro, rspec, n)
+        if p is None:
+            continue
+        if ro > cur:
+            parts.append({"off": cur, "size": ro - cur, "spec": None})
+        p["off"] = ro; parts.append(p); cur = ro + p["size"]
+    if cur < size:
+        parts.append({"off": cur, "size": size - cur, "spec": None})
+    return parts
+
+
+def encode_element(enc: "Encoder", tid, mem, off, n, partial_size=None):
+    """One struct element; with a counted array (n elements), the array's elements all listed."""
+    if partial_size is not None:  # the first fields of a T: the rest of T read as zero
+        es = enc.s.size(tid); tmp = bytearray(es); tmp[:partial_size] = mem[off:off + partial_size]
+        return enc.value(tid, memoryview(tmp), 0)
+    v = enc.value(tid, mem, off)
+    if n is not None:
+        r, a, _ = counted_rule(enc.s, tid)
+        key = array_key(enc.s, tid, a)
+        of = enc.s.types[a["type"]]["of"]; es = enc.s.size(of); base = off + a["off"]
+        et = enc.s.types[of]
+        if et["k"] == "int":
+            v[key] = {"x": bytes(mem[base:base + n * es]).hex(), "w": es}
+        else:
+            v[key] = [enc.value(of, mem, base + j * es) for j in range(n)]
+    return v
+
+
+def array_key(schema: Schema, tid, field):
+    seen = set()
+    for f in schema.types[tid]["fields"]:
+        k = Encoder.field_key(None, f, seen)
+        if f is field or f["name"] == field["name"]:
+            return k
+    return None
+
+
+def encode_part(enc: "Encoder", mem, off, p) -> dict:
+    spec = p["spec"]
+    if spec is None:
+        return {"x": bytes(mem[off:off + p["size"]]).hex()}
+    if spec == "ptrs":
+        return {"t": spec, "v": [enc.pointer(int.from_bytes(mem[off + k:off + k + 8], "little"), quiet=True)
+                                 for k in range(0, p["size"], 8)]}
+    if spec == "otags":
+        return {"t": spec, "v": [enc.value("OTag", mem, off + k) for k in range(0, p["size"], 8)]}
+    if spec == "prims":
+        return {"t": spec, "size": p["size"], "v": encode_prims(enc, mem, off, p["size"])}
+    tid = spec["tid"]
+    name = stable_name(enc.s, tid)
+    if name is None:
+        enc.warn["heap part of an unnamed type (same build only)"] += 1
+    out = {"t": {"tid": tid, "name": name}, "v": [encode_element(enc, tid, mem, off + o, n, p["size"] if p.get("partial") else None)
+                                    for o, n in zip(p["eo"], p["cnt"])]}
+    if p.get("partial"):
+        # the first fields only: up to the first that does not fit (allocateHeap(offsetof(T, m)))
+        # (offsetof(T, m): the part ends where field m starts; in another build, where m starts there)
+        nxt = next((f for f in enc.s.types[tid]["fields"] if f.get("bits") is None and
+                    f["off"] + enc.s.size(f["type"]) > p["size"]), None)
+        out["upto"] = array_key(enc.s, tid, nxt) if nxt is not None and nxt["off"] == p["size"] else None
+        out["size"] = p["size"]
+    if any(n is not None for n in p["cnt"]):
+        out["counted"] = True
+    return out
+
+
 def encode_heap(schema: Schema, chunks: dict, enc: "Encoder") -> dict:
     """The game heap as its blocks in order (the canonical heap, phase P2): free blocks by size, live ones
-    with owner, flags, the allocation site, and their contents by type."""
+    with owner, flags, the allocation site, and their contents as typed parts: the type the allocation named
+    (PC_HEAP_OF, in the block's header), else the site's (the prototype's inference), and the ranges the game
+    recorded in the block (PC_STATE_AT)."""
     heap_lo = schema.regions["heapArena"][0]
     mem = memoryview(chunks["mem.heap"])
     blocks = heap_blocks(schema, chunks)
     sites = Sites(schema)
-    where = sites.lookup([b["caller"] for b in blocks if b.get("user") and not b.get("end")])
-    for b in blocks:
+    live = [b for b in blocks if b.get("user") and not b.get("end")]
+    where = sites.lookup([b["caller"] for b in live])
+    ranges, over = state_ranges(schema, chunks)
+    if over:
+        enc.warn["typed ranges not recorded (pcStateRanges full): such a state is not canonical"] += 1
+    starts = [b["data"] for b in blocks]
+    per_block = defaultdict(list)
+    arena = arena_blocks(schema, chunks); per_arena = defaultdict(list)
+    for at, h, n in ranges:
+        i = bisect.bisect_right(starts, at) - 1
+        if i >= 0 and blocks[i].get("user") and not blocks[i].get("end") and at < blocks[i]["data"] + blocks[i]["size"]:
+            per_block[i].append((at - blocks[i]["data"], spec_of(schema, h), n))
+            continue
+        if arena is not None:
+            j = bisect.bisect_right(arena["lo"], at) - 1
+            if j >= 0 and at < arena["blocks"][j]["data"] + arena["blocks"][j]["size"]:
+                per_arena[j].append((at - arena["blocks"][j]["data"], spec_of(schema, h), n))
+                continue
+        enc.warn["typed range outside the live heap blocks (left to the bytes there)"] += 1
+    for i, b in enumerate(blocks):
         if b.get("user") and not b.get("end"):
             b["site"] = where[b["caller"]]
-            b["spec"] = type_spec(schema, sites, b["site"])
+            s = spec_of(schema, b["pctype"]) if b["pctype"] else False
+            if s is False:
+                if b["pctype"]:
+                    enc.warn["heap block of a type the schema does not name (typed by its site)"] += 1
+                s = type_spec(schema, sites, b["site"]); b["by"] = "site"
+            else:
+                b["by"] = "source"
+            b["spec"] = s
+            b["parts"] = block_layout(schema, mem, b["data"] - heap_lo, b["size"], s, per_block.get(i, []))
+            b["part_lo"] = [p["off"] for p in b["parts"]]
     enc.heap = blocks
-    enc.heap_lo = [b["data"] for b in blocks]
+    enc.heap_lo = starts
+    if arena is not None:  # the sound arena: typed by what its allocations named, else bytes
+        amem = memoryview(chunks["mem." + arena["sec"]])
+        for j, b in enumerate(arena["blocks"]):
+            sp = spec_of(schema, b["pctype"]) if b["pctype"] else None
+            if sp is False:
+                enc.warn["sound arena block of a type the schema does not name (kept as bytes)"] += 1
+                sp = None
+            b["spec"] = sp
+            b["parts"] = block_layout(schema, amem, arena["off"] + b["hdr"] + ARENA_HEADER, b["size"], sp, per_arena.get(j, []))
+            b["part_lo"] = [p["off"] for p in b["parts"]]
+        enc.arena = arena
     out = []
     for i, b in enumerate(blocks):
         if b.get("end"):
             out.append({"end": True, "next": enc.pointer(b["next"], quiet=True), "bits": b["bits"] & ~0x1FFFFF}); continue
         if not b["user"]:
             out.append({"free": b["size"], "pin": b["pinned"], "ty": b["type"]}); continue
-        rec = {"u": b["user"], "pin": b["pinned"], "ty": b["type"], "size": b["size"],
+        rec = {"u": b["user"], "pin": b["pinned"], "ty": b["type"], "size": b["size"], "by": b["by"],
                "site": [b["site"][0], Path(b["site"][1]).name, b["site"][2]]}
-        off = b["data"] - heap_lo; spec = b["spec"]; size = b["size"]
+        if b["pctype"]:
+            rec["pct"] = b["pctype"]
+        off = b["data"] - heap_lo
         enc.current = f"heap block {i} ({b['site'][0]})"
-        if isinstance(spec, dict):
-            es = schema.size(spec["tid"]); n = size // es if es else 0
-            rec["t"] = spec; rec["n"] = n
-            rec["v"] = [enc.value(spec["tid"], mem, off + k * es) for k in range(n)]
-            rec["x"] = bytes(mem[off + n * es:off + size]).hex()
-        elif spec == "ptrs":
-            rec["t"] = spec
-            rec["v"] = [enc.pointer(int.from_bytes(mem[off + k:off + k + 8], "little"), quiet=True)
-                        for k in range(0, size - 7, 8)]
-        elif spec == "otags":
-            rec["t"] = spec
-            rec["v"] = [enc.value("OTag", mem, off + k) for k in range(0, size - 7, 8)]
-        elif spec == "prims":
-            rec["t"] = spec
-            rec["v"] = encode_prims(enc, mem, off, size)
-        else:
-            rec["x"] = bytes(mem[off:off + size]).hex()
+        rec["parts"] = [encode_part(enc, mem, off + p["off"], p) for p in b["parts"]]
         out.append(rec)
     return {"first": blocks[0]["data"] - heap_lo if blocks else 0, "blocks": out}
 
 
+def stable_name(schema: Schema, tid):
+    """A struct type's name, which another build resolves (type_names), for one of the DWARF entries that
+    describe it (each compile unit has its own)."""
+    n = schema.tid_name.get(tid)
+    if n:
+        return n
+    n = schema.types.get(tid, {}).get("name")
+    if n and "<anon>" not in n and n in schema.type_names and schema.size(schema.type_names[n]) == schema.size(tid):
+        return n
+    return None
+
+
+def part_tid(schema: Schema, t: dict, dec: "Decoder"):
+    """A struct part's type in this build: by its name; an unnamed one by the saving build's DWARF offset, which
+    only the same build has."""
+    if t.get("name"):
+        tid = schema.type_names.get(t["name"])
+        if tid is None:
+            dec.warn["heap part type not in this build (left zero)"] += 1
+        return tid
+    return t["tid"] if t.get("tid") in schema.types else None
+
+
+def part_size(schema: Schema, part: dict, dec: "Decoder", tid=None) -> tuple[int, list]:
+    """A part's size in this build, and its elements' offsets."""
+    if "x" in part:
+        return len(part["x"]) // 2, []
+    t = part["t"]
+    if t in ("ptrs", "otags"):
+        return 8 * len(part["v"]), []
+    if t == "prims":
+        return part["size"], []
+    if tid is None:
+        return part.get("size", 0), []
+    if "upto" in part:
+        if part["upto"] is None:
+            return part["size"], [0]
+        o = Decoder.offset_of(dec, tid, [part["upto"]])
+        return (o if o is not None else part.get("size", 0)), [0]
+    eo, o = [], 0
+    cr = counted_rule(schema, tid) if part.get("counted") else None
+    for v in part["v"]:
+        eo.append(o)
+        if cr:
+            r, a, _ = cr
+            key = array_key(schema, tid, a); av = v.get(key)
+            n = (len(bytes.fromhex(av["x"])) // av["w"]) if isinstance(av, dict) else len(av or [])
+            o += a["off"] + n * schema.size(schema.types[a["type"]]["of"])
+        else:
+            o += schema.size(tid)
+    return o, eo
+
+
 def decode_heap_layout(h: dict, schema: Schema, dec: "Decoder") -> None:
     """Where each block goes in this build: in order from the same start, each live one sized by this build's
-    types (a struct array's elements may have grown), free ones as they were."""
+    types (a struct array's elements may have grown; whole grains, as allocateHeap rounds), free ones as they
+    were."""
     heap_lo = schema.regions["heapArena"][0]
     data = heap_lo + h["first"]
     layout = []
@@ -1156,22 +1562,33 @@ def decode_heap_layout(h: dict, schema: Schema, dec: "Decoder") -> None:
         if rec.get("end"):
             layout.append({"data": data, "size": 0, "end": True, "rec": rec}); break
         if "free" in rec:
-            size = rec["free"]; spec = None
+            size = rec["free"]; parts = []
         else:
-            spec = rec.get("t")
-            if isinstance(spec, dict):
-                if spec["tid"] not in schema.types:
-                    dec.warn["heap block type not in this build (kept as bytes)"] += 1
-                    spec = None; size = rec["size"]
-                else:
-                    size = rec["n"] * schema.size(spec["tid"]) + len(rec.get("x", "")) // 2
-            elif spec in ("ptrs", "otags"):
-                size = len(rec["v"]) * 8
-            else:
-                size = rec["size"]
-        layout.append({"data": data, "size": size, "spec": spec, "rec": rec})
+            parts, o = layout_parts(schema, rec["parts"], dec)
+            size = (o + HEAP_HEADER - 1) & ~(HEAP_HEADER - 1) if o != rec["size"] else o
+        layout.append({"data": data, "size": size, "parts": parts, "rec": rec})
         data += size + HEAP_HEADER
     dec.heap = layout
+
+
+def put_element(dec: "Decoder", tid, v, buf, off, counted):
+    if counted:
+        r, a, _ = counted_rule(dec.s, tid)
+        key = array_key(dec.s, tid, a); av = v.get(key)
+        of = dec.s.types[a["type"]]["of"]; es = dec.s.size(of); base = off + a["off"]
+        first = dict(v)
+        if isinstance(av, dict):
+            first[key] = {"x": av["x"][:2 * es], "w": es}
+        else:
+            first[key] = av[:1]
+        dec.put(tid, first, buf, off)
+        if isinstance(av, dict):
+            b = bytes.fromhex(av["x"]); buf[base:base + len(b)] = b
+        else:
+            for j, e in enumerate(av):
+                dec.put(of, e, buf, base + j * es)
+        return
+    dec.put(tid, v, buf, off)
 
 
 def decode_heap(h: dict, schema: Schema, dec: "Decoder", heap_size: int) -> bytearray:
@@ -1195,23 +1612,94 @@ def decode_heap(h: dict, schema: Schema, dec: "Decoder", heap_size: int) -> byte
         # the caller field (a code address of the saving build) is left zero: the heap's own debugging uses it
         bits = (rec["u"] << 21) | (rec["pin"] << 25) | (rec["ty"] << 26)
         buf[hdr + 8:hdr + 12] = bits.to_bytes(4, "little")
-        off = b["data"] - heap_lo; spec = b["spec"]
-        if isinstance(spec, dict):
-            es = schema.size(spec["tid"])
-            for i, v in enumerate(rec["v"]):
-                dec.put(spec["tid"], v, buf, off + i * es)
-            x = bytes.fromhex(rec.get("x", "")); buf[off + len(rec["v"]) * es:off + len(rec["v"]) * es + len(x)] = x
-        elif spec == "ptrs":
-            for i, v in enumerate(rec["v"]):
-                buf[off + i * 8:off + i * 8 + 8] = (dec.pointer(v) & MASK64).to_bytes(8, "little")
-        elif spec == "otags":
-            for i, v in enumerate(rec["v"]):
-                dec.put("OTag", v, buf, off + i * 8)
-        elif spec == "prims":
-            put_prims(dec, rec["v"], buf, off, b["size"])
-        else:
-            x = bytes.fromhex(rec["x"]); buf[off:off + len(x)] = x
+        buf[hdr + 12:hdr + 16] = rec.get("pct", 0).to_bytes(4, "little")
+        put_parts(dec, rec["parts"], b["parts"], buf, b["data"] - heap_lo)
     return buf
+
+
+def put_parts(dec: "Decoder", parts: list, layout: list, buf, base: int) -> None:
+    """A block's typed parts (encode_part) at base, where this build lays them out (part_size)."""
+    schema = dec.s
+    for part, lay in zip(parts, layout):
+        off = base + lay["off"]
+        if "x" in part:
+            x = bytes.fromhex(part["x"]); buf[off:off + len(x)] = x; continue
+        t = part["t"]
+        if t == "ptrs":
+            for i, v in enumerate(part["v"]):
+                buf[off + i * 8:off + i * 8 + 8] = (dec.pointer(v) & MASK64).to_bytes(8, "little")
+        elif t == "otags":
+            for i, v in enumerate(part["v"]):
+                dec.put("OTag", v, buf, off + i * 8)
+        elif t == "prims":
+            put_prims(dec, part["v"], buf, off, part["size"])
+        elif lay.get("tid") is not None:
+            tid = lay["tid"]
+            if "upto" in part:
+                tmp = bytearray(schema.size(tid)); dec.put(tid, part["v"][0], tmp, 0)
+                buf[off:off + lay["size"]] = tmp[:lay["size"]]
+                continue
+            for e, v in zip(lay["eo"], part["v"]):
+                put_element(dec, tid, v, buf, off + e, part.get("counted"))
+
+
+def layout_parts(schema: Schema, parts: list, dec: "Decoder") -> tuple[list, int]:
+    out = []; o = 0
+    for p in parts:
+        tid = part_tid(schema, p["t"], dec) if isinstance(p.get("t"), dict) else None
+        n, eo = part_size(schema, p, dec, tid)
+        out.append({"off": o, "size": n, "eo": eo, "tid": tid}); o += n
+    return out, o
+
+
+def encode_arena(enc: "Encoder", data, off: int) -> dict:
+    """The sound arena (arena_blocks) in chain order: each block with the gap before its header (after the
+    previous block's end, rounded to 16 as the allocator places them), flags, m2, m4, its type, and its
+    contents as typed parts."""
+    ar = enc.arena; out = []; prev_end = 0
+    for j, b in enumerate(ar["blocks"]):
+        gap = 0 if j == 0 else b["hdr"] - align16(prev_end)
+        if gap < 0:
+            enc.warn["sound arena blocks out of order (kept as they were)"] += 1
+        prev_end = b["hdr"] + ARENA_HEADER + b["size"]
+        rec = {"gap": gap, "f": b["flags"], "m2": b["m2"], "m4": b["m4"], "size": b["size"]}
+        if b["pctype"]:
+            rec["pct"] = b["pctype"]
+        enc.current = f"sound arena block {j}"
+        rec["parts"] = [encode_part(enc, data, off + b["hdr"] + ARENA_HEADER + p["off"], p) for p in b["parts"]]
+        out.append(rec)
+    return {"blocks": out}
+
+
+def decode_arena_layout(arena: dict, schema: Schema, var: dict, dec: "Decoder") -> None:
+    """Where the sound arena's blocks go in this build: each after the previous one's end, rounded to 16, and
+    the gap it had; sized by this build's types."""
+    blocks = []; prev_end = 0
+    for j, r in enumerate(arena["blocks"]):
+        hdr = 0 if j == 0 else align16(prev_end) + r["gap"]
+        parts, size = layout_parts(schema, r["parts"], dec)
+        if not r["parts"]:
+            size = r["size"]
+        blocks.append({"hdr": hdr, "data": var["addr"] + hdr + ARENA_HEADER, "size": size, "parts": parts, "rec": r})
+        prev_end = hdr + ARENA_HEADER + size
+    dec.arena = {"blocks": blocks, "base": var["addr"], "lo": [b["data"] for b in blocks]}
+
+
+def put_arena(dec: "Decoder", arena: dict, buf, off: int, size: int) -> None:
+    buf[off:off + size] = bytes(size)
+    blocks = dec.arena["blocks"]
+    for j, b in enumerate(blocks):
+        h = off + b["hdr"]; r = b["rec"]
+        if b["hdr"] + ARENA_HEADER + b["size"] > size:
+            dec.warn["sound arena block past the arena's end (left out)"] += 1
+            continue
+        nxt = dec.arena["base"] + blocks[j + 1]["hdr"] if j + 1 < len(blocks) else 0
+        buf[h:h + 8] = (r["f"].to_bytes(2, "little") + r["m2"].to_bytes(2, "little") +
+                        (r["m4"] & 0xFFFFFFFF).to_bytes(4, "little"))
+        buf[h + 8:h + 16] = (b["data"] + b["size"]).to_bytes(8, "little")
+        buf[h + 16:h + 24] = nxt.to_bytes(8, "little")
+        buf[h + 24:h + 28] = r.get("pct", 0).to_bytes(4, "little")
+        put_parts(dec, r["parts"], b["parts"], buf, h + ARENA_HEADER)
 
 
 def main() -> int:

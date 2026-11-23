@@ -168,7 +168,7 @@ void createFxModelShatter(sCustomPolySubBuffer* model, u8* prims, MATRIX* m, s32
     s32 r;
     sCustomPolySubBuffer* sub;
 
-    e = (Fx05Effect*)allocateTaskPair(sizeof(Fx05Effect), NULL, fxModelShatter_update, fxModelShatter_draw, fxModelShatter_delete);
+    e = (Fx05Effect*)allocateTaskPair(PC_HEAP_OF(Fx05Effect, sizeof(Fx05Effect)), NULL, fxModelShatter_update, fxModelShatter_draw, fxModelShatter_delete);
     e->m6C_model = model;
     count = model->m14_count;
     e->m58_count = count;

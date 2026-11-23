@@ -1,6 +1,7 @@
 /* Sprite band: 16 copies of an actor scrolled by its move speed.
  * gcc-2.7.2-cdk, ASPSX 2.56. */
 #include "common.h"
+#include "pc_state.h"
 #include "psyq.h"
 #include "main/task.h"
 #include "main/sprite.h"
@@ -209,7 +210,7 @@ void fxSpriteBand_draw(TaskHeader* task) {
 }
 
 void createFxSpriteBand(SpriteActorCore* actor) {
-    Fx07Effect* e = (Fx07Effect*)allocateTaskPair(sizeof(Fx07Effect), actor->m6C_owner, fxSpriteBand_update, fxSpriteBand_draw, NULL);
+    Fx07Effect* e = (Fx07Effect*)allocateTaskPair(PC_HEAP_OF(Fx07Effect, sizeof(Fx07Effect)), actor->m6C_owner, fxSpriteBand_update, fxSpriteBand_draw, NULL);
 
     e->m58_actor = actor;
     actor->mAC_x5 = 1;

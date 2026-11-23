@@ -2983,6 +2983,47 @@ msgid "Build %s, %s, %s"
 msgstr "ビルド %s、%s、%s"
 
 #: port/src/ui/sections.cpp
+msgid "a development build"
+msgstr "テスト用ビルド"
+
+#: port/src/ui/sections.cpp
+msgid "Linux tarball"
+msgstr "Linux 用 tarball"
+
+#: port/src/ui/sections.cpp
+msgid "Windows zip"
+msgstr "Windows 用 zip"
+
+#: port/src/ui/sections.cpp
+msgid "Windows installer"
+msgstr "Windows 用インストーラー"
+
+#: port/src/ui/sections.cpp
+msgid "Android app"
+msgstr "Android アプリ"
+
+#: port/src/ui/sections.cpp
+msgid "Ubuntu package"
+msgstr "Ubuntu パッケージ"
+
+#: port/src/ui/sections.cpp
+msgid "Arch package"
+msgstr "Arch パッケージ"
+
+#: port/src/ui/sections.cpp
+msgid "Gentoo package"
+msgstr "Gentoo パッケージ"
+
+#: port/src/ui/sections.cpp
+msgid "Not a release: a development build"
+msgstr "リリースではありません: テスト用ビルド"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Release %s, %s"
+msgstr "リリース %s、%s"
+
+#: port/src/ui/sections.cpp
 #, c-format
 msgid "Compiler: clang %s"
 msgstr "コンパイラー: clang %s"

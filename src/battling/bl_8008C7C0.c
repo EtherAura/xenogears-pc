@@ -648,6 +648,12 @@ static const s32 pcBattlingParticleSizes[5] = {
     sizeof(BattlingParticleLineF4), sizeof(BattlingParticleLineF3), sizeof(BattlingParticleLineF2),
     sizeof(BattlingParticleTile), sizeof(BattlingParticleTile1),
 };
+/* what a pool holds, for save states (include/pc_state.h) */
+static const char* const pcBattlingParticleNames[5] = {
+    PC_STATE_NAME(BattlingParticleLineF4), PC_STATE_NAME(BattlingParticleLineF3),
+    PC_STATE_NAME(BattlingParticleLineF2), PC_STATE_NAME(BattlingParticleTile),
+    PC_STATE_NAME(BattlingParticleTile1),
+};
 #endif
 
 BattlingEmitter* createBattlingEmitter(s32 type, s32 shape) {
@@ -723,7 +729,11 @@ void allocBattlingEmitterParticles(BattlingEmitter* pool, s32 count) {
     }
     pool->mA_count = count;
     traceNextAlloc(0x14);
+#ifdef PLATFORM_PC
+    pool->m10_particles = allocateHeap(PC_HEAP_NAMED(pcBattlingParticleNames[pool->m66_type], pool->mC_particleSize * pool->mA_count), 0);
+#else
     pool->m10_particles = allocateHeap(pool->mC_particleSize * pool->mA_count, 0);
+#endif
     init = pool->m58_init;
     p = pool->m10_particles;
     for (i = 0; i < pool->mA_count; i++) {

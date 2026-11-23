@@ -914,7 +914,7 @@ void battleSpriteEffect_1_draw(TaskHeader* task) {
 void battleSpriteEffect_1(SpriteActorCore* actor, u8* args) {
     BattleSpriteTrail* p;
 
-    p = (BattleSpriteTrail*)allocateTaskPair((s32)sizeof(BattleSpriteTrail), actor->m6C_owner, battleSpriteEffect_1_update, battleSpriteEffect_1_draw, 0);
+    p = (BattleSpriteTrail*)allocateTaskPair(PC_HEAP_OF(BattleSpriteTrail, (s32)sizeof(BattleSpriteTrail)), actor->m6C_owner, battleSpriteEffect_1_update, battleSpriteEffect_1_draw, 0);
     p->m38_actor = actor;
     p->m3C_frame = (u16)actor->m34_currentSpriteFrame;
     p->m40_animationId = (s8)actor->mAF_animationId;

@@ -190,7 +190,7 @@ void battleEvent_setSpriteAnimation(sBattleSpriteActor* task, s32 anim) {
 
 sBattleSpriteActor* battleEvent_createSpriteEntity(void* bundle, SVECTOR* pos) {
     s32 saved = allocateSavePointMeshDataSub0_var0;
-    sBattleSpriteActor* task = (sBattleSpriteActor*)allocateTaskPair((s32)sizeof(sBattleSpriteActor), NULL, battleSpriteUpdate, battleSpriteRender, battleSpriteDelete);
+    sBattleSpriteActor* task = (sBattleSpriteActor*)allocateTaskPair(PC_HEAP_OF(sBattleSpriteActor, (s32)sizeof(sBattleSpriteActor)), NULL, battleSpriteUpdate, battleSpriteRender, battleSpriteDelete);
     SpriteActor* actor = &task->m38_spriteActor;
 
     allocateSavePointMeshDataSub0_var0 = saved;

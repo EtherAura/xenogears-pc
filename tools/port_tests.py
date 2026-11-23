@@ -349,7 +349,7 @@ PLAIN = [
     "gte_precisiontest", "jpegtest", "mdectest", "model_geometrytest", "thin_geometrytest", "slidestacktest", "retailheaptest", "rumbletest", "touchtest", "texturecachetest", "provenancetest",
     "gametext_spritetest",
     "cpueffecttest", "textureedgetest", "texturefiltertest", "texturetest", "ui_l10ntest", "ui_motiontest", "verticaltest",
-    "state_codectest", "rewindpacktest", "statefiletest", "seamreusetest", "spansteptest", "battlepacingtest", "spu_outputtest",
+    "state_codectest", "rewindpacktest", "statefiletest", "releasetest", "updatemanifesttest", "seamreusetest", "spansteptest", "battlepacingtest", "spu_outputtest",
     "hostpolltest", "battlespeedtest", "backuptest", "stallwatchtest", "backlogtest",
 ]
 
