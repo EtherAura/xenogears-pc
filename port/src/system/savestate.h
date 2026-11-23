@@ -132,6 +132,9 @@ uint64_t spuOutputDumpFrames(void);
 /* hw.c hwWaitVSync, after the vblank: parks the game when a request or a
  * rewind capture is due (one flag test otherwise). */
 void stateVBlankPoint(void);
+/* A main loop's safe point, between frames (include/pc_state.h pcSafePoint): parks
+ * for a save that must be taken at one (a canonical state's: XG_STATE_SAVE_SAFE). */
+void stateSafePark(void);
 /* gamestack.c, on the host side of a park. */
 void stateServe(void);
 

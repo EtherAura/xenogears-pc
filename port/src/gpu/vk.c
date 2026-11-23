@@ -436,6 +436,14 @@ VK_DEVICE_FUNCS(VK_DECLARE)
  * count, one vec4 per ground point, then the fog's colour, which light.comp's
  * fog pass writes there (FOG_SLOT). */
 #define LIGHT_BLOCK_BYTES ((3 + SCENE_FIGURES) * 16 + 16)
+/* With ambient particles (xg-rgcf.5.10), after it: the room's frame and the
+ * particles' settings (5 vec4s), a record of 3 vec4s per particle (light.comp
+ * pass 20 writes them), and a 2048-bit mask per 16x16 PS1-pixel tile of the
+ * frame, the particles that may cover it (zeroed here, pass 20 sets the bits);
+ * light.comp's PART_* slots. */
+#define PARTICLES_MAX 2048
+#define PARTICLE_TILES (64 * 16)
+#define PARTICLE_BLOCK_BYTES ((5 + 3 * PARTICLES_MAX) * 16 + PARTICLE_TILES * (PARTICLES_MAX / 8))
 /* GT_PRESENT includes the wait for the swapchain image: a vblank's submission
  * waits for it at the colour attachment output stage, so the present pass's
  * time grows with the frame's slack (on the Pixel 6.6 ms with an idle field,
@@ -4259,9 +4267,13 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
                             int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const DofParams* p);
 static int sceneLightImages(int w, int h);
 static void sceneLightSets(FrameCtx* f, int t);
-static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
-                             int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
-                             float centerX, float centerY);
+static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                                int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
+                                float centerX, float centerY);
+static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                                 int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
+                                 float centerX, float centerY, int32_t block);
+static size_t lightBlockBytes(const LightParams* p);
 /* A picture between's scene draws (interpolationRender): the depth builds'
  * set 1, the replay canvas's depth image; VK_NULL_HANDLE otherwise. */
 static VkDescriptorSet interpolationDepthSet;
@@ -4920,6 +4932,15 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 for (int k = 0; k < 3; k++) { sun[k] = lit.sun[k] + a * (to->sun[k] - lit.sun[k]); length += sun[k] * sun[k]; }
                 length = sqrtf(length);
                 if (length > 1.0e-4f) for (int k = 0; k < 3; k++) lit.sun[k] = sun[k] / length;
+                /* The particles drift on with the picture's time (not across the
+                 * hour their time repeats over), and keep their places in the room. */
+                if (lit.particles > 0 && to->particles > 0) {
+                    if (to->particleTime >= lit.particleTime) lit.particleTime += a * (to->particleTime - lit.particleTime);
+                    for (int i = 0; i < 3; i++) {
+                        for (int j = 0; j < 3; j++) lit.roomRot[i][j] += a * (to->roomRot[i][j] - lit.roomRot[i][j]);
+                        lit.roomTrans[i] += a * (to->roomTrans[i] - lit.roomTrans[i]);
+                    }
+                }
                 /* The actors' ground points move with them; their order is the actors'. */
                 if (to->figures == lit.figures)
                     for (int k = 0; k < lit.figures; k++)
@@ -4960,7 +4981,8 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         size_t vb = (size_t)count*sizeof(HiVertex), pb = (size_t)f->pixelCount*4, sb = (size_t)spanCount*4;
         endBatch();
         if (vb > VERTEX_BYTES || pb+sb > SPAN_BYTES) return 0;
-        size_t lb = f->sceneLight && (f->fx.light.all || f->fx.light.shadow > 0 || f->fx.light.fogMost > 0) ? 16 + LIGHT_BLOCK_BYTES : 0; /* lightBlock's */
+        size_t lb = f->sceneLight && (f->fx.light.all || f->fx.light.shadow > 0 || f->fx.light.fogMost > 0 || f->fx.light.particles > 0)
+                        ? lightBlockBytes(&f->fx.light) : 0; /* lightBlock's */
         if (frame()->vertexUsed+vb > VERTEX_BYTES || frame()->spanUsed+pb+sb+lb > SPAN_BYTES) {
             if(vk.presentAcquired)return 0;
             submitFrame(NULL,NULL);
@@ -5095,11 +5117,15 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 if (inScene && first >= (uint32_t)blurAt) {
                     /* The canvas is the frame's view: the game's frame starts at its origin inside it. */
                     vk.scene.ditherX = c.ditherX; vk.scene.ditherY = c.ditherY; /* as the canvas's draws */
+                    int32_t particleBlock = -1;
                     if (f->sceneLight)
-                        sceneLightRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &lit,
-                                         lit.centerX + (float)f->originX, lit.centerY + (float)f->originY);
+                        particleBlock = sceneLightRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0,
+                                                         vk.interpolationN, &lit, lit.centerX + (float)f->originX,
+                                                         lit.centerY + (float)f->originY);
                     if (f->sceneBlur)
                         sceneBlurRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &blur);
+                    sceneParticlesRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &lit,
+                                         lit.centerX + (float)f->originX, lit.centerY + (float)f->originY, particleBlock);
                     vk.scene.ditherX = vk.scene.ditherY = 0;
                     interpolationBarrier(cmd);
                     vkCmdBindVertexBuffers(cmd,0,1,&ctx->vertices.buffer,&offset);
@@ -6271,9 +6297,15 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
 /* The shadows' block for a scene, at the end of the frame's span buffer:
  * returns where it starts, in vec4s, or -1 when the buffer has no room (the
  * callers make room first). */
+/* The bytes lightBlock takes for these parameters (with its alignment). */
+static size_t lightBlockBytes(const LightParams* p) {
+    return 16 + LIGHT_BLOCK_BYTES + (p->particles > 0 ? PARTICLE_BLOCK_BYTES : 0);
+}
+
 static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
     size_t at = (ctx->spanUsed + 15) & ~(size_t)15;
-    if (at + LIGHT_BLOCK_BYTES > SPAN_BYTES) return -1;
+    size_t bytes = LIGHT_BLOCK_BYTES + (p->particles > 0 ? PARTICLE_BLOCK_BYTES : 0);
+    if (at + bytes > SPAN_BYTES) return -1;
     float* b = (float*)(ctx->spans.map + at);
     int count = p->figures < 0 ? 0 : p->figures > SCENE_FIGURES ? SCENE_FIGURES : p->figures;
     b[0] = p->sun[0]; b[1] = p->sun[1]; b[2] = p->sun[2]; b[3] = p->shadow;
@@ -6281,25 +6313,37 @@ static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
     for (int k = 0; k < count; k++) {
         b[8 + 4 * k] = p->figure[k][0]; b[9 + 4 * k] = p->figure[k][1]; b[10 + 4 * k] = p->figure[k][2]; b[11 + 4 * k] = 0;
     }
-    ctx->spanUsed = at + LIGHT_BLOCK_BYTES;
+    if (p->particles > 0) {
+        float* q = (float*)(ctx->spans.map + at + LIGHT_BLOCK_BYTES); /* light.comp PART_SLOT */
+        for (int i = 0; i < 3; i++) {
+            q[4 * i] = p->roomRot[i][0]; q[4 * i + 1] = p->roomRot[i][1]; q[4 * i + 2] = p->roomRot[i][2];
+            q[4 * i + 3] = p->roomTrans[i];
+        }
+        q[12] = p->particleBox; q[13] = p->particleTime; q[14] = p->particleSize; q[15] = (float)p->particles;
+        q[16] = p->blurBand; q[17] = p->blurGain; q[18] = p->blurRadius; q[19] = 0;
+        /* The tiles' masks start empty (pass 20 writes every record and sets the bits). */
+        memset(ctx->spans.map + at + LIGHT_BLOCK_BYTES + (5 + 3 * PARTICLES_MAX) * 16, 0,
+               PARTICLE_TILES * (PARTICLES_MAX / 8));
+    }
+    ctx->spanUsed = at + bytes;
     return (int32_t)(at / 16);
 }
 
 /* light.comp's passes for a frame, as sceneBlurRecord's: the layers are made
  * from `primary` on the PS1's pixel grid and laid over it and over `second`.
  * (centerX, centerY): the projection centre in the primary's frame. */
-static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
-                             int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
-                             float centerX, float centerY) {
+static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                                int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
+                                float centerX, float centerY) {
     rasterBarrier(cmd);
     vk.needBarrier = 0;
     int q = gtStart(cmd, GT_LIGHT);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.light);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
     /* prepare's samples per PS1 pixel: all of them up to 3x, nine beyond. */
-    int shadows = p->all || p->shadow > 0, fog = p->all || p->fogMost > 0;
-    int32_t block = shadows || fog ? lightBlock(ctx, p) : -1;
-    if (block < 0) shadows = fog = 0; /* no room for the block: no shadows or fog in this picture */
+    int shadows = p->all || p->shadow > 0, fog = p->all || p->fogMost > 0, particles = p->particles > 0;
+    int32_t block = shadows || fog || particles ? lightBlock(ctx, p) : -1;
+    if (block < 0) shadows = fog = particles = 0; /* no room for the block: no shadows, fog or particles here */
     LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
                         {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, (float)block,
                         p->top, p->shade, p->bounce, p->glow};
@@ -6311,15 +6355,17 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
      * that is off. */
     int glow = p->all || p->glow > 0, bounce = p->all || p->bounce > 0, shade = p->all || p->shade > 0;
     int surface = shade || p->top > 0;
+    /* With particles alone the composite would change nothing: not run. */
+    int composite = p->all || surface || glow || bounce || shadows || fog || p->grade > 0;
     for (int pass = 0; pass <= LIGHT_COMPOSITE; pass++) {
-        int needed = pass == 0 || pass == LIGHT_COMPOSITE ||
-                     (pass >= 1 && pass <= 3 && (glow || bounce)) ||          /* the surroundings, the glow's wide spreads */
+        int needed = pass == 0 || (pass == LIGHT_COMPOSITE && composite) ||
+                     (pass >= 1 && pass <= 3 && (glow || bounce || particles)) || /* the surroundings (the particles' light too), the glow's wide spreads */
                      ((pass == 4 || pass == 10 || pass == 11) && bounce) ||
                      (pass >= 5 && pass <= 7 && surface) ||                   /* normals, top light, shade */
                      ((pass == 8 || pass == 9) && shade) ||
                      ((pass == 12 || pass == 13) && glow) ||
                      (pass >= LIGHT_SHADOWS && pass < LIGHT_FOG && shadows) ||  /* cast shadows */
-                     (pass == LIGHT_FOG && fog);                               /* the fog's colour */
+                     (pass == LIGHT_FOG && (fog || particles));                /* the fog's colour; the room's brightness */
         if (!needed) continue;
         c.pass = pass;
         vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
@@ -6334,7 +6380,7 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
         vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
         rasterBarrier(cmd);
     }
-    if (second >= 0 && sw > 0 && sh > 0) {
+    if (second >= 0 && sw > 0 && sh > 0 && composite) {
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[second], 0, NULL);
         c.pass = LIGHT_COMPOSITE;
         c.originX = sx * n; c.originY = sy * n; c.sizeW = sw * n; c.sizeH = sh * n;
@@ -6345,24 +6391,85 @@ static void sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, in
     }
     gtStop(cmd, q);
     vk.needBarrier = 1;
+    return particles ? block : -1;
 }
 
-/* The lighting for a frame of the copy (sceneBlur's arguments). */
-static void sceneLight(int primary, int x, int y, int w, int h, int second, int sx, int sy, int sw, int sh,
-                       int layerX, int layerY, int n, const LightParams* p, float centerX, float centerY) {
-    if (w <= 0 || h <= 0 || n <= 0) return;
-    if (!sceneLightImages(w, h)) return;
-    if (vk.hiN != n) return;
+/* The ambient particles (light.comp passes 20 and 21), after the blur: their
+ * records and the tiles' masks into `block` (sceneLightRecord's), then each
+ * of the frame's pixels gets those that cover it, on `primary` and `second`
+ * as the composite (xg-rgcf.5.10). */
+static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
+                                 int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
+                                 float centerX, float centerY, int32_t block) {
+    if (block < 0 || p->particles <= 0) return;
+    rasterBarrier(cmd);
+    vk.needBarrier = 0;
+    int q = gtStart(cmd, GT_LIGHT);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.light);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
+    LightConstants c = {20, n, n < 3 ? n : 3, 0, x * n, y * n, w * n, h * n, w, h, 0, 0,
+                        {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, (float)block,
+                        p->top, p->shade, p->bounce, p->glow};
+    c.color = vk.hiColor;
+    c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
+    vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+    vkCmdDispatch(cmd, PARTICLES_MAX / 64, 1, 1); /* one invocation a particle */
+    rasterBarrier(cmd);
+    c.pass = 21;
+    vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+    vkCmdDispatch(cmd, (uint32_t)(w * n + 7) / 8, (uint32_t)(h * n + 7) / 8, 1);
+    rasterBarrier(cmd);
+    if (second >= 0 && sw > 0 && sh > 0) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[second], 0, NULL);
+        c.originX = sx * n; c.originY = sy * n; c.sizeW = sw * n; c.sizeH = sh * n;
+        c.layerX = layerX; c.layerY = layerY;
+        vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+        vkCmdDispatch(cmd, (uint32_t)(sw * n + 7) / 8, (uint32_t)(sh * n + 7) / 8, 1);
+        rasterBarrier(cmd);
+    }
+    gtStop(cmd, q);
+    vk.needBarrier = 1;
+}
+
+/* The frame context sceneLight recorded the particles' block into: the
+ * particles are drawn only into the same one (a blur that makes its images
+ * anew waits for the device, and the frame after has neither the block nor
+ * these sets written). */
+static FrameCtx* sceneParticleFrame;
+
+/* The lighting for a frame of the copy (sceneBlur's arguments): the block
+ * the particles take after the blur (sceneParticlesDraw), or -1. */
+static int32_t sceneLight(int primary, int x, int y, int w, int h, int second, int sx, int sy, int sw, int sh,
+                          int layerX, int layerY, int n, const LightParams* p, float centerX, float centerY) {
+    if (w <= 0 || h <= 0 || n <= 0) return -1;
+    if (!sceneLightImages(w, h)) return -1;
+    if (vk.hiN != n) return -1;
     cpuResolveFlush();
     endBatch();
-    /* Room for the shadows' block in this frame's span buffer. */
-    if ((p->all || p->shadow > 0 || p->fogMost > 0) && frame()->spanUsed + 16 + LIGHT_BLOCK_BYTES > SPAN_BYTES && !vk.presentAcquired)
+    /* Room for the shadows' and particles' block in this frame's span buffer. */
+    if ((p->all || p->shadow > 0 || p->fogMost > 0 || p->particles > 0) && frame()->spanUsed + lightBlockBytes(p) > SPAN_BYTES &&
+        !vk.presentAcquired)
         submitFrame(NULL, NULL);
     VkCommandBuffer cmd = recording();
     FrameCtx* ctx = frame();
     sceneLightSets(ctx, primary);
     if (second >= 0) sceneLightSets(ctx, second);
-    sceneLightRecord(cmd, ctx, primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p, centerX, centerY);
+    sceneParticleFrame = ctx;
+    return sceneLightRecord(cmd, ctx, primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p, centerX, centerY);
+}
+
+/* The particles after the blur, in the frame sceneLight recorded into (the
+ * same span buffer: no submission between). */
+static void sceneParticlesDraw(int primary, int x, int y, int w, int h, int second, int sx, int sy, int sw, int sh,
+                           int layerX, int layerY, int n, const LightParams* p, float centerX, float centerY, int32_t block) {
+    if (block < 0 || w <= 0 || h <= 0 || n <= 0 || vk.hiN != n) return;
+    cpuResolveFlush();
+    endBatch();
+    if (frame() != sceneParticleFrame) return; /* another frame since the lighting: this scene goes without */
+    sceneLightSets(frame(), primary);
+    if (second >= 0) sceneLightSets(frame(), second);
+    sceneParticlesRecord(recording(), frame(), primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p, centerX,
+                         centerY, block);
 }
 
 /* The copy of VRAM's depth round (cx, cy), PS1 pixels from its frame's
@@ -6417,17 +6524,27 @@ void gvkSceneEnd(const SceneParams* p) {
         if (r.x0 + w > vk.hiWideW) w = vk.hiWideW - r.x0;
         if (r.y0 + h > vk.hiWideH) h = vk.hiWideH - r.y0;
         if (w > 0 && h > 0) {
-            /* The lighting first: the lens sees the lit scene. */
+            /* The lighting first: the lens sees the lit scene. The
+             * particles last: they take their own blur. */
+            int32_t block = -1;
+            float cx = p->light.centerX + (float)vk.scene.insetX, cy = p->light.centerY + (float)vk.scene.insetY;
             if (light)
-                sceneLight(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY, vk.hiN,
-                           &p->light, p->light.centerX + (float)vk.scene.insetX, p->light.centerY + (float)vk.scene.insetY);
+                block = sceneLight(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY,
+                                   vk.hiN, &p->light, cx, cy);
             if (blur)
                 sceneBlur(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY, vk.hiN, &p->dof);
+            sceneParticlesDraw(SCENE_WIDE, r.x0, r.y0, w, h, SCENE_NARROW, a.x0, a.y0, aw, ah, vk.scene.insetX, vk.scene.insetY, vk.hiN,
+                           &p->light, cx, cy, block);
             return;
         }
     }
-    if (light) sceneLight(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, &p->light, p->light.centerX, p->light.centerY);
+    int32_t block = -1;
+    if (light)
+        block = sceneLight(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, &p->light, p->light.centerX,
+                           p->light.centerY);
     if (blur) sceneBlur(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, &p->dof);
+    sceneParticlesDraw(SCENE_NARROW, a.x0, a.y0, aw, ah, -1, 0, 0, 0, 0, 0, 0, vk.hiN, &p->light, p->light.centerX, p->light.centerY,
+                   block);
 }
 
 void gvkHiEffectReset(void) { vk.hiEffectValid = 0; }

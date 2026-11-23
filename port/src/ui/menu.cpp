@@ -74,6 +74,7 @@ struct State {
     bool want;       // asked to open (F1, Guide, L3+R3)
     bool wantBacklog; // asked to open as the dialogue backlog (H, Select+Square: system/backlog.h)
     bool backlog;    // open as the dialogue backlog (backlog.cpp), not the settings
+    bool ask;        // open as the update check's question (updates.cpp; ui.h uiAskUpdates)
     bool open;
     bool closing;    // asked to close: the loop ends after this frame
     bool ready;      // ImGui context and the SDL backend
@@ -1672,10 +1673,10 @@ void frame() {
     Layout L = layout(st.opened);
     st.centre = L.game ? L.centre() : ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2);
     unsigned age = unsigned(st.frames - st.openedAt);
-    bool moving = !st.setup && !st.backlog && (age < menuMotion::OPENING_FRAMES || st.leaving);
+    bool moving = !st.setup && !st.backlog && !st.ask && (age < menuMotion::OPENING_FRAMES || st.leaving);
     menuMotion::View view = st.leaving ? menuMotion::leaving(st.centre, skin::unit(), unsigned(st.frames - st.closedAt))
                                        : menuMotion::opening(st.centre, skin::unit(), age);
-    if (!st.setup && !st.backlog && ImGui::IsMousePosValid(&st.mouse)) {
+    if (!st.setup && !st.backlog && !st.ask && ImGui::IsMousePosValid(&st.mouse)) {
         ImVec2 mouse = st.mouse;
         if (moving) {
             if (st.leaving) mouse = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -1687,6 +1688,10 @@ void frame() {
     skin::beginFrame();
     if (st.backlog) {
         if (drawBacklog()) st.closing = true;
+#ifdef XG_UPDATER
+    } else if (st.ask) {
+        if (drawUpdateQuestion()) st.closing = true;
+#endif
     } else {
         drawFrame();
     }
@@ -1819,7 +1824,8 @@ void run() {
         SDL_GetWindowSize(presentWindow(), &lw, &lh);
         SDL_GetWindowSizeInPixels(presentWindow(), &pw, &ph);
         fprintf(stderr, "ui: %s open (vblank %u, window %dx%d, %dx%d pixels); the game is paused\n",
-                st.backlog ? "dialogue backlog" : "settings menu", hwVSyncCount(), lw, lh, pw, ph);
+                st.backlog ? "dialogue backlog" : st.ask ? "update question" : "settings menu", hwVSyncCount(), lw,
+                lh, pw, ph);
     }
     st.open = true;
     st.closing = false;
@@ -1839,6 +1845,10 @@ void run() {
     sfx::opened();
     if (st.backlog) {
         backlogOpened();
+#ifdef XG_UPDATER
+    } else if (st.ask) {
+        updateQuestionOpened(); // the question's box opens as the game's message boxes (no sound)
+#endif
     } else if (!st.setup) {
         sfx::play(sfx::OPEN); // as a sub-menu's box starts turning in (processLoadSaveMenuSub1)
     }
@@ -1861,9 +1871,9 @@ void run() {
             st.leaving = true;
             st.closedAt = st.frames;
             // As a sub-menu starts turning away (processLoadSaveMenuSub1Alt2).
-            sfx::play(st.setup || st.backlog ? sfx::BACK : sfx::CLOSE);
+            if (!st.ask) sfx::play(st.setup || st.backlog ? sfx::BACK : sfx::CLOSE); // the question: its choice sounded
         }
-        if (st.leaving && (st.backlog || st.frames - st.closedAt >= menuMotion::LEAVING_FRAMES)) break;
+        if (st.leaving && (st.backlog || st.ask || st.frames - st.closedAt >= menuMotion::LEAVING_FRAMES)) break;
         if (st.suspendWanted) {
             suspend(true); // nothing drawn meanwhile; the menu as it was after
             next = SDL_GetTicksNS();
@@ -1893,7 +1903,8 @@ void run() {
     if (extrasJukeboxEnd) extrasJukeboxEnd();
     spuOutputPause(0);
     hwPause(0);
-    fprintf(stderr, "ui: %s closed; the game goes on\n", st.backlog ? "dialogue backlog" : "settings menu");
+    fprintf(stderr, "ui: %s closed; the game goes on\n",
+            st.backlog ? "dialogue backlog" : st.ask ? "update question" : "settings menu");
 }
 
 } // namespace
@@ -2206,6 +2217,17 @@ extern "C" int uiDiscSetup(const char* region, int flags, char* chosen, unsigned
     }
     return discSetupAccepted();
 }
+
+#ifdef XG_UPDATER
+extern "C" void uiAskUpdates(void) {
+    if (!begin()) return;
+    if (!st.scriptLoaded) { st.scriptLoaded = true; loadScript(); }
+    st.ask = true;
+    run();
+    st.ask = false;
+    st.want = false;
+}
+#endif
 
 extern "C" void uiVulkanReady(const UiVulkan* dev) {
     st.dev = *dev;

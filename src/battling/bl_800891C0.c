@@ -627,7 +627,7 @@ BattlingNode* initBattlingNode(BattlingNode* node) {
 
 BattlingNode* createBattlingNode(void) {
     traceNextAlloc(8);
-    return initBattlingNode(allocateHeap((s32)sizeof(BattlingNode), 0));
+    return initBattlingNode(allocateHeap(PC_HEAP_OF(BattlingNode, (s32)sizeof(BattlingNode)), 0));
 }
 
 void addBattlingNodeChild(BattlingNode* parent, BattlingNode* child) {
@@ -716,7 +716,7 @@ BattlingSkeleton* createBattlingSkeleton(void) {
     BattlingSkeleton* skel;
 
     traceNextAlloc(4);
-    skel = allocateHeap((s32)sizeof(BattlingSkeleton), 0);
+    skel = allocateHeap(PC_HEAP_OF(BattlingSkeleton, (s32)sizeof(BattlingSkeleton)), 0);
     skel->m10_scale[2] = 0x1000;
     skel->m10_scale[1] = 0x1000;
     skel->m10_scale[0] = 0x1000;
@@ -760,7 +760,7 @@ BattlingModel* initBattlingModel(BattlingModel* model) {
 
 BattlingModel* createBattlingModel(void) {
     traceNextAlloc(1);
-    return initBattlingModel(allocateHeap((s32)sizeof(BattlingModel), 0));
+    return initBattlingModel(allocateHeap(PC_HEAP_OF(BattlingModel, (s32)sizeof(BattlingModel)), 0));
 }
 
 void freeBattlingModel(BattlingModel* model) {
@@ -849,7 +849,7 @@ BattlingLayer* createBattlingLayer(u16 otSize) {
     s32 i;
 
     traceNextAlloc(0xC);
-    layer = allocateHeap((s32)sizeof(BattlingLayer), 0);
+    layer = allocateHeap(PC_HEAP_OF(BattlingLayer, (s32)sizeof(BattlingLayer)), 0);
     traceNextAlloc(0xC);
     layer->m4_ot[0] = allocateHeap(PC_HEAP_OF(OTag, otSize * (2 * (s32)sizeof(OTag))), 0);
     layer->m4_ot[1] = layer->m4_ot[0] + otSize;
@@ -884,7 +884,7 @@ BattlingScene* createBattlingScene(BattlingLayer* layer) {
     BattlingLight* light;
 
     traceNextAlloc(9);
-    scene = allocateHeap((s32)sizeof(BattlingScene), 0);
+    scene = allocateHeap(PC_HEAP_OF(BattlingScene, (s32)sizeof(BattlingScene)), 0);
     scene->m0 = 0;
     scene->m4_root = &scene->m14_rootNode;
     scene->m8_lights[0] = &scene->mB0_lightNodes[0];
@@ -1341,7 +1341,7 @@ BattlingNode* loadBattlingSkeleton(BattlingDataFile* file) {
     if (anims != NULL) {
         ptr = anims;
         traceNextAlloc(0x11);
-        animArray = allocateHeap(ptr[0] * (s32)sizeof(BattlingAnim), 0);
+        animArray = allocateHeap(PC_HEAP_OF(BattlingAnim, ptr[0] * (s32)sizeof(BattlingAnim)), 0);
         skel->m8_anims = animArray;
         skel->m2_animCount = ptr[0];
         for (i = 0; i < ptr[0]; i++) {
@@ -1502,7 +1502,7 @@ BattlingThread* createBattlingThread(void* entry, s32 arg, u32* stack, s32 stack
     s32 i;
 
     traceNextAlloc(3);
-    t = allocateHeap((s32)sizeof(BattlingThread), 2);
+    t = allocateHeap(PC_HEAP_OF(BattlingThread, (s32)sizeof(BattlingThread)), 2);
     for (i = 31; i >= 0; i--) {
         t->m0_regs[i] = 0;
     }

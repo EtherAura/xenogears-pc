@@ -69,7 +69,7 @@ def macro_args(text: str, start: int) -> list[str] | None:
     return None
 
 
-STATE_MACRO = re.compile(r"\b(PC_HEAP_OF|PC_STATE_AT|PC_STATE_NAME|PC_STATE_COUNTED|PC_STATE_TAIL|PC_STATE_UNION)\s*\(")
+STATE_MACRO = re.compile(r"\b(PC_HEAP_OF|PC_HEAP_ONE|PC_STATE_AT|PC_STATE_NAME|PC_STATE_COUNTED|PC_STATE_TAIL|PC_STATE_UNION)\s*\(")
 
 
 def state_annotations(roots: list[Path]):
@@ -104,6 +104,8 @@ def state_annotations(roots: list[Path]):
                     names[args[1]].append(where)
                 elif kind in ("PC_HEAP_OF", "PC_STATE_NAME") and args:
                     names[args[0]].append(where)
+                elif kind == "PC_HEAP_ONE" and args:  # one T, then bytes: its name says so (#T "[1]")
+                    names[args[0] + "[1]"].append(where)
     return names, counted, unions
 
 
@@ -647,6 +649,9 @@ def main() -> int:
     heap_types = {}; heap_problems = []
     for name, wheres in sorted(heap_names.items()):
         bare = re.sub(r"\s+", "", name)
+        one = bare.endswith("[1]")
+        if one:
+            bare = bare[:-3]
         if bare == "PC_PRIMS":
             spec = "prims"
         elif bare.endswith("*"):
@@ -656,10 +661,13 @@ def main() -> int:
             k = table.get(t, {}).get("k")
             spec = {"tid": t} if k in ("struct", "union") else "otags" if k == "otag" else \
                 "ptrs" if k in ("addr", "ptr") else None  # scalars: bytes, the same in every build
+            if one and isinstance(spec, dict):
+                spec["one"] = True
         else:
             heap_problems.append(f"{name} ({wheres[0]}): no such type in this build")
             continue
         h = f"{type_id(name):08x}"
+        bare = bare + "[1]" if one else bare
         if h in heap_types and heap_types[h]["name"] != bare:
             heap_problems.append(f"{name} and {heap_types[h]['name']}: one hash ({h})")
         heap_types[h] = {"name": bare, "spec": spec}

@@ -10,11 +10,18 @@
 
 #include "monocypher-ed25519.h"
 
-/* The release key's public half (packaging/update_manifest.py public): the
- * one key whose signature makes a manifest trusted. None yet: until the key
- * is made (xg-4oq.14.2) no manifest is trusted, so nothing is ever offered. */
-static const uint8_t TRUSTED_KEYS[][32] = {{0}};
-static const int TRUSTED_COUNT = 0;
+/* The release keys' public halves (packaging/update_manifest.py public): a
+ * manifest is trusted when one of its signature lines verifies with one of
+ * these. A new key comes in beside the old one, in a release whose manifest
+ * both sign; the old one leaves only once no supported release needs it. */
+static const uint8_t TRUSTED_KEYS[][32] = {
+    /* The release key, key id 49ff8de97d412305. */
+    {0x49, 0xff, 0x8d, 0xe9, 0x7d, 0x41, 0x23, 0x05,
+     0xca, 0x10, 0xfe, 0xa1, 0x05, 0xe4, 0x70, 0xf1,
+     0x1d, 0x23, 0x0b, 0x8d, 0xbb, 0x6a, 0x1c, 0xb1,
+     0x64, 0x74, 0x94, 0x1a, 0x8e, 0x07, 0xd7, 0x90},
+};
+static const int TRUSTED_COUNT = (int)(sizeof TRUSTED_KEYS / sizeof TRUSTED_KEYS[0]);
 
 int updateTrustedKeyCount(void) {
     return TRUSTED_COUNT;

@@ -234,6 +234,29 @@ add_executable(releasetest EXCLUDE_FROM_ALL src/system/test/releasetest.c src/sy
 add_executable(updatemanifesttest EXCLUDE_FROM_ALL src/update/test/updatemanifesttest.c src/update/update_manifest.c
     src/system/release.c third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)
 target_include_directories(updatemanifesttest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/monocypher")
+# The update check (update/update_check.c, xg-4oq.14.3) with a fake fetcher: the setting, the daily
+# rule, a manifest judged (newer, latest, skipped, switched off, untrusted), no request when off.
+# With "--fetch URL" it fetches through this system's own fetcher (update_fetch.c) instead.
+add_executable(updatechecktest EXCLUDE_FROM_ALL src/update/test/updatechecktest.c src/update/update_check.c
+    src/update/update_fetch.c src/update/update_manifest.c src/system/release.c src/system/settings.c
+    third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)
+target_include_directories(updatechecktest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/monocypher")
+if(WIN32)
+    target_link_libraries(updatechecktest PRIVATE winhttp)
+endif()
+# The one-click update (update/update_install.c, update_archive.c with puff, xg-4oq.14.4): zip and
+# tar.gz read and refused, the download checked, files unpacked beside a copy and swapped, undone,
+# finished after a crash, tidied; with a fake fetcher and download, in a folder of its own.
+# "--unpack ARCHIVE" lists an archive as the updater reads it (tools/test_update_install.py).
+add_executable(updateinstalltest EXCLUDE_FROM_ALL src/update/test/updateinstalltest.c src/update/update_install.c
+    src/update/update_archive.c src/update/update_check.c src/update/update_fetch.c src/update/update_manifest.c
+    src/system/release.c src/system/settings.c src/system/engine.c third_party/puff/puff.c
+    third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c)
+target_include_directories(updateinstalltest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/monocypher"
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/puff")
+if(WIN32)
+    target_link_libraries(updateinstalltest PRIVATE winhttp)
+endif()
 add_executable(seamreusetest EXCLUDE_FROM_ALL src/gpu/test/seamreusetest.c)
 add_executable(spansteptest EXCLUDE_FROM_ALL src/gpu/test/spansteptest.c)
 add_executable(battlepacingtest EXCLUDE_FROM_ALL src/system/test/battlepacingtest.c
@@ -255,7 +278,7 @@ add_executable(stallwatchtest EXCLUDE_FROM_ALL src/system/test/stallwatchtest.c 
 # The dialogue backlog's capture (backlog.c, xg-htn.57): the printer's calls
 # as dialog.c makes them, the screens, captions, its controls.
 add_executable(backlogtest EXCLUDE_FROM_ALL src/system/test/backlogtest.c src/system/backlog.c src/system/settings.c)
-foreach(tool rewindpacktest statefiletest releasetest updatemanifesttest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest stallwatchtest backlogtest)
+foreach(tool rewindpacktest statefiletest releasetest updatemanifesttest updatechecktest updateinstalltest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest stallwatchtest backlogtest)
     target_include_directories(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
     target_compile_definitions(${tool} PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
     target_compile_options(${tool} PRIVATE -fno-strict-aliasing)
@@ -537,6 +560,33 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     set_source_files_properties(${XG_UI_SOURCES} PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Wno-unused-parameter")
 endif()
 target_link_libraries(ui PRIVATE SDL3::SDL3 Vulkan::Headers)
+# The opt-in update check (port/src/update, xg-4oq.14.3): the question before the game, F1 >
+# System > Updates, the system's own HTTPS (update_fetch.c: WinHTTP, Android's HttpURLConnection,
+# libcurl loaded at run time). Off by default, and in releases, until a release's save states load
+# both ways in every other canonical release's (xg-4oq.14.7); without it nothing of it is built.
+option(XG_UPDATER "the opt-in update check (port/src/update; off until xg-4oq.14.7)" OFF)
+if(XG_UPDATER)
+    target_sources(platform PRIVATE src/update/update_check.c src/update/update_fetch.c
+        src/update/update_manifest.c src/update/update_install.c src/update/update_archive.c
+        third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c third_party/puff/puff.c)
+    target_include_directories(platform PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/monocypher"
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/puff")
+    # Vendored as they are (their READMEs): GCC's warnings there are for upstream, not for this build.
+    set_source_files_properties(third_party/monocypher/monocypher.c third_party/monocypher/monocypher-ed25519.c
+        third_party/puff/puff.c PROPERTIES COMPILE_OPTIONS "-w")
+    # A test build of the updater, never a release: the tests' FIXTURE key trusted too, and with
+    # XG_UPDATE_TEST_DIR set, the release's files read from that folder instead of the network: an
+    # install run end to end on files made locally (docs: port/src/update/update_check.c).
+    option(XG_UPDATER_TEST "a test build of the updater (the FIXTURE key, XG_UPDATE_TEST_DIR): never a release" OFF)
+    if(XG_UPDATER_TEST)
+        if(XG_DIST)
+            message(FATAL_ERROR "XG_UPDATER_TEST with XG_DIST: a build to hand out never trusts the test key")
+        endif()
+        target_compile_definitions(platform PRIVATE XG_UPDATER_TEST=1)
+    endif()
+    target_compile_definitions(platform PRIVATE XG_UPDATER=1)
+    target_compile_definitions(ui PRIVATE XG_UPDATER=1)
+endif()
 # The About section's build line, made again at each build (port/cmake/buildinfo.cmake);
 # an Android build ships the NDK's C++ runtime, whose licence About shows too.
 set(XG_LIBCXX_LICENSE "")
@@ -854,6 +904,9 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/xenogears.exe.payload.json"
         VERBATIM)
     target_link_libraries(xenogears PRIVATE ws2_32) # netplay's UDP (system/net.c)
+    if(XG_UPDATER)
+        target_link_libraries(xenogears PRIVATE winhttp) # the update check's HTTPS (update/update_fetch.c)
+    endif()
     # The manifest: UTF-8 process code page (paths outside ASCII), long paths.
     enable_language(RC)
     target_sources(xenogears PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.rc")

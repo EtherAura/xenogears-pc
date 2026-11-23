@@ -446,6 +446,12 @@ static void relocateGuard(unsigned char* from, unsigned char* to, uint64_t old, 
     }
 }
 
+/* The last load's state had no stack: the game starts again at its safe point (serveLoad). */
+static int stackless;
+
+/* port/src/game/main/statetypes.c: the saved mode's loop, taken up at its safe point. */
+void pcResumeGame(void);
+
 static void memoryRegions(XgState* s) {
     char name[96];
     s->part = "mem";
@@ -466,6 +472,18 @@ static void memoryRegions(XgState* s) {
     unsigned char* base = gameStackBase();
     unsigned char* top = base + gameStackSize();
     unsigned char* at = (unsigned char*)(uintptr_t)xgStateLen(s, "stack.sp", (size_t)(uintptr_t)gameStackParkedSp());
+    if (!xgStateSaving(s) && at == NULL) {
+        /* A state without the game's frames (a canonical state decoded for this build, which
+         * cannot carry them): the game starts again from the safe point it was saved at
+         * (serveLoad: gameStackRestart, kernel.c pcResumeGame). */
+        (void)xgStateLen(s, "stack.low", 0);
+        xgStateIo(s, "stack", NULL, 0);
+        (void)xgStateLen(s, "guard", 0);
+        if (s->mode == MODE_LOAD && !s->failed) {
+            stackless = 1;
+        }
+        return;
+    }
     unsigned char* low = xgStateSaving(s) ? gameStackLowWater() : NULL;
     if (low != NULL && low > at) {
         low = (unsigned char*)((uintptr_t)at & ~(uintptr_t)4095);
@@ -919,6 +937,7 @@ static struct {
     char path[1100];
     int sync;            /* write before going on (the harness) */
     int rewind;          /* REQ_REWIND: REWIND_CAPTURE or REWIND_BACK */
+    int safe;            /* REQ_SAVE: only at a safe point (stateSafePark: a canonical state's) */
 } req;
 
 static int selected = 1;
@@ -958,6 +977,7 @@ static void request(int kind, int slot, const char* path) {
     req.kind = kind;
     req.slot = slot;
     req.sync = 0;
+    req.safe = 0;
     if (path != NULL) {
         snprintf(req.path, sizeof req.path, "%s", path);
     } else if (!stateSlotPath(slot, req.path, sizeof req.path)) {
@@ -1069,6 +1089,7 @@ static struct {
         uint32_t vblank;
         char path[1100];
         int done;
+        int safe; /* XG_STATE_SAVE_SAFE: at the first safe point from that vblank */
     } saves[16];
     int saveCount;
     char load[1100];
@@ -1077,9 +1098,7 @@ static struct {
     char everyPath[1100];
 } harness;
 
-static void harnessParse(void) {
-    harness.parsed = 1;
-    const char* e = getenv("XG_STATE_SAVE");
+static void harnessParseSaves(const char* e, int safe) {
     while (e != NULL && *e != '\0' && harness.saveCount < 16) {
         unsigned long v;
         int n = 0;
@@ -1090,11 +1109,18 @@ static void harnessParse(void) {
         const char* end = strchr(path, ',');
         size_t len = end != NULL ? (size_t)(end - path) : strlen(path);
         harness.saves[harness.saveCount].vblank = (uint32_t)v;
+        harness.saves[harness.saveCount].safe = safe;
         snprintf(harness.saves[harness.saveCount].path, sizeof harness.saves[0].path, "%.*s", (int)len, path);
         harness.saveCount++;
         e = end != NULL ? end + 1 : NULL;
     }
-    e = getenv("XG_STATE_LOAD");
+}
+
+static void harnessParse(void) {
+    harness.parsed = 1;
+    harnessParseSaves(getenv("XG_STATE_SAVE"), 0);
+    harnessParseSaves(getenv("XG_STATE_SAVE_SAFE"), 1);
+    const char* e = getenv("XG_STATE_LOAD");
     if (e != NULL && e[0] != '\0') {
         snprintf(harness.load, sizeof harness.load, "%s", e);
     }
@@ -1130,6 +1156,7 @@ static void harnessCheck(uint32_t vblank) {
             harness.saves[i].done = 1;
             request(REQ_SAVE, -1, harness.saves[i].path);
             req.sync = 1;
+            req.safe = harness.saves[i].safe;
             return;
         }
     }
@@ -1143,9 +1170,14 @@ static void harnessCheck(uint32_t vblank) {
 
 int vramBookkeepingHeld(void) __attribute__((weak)); /* port/src/gpu/vram.c */
 
+static int parkAllowed(void);
+
 void stateVBlankPoint(void) {
     finishJob(0);
     harnessCheck(hwVSyncCount());
+    if (req.kind == REQ_SAVE && req.safe) {
+        return; /* a canonical state's: at the next safe point (stateSafePark), not inside a frame */
+    }
     if (req.kind == REQ_NONE) {
         /* Rewind (rewind.c): a capture due, or the rewind input held. */
         int r = rewindWanted(hwVSyncCount());
@@ -1155,15 +1187,22 @@ void stateVBlankPoint(void) {
         req.kind = REQ_REWIND;
         req.rewind = r;
     }
+    if (parkAllowed()) {
+        gameStackPark();
+    }
+}
+
+/* Whether the game may park for the request now (the request may be dropped). */
+static int parkAllowed(void) {
     if (hwWorldCurrent() != NULL || !gameStackActive()) {
-        return; /* not the game's own world: later */
+        return 0; /* not the game's own world: later */
     }
     if (getenv("XG_SLOWDOWN") != NULL || portOverlayCd() || (netplayActive != NULL && netplayActive())) {
         if (req.kind != REQ_REWIND) {
             note("Save states are off during the slowdown replay, XG_OVERLAY_CD and online sessions");
         }
         req.kind = REQ_NONE;
-        return;
+        return 0;
     }
     /* Battling's picture between drawn and not yet put back (its VRAM and bookkeeping go back
      * after the wait, from host memory no state carries: between.c pcBattling60WaitDone): a state
@@ -1174,9 +1213,15 @@ void stateVBlankPoint(void) {
         if (req.kind == REQ_REWIND) {
             req.kind = REQ_NONE; /* no capture now (the next park tries again) */
         }
-        return; /* a memory card access or file in progress, or a picture between: at its end */
+        return 0; /* a memory card access or file in progress, or a picture between: at its end */
     }
-    gameStackPark();
+    return 1;
+}
+
+void stateSafePark(void) {
+    if (req.kind == REQ_SAVE && req.safe && parkAllowed()) {
+        gameStackPark();
+    }
 }
 
 static void serveSave(void) {
@@ -1230,8 +1275,13 @@ static void serveLoad(void) {
         uint8_t* now = capture(&size);
         writeState(undo, "undo", now, size, req.sync);
     }
+    stackless = 0;
     restore(&h, body);
     free(body);
+    if (stackless) {
+        gameStackRestart(pcResumeGame); /* a state without the game's frames: from its safe point */
+        stackless = 0;
+    }
     rewindReset(); /* the history belongs to the timeline left behind */
     if (req.slot > 0) {
         note("Loaded slot %d (%s)", req.slot, h.label);

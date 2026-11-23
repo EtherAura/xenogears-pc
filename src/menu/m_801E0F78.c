@@ -12,11 +12,20 @@
 /* equip submenu entry: allocate m35C/m360, then runEquipMenu(character, arg1, 0) */
 u8 openEquipMenu(u8 character, u8 arg1);
 u8 openEquipMenu(u8 character, u8 arg1) {
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() == PC_SAFE_SUB_EQUIP) {
+        goto equip; /* a stackless load: its context is the state's (include/pc_state.h) */
+    }
+#endif
     gMenuContext->m35C_selectedStats = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_35C), 0x32f4), 0);
     bzero(gMenuContext->m35C_selectedStats, sizeof(MenuContext_35C));
     gMenuContext->m360_equipment = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_360), (s32)0x2ac), 0);
     bzero(gMenuContext->m360_equipment, (s32)sizeof(struct MenuContext_360));
     loadSharedMenuData2(3);
+#ifdef PLATFORM_PC
+equip:
+    pcMenuChild(PC_SAFE_SUB_EQUIP);
+#endif
     runEquipMenu(character, arg1, 0);
     loadSharedMenuData2(0x13);
     return 1;
@@ -295,6 +304,13 @@ u8 runSkillMenu(u8 slot) {
     u8 keepGoing;
     u8 prev;
 
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() == PC_SAFE_SUB_SKILLS) {
+        pcMenuTake(PC_SAFE_SUB_SKILLS, 3, PC_LOCAL(slot), PC_LOCAL(keepGoing), PC_LOCAL(prev));
+        pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+        goto skillLoop;
+    }
+#endif
     keepGoing = 1;
     prev = 0xFF;
     if (gMenuContext->m33C_drawFlags->m30_partyMemberId[slot] == 7 || gMenuContext->m33C_drawFlags->m30_partyMemberId[slot] == 8) {
@@ -303,6 +319,11 @@ u8 runSkillMenu(u8 slot) {
     }
     initSkillMenu();
     do {
+#ifdef PLATFORM_PC
+    skillLoop:
+        pcMenuKeep(PC_SAFE_SUB_SKILLS, 3, PC_LOCAL(slot), PC_LOCAL(keepGoing), PC_LOCAL(prev));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SKILLS)); /* between frames: a canonical state's place */
+#endif
         menuDraw();
         if (slot != prev) {
             setupSkillMenuPage(slot);

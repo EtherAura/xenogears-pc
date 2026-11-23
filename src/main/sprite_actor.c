@@ -767,7 +767,7 @@ SpriteTask* allocateSavePointMeshData(TaskHeader* parent, s32 extraSize) {
 #ifdef PLATFORM_PC
     s32 retailExtra = pcHeapTakeRequest();
 #endif
-    task = allocateHeap(PC_HEAP_SIZED(extraSize + sizeof(SpriteTask), retailExtra < 0 ? PC_HEAP_UNKNOWN : retailExtra + 0xEC), battleScriptLoaderTaskCreationInProgress);
+    task = allocateHeap(PC_HEAP_ONE(SpriteTask, PC_HEAP_SIZED(extraSize + sizeof(SpriteTask), retailExtra < 0 ? PC_HEAP_UNKNOWN : retailExtra + 0xEC)), battleScriptLoaderTaskCreationInProgress);
     allocateSavePointMeshDataSub0(parent, &task->m0_updateTask);
     sub = &task->m1C_drawTask;
     registerSpriteCallback2(&task->m0_updateTask, sub);
@@ -941,6 +941,7 @@ void createSavePointMeshDataMode0(SpriteActorCore* actor) {
 /* Noah: createSavePointMeshDataMode2 (3D model object after the actor). */
 void createSavePointMeshDataMode2(SpriteActorCore* actor) {
     actor->m20_object = (SpriteObject*)(actor + 1);
+    PC_STATE_AT(actor->m20_object, ModelObject, 1);
     initsFieldEntitySub4_B4(actor->m20_object);
     ((ModelObject*)actor->m20_object)->m34_modelBlock = NULL;
     ((ModelObject*)actor->m20_object)->m40 = 0;
@@ -959,6 +960,7 @@ void initFieldEntitySub4Sub2(SpriteActor* actor) {
 /* Noah: createSavePointMeshDataMode1 (sprite object + sub-sprites after the actor). */
 void createSavePointMeshDataMode1(SpriteActorCore* actor) {
     actor->m20_object = (SpriteObject*)(actor + 1);
+    PC_STATE_AT(actor->m20_object, SpriteObject, 1);
     initsFieldEntitySub4_B4(actor->m20_object);
     actor->m20_object->m30_subSprites = (SubSprite*)((SpriteObject*)(actor + 1) + 1); /* 0xF4 on the PS1 */
     actor->m20_object->m34_perSubgroupTransform = NULL;
@@ -1228,7 +1230,7 @@ SpriteActor* initializeSpriteActor(SpriteActor* arg0, AnimationBundle* bundle, s
 
 /* Noah: createSpriteActor. */
 SpriteActor* createSpriteActor(AnimationBundle* bundle, s16 clutX, s16 clutY, s16 vramX, s16 vramY, s16 arg5) {
-    SpriteActor* actor = allocateHeap(PC_HEAP_SIZED(sizeof(SpriteActor), 0x164), 0);
+    SpriteActor* actor = allocateHeap(PC_HEAP_OF(SpriteActor, PC_HEAP_SIZED(sizeof(SpriteActor), 0x164)), 0);
     actor->m0_spriteActorCore.m86_thisSize = sizeof(SpriteActor);
     return initializeSpriteActor(actor, bundle, clutX, clutY, vramX, vramY, arg5);
 }

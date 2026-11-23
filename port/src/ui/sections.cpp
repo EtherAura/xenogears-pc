@@ -959,6 +959,28 @@ void displaySection() {
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("color_grade");
     }
+    // Ambient particles (docs/PORT_HD2D.md section 33), drawn after the depth of field.
+    if (row("Particles", "particles", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneParticles();
+        int chosen = listChoice("##particles", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetParticles(chosen);
+        hint("In fields and on the world map, fine dust drifting where the place is lit, and warm embers where it is "
+             "dark. Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("particles");
+    }
+    if (row("Particle size", "particle_size", opt::ENHANCED)) {
+        static const char* const sizes[] = {N_("Small"), N_("Medium"), N_("Large")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED || sceneParticles() == 0);
+        int size = sceneParticleSize();
+        int chosen = listChoice("##particle_size", sizes, IM_COUNTOF(sizes), size);
+        ImGui::EndDisabled();
+        if (chosen != size) sceneSetParticleSize(chosen);
+        hint("How big the particles are. Small by default.");
+        overrideNote("particle_size");
+    }
 
     if (row("Filter", "present_filter")) {
         static const char* const filters[] = {"Nearest", "Linear", "Sharp", "Bicubic", "xBR (edges)"};
@@ -3162,6 +3184,10 @@ void systemSection() {
         overrideNote("disc2");
         overrideNote("disc_swap");
     }
+
+#ifdef XG_UPDATER
+    updatesRows(); // updates.cpp: a newer version, the update check's setting, its last check
+#endif
 
     opt::group(N_("This menu"));
     languageRow();

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A build with the updater (Gradle property xg.updater=on, the game built with XG_UPDATER;
+     xg-4oq.14.3): merged over the app's manifest (app/build.gradle sets it as both build types'
+     manifest). The update check fetches the latest release's signed manifest (port/src/update):
+     the network. A build without the updater asks for no network. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+</manifest>

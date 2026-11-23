@@ -39,7 +39,7 @@ BackgroundPoly* createBackgroundPoly(s32 arg0, s32 arg1, s32 arg2, s32 arg3, s32
     s32 i;
 
     resetMemoryAllocStats(4, 0);
-    p = allocateHeap(PC_HEAP_SIZED(sizeof(BackgroundPoly), 0x34c), 0);
+    p = allocateHeap(PC_HEAP_OF(BackgroundPoly, PC_HEAP_SIZED(sizeof(BackgroundPoly), 0x34c)), 0);
     if (p == NULL) {
         return NULL;
     }

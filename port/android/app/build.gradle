@@ -17,6 +17,12 @@ def assetsDir = providers.gradleProperty('xg.assets').getOrElse("${rootDir}/../.
 // A suffix for the package name (tools/build_android.sh --id-suffix .dev): a test build installed
 // beside the app instead of over it, with its own data. Empty by default.
 def idSuffix = providers.gradleProperty('xg.idSuffix').getOrElse('')
+// A build with the updater (tools/build_android.sh --updater; the game built with -DXG_UPDATER=ON,
+// xg-4oq.14.3): its manifest asks for the network too (src/updater/AndroidManifest.xml). Off by default.
+def updater = providers.gradleProperty('xg.updater').getOrElse('off')
+if (!(updater in ['on', 'off'])) {
+    throw new GradleException("xg.updater is on or off, not ${updater}")
+}
 
 // The version from git (the user's decision): versionCode the commit count, versionName the
 // latest tag plus the short hash ("0.0" before any tag; ".changes" for uncommitted changes).
@@ -90,6 +96,11 @@ android {
             java.srcDirs += ["${sdlSource}/android-project/app/src/main/java"]
             jniLibs.srcDirs = [jniLibsDir]
             assets.srcDirs = [assetsDir]
+        }
+        if (updater == 'on') {
+            // A build type's manifest is merged over main's: the one permission it adds.
+            debug.manifest.srcFile('src/updater/AndroidManifest.xml')
+            release.manifest.srcFile('src/updater/AndroidManifest.xml')
         }
     }
 

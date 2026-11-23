@@ -701,7 +701,7 @@ void initWorldmapTexAnims1(void) {
     sWorldmapTexAnim* a;
 
     worldmapTexAnims1Count = worldmapFile1Buffer_20[0];
-    worldmapTexAnims1 = allocateHeap(worldmapTexAnims1Count * sizeof(sWorldmapTexAnim), 0);
+    worldmapTexAnims1 = allocateHeap(PC_HEAP_OF(sWorldmapTexAnim, worldmapTexAnims1Count * sizeof(sWorldmapTexAnim)), 0);
     for (a = worldmapTexAnims1, i = 0; i < worldmapTexAnims1Count; i++, a++) {
         a->m0_pixels = (u8*)worldmapFile1Buffer_20 + worldmapFile1Buffer_20[i + 1];
         a->m4_def = &worldmapTexAnims1Defs[i];
@@ -739,7 +739,7 @@ void initWorldmapTexAnims2(void) {
     sWorldmapTexAnim* a;
 
     worldmapTexAnims2Count = worldmapFile1Buffer_24[0];
-    worldmapTexAnims2 = allocateHeap(worldmapTexAnims2Count * sizeof(sWorldmapTexAnim), 0);
+    worldmapTexAnims2 = allocateHeap(PC_HEAP_OF(sWorldmapTexAnim, worldmapTexAnims2Count * sizeof(sWorldmapTexAnim)), 0);
     for (a = worldmapTexAnims2, i = 0; i < worldmapTexAnims2Count; i++, a++) {
         a->m0_pixels = (u8*)worldmapFile1Buffer_24 + worldmapFile1Buffer_24[i + 1];
         a->m4_def = &worldmapTexAnims2Defs[i];

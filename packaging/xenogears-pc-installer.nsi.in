@@ -13,6 +13,13 @@
 ; each folder only if it is empty (RMDir without /r): anything else the player
 ; put there, such as a disc image beside the executable, stays.
 ; No file of the game is in the setup: the port reads the player's own disc.
+;
+; An update from the game (port/src/update/update_install.c, xg-4oq.14.4) runs
+; this setup as "/S /UPDATE=<executable> /D=<the installed folder>": silently,
+; over the installed copy. It first waits, up to a minute, until the game has
+; quit (its executable can be opened for writing), and when done starts that
+; executable again as the player, not elevated: through Explorer. Only the
+; two executables' names are taken.
 
 Unicode true
 ManifestDPIAware true
@@ -22,9 +29,12 @@ RequestExecutionLevel admin
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "x64.nsh"
+!include "FileFunc.nsh"
 
 !define PRODUCT "Xenogears PC"
 !define UNINSTALL_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\xenogears-pc"
+
+Var UpdateExe ; the game's executable, when the game runs this setup to update itself
 
 Name "${PRODUCT} @VERSION@"
 OutFile "@SETUP_NAME@"
@@ -56,6 +66,33 @@ Function .onInit
   ${EndIf}
   SetRegView 64
   SetShellVarContext all
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/UPDATE=" $UpdateExe
+  ${If} ${Errors}
+  ${OrIf} $UpdateExe != "xenogears.exe"
+  ${AndIf} $UpdateExe != "xenogears-enhanced.exe"
+    StrCpy $UpdateExe ""
+  ${EndIf}
+FunctionEnd
+
+; An update: the game has quit when its executable can be opened for writing (a running
+; executable cannot); a minute at most.
+Function WaitForTheGame
+  StrCpy $R1 0
+  ${DoWhile} $R1 < 240
+    ${IfNot} ${FileExists} "$INSTDIR\$UpdateExe"
+      Return
+    ${EndIf}
+    ClearErrors
+    FileOpen $R2 "$INSTDIR\$UpdateExe" a
+    ${IfNot} ${Errors}
+      FileClose $R2
+      Return
+    ${EndIf}
+    Sleep 250
+    IntOp $R1 $R1 + 1
+  ${Loop}
 FunctionEnd
 
 Function un.onInit
@@ -64,6 +101,9 @@ Function un.onInit
 FunctionEnd
 
 Section "Install"
+  ${If} $UpdateExe != ""
+    Call WaitForTheGame
+  ${EndIf}
 @INSTALL_FILES@
   SetOutPath "$INSTDIR"
   ; What the in-app updater reads (port/src/system/release.h): this release, installed by its setup.
@@ -86,6 +126,11 @@ Section "Install"
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "EstimatedSize" @ESTIMATED_SIZE_KB@
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKLM "${UNINSTALL_KEY}" "NoRepair" 1
+
+  ; An update: the game again, as the player (Explorer starts it; this setup runs elevated).
+  ${If} $UpdateExe != ""
+    Exec '"$WINDIR\explorer.exe" "$INSTDIR\$UpdateExe"'
+  ${EndIf}
 SectionEnd
 
 Section "Uninstall"

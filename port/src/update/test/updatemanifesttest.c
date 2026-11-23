@@ -4,8 +4,14 @@
  * SHA-256 of "xenogears-pc update manifest test key: public, trusted by no
  * build"): its signature verifies, one changed byte of the manifest or the
  * signature does not, another key's id is not tried, and the build's own keys
- * (none yet) trust nothing; the manifest's fields, and manifests refused; CalVer
- * order; this build's platform name. */
+ * (the release key) do not trust it; the manifest's fields, and manifests
+ * refused; CalVer order; this build's platform name.
+ *
+ *     updatemanifesttest [MANIFEST SIGNATURE]
+ *
+ * Given a release's two files (xenogears-pc-update.txt and its .sig), it also
+ * checks them as the app would: signed by a key this build trusts, and a
+ * manifest it accepts. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,7 +67,44 @@ static int parses(const char* text, const char* needle) {
     return !ok && strstr(why, needle) != NULL;
 }
 
-int main(void) {
+/* A whole file, up to max bytes and a terminating NUL; 0 when it is missing or longer. */
+static size_t slurp(const char* path, char* out, size_t max) {
+    FILE* f = fopen(path, "rb");
+    if (f == NULL) return 0;
+    size_t n = fread(out, 1, max + 1, f);
+    fclose(f);
+    if (n > max) return 0;
+    out[n] = '\0';
+    return n;
+}
+
+static void releaseFiles(const char* manifestPath, const char* sigPath) {
+    static char text[UPDATE_MANIFEST_MAX + 1], sig[UPDATE_SIGNATURE_MAX + 1];
+    size_t n = slurp(manifestPath, text, UPDATE_MANIFEST_MAX);
+    size_t sn = slurp(sigPath, sig, UPDATE_SIGNATURE_MAX);
+    char why[160] = "";
+    UpdateManifest m;
+    CHECK(n > 0 && sn > 0);
+    int trusted = updateSignatureTrusted((const uint8_t*)text, n, sig, sn, why, sizeof why);
+    printf("%s: %s\n", sigPath, trusted ? "signed by a key this build trusts" : why);
+    CHECK(trusted == 1);
+    int parsed = updateManifestParse(text, n, &m, why, sizeof why);
+    if (parsed) {
+        printf("%s: version %s, updates %s, %d asset(s)\n", manifestPath, m.version, m.updates ? "on" : "off",
+               m.assets);
+    } else {
+        printf("%s: %s\n", manifestPath, why);
+    }
+    CHECK(parsed == 1);
+}
+
+int main(int argc, char** argv) {
+    if (argc != 1 && argc != 3) {
+        printf("usage: updatemanifesttest [MANIFEST SIGNATURE]\n");
+        return 2;
+    }
+    if (argc == 3) releaseFiles(argv[1], argv[2]);
+
     /* Monocypher's Ed25519 is RFC 8032's. */
     for (int t = 0; t < 3; t++) {
         uint8_t key[32], msg[2], sig[64];
@@ -84,7 +127,9 @@ int main(void) {
     CHECK(updateSignatureCheck((const uint8_t*)MANIFEST, n, SIGNATURE, sn, keys, 1, why, sizeof why) == 0);
     CHECK(strstr(why, "no key this build trusts") != NULL);
     CHECK(updateSignatureTrusted((const uint8_t*)MANIFEST, n, SIGNATURE, sn, why, sizeof why) == 0);
-    CHECK(updateTrustedKeyCount() == 0 && strstr(why, "trusts no release key yet") != NULL);
+    CHECK(updateTrustedKeyCount() == 1 && strstr(why, "no key this build trusts") != NULL);
+    CHECK(updateSignatureCheck((const uint8_t*)MANIFEST, n, SIGNATURE, sn, keys, 0, why, sizeof why) == 0);
+    CHECK(strstr(why, "trusts no release key yet") != NULL);
     {
         char text[sizeof MANIFEST];
         memcpy(text, MANIFEST, sizeof MANIFEST);

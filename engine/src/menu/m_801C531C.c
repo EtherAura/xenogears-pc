@@ -102,7 +102,16 @@ void mainMenuExecute(void) {
     u8 ok;
 
     cont = 1;
+    if (pcResumeMenu() == PC_SAFE_SUB_MENU) {
+        pcResumeDone(); /* a stackless load: the main menu's frame goes on (include/pc_state.h) */
+        goto mainLoop;
+    }
+    if (pcResumeMenu() > PC_SAFE_SUB_MENU) {
+        goto selection; /* a screen's loop: its menu2_executeMainMenuSelection call */
+    }
     do {
+    mainLoop:
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_MENU)); /* between frames: a canonical state's place */
         menuDraw();
         switch (gMenuContext->m325_menuButton) {
         case 4:
@@ -115,6 +124,7 @@ void mainMenuExecute(void) {
                 gMenuContext->m350_mainMenu->m1192_dimmed = 1;
                 resetCursorState();
                 countField33C_C(8, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
+            selection:
                 cont = menu2_executeMainMenuSelection(0);
             }
             break;
@@ -229,7 +239,7 @@ void loadSaveGameMenuExecute(void) {
 /* Noah initMenuContext32C */
 void initMenuContext32C(u8 arg0) {
     if (arg0) {
-        gMenuContext->m32C_memoryCardContext = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_32C), 0x5034), 0);
+        gMenuContext->m32C_memoryCardContext = allocateHeap(PC_HEAP_OF(MenuContext_32C, PC_HEAP_SIZED(sizeof(MenuContext_32C), 0x5034)), 0);
         bzero(gMenuContext->m32C_memoryCardContext, sizeof(MenuContext_32C));
     } else {
         freeHeap(gMenuContext->m32C_memoryCardContext);
@@ -249,7 +259,7 @@ void initMenuContext33C(u8 arg0) {
 /* Noah initMenuContext350MainMenu */
 void initMenuContext350MainMenu(u8 arg0) {
     if (arg0) {
-        gMenuContext->m350_mainMenu = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_350), 0x1194), 0);
+        gMenuContext->m350_mainMenu = allocateHeap(PC_HEAP_OF(MenuContext_350, PC_HEAP_SIZED(sizeof(MenuContext_350), 0x1194)), 0);
         bzero(gMenuContext->m350_mainMenu, sizeof(MenuContext_350));
     } else {
         freeHeap(gMenuContext->m350_mainMenu);
@@ -259,7 +269,7 @@ void initMenuContext350MainMenu(u8 arg0) {
 /* Noah initMenuContext354 */
 void initMenuContext354(u8 arg0) {
     if (arg0) {
-        gMenuContext->m354_subMenu = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_354), (s32)0x140c), 0);
+        gMenuContext->m354_subMenu = allocateHeap(PC_HEAP_OF(struct MenuContext_354, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_354), (s32)0x140c)), 0);
         bzero(gMenuContext->m354_subMenu, (s32)sizeof(struct MenuContext_354));
     } else {
         freeHeap(gMenuContext->m354_subMenu);
@@ -269,7 +279,7 @@ void initMenuContext354(u8 arg0) {
 /* Noah initMenuContext330 */
 void initMenuContext330(u8 arg0) {
     if (arg0) {
-        gMenuContext->m330_itemData = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_330), (s32)0xcc), 0);
+        gMenuContext->m330_itemData = allocateHeap(PC_HEAP_OF(struct MenuContext_330, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_330), (s32)0xcc)), 0);
         bzero(gMenuContext->m330_itemData, (s32)sizeof(struct MenuContext_330));
     } else {
         freeHeap(gMenuContext->m330_itemData);
@@ -279,7 +289,7 @@ void initMenuContext330(u8 arg0) {
 /* Noah initMenuContext340_goldOwned */
 void initMenuContext340_goldOwned(u8 arg0) {
     if (arg0) {
-        gMenuContext->m340_gold = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_340), (s32)0x328), 0);
+        gMenuContext->m340_gold = allocateHeap(PC_HEAP_OF(struct MenuContext_340, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_340), (s32)0x328)), 0);
         bzero(gMenuContext->m340_gold, (s32)sizeof(struct MenuContext_340));
     } else {
         freeHeap(gMenuContext->m340_gold);
@@ -289,7 +299,7 @@ void initMenuContext340_goldOwned(u8 arg0) {
 /* Noah initMenuContext344_playTime */
 void initMenuContext344_playTime(u8 arg0) {
     if (arg0) {
-        gMenuContext->m344_playTime = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_344), (s32)0x374), 0);
+        gMenuContext->m344_playTime = allocateHeap(PC_HEAP_OF(struct MenuContext_344, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_344), (s32)0x374)), 0);
         bzero(gMenuContext->m344_playTime, (s32)sizeof(struct MenuContext_344));
     } else {
         freeHeap(gMenuContext->m344_playTime);
@@ -299,7 +309,7 @@ void initMenuContext344_playTime(u8 arg0) {
 /* Noah initMenuContext348 */
 void initMenuContext348(u8 arg0) {
     if (arg0) {
-        gMenuContext->m348_cursor = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_348), 0x15c), 0);
+        gMenuContext->m348_cursor = allocateHeap(PC_HEAP_OF(MenuContext_348, PC_HEAP_SIZED(sizeof(MenuContext_348), 0x15c)), 0);
         bzero(gMenuContext->m348_cursor, sizeof(MenuContext_348));
     } else {
         freeHeap(gMenuContext->m348_cursor);
@@ -312,7 +322,7 @@ void initMenuContext39C(u8 arg0) {
 
     if (arg0) {
         for (i = 0; i < 3; i++) {
-            gMenuContext->m39C_infoCards[i] = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_39C), 0x127c), 0);
+            gMenuContext->m39C_infoCards[i] = allocateHeap(PC_HEAP_OF(MenuContext_39C, PC_HEAP_SIZED(sizeof(MenuContext_39C), 0x127c)), 0);
             bzero(gMenuContext->m39C_infoCards[i], sizeof(MenuContext_39C));
         }
     } else {
@@ -329,7 +339,7 @@ void initMenuContext(void) {
     initMenuContext354(1);
     initMenuContext330(1);
     initMenuContext348(1);
-    gMenuContext->m428_cardCursors = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_428), 0x14c), 0);
+    gMenuContext->m428_cardCursors = allocateHeap(PC_HEAP_OF(MenuContext_428, PC_HEAP_SIZED(sizeof(MenuContext_428), 0x14c)), 0);
     bzero(gMenuContext->m428_cardCursors, sizeof(MenuContext_428));
     switch (menuToEnter) {
     case 0:
@@ -402,6 +412,9 @@ void menu2_mainLoop(void) {
 
 /* Noah menu2_loadGame_entryPoint */
 void menu2_loadGame_entryPoint(void) {
+    if (pcResumeMenu() && menuToEnter == 0) {
+        goto resumeMain; /* a stackless load: the main menu goes on (include/pc_state.h) */
+    }
     initMenuContext();
     setupMainMenu();
     gMenuContext->m327_drawEnabled = 1;
@@ -409,6 +422,7 @@ void menu2_loadGame_entryPoint(void) {
     switch (menuToEnter) {
     case 0:
         setupMenu0();
+    resumeMain:
         mainMenuExecute();
         break;
     case 2:

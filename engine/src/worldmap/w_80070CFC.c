@@ -310,6 +310,10 @@ void worldmapEntryPoint(void) {
     s32 i;
     void* buf;
 
+    /* a stackless load: the frame loop goes on where its state was saved (include/pc_state.h) */
+    if (pcResumeAt() == PC_SAFE_WORLDMAP) {
+        goto resumeFrames;
+    }
     worldmapFlushCacheAndSync();
     DrawSync(0);
     VSync(0);
@@ -394,6 +398,7 @@ void worldmapEntryPoint(void) {
         VSync(0);
         resetInputs();
         isWorldmapModeFlagSet = exitWorldMapMode;
+    resumeFrames:
         worldmapMainLoop();
         worldmapModes[currentWorldmapMode].m8_free();
     }
@@ -1031,6 +1036,17 @@ void worldmapMainLoop(void) {
     u16* in[6];
     void portWorldmapSweepFrame(s32 frame, s32 tick);
 
+    if (pcResumeAt() == PC_SAFE_WORLDMAP) {
+        /* a stackless load (include/pc_state.h): the frame state is the module's, in[] points at it again */
+        pcResumeDone();
+        in[0] = &worldmapInput1_0;
+        in[1] = &worldmapInput1_1;
+        in[2] = &worldmapInput2_0;
+        in[3] = &worldmapInput2_1;
+        in[4] = &worldmapInput3_0;
+        in[5] = &worldmapInput3_1;
+        goto frameTop;
+    }
     pCurrentWorldmapRenderingStruct = &worldmapRenderingStructs[1];
     worldmapOddOrEven = 1;
     continueWorldmapLoop = 1;
@@ -1051,7 +1067,9 @@ void worldmapMainLoop(void) {
         pcWm60Carry[i] = 0;
     }
     do {
+    frameTop:
         if (!pcWm60Active || !(pcWm60Frame & 1)) {
+            pcSafePoint(PC_SAFE_WORLDMAP); /* between the Original's frames: a canonical state's place */
             /* the F1 setting, live: switched between native frames */
             s32 want = pcGameplayWorldmap60();
             if (want != pcWm60Active) {
@@ -2060,6 +2078,6 @@ void finalizeWorldMapFileLoading(void) {
 }
 
 void allocateWorldMapsOT(void) {
-    worldmapRenderingStructs[0].m70_OT = allocateHeap(1024 * (s32)sizeof(OTag), 0);
-    worldmapRenderingStructs[1].m70_OT = allocateHeap(1024 * (s32)sizeof(OTag), 0);
+    worldmapRenderingStructs[0].m70_OT = allocateHeap(PC_HEAP_OF(OTag, 1024 * (s32)sizeof(OTag)), 0);
+    worldmapRenderingStructs[1].m70_OT = allocateHeap(PC_HEAP_OF(OTag, 1024 * (s32)sizeof(OTag)), 0);
 }

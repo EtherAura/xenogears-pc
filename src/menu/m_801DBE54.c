@@ -29,6 +29,16 @@ u8 openItemMenu(void) {
     s32 swap;
 
     keepGoing = 1;
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() == PC_SAFE_SUB_ITEM || pcResumeMenu() == PC_SAFE_SUB_ITEM_USE) {
+        pcMenuTake(PC_SAFE_SUB_ITEM, 6, PC_LOCAL(first), PC_LOCAL(page), PC_LOCAL(prevPage), PC_LOCAL(cursor), PC_LOCAL(prevCursor), PC_LOCAL(swap));
+        if (pcResumeMenu() == PC_SAFE_SUB_ITEM) {
+            pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+            goto itemLoop;
+        }
+        goto itemUse; /* the party picker it opened */
+    }
+#endif
     first = 1;
     page = 0;
     prevPage = 0xFF;
@@ -40,6 +50,11 @@ u8 openItemMenu(void) {
     allocMenuPointerGlyph(0);
     allocMenuPointerGlyph(1);
     while (keepGoing) {
+#ifdef PLATFORM_PC
+    itemLoop:
+        pcMenuKeep(PC_SAFE_SUB_ITEM, 6, PC_LOCAL(first), PC_LOCAL(page), PC_LOCAL(prevPage), PC_LOCAL(cursor), PC_LOCAL(prevCursor), PC_LOCAL(swap));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_ITEM)); /* between frames: a canonical state's place */
+#endif
         menuDraw();
         if (page != prevPage) {
             setupItemMenuPage(page);
@@ -65,6 +80,10 @@ u8 openItemMenu(void) {
                 swap = page * 2 + cursor;
             } else {
                 if (page * 2 + cursor == swap) {
+#ifdef PLATFORM_PC
+                    pcMenuKeep(PC_SAFE_SUB_ITEM, 6, PC_LOCAL(first), PC_LOCAL(page), PC_LOCAL(prevPage), PC_LOCAL(cursor), PC_LOCAL(prevCursor), PC_LOCAL(swap)); /* as the picker finds them */
+                itemUse:
+#endif
                     if (useItemOnParty(page, cursor)) {
                         prevPage = 0xFF;
                         prevCursor = 0xFF;
@@ -622,6 +641,15 @@ void runEtherListMenu(u8 slotArg, u8 flag, u8 mode) {
     s32 prevCursor;
     u8 prevSlot;
 
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() != 0 && pcResumeMenu() == pcMenuChildNow() &&
+        (pcResumeMenu() == PC_SAFE_SUB_ETHER || pcResumeMenu() == PC_SAFE_SUB_STATUS_ETHER ||
+         pcResumeMenu() == PC_SAFE_SUB_GEAR_ETHER || pcResumeMenu() == PC_SAFE_SUB_GEAR_ETHER2)) {
+        pcMenuTake(pcMenuChildNow(), 9, PC_LOCAL(slotArg), PC_LOCAL(flag), PC_LOCAL(mode), PC_LOCAL(slot), PC_LOCAL(keepGoing), PC_LOCAL(first), PC_LOCAL(cursor), PC_LOCAL(prevCursor), PC_LOCAL(prevSlot));
+        pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+        goto etherLoop;
+    }
+#endif
     keepGoing = 1;
     first = 1;
     cursor = 0;
@@ -631,6 +659,11 @@ void runEtherListMenu(u8 slotArg, u8 flag, u8 mode) {
     initEtherListMenu(mode);
     allocMenuPointerGlyph(0);
     do {
+#ifdef PLATFORM_PC
+    etherLoop:
+        pcMenuKeep(pcMenuChildNow(), 9, PC_LOCAL(slotArg), PC_LOCAL(flag), PC_LOCAL(mode), PC_LOCAL(slot), PC_LOCAL(keepGoing), PC_LOCAL(first), PC_LOCAL(cursor), PC_LOCAL(prevCursor), PC_LOCAL(prevSlot));
+        pcSafePoint(pcMenuSafeId(pcMenuChildNow())); /* between frames: a canonical state's place */
+#endif
         menuDraw();
         if (slot != prevSlot) {
             setupEtherListPage(slot, mode);

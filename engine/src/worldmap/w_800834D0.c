@@ -736,7 +736,7 @@ void worldmapInitAllModels(void) {
     (void)p;
     i = 0;
     worldmapNumModels = *pWorldmapModelsConfig;
-    worldmapModels = allocateHeap(worldmapNumModels * sizeof(sWorldmapModel), 0);
+    worldmapModels = allocateHeap(PC_HEAP_OF(sWorldmapModel, worldmapNumModels * sizeof(sWorldmapModel)), 0);
     cfg = (sWorldmapModelConfig*)(pWorldmapModelsConfig + 1);
     SetColorMatrix(&worldmapColorMatrix);
     SetLightMatrix(&worldmapLightMatrix);

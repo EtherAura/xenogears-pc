@@ -595,6 +595,11 @@ void spawnBattlingSpriteEffect(SVECTOR* pos, s32 type) {
     if (i == 0x3C) {
         return;
     }
+#ifdef PLATFORM_PC
+    /* a reused slot starts from zeros on the PC: its union's other views keep an earlier effect's
+     * pointer halves otherwise (canonical states; the PS1 keeps them) */
+    __builtin_memset(&p->m60_view, 0, sizeof(p->m60_view));
+#endif
     p->m50_active = 1;
     t = &battlingEffectTemplates[type];
     p->m53_type = 0;
@@ -754,6 +759,11 @@ void spawnBattlingTrailEffect(s32 arg0, VECTOR* pos, s32 owner, s32 arg3) {
     if (i == 0x3C) {
         return;
     }
+#ifdef PLATFORM_PC
+    /* a reused slot starts from zeros on the PC: its union's other views keep an earlier effect's
+     * pointer halves otherwise (canonical states; the PS1 keeps them) */
+    __builtin_memset(&p->m60_view, 0, sizeof(p->m60_view));
+#endif
     poly = &p->m0_polys[0];
     poly->u0 = poly->u1 = poly->u2 = poly->u3 = (u8)battlingGearColorClutX * 4 + 8 + arg0 * 4;
     poly->v0 = poly->v1 = poly->v2 = poly->v3 = battlingGearColorClutY;
@@ -852,6 +862,11 @@ void spawnBattlingBeamEffect(s32 arg0, VECTOR* pos, VECTOR* pos2, s32 owner) {
     if (i == 0x3C) {
         return;
     }
+#ifdef PLATFORM_PC
+    /* a reused slot starts from zeros on the PC: its union's other views keep an earlier effect's
+     * pointer halves otherwise (canonical states; the PS1 keeps them) */
+    __builtin_memset(&p->m60_view, 0, sizeof(p->m60_view));
+#endif
     p->m52_frameCount = 7;
     p->m53_type = 2;
     p->m50_active = 1;

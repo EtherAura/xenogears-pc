@@ -221,8 +221,8 @@ void initBattlingFont(void** files) {
     s16* clut;
     u8 pad[8]; /* unused: reserves the 8 bytes of retail's frame */
 
-    battlingGlyphPolys[0] = allocateHeap(100 * (s32)sizeof(POLY_FT4), 0);
-    battlingGlyphPolys[1] = allocateHeap(100 * (s32)sizeof(POLY_FT4), 0);
+    battlingGlyphPolys[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, 100 * (s32)sizeof(POLY_FT4)), 0);
+    battlingGlyphPolys[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, 100 * (s32)sizeof(POLY_FT4)), 0);
     for (i = 0; i < 100; i++) {
         setlen(&battlingGlyphPolys[0][i], 0);
         setlen(&battlingGlyphPolys[1][i], 0);
@@ -444,7 +444,7 @@ void buildBattlingGearList(s32 filter) {
         limit = 0x7FFF;
         battlingBonusGearUnlocked = 1;
     }
-    battlingGearList = allocateHeap(49 * (s32)sizeof(BattlingGearEntry*), 1);
+    battlingGearList = allocateHeap(PC_HEAP_OF(BattlingGearEntry*, 49 * (s32)sizeof(BattlingGearEntry*)), 1);
     battlingGearListCount = 0;
     for (i = 0, list = battlingGearList, def = battlingGearDefs, entry = battlingGearEntries; i < 49; def++, i++, entry++) {
         if (filter == 0 || def->m4_unlockLevel <= limit) {
@@ -1947,8 +1947,8 @@ void initBattlingRingWall(u32** bundle) {
     battlingRingWallClut = GetClut(tim.crect->x, tim.crect->y);
     battlingRingWallTPage = GetTPage(1, 0, tim.prect->x, tim.prect->y);
     battlingRingWallV = (u8)tim.prect->y;
-    battlingRingWallPolys[0] = allocateHeap(64 * (s32)sizeof(POLY_FT4), 0);
-    battlingRingWallPolys[1] = allocateHeap(64 * (s32)sizeof(POLY_FT4), 0);
+    battlingRingWallPolys[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, 64 * (s32)sizeof(POLY_FT4)), 0);
+    battlingRingWallPolys[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, 64 * (s32)sizeof(POLY_FT4)), 0);
     p = battlingRingWallPolys[0];
     for (i = 0; i < 64; i += 2) {
         setlen(p, 9);

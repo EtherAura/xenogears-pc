@@ -255,7 +255,15 @@ void battleMain(void) {
     void* a;
     void* b;
 
-    battleVar0 = (sBattleVar0*)allocateBattleHeap(sizeof(sBattleVar0), 0);
+    if (pcResumeAt() == PC_SAFE_BATTLE) {
+        /* a stackless load (include/pc_state.h): mode and result keep their first values there */
+        pcResumeDone();
+        goto battleLoop;
+    }
+    if (pcResumeAt() == PC_SAFE_BATTLE_TURN) {
+        goto battleTurn; /* on to a player's turn (setupTurnRenderLoop), whatever the time bar does */
+    }
+    battleVar0 = (sBattleVar0*)allocateBattleHeap(PC_HEAP_OF(sBattleVar0, sizeof(sBattleVar0)), 0);
     battleVar1 = (sBattleVar1*)allocateBattleHeap(0x10C, 0);
     battleVar2 = (sBattleVar2*)allocateBattleHeap(0x2F8, 0);
     bzero(battleVar0, sizeof(sBattleVar0));
@@ -359,7 +367,10 @@ void battleMain(void) {
         }
     }
     while (performAttackSub3_var0.m2_battleRunningVar1 == 0 && isBattleAnEvent == 0) {
+    battleLoop:
+        pcSafePoint(PC_SAFE_BATTLE); /* between frames: a canonical state's place */
         if (battleTimeEnabled) {
+        battleTurn:
             battleTickGameplay();
         }
         battleRenderDebugAndMain();
@@ -553,6 +564,9 @@ void battleTickMain(u8 arg0) {
     s32 i;
     u8* p;
 
+    if (pcResumeAt() == PC_SAFE_BATTLE_TURN) {
+        goto turn; /* a stackless load: the player's turn goes on (include/pc_state.h) */
+    }
     battleTickMain_var0 = 1;
     D_800D2CA4.mB_battleTickMain_var1 = 0;
     if (battleVar2->m2D3_currentEntityTurn == 0) {
@@ -606,6 +620,7 @@ void battleTickMain(u8 arg0) {
         if ((battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m7C_statusFlags[0] & 0x2080) == 0 &&
             (battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m7C_statusFlags[2] & 0x1000) == 0) {
             if ((battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m7C_statusFlags[2] & 0x2000) == 0) {
+            turn:
                 setupTurnRenderLoop(battleVar2->m2D3_currentEntityTurn);
             } else {
                 performAutoPartyMemberTurn(battleVar2->m2D3_currentEntityTurn);
@@ -692,6 +707,9 @@ void battleTickGameplay(void) {
     s32 t;
     u8 n;
 
+    if (pcResumeAt() == PC_SAFE_BATTLE_TURN) {
+        goto tick; /* a stackless load: the turn picked then goes on (include/pc_state.h) */
+    }
     if (bBattleTickMode0 == 0) {
         if (bBattleTickMode1 != 0) {
             battleVar2->m2D3_currentEntityTurn = bBattleTickMode1;
@@ -723,6 +741,7 @@ void battleTickGameplay(void) {
                 }
             }
         }
+    tick:
         battleTickMain(0);
     } else {
         battleTickRestoreFlaggedMonsters();

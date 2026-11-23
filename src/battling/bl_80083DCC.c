@@ -1803,8 +1803,8 @@ void initBattlingGroundPrims(void) {
 
     battlingGroundSpanEnds = (u8*)PSX_SCRATCH(0x1F800000);
     battlingGroundSpanStarts = (u8*)PSX_SCRATCH(0x1F800080);
-    battlingGroundPolys[0] = allocateHeap(1800 * (s32)sizeof(POLY_FT3), 0);
-    battlingGroundPolys[1] = allocateHeap(1800 * (s32)sizeof(POLY_FT3), 0);
+    battlingGroundPolys[0] = allocateHeap(PC_HEAP_OF(POLY_FT3, 1800 * (s32)sizeof(POLY_FT3)), 0);
+    battlingGroundPolys[1] = allocateHeap(PC_HEAP_OF(POLY_FT3, 1800 * (s32)sizeof(POLY_FT3)), 0);
     p = battlingGroundPolys[0];
     for (i = 0; i < 0x708; i++) {
         setlen(p, 7);

@@ -270,6 +270,12 @@ void worldmapEntryPoint(void) {
     s32 i;
     void* buf;
 
+#ifdef PLATFORM_PC
+    /* a stackless load: the frame loop goes on where its state was saved (include/pc_state.h) */
+    if (pcResumeAt() == PC_SAFE_WORLDMAP) {
+        goto resumeFrames;
+    }
+#endif
     worldmapFlushCacheAndSync();
     DrawSync(0);
     VSync(0);
@@ -358,6 +364,9 @@ void worldmapEntryPoint(void) {
         VSync(0);
         resetInputs();
         isWorldmapModeFlagSet = exitWorldMapMode;
+#ifdef PLATFORM_PC
+    resumeFrames:
+#endif
         worldmapMainLoop();
         worldmapModes[currentWorldmapMode].m8_free();
     }
@@ -410,10 +419,20 @@ void worldmapMainLoop(void) {
     s32 i;
     sWorldmapRenderingStruct* rs;
 
+#ifdef PLATFORM_PC
+    if (pcResumeAt() == PC_SAFE_WORLDMAP) {
+        pcResumeDone(); /* every frame's state is the module's: nothing to take back */
+        goto frameTop;
+    }
+#endif
     pCurrentWorldmapRenderingStruct = &worldmapRenderingStructs[1];
     worldmapOddOrEven = 1;
     continueWorldmapLoop = 1;
     do {
+#ifdef PLATFORM_PC
+    frameTop:
+        pcSafePoint(PC_SAFE_WORLDMAP); /* between frames: a canonical state's place */
+#endif
         worldmapInput3_1 = 0;
         worldmapInput2_1 = 0;
         worldmapInput1_1 = 0;
@@ -1308,6 +1327,6 @@ void finalizeWorldMapFileLoading(void) {
 }
 
 void allocateWorldMapsOT(void) {
-    worldmapRenderingStructs[0].m70_OT = allocateHeap(1024 * (s32)sizeof(OTag), 0);
-    worldmapRenderingStructs[1].m70_OT = allocateHeap(1024 * (s32)sizeof(OTag), 0);
+    worldmapRenderingStructs[0].m70_OT = allocateHeap(PC_HEAP_OF(OTag, 1024 * (s32)sizeof(OTag)), 0);
+    worldmapRenderingStructs[1].m70_OT = allocateHeap(PC_HEAP_OF(OTag, 1024 * (s32)sizeof(OTag)), 0);
 }

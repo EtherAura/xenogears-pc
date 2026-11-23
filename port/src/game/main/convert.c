@@ -157,7 +157,7 @@ void pcConvertModelBlock(void* raw) {
     ModelBlock* b;
     s32 j;
 
-    b = allocateHeap(PC_HEAP_NATIVE((s32)sizeof(ModelBlock) + dynVertsSize(base, d->m1C_dynamicVertices)), 1);
+    b = allocateHeap(PC_HEAP_OF(ModelBlock, PC_HEAP_NATIVE((s32)sizeof(ModelBlock) + dynVertsSize(base, d->m1C_dynamicVertices))), 1);
     b->m0_flags = d->m0_flags;
     b->m2_numVertices = d->m2_numVertices;
     b->m4_numPrims = d->m4_numPrims;
@@ -187,8 +187,10 @@ void pcConvertModelBlock(void* raw) {
             dv->m4_entries[j].m8_normals = base + e[j].m8_normals;
         }
         b->m1C_dynamicVertices = dv;
+        PC_STATE_AT(dv, ModelDynVerts, 1);
     }
     memcpy(base + 8, &b, sizeof(b));
+    PC_STATE_AT(base + 8, ModelBlock*, 1); /* the block's bytes keep the native block */
 }
 
 void* pcModelBlockOf(void* raw) {

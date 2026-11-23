@@ -1176,7 +1176,7 @@ void allocateAndSetupBattleDialogWindow(u8 idx, u16 x, u16 y, u16 w, u16 h, u8 d
     sBattleDialogWindow2* win2;
 
     if (battleVar1->mB0_isDialogWindowInitialized[idx] == 0) {
-        battleDialogWindows[idx] = allocateBattleHeap(sizeof(sBattleDialogWindow), 0);
+        battleDialogWindows[idx] = allocateBattleHeap(PC_HEAP_OF(sBattleDialogWindow, sizeof(sBattleDialogWindow)), 0);
         bzero(battleDialogWindows[idx], sizeof(sBattleDialogWindow));
         battleDialogWindows2[idx] = allocateBattleHeap(sizeof(sBattleDialogWindow2), 0);
         bzero(battleDialogWindows2[idx], sizeof(sBattleDialogWindow2));

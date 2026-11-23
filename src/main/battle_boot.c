@@ -5,6 +5,7 @@
  * compiler/assembler changes and may move. Built with GCC 2.7.2 (PSY-Q), ASPSX < 2.50.
  */
 #include "common.h"
+#include "pc_state.h"
 #include "main/kernel.h"
 #include "psyq.h"
 #include "main/filesystem.h"
@@ -31,6 +32,11 @@ u8 battleDebugDisplay;
 void battleEntryPoint(void) {
     s32 mode;
 
+#ifdef PLATFORM_PC
+    if (PC_SAFE_MODE(pcResumeAt()) == PC_SAFE_MODE(PC_SAFE_BATTLE)) {
+        goto resume; /* a stackless load: battleMain's loop goes on (include/pc_state.h) */
+    }
+#endif
     battleDebugDisplay = 1;
     waitReadCompletion(0);
     setCurrentDirectory(0xC, 0);
@@ -39,6 +45,9 @@ void battleEntryPoint(void) {
         initDebugFont(0x10, 0x10, 0x140, 0x100, 0x3E8, 0, 0x340, 0, 0x340, 0x20, 0);
     }
     initGraphicsForBattle();
+#ifdef PLATFORM_PC
+resume:
+#endif
     battleMain();
 #ifdef PLATFORM_PC
     /* A gauntlet's next fight, or the end of its run: the state of before

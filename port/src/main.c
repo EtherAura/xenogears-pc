@@ -39,6 +39,10 @@
 #include "system/android.h"
 #include "system/system.h"
 #include "ui/ui.h"
+#ifdef XG_UPDATER
+#include "update/update_check.h"
+#include "update/update_install.h"
+#endif
 #ifdef VERSION_JP
 #define BUILD_REGION "JP"
 #else
@@ -177,6 +181,9 @@ int main(int argc, char** argv) {
 #if defined(XG_PIE) && defined(__linux__) && !defined(__ANDROID__)
     fixedAddresses(argv);
 #endif
+    /* Started by an update's restart (system/engine.h engineStartAfter): the old process's exit
+     * handlers (memory cards, settings.ini) done before anything here reads them. */
+    engineWaitForStarter();
     if (argc > 1 && SDL_strcmp(argv[1], "--verify-discs") == 0)
         return cdVerifyCommand(argc - 2, argv + 2, BUILD_REGION);
     if (argc > 1 && SDL_strcmp(argv[1], "--help") == 0) {
@@ -245,6 +252,9 @@ int main(int argc, char** argv) {
         return 1;
     }
     releaseLog(); /* which release this is and how it was installed (system/release.h) */
+#ifdef XG_UPDATER
+    updateInstallCleanup(); /* what an update left: its .old files, its download (update/update_install.h) */
+#endif
     /* Size, position and fullscreen from settings.ini (port/src/gpu/present.c). */
     SDL_Window* window = presentCreateWindow("Xenogears");
     if (window == NULL) {
@@ -314,6 +324,14 @@ int main(int argc, char** argv) {
     }
     /* The setup screen chose the other engine: it starts the game instead. */
     engineRedirect();
+#ifdef XG_UPDATER
+    /* The update check (update/update_check.h): asked once, here, before the game (right after the
+     * setup screen's Start on a first run); then, when the player chose it, once a day in the
+     * background (gpu/libgpu.c's vblank). */
+    if (updateShouldAsk()) {
+        uiAskUpdates();
+    }
+#endif
     disc = cdSwapPath(0);
     if (kromPath() == NULL && SDL_strcmp(disc, selected) != 0) {
         kromInit(disc); /* the starting image changed: its folder's BIOS */

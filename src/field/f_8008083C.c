@@ -406,7 +406,7 @@ void initFieldScriptEntity(s32 index) {
 
     if (index < g_totalActors) {
         numInitializedFieldScriptEntities[0]++;
-        fieldSceneState.m290_actorArray[index].m4C_scriptEntity = allocateHeap(PC_HEAP_SIZED(sizeof(sFieldScriptEntity), 0x138), 0);
+        fieldSceneState.m290_actorArray[index].m4C_scriptEntity = allocateHeap(PC_HEAP_OF(sFieldScriptEntity, PC_HEAP_SIZED(sizeof(sFieldScriptEntity), 0x138)), 0);
         p = (u32*)fieldSceneState.m290_actorArray[index].m4C_scriptEntity;
         for (i = 0; i < count; i++) {
             *p++ = 0;
@@ -427,7 +427,7 @@ void initFieldScriptEntity(s32 index) {
             }
         }
         resetFieldScriptEntityValues(index);
-        fieldSceneState.m290_actorArray[index].m8_2dSprite = allocateHeap(PC_HEAP_SIZED(sizeof(FieldQuad), 0x70), 0);
+        fieldSceneState.m290_actorArray[index].m8_2dSprite = allocateHeap(PC_HEAP_OF(FieldQuad, PC_HEAP_SIZED(sizeof(FieldQuad), 0x70)), 0);
         initCharacterShadowPoly(fieldSceneState.m290_actorArray[index].m8_2dSprite);
     }
 }

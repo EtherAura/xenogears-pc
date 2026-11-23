@@ -389,7 +389,9 @@ void portBootLongjmp(void** context) __attribute__((noreturn));
 #define BOOT_LONGJMP(context) __builtin_longjmp(context, 1)
 #define BOOT_CONTEXT_WORDS 5
 #endif
-static void* bootContext[BOOT_CONTEXT_WORDS];
+/* this run's frames: a canonical state does not carry it (scratch64), a load
+ * from one arms it again (pcBootResume) */
+static scratch64 bootContext[BOOT_CONTEXT_WORDS];
 static s32 bootContextReady;
 static s32 bootErrNo;
 
@@ -405,11 +407,20 @@ void bootGame(s32 errNo) {
         bootErrNo = 0;
     }
     if (bootContextReady) {
-        BOOT_LONGJMP(bootContext);
+        BOOT_LONGJMP((void**)bootContext);
     }
     bootContextReady = 1;
-    BOOT_SETJMP(bootContext);
+    BOOT_SETJMP((void**)bootContext);
     mode = &gameModes[bootMode];
+    if (pcResumeAt() != PC_SAFE_NONE) {
+        /* A state without the game's frames (include/pc_state.h): the mode's
+         * memory is the state's, its entry takes up the loop where it was
+         * saved, and nothing here sets the mode up again. */
+        mode = &gameModes[PC_SAFE_MODE(pcResumeAt())];
+        pcWideSetMode((s32)(mode - gameModes));
+        mode->m0_entryPoint();
+        bootGame(0);
+    }
     ResetGraph(1);
     DrawSyncCallback(0);
     setVsyncUserCallback(0);
@@ -455,6 +466,13 @@ void bootGame(s32 errNo) {
      * in the slots they never write (port/src/system/gamestack.h). */
     gameStackScrub();
     mode->m0_entryPoint();
+    bootGame(0);
+}
+
+/* pcResumeGame (port/src/game/main/statetypes.c), on a fresh game stack after a
+ * stackless load: this build's own boot context, not the one in the state. */
+void pcBootResume(void) {
+    bootContextReady = 0;
     bootGame(0);
 }
 

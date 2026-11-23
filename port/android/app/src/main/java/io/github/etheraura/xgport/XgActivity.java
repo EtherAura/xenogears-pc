@@ -25,7 +25,8 @@
 // The game's menu calls chooseDiscFolder, discFolder, copyPack, packCopyStatus,
 // cancelPackCopy, chooseBiosFile, useFolderBios, useNoBios, biosAskOff,
 // takeBios and biosName (port/src/system/android.c); a new disc folder applies at
-// the next start. The game itself starts before the picker returns (SDL starts
+// the next start. The update check (a build with the updater: port/src/update)
+// fetches with updateFetch. The game itself starts before the picker returns (SDL starts
 // it as soon as the surface first comes up), so when a folder arrives while the
 // game runs without a disc (the first start) the app starts again with it.
 //
@@ -569,6 +570,40 @@ public class XgActivity extends SDLActivity {
             Log.i(TAG, "restart: the app starts again");
             startActivity(restart);
         });
+    }
+
+    // The update check's GET (port/src/update/update_fetch.c, xg-4oq.14.3), called on the check's
+    // own thread (never the UI thread, never the game's stack): url's body, at most max bytes. https
+    // only; redirects followed, to https only (HttpURLConnection keeps to one protocol); 15 s to
+    // connect, 30 s without data. "HTTP <code>" for anything but 200, which the native side reads
+    // (404: the file is not there). Nothing about the player is sent: the User-Agent is
+    // "xenogears-pc". Needs the INTERNET permission, which only a build with the updater asks for
+    // (app/src/updater/AndroidManifest.xml).
+    public byte[] updateFetch(String url, int max) throws java.io.IOException {
+        java.net.URL at = new java.net.URL(url);
+        if (!"https".equals(at.getProtocol())) throw new java.io.IOException("not an https URL");
+        java.net.HttpURLConnection c = (java.net.HttpURLConnection) at.openConnection();
+        try {
+            c.setInstanceFollowRedirects(true);
+            c.setConnectTimeout(15000);
+            c.setReadTimeout(30000);
+            c.setUseCaches(false);
+            c.setRequestProperty("User-Agent", "xenogears-pc");
+            int code = c.getResponseCode();
+            if (!"https".equals(c.getURL().getProtocol())) throw new java.io.IOException("redirected off https");
+            if (code != 200) throw new java.io.IOException("HTTP " + code);
+            java.io.ByteArrayOutputStream body = new java.io.ByteArrayOutputStream();
+            try (java.io.InputStream in = c.getInputStream()) {
+                byte[] chunk = new byte[4096];
+                for (int n; (n = in.read(chunk)) > 0; ) {
+                    if (body.size() + n > max) throw new java.io.IOException("longer than " + max + " bytes");
+                    body.write(chunk, 0, n);
+                }
+            }
+            return body.toByteArray();
+        } finally {
+            c.disconnect();
+        }
     }
 
     @Override

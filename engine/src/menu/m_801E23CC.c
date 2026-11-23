@@ -30,6 +30,15 @@ u8 openGearMenu(void) {
     s32 slot;
 
     keepGoing = 1;
+    if (pcResumeMenu() == PC_SAFE_SUB_GEAR || pcResumeMenu() == PC_SAFE_SUB_GEAR_EQUIP ||
+        pcResumeMenu() == PC_SAFE_SUB_GEAR_ETHER || pcResumeMenu() == PC_SAFE_SUB_GEAR_ETHER2) {
+        pcMenuTake(PC_SAFE_SUB_GEAR, 4, PC_LOCAL(first), PC_LOCAL(prev), PC_LOCAL(set), PC_LOCAL(slot));
+        if (pcResumeMenu() == PC_SAFE_SUB_GEAR) {
+            pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+            goto gearLoop;
+        }
+        goto gearChild; /* the sub-screen it opened */
+    }
     /* Unset in retail too: $a0 is the caller's $s2, menu2_executeMainMenuSelection's
      * arg0, which is 0 whenever it opens this menu. The result is unused, but a
      * garbage index walks findNextPartySlot's table out of bounds. */
@@ -41,6 +50,9 @@ u8 openGearMenu(void) {
     gMenuContext->m339_previousSelectedSubMenuEntry = 0xFF;
     slot = initGearStatusMenu();
     while (keepGoing) {
+    gearLoop:
+        pcMenuKeep(PC_SAFE_SUB_GEAR, 4, PC_LOCAL(first), PC_LOCAL(prev), PC_LOCAL(set), PC_LOCAL(slot));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_GEAR)); /* between frames: a canonical state's place */
         menuDraw();
         if (slot != prev) {
             prev = slot;
@@ -74,10 +86,13 @@ u8 openGearMenu(void) {
             gMenuContext->m33C_drawFlags->m4B_draw360 = 0;
             gMenuContext->m33C_drawFlags->m54_drawGearMenuLabels[4] = 0;
             gMenuContext->m33C_drawFlags->m54_drawGearMenuLabels[5] = 0;
+            pcMenuKeep(PC_SAFE_SUB_GEAR, 4, PC_LOCAL(first), PC_LOCAL(prev), PC_LOCAL(set), PC_LOCAL(slot)); /* as the sub-screen finds them */
+        gearChild:
             switch (gMenuContext->m338_currentSelectedSubMenuEntry) {
             case 0:
                 if (gMenuContext->m33C_drawFlags->m30_partyMemberId[slot] != 7) {
                     gMenuContext->m33C_drawFlags->mA_354Enabled = 0;
+                    pcMenuChild(PC_SAFE_SUB_GEAR_EQUIP);
                     runEquipMenu(slot, 0, 1);
 #if !VERSION_JP
                     RESET_PREV();
@@ -95,6 +110,7 @@ u8 openGearMenu(void) {
                 break;
             case 1:
                 if (gMenuContext->m33C_drawFlags->m30_partyMemberId[slot] != 7) {
+                    pcMenuChild(PC_SAFE_SUB_GEAR_ETHER);
                     runEtherListMenu(slot, 0, 1);
                     freeEtherListMenu(1);
 #if !VERSION_JP
@@ -109,6 +125,7 @@ u8 openGearMenu(void) {
                 break;
             case 2:
                 if (gMenuContext->m33C_drawFlags->m30_partyMemberId[slot] != 7) {
+                    pcMenuChild(PC_SAFE_SUB_GEAR_ETHER2);
                     runEtherListMenu(slot, 0, 2);
                     freeEtherListMenu(2);
                     RESET_PREV();
@@ -180,11 +197,11 @@ u8 openGearMenu(void) {
 void initStatusMenu(void);
 void initStatusMenu(void) {
     initStatusMenuSub0(1);
-    gMenuContext->m358_selectedInfoCard = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_358), 0x2af0), 0);
+    gMenuContext->m358_selectedInfoCard = allocateHeap(PC_HEAP_OF(MenuContext_358, PC_HEAP_SIZED(sizeof(MenuContext_358), 0x2af0)), 0);
     bzero(gMenuContext->m358_selectedInfoCard, sizeof(MenuContext_358));
-    gMenuContext->m35C_selectedStats = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_35C), 0x32f4), 0);
+    gMenuContext->m35C_selectedStats = allocateHeap(PC_HEAP_OF(MenuContext_35C, PC_HEAP_SIZED(sizeof(MenuContext_35C), 0x32f4)), 0);
     bzero(gMenuContext->m35C_selectedStats, sizeof(MenuContext_35C));
-    gMenuContext->m360_equipment = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_360), (s32)0x2ac), 0);
+    gMenuContext->m360_equipment = allocateHeap(PC_HEAP_OF(struct MenuContext_360, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_360), (s32)0x2ac)), 0);
     bzero(gMenuContext->m360_equipment, (s32)sizeof(struct MenuContext_360));
     loadSharedMenuData2(3);
     initStatusMenuSub1(0, 0);

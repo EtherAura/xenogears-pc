@@ -28,7 +28,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <errno.h>
+#include <signal.h>
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -198,6 +203,65 @@ static void handOver(const char* exe) {
     execv(exe, args);
     unsetenv("XG_ENGINE_LAUNCHED");
     free(args);
+#endif
+}
+
+int engineStartAfter(const char* exe) {
+#ifdef __ANDROID__
+    (void)exe;
+    return 0;
+#else
+    const char** args = calloc((size_t)argcSaved + 1, sizeof *args);
+    if (args == NULL) return 0;
+    args[0] = exe;
+    for (int i = 1; i < argcSaved; i++) args[i] = argvSaved[i];
+    char pid[32];
+#ifdef _WIN32
+    snprintf(pid, sizeof pid, "%lu", (unsigned long)GetCurrentProcessId());
+#else
+    snprintf(pid, sizeof pid, "%ld", (long)getpid());
+#endif
+    SDL_Environment* env = SDL_CreateEnvironment(true);
+    SDL_PropertiesID props = SDL_CreateProperties();
+    int ok = 0;
+    if (env != NULL && props != 0) {
+        SDL_SetEnvironmentVariable(env, "XG_ENGINE_LAUNCHED", "1", true);
+        SDL_SetEnvironmentVariable(env, "XG_WAIT_FOR_PID", pid, true);
+        SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void*)args);
+        SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, env);
+        SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+        SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+        SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_INHERITED);
+        SDL_Process* proc = SDL_CreateProcessWithProperties(props);
+        if (proc != NULL) {
+            SDL_DestroyProcess(proc); /* it runs on; this process ends */
+            ok = 1;
+        }
+    }
+    if (props != 0) SDL_DestroyProperties(props);
+    if (env != NULL) SDL_DestroyEnvironment(env);
+    free(args);
+    return ok;
+#endif
+}
+
+void engineWaitForStarter(void) {
+    const char* v = getenv("XG_WAIT_FOR_PID");
+    if (v == NULL || v[0] == '\0') return;
+    long pid = strtol(v, NULL, 10);
+#ifdef _WIN32
+    HANDLE h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    if (h != NULL) {
+        WaitForSingleObject(h, 15000);
+        CloseHandle(h);
+    }
+    _putenv_s("XG_WAIT_FOR_PID", "");
+#else
+    for (int i = 0; i < 300 && pid > 1 && (kill((pid_t)pid, 0) == 0 || errno == EPERM); i++) {
+        struct timespec ms50 = {0, 50000000};
+        nanosleep(&ms50, NULL);
+    }
+    unsetenv("XG_WAIT_FOR_PID");
 #endif
 }
 

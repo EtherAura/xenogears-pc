@@ -306,7 +306,7 @@ sMechaBone* processMechaMesh_battle(sMechaInitVar4* model, sMechaDataTable1_C* e
         return NULL;
     }
     n++;
-    bones = allocateHeap(n * sizeof(sMechaBone), 0);
+    bones = allocateHeap(PC_HEAP_OF(sMechaBone, n * sizeof(sMechaBone)), 0);
     if (bones == NULL) {
         return NULL;
     }
@@ -1591,7 +1591,7 @@ sMechaInitVar2* initMechaInitVar2_battle(sMechaInitVar2* arg0, s32 count) {
     if (count > 0) {
         arg0->m6_count = count;
         resetMemoryAllocStats(4, 0);
-        arg0->m0_tracks = allocateHeap(count * sizeof(sMechaInitVar2Sub), 0);
+        arg0->m0_tracks = allocateHeap(PC_HEAP_OF(sMechaInitVar2Sub, count * sizeof(sMechaInitVar2Sub)), 0);
         if (arg0->m0_tracks == NULL) {
             return NULL;
         }

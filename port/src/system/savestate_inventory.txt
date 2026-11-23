@@ -547,6 +547,11 @@ system/spu.c transferMode state
 system/stall.c * host the stall watchdog
 system/statefile.c * host save state files
 system/release.c * host which release this copy is and how it was installed (its release.txt, read once at start)
+update/update_check.c * host the update check (XG_UPDATER): its setting's state, the check thread and what it found
+update/update_fetch.c * host the update check's fetcher (libcurl loaded at run time)
+update/update_manifest.c * host the update manifest's reader (no writable statics today)
+update/update_install.c * host the one-click update: its thread, its progress, the copy it installs into
+update/update_archive.c * host the release archive's reader (its CRC table)
 system/sweeplog.c * host sweep logs
 system/todo.c * host PORT_TODO reports
 system/world.c * host the extras' worlds (states wait until none is entered)

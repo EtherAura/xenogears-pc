@@ -418,6 +418,12 @@ void gameStackRun(void (*entry)(void)) {
     }
 }
 
+void gameStackRestart(void (*entry)(void)) {
+    gameEntry = entry;
+    gameSp = newContext(gameStart);
+    running = 1;
+}
+
 void gameStackAbandon(void) {
     onStack = 0;
     hostBounds(0);
@@ -492,6 +498,10 @@ void gameStackRun(void (*entry)(void)) {
 }
 
 void gameStackAbandon(void) {
+}
+
+void gameStackRestart(void (*entry)(void)) {
+    (void)entry;
 }
 
 void gameStackPark(void) {

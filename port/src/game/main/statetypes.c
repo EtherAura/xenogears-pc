@@ -85,3 +85,54 @@ void pcStateForget(const void* start, const void* end) {
 void pcStateHeapFree(const void* start, s32 bytes) {
     if (pcStateRanges.count) pcStateForget(start, (const u8*)start + bytes);
 }
+
+/* ---- safe points (include/pc_state.h) ------------------------------------ */
+
+static s32 safePointId; /* the safe point the game is parked at: a state saved there keeps it */
+static s32 resumePoint; /* after a stackless load: the safe point the mode's entry takes up */
+
+void stateSafePark(void); /* port/src/system/savestate.c */
+void pcBootResume(void);  /* src/main/kernel.c */
+
+void pcSafePoint(s32 where) {
+    if (where == PC_SAFE_NONE) {
+        return; /* (a loop without a resume path where it runs now) */
+    }
+    safePointId = where;
+    stateSafePark();
+    safePointId = 0;
+}
+
+s32 pcResumeAt(void) {
+    return resumePoint;
+}
+
+void pcResumeDone(void) {
+    resumePoint = 0;
+}
+
+void pcResumeGame(void) {
+    resumePoint = safePointId;
+    safePointId = 0;
+    if (resumePoint == PC_SAFE_NONE) {
+        /* tools/statecanon.py makes stackless states of safe points' states only */
+        portTodo(__FUNCTION__, "a state without its stack that was not saved at a safe point");
+    }
+    pcBootResume();
+}
+
+/* ---- the menus' safe points: the mode that opened the menu ----------------- */
+
+static s32 menuHost = -1; /* -1: the menu has no safe points where it runs now */
+
+void pcMenuHost(s32 mode) {
+    menuHost = mode;
+}
+
+s32 pcMenuSafeId(s32 sub) {
+    return menuHost < 0 ? PC_SAFE_NONE : (menuHost << 8) | sub;
+}
+
+s32 pcResumeMenu(void) {
+    return (resumePoint & 0xFF) >= PC_SAFE_SUB_MENU ? (resumePoint & 0xFF) : 0;
+}

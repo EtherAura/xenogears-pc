@@ -143,6 +143,7 @@ static struct {
     float bandOverride;
     int haveBand;
     int lighting, glow, shadows, fog, grade; /* levels, 0 off */
+    int particles, particleSize;             /* particles' level (0 off) and size (0 small .. 2 large) */
     int shadePart, bouncePart;
     int lightDebug, haveLightGain;
     float lightGain;
@@ -165,6 +166,9 @@ static struct {
     /* The shadows' sun in room space, set when the room changes. */
     int sunRoomId, sunSet;
     float sunRoom[3];
+    /* The particles' box (view units), set from the focus when the room changes. */
+    int particleRoomId, particleBoxSet;
+    float particleBox;
     /* Ground points pcSceneFigure gave this frame (room space), and the vblank they belong to. */
     int figureCount;
     uint32_t figureVblank; /* the last point's */
@@ -249,6 +253,13 @@ static void load(void) {
     settingsDescribe("color_grade", "color_grade: off (default), subtle, medium or strong: shadows a little cool and "
                                     "highlights a little warm in fields (the Enhanced engine)");
     sc.grade = levelOf("color_grade");
+    settingsDescribe("particles", "particles: off (default), subtle, medium or strong: ambient particles in fields and on "
+                                  "the world map, dust where the place is lit and embers where it is dark (the Enhanced "
+                                  "engine)");
+    sc.particles = levelOf("particles");
+    settingsDescribe("particle_size", "particle_size: small (default), medium or large: how big the ambient particles are");
+    s = settingsGet("particle_size");
+    sc.particleSize = s != NULL && strcmp(s, "medium") == 0 ? 1 : s != NULL && strcmp(s, "large") == 0 ? 2 : 0;
     s = settingsGet("lighting_shade");
     sc.shadePart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     s = settingsGet("lighting_bounce");
@@ -331,14 +342,34 @@ int sceneGrade(void) {
 void sceneSetFog(int level) { setLevel("fog", &sc.fog, level); }
 void sceneSetGrade(int level) { setLevel("color_grade", &sc.grade, level); }
 
+int sceneParticles(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.particles : 0;
+}
+
+void sceneSetParticles(int level) { setLevel("particles", &sc.particles, level); }
+
+int sceneParticleSize(void) {
+    load();
+    return sc.particleSize;
+}
+
+void sceneSetParticleSize(int size) {
+    static const char* const names[] = {"small", "medium", "large"};
+    load();
+    sc.particleSize = size < 0 ? 0 : size > 2 ? 2 : size;
+    settingsSet("particle_size", names[sc.particleSize]);
+    settingsSave();
+}
+
 const char* sceneLightingStatus(void) {
-    if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && !sceneGrade()) return NULL;
+    if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && !sceneGrade() && !sceneParticles()) return NULL;
     return sc.status != NULL ? sc.status : sc.lightStatus;
 }
 
 int sceneWantsCopy(void) {
     return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0 || sceneFog() != 0 ||
-           sceneGrade() != 0;
+           sceneGrade() != 0 || sceneParticles() != 0;
 }
 
 static void normalize3(float v[3]) {
@@ -358,8 +389,10 @@ static void params(SceneParams* p) {
     LightParams* l = &p->light;
     memset(l, 0, sizeof(*l));
     int lighting = sceneLighting(), glow = sceneGlow(), shadows = sceneShadows(), fog = sceneFog(), grade = sceneGrade();
+    /* Particles: fields and the world map only. */
+    int particles = sc.place == PC_SCENE_FIELD || sc.place == PC_SCENE_WORLDMAP ? sceneParticles() : 0;
     sc.lightStatus = NULL;
-    if (!lighting && !glow && !shadows && !fog && !grade) return;
+    if (!lighting && !glow && !shadows && !fog && !grade && !particles) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
         return;
@@ -396,6 +429,26 @@ static void params(SceneParams* p) {
             l->figure[k][i] = (sc.matrix[i][0] * r[0] + sc.matrix[i][1] * r[1] + sc.matrix[i][2] * r[2]) / 4096.0f + sc.trans[i];
     }
     l->figures = sc.sceneFigureCount;
+    if (particles) {
+        /* The box they wrap in: from the focus when the room starts, then
+         * kept, so a moving camera does not stretch it. */
+        if (!sc.particleBoxSet || sc.particleRoomId != sc.sunRoomId) {
+            sc.particleRoomId = sc.sunRoomId;
+            sc.particleBoxSet = 1;
+            sc.particleBox = 2.5f * (float)(sc.focusZ > 0 ? sc.focusZ : 3000);
+        }
+        static const float sizes[] = {0.45f, 0.75f, 1.1f};
+        l->particles = particles;
+        l->particleSize = sizes[sc.particleSize];
+        /* Seconds, over an hour that repeats (a float keeps them fine). */
+        l->particleTime = (float)(hwVSyncCount() % 216000u) / 60.0f;
+        l->particleBox = sc.particleBox;
+        memcpy(l->roomRot, sc.rot, sizeof(l->roomRot));
+        memcpy(l->roomTrans, sc.trans, sizeof(l->roomTrans));
+        l->blurBand = d->band;
+        l->blurGain = d->gain;
+        l->blurRadius = d->radius;
+    }
     memcpy(l->up, sc.up, sizeof(l->up));
     l->screenZ = sc.screenZ;
     l->centerX = sc.centerX;
@@ -590,6 +643,10 @@ static void finish(int reached) {
             gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f fog %.2f grade %.2f up %.3f %.3f %.3f screen %.0f figures %d",
                    sc.scenes, p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.fogMost, p.light.grade,
                    p.light.up[0], p.light.up[1], p.light.up[2], p.light.screenZ, p.light.figures);
+        if (p.light.particles > 0)
+            gpuLog("scene: %u particles %d size %.2f time %.2f box %.0f blur %.3f %.2f %.2f", sc.scenes, p.light.particles,
+                   p.light.particleSize, p.light.particleTime, p.light.particleBox, p.light.blurBand, p.light.blurGain,
+                   p.light.blurRadius);
     }
 }
 

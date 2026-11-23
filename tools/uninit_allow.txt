@@ -146,7 +146,6 @@ src/menu/m_801D3674.c | setupStatusScreenWeight | rem | FP: set and read under t
 src/menu/m_801D3674.c | setupStatsPolyG4 | rgb | FP: callers pass 0, or scaledStatsVar5 (2/3); the switch covers 0-3
 src/menu/m_801D3674.c | setStatDigitsColor | rgb | FP: callers pass 2 or scaledStatsVar5 - 2 (0/1); the switch covers 0-2
 src/menu/m_801D3674.c | setupStatusScreenEquipNames | load | harmless, reached (gear status): i == 0 may upload the half-drawn name image, which i == 1 then overwrites in the same rect (PS1: stack byte sp+0x48)
-src/menu/m_801D9808.c | processSoundMenu | mode | FP: processSoundMenuSub0 returns only 0-2, all cases
 src/menu/m_801D9F98.c | updateMenuPointerGlyph | x | FP: every caller passes mode 0-3; in mode 1 it is set whenever show stays 1
 src/menu/m_801D9F98.c | updateMenuPointerGlyph | y | FP: every caller passes mode 0-3; in mode 1 it is set whenever show stays 1
 src/menu/m_801DBE54.c | initEtherListMenu | bg | FP: mode comes from runEtherListMenu, only 0-2
@@ -164,9 +163,7 @@ src/menu/m_801DE29C.c | buildEquipCandidateList | gw | FP: set each pass under i
 src/menu/m_801DE29C.c | buildEquipCandidateList | curGw | FP: types 1-4 come only with isSlot, which sets it when isGear != 0
 src/menu/m_801DE29C.c | buildEquipCandidateList | ga | FP: set each pass under isGear != 0, read under the same test
 src/menu/m_801DE29C.c | setupEquipItemDescription | bundle | FP: the category is 0-3 (isGear is 0/1 at every caller), all cases
-src/menu/m_801DE29C.c | runEquipMenu | count | FP: on the first pass page 0 != prevPage 0xFF, so buildEquipCandidateList sets it
 src/menu/m_801E0F78.c | setupSkillMenuPage | pct | harmless: learned skills pass it unset, and the callee reads it only in state 2 (PS1: $s8, the previous entry's)
-src/menu/m_801E23CC.c | openGearMenu | set | FP: on the first pass slot != prev (0xF3), so it is set before both reads
 src/menu/m_801E3088.c | loadMemoryCardIconToVram | y | FP: the loop (0 < 3) always runs and sets it
 src/menu/m_801E3088.c | loadMemoryCardIconToVram | base | FP: the loop (0 < 3) always runs and sets it
 src/menu_gear_shop/gs_801C511C.c | loadGearShopData | bundle | FP: case 0 implies arg0 < 16, the test that sets it

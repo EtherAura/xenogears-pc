@@ -193,6 +193,14 @@ def check_script(text: str, version: str, nsis: str, setup: str, files: dict[str
     check(re.findall(r'^  SetOutPath "([^"]+)"$', text, re.M)
           == ["$INSTDIR", "$INSTDIR\\extra", "$INSTDIR\\extra\\notes", "$INSTDIR"],
           "script: SetOutPath for each folder before its files")
+    update = re.search(r'\$\{GetOptions\} \$R0 "/UPDATE=" \$UpdateExe\n  \$\{If\} \$\{Errors\}\n'
+                       r'  \$\{OrIf\} \$UpdateExe != "xenogears\.exe"\n'
+                       r'  \$\{AndIf\} \$UpdateExe != "xenogears-enhanced\.exe"\n    StrCpy \$UpdateExe ""', text)
+    restart = re.search(r'^    Exec \'"\$WINDIR\\explorer\.exe" "\$INSTDIR\\\$UpdateExe"\'$', text, re.M)
+    check(update is not None and restart is not None and "    Call WaitForTheGame\n" in text
+          and 'FileOpen $R2 "$INSTDIR\\$UpdateExe" a' in text,
+          "script: /UPDATE= takes the two executables only, waits for the game, then starts it again through "
+          "Explorer (the in-app updater's silent update)")
     check(not re.search(r"(Delete|RMDir)[^\n]*\$(APPDATA|LOCALAPPDATA|PROFILE|DOCUMENTS)", text),
           "script: the uninstaller touches none of the player's folders")
     check('"$INSTDIR\\xenogears.exe"' in text and '"$INSTDIR\\xenogears-enhanced.exe"' in text

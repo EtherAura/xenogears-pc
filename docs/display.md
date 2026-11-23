@@ -111,6 +111,17 @@ portraits and the HUD are not touched. The Enhanced engine only (F1 > System
 > Engine). F1 > Display > Fog and Colour grade (each Off, Subtle, Medium,
 Strong).
 
+## Particles
+
+In fields and on the world map, fine dust drifts where the place is lit
+(windows, lamps, sunlit ground) and warm embers where it is dark, chosen by
+how bright the place is. Each stays at its place in the room as the camera
+moves, behind the scenery and the characters in front of it, and as blurred
+as the depth of field makes things at its distance. Dialogue, portraits and
+the HUD are not touched. The Enhanced engine only (F1 > System > Engine).
+F1 > Display > Particles (Off, Subtle, Medium, Strong) and Particle size
+(Small, Medium, Large).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -147,6 +158,8 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Shadows | Off |
 | Fog | Off |
 | Colour grade | Off |
+| Particles | Off |
+| Particle size | Small |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

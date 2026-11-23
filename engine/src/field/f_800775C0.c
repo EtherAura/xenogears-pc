@@ -354,6 +354,9 @@ int portStartMusic(int music); /* port/src/system/options.c */
 void pcGauntletFieldTick(void); /* port/src/game/field/gauntlet_field.c */
 void pcArenaFieldTick(void); /* port/src/game/field/arena_field.c */
 
+void pcFieldSafePoint(s32 firstFrame, s32 comboHeld);
+s32 pcFieldResume(s32* firstFrame, s32* comboHeld);
+
 void fieldEntryPoint(void) {
     s32 midNative = 0; /* Enhanced: inside a native frame (its frames between to come) */
     s32 mode;
@@ -362,6 +365,13 @@ void fieldEntryPoint(void) {
     s32 playTime;
     RECT unused;
 
+    /* a stackless load: the loop goes on where its state was saved (port/src/game/field/resume.c) */
+    switch (pcFieldResume(&firstFrame, &comboHeld)) {
+    case 1:
+        goto fieldLoop;
+    case 2:
+        goto fieldMenu; /* a menu loop's safe point: the menu goes on (openFieldMenu) */
+    }
     if (runningOnDTL != -1) {
         fieldDebugDisable = 0;
     } else {
@@ -431,6 +441,10 @@ void fieldEntryPoint(void) {
     fieldTransitionCompleted = 1;
 
     while (1) {
+    fieldLoop:
+        if (!midNative) {
+            pcFieldSafePoint(firstFrame, comboHeld); /* between the Original's frames: a canonical state's place */
+        }
 #if !VERSION_JP
         /* US only: wait while the controller is disconnected */
         if (!midNative && isControllerConnected(0) == 0) {
@@ -622,6 +636,7 @@ void fieldEntryPoint(void) {
                 (fieldSceneState.m290_actorArray[g_playerControlledActor].m4C_scriptEntity->m0_fieldScriptFlags & 0x1800) == 0) {
                 releaseAllDialogWindows();
                 pcFieldPreviewSettle(); /* Enhanced: the menu opens on the native frame (xg-hbc.19.3) */
+            fieldMenu:
                 openFieldMenu();
                 g_menuIdToOpen = 0xFF;
             }

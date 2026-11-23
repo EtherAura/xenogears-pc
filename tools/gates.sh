@@ -59,6 +59,15 @@
 #               tools/pc_link.py with the JP symbol files and layouts, which the
 #               US build never runs; skipped when an explicit one is missing
 #   payload-jp  the payload gate on that JP executable
+#   updater     the US executable with the update check (-DXG_UPDATER=ON:
+#               port/src/update, ui/updates.cpp), which no other build has
+#               while releases leave it out (xg-4oq.14.7), in
+#               $XG_UPDATER_BUILD (default build/pc/gates-updater, configured
+#               on first use like the US one): it links, and holds the
+#               updater; skipped when an explicit one is missing
+#   statevars-updater, payload-updater  those gates on that executable (the
+#               updater's statics are classified, no retail data came with it);
+#               its unit tests (updatechecktest) run with the port tests
 #   payload-android  the payload gate on each Android game library built in
 #               build/android (tools/build_android.sh); skipped when none is
 #   beetle-capture frame-boundary capture regressions, without a core or discs
@@ -103,6 +112,7 @@ TESTS=1
 TEST_BUILD="${XG_TEST_BUILD:-build/pc/gates}"
 SCHEMA_BUILD="${XG_SCHEMA_BUILD:-build/pc/schema}"
 TEST_BUILD_JP="${XG_TEST_BUILD_JP:-build/pc/gates-jp}"
+UPDATER_BUILD="${XG_UPDATER_BUILD:-build/pc/gates-updater}"
 for a in "$@"; do
     case "$a" in
     --no-ninja) NINJA=0 ;;
@@ -259,6 +269,35 @@ if [ "$TESTS" = 1 ] && [ -f "$TEST_BUILD_JP/CMakeCache.txt" ]; then
     fi
 elif [ "$TESTS" = 1 ]; then
     record port-jp 0 "skipped: no configured build in $TEST_BUILD_JP"
+fi
+
+# The update check (port/src/update, xg-4oq.14.3): built only with -DXG_UPDATER=ON, which the
+# test builds, the user's launcher and releases leave off until xg-4oq.14.7. The executable with
+# it, so that its code is compiled and linked as it changes, then the gates on that executable.
+if [ "$TESTS" = 1 ] && [ -z "${XG_UPDATER_BUILD:-}" ] && [ ! -f "$UPDATER_BUILD/CMakeCache.txt" ]; then
+    "$PY" tools/pc_sources.py > /dev/null &&
+        cmake -S port -B "$UPDATER_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DXG_VERSION=US -DXG_EXTRAS=ON \
+            -DXG_UPDATER=ON > "$OUT/configure-updater.txt" 2>&1
+fi
+if [ "$TESTS" = 1 ] && [ -f "$UPDATER_BUILD/CMakeCache.txt" ]; then
+    if ! grep -q '^XG_UPDATER:BOOL=ON$' "$UPDATER_BUILD/CMakeCache.txt"; then
+        record updater 1 "$UPDATER_BUILD is not configured with -DXG_UPDATER=ON"
+    elif cmake --build "$UPDATER_BUILD" --target xenogears > "$OUT/updater.txt" 2>&1; then
+        # The manifest's name is the updater's own string: a build that left it out has none.
+        if grep -aq 'xenogears-pc-update.txt' "$UPDATER_BUILD/xenogears"; then
+            record updater 0 "US executable with the update check linked in ${UPDATER_BUILD#"$ROOT"/}"
+        else
+            record updater 1 "$UPDATER_BUILD/xenogears has no update check in it"
+        fi
+        gate statevars-updater "$PY" tools/statecheck.py inventory "$UPDATER_BUILD"
+        gate payload-updater "$PY" tools/payloadcheck.py --build "$UPDATER_BUILD"
+    else
+        line=$(grep -m1 'error:' "$OUT/updater.txt" || grep -m1 '^pc_link:' "$OUT/updater.txt" ||
+            grep -m1 'FAILED' "$OUT/updater.txt")
+        record updater 1 "$(cut -c1-200 <<< "$line")"
+    fi
+elif [ "$TESTS" = 1 ]; then
+    record updater 0 "skipped: no configured build in $UPDATER_BUILD"
 fi
 
 # The Android game libraries (tools/build_android.sh), when built in this tree: what an APK

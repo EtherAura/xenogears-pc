@@ -161,7 +161,7 @@ void iniMenuContext364And380(u8 index, u16 x, u16 y, u16 width, u16 height, u8 a
     MenuContext_380* anim;
 
     if (index >= 2) {
-        gMenuContext->m364_menuBoxes[index] = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_364), 0x720), 0);
+        gMenuContext->m364_menuBoxes[index] = allocateHeap(PC_HEAP_OF(MenuContext_364, PC_HEAP_SIZED(sizeof(MenuContext_364), 0x720)), 0);
         bzero(gMenuContext->m364_menuBoxes[index], sizeof(MenuContext_364));
         gMenuContext->m380_menuBoxAnims[index] = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_380), 0x18), 0);
         bzero(gMenuContext->m380_menuBoxAnims[index], sizeof(MenuContext_380));

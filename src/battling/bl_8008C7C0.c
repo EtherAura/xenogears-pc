@@ -661,7 +661,7 @@ BattlingEmitter* createBattlingEmitter(s32 type, s32 shape) {
     BattlingParticleType* t;
 
     traceNextAlloc(0x15);
-    e = allocateHeap((s32)sizeof(BattlingEmitter), 0);
+    e = allocateHeap(PC_HEAP_OF(BattlingEmitter, (s32)sizeof(BattlingEmitter)), 0);
     e->m24_size[0] = 0x1000;
     e->m24_size[1] = 0x1000;
     e->m24_size[2] = 0x1000;

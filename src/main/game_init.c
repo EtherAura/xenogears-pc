@@ -383,6 +383,11 @@ void processDebugMenuForMenuList(void) {
     void* p0;
     void* p1;
 
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() && useDebugMenuList == 0) {
+        goto dispatch; /* a stackless load: the menu opened from a mode goes on (include/pc_state.h) */
+    }
+#endif
     if (useDebugMenuList != 0) {
         do {
             logToScreen("\n\n     Menu=(%d)%s\n", menu, debugMenuNames[menu]);
@@ -492,6 +497,9 @@ void processDebugMenuForMenuList(void) {
         waitReadCompletion(0);
     }
     setCurrentDirectory(0x10, 0);
+#ifdef PLATFORM_PC
+dispatch:
+#endif
     switch (menuToEnter) {
     case 0:
         menu2_loadGame_entryPoint();
@@ -533,7 +541,15 @@ void processDebugMenuForMenuList(void) {
 }
 
 void enterMenu(void) {
-    gMenuContext = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext), 0x1e98), 0);
+#ifdef PLATFORM_PC
+    if (pcResumeMenu()) {
+        /* a stackless load: the menu context is the state's; its screen goes on (include/pc_state.h) */
+        processDebugMenuForMenuList();
+        useDebugMenuList = 1;
+        return;
+    }
+#endif
+    gMenuContext = allocateHeap(PC_HEAP_OF(MenuContext, PC_HEAP_SIZED(sizeof(MenuContext), 0x1e98)), 0);
     bzero(gMenuContext, sizeof(MenuContext));
     gMenuContext->m325_menuButton = 8;
     resetMemoryAllocStats(2, 0);

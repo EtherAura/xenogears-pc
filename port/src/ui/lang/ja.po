@@ -3023,6 +3023,144 @@ msgstr "リリースではありません: テスト用ビルド"
 msgid "Release %s, %s"
 msgstr "リリース %s、%s"
 
+msgid "Ask at the next start"
+msgstr "次の起動時にたずねる"
+
+msgid "Once a day"
+msgstr "1日1回"
+
+msgid "Never"
+msgstr "しない"
+
+msgid "Look for a new version of the port once a day?"
+msgstr "ポートの新しいバージョンを1日1回確認しますか?"
+
+msgid "The game would ask GitHub for the latest release's small signed file; nothing about you is sent. A new version shows in a corner note and in F1, System, Updates, where this can be changed."
+msgstr "最新リリースのサイン付きの小さなファイルを GitHub から取得します。あなたについての情報は何も送りません。新しいバージョンは画面のすみのおしらせと F1 のシステム > アップデートに表示されます。この設定はそこで変えられます。"
+
+msgid "Cancel: ask again at the next start."
+msgstr "キャンセル: 次の起動時にもう一度たずねます。"
+
+msgid "Updates"
+msgstr "アップデート"
+
+msgid "New version"
+msgstr "新しいバージョン"
+
+msgid "Xenogears PC port %s is out (this is %s)."
+msgstr "ゼノギアス PC 移植版 %s が出ています(これは %s)。"
+
+msgid "Open the release page"
+msgstr "リリースのページを開く"
+
+msgid "Skip this version"
+msgstr "このバージョンを飛ばす"
+
+msgid "Its release page has the downloads. Skipped, it is not shown again; a later version is."
+msgstr "ダウンロードはリリースのページにあります。飛ばしたバージョンはもう表示しません。それより新しいバージョンは表示します。"
+
+msgid "Your package manager installs it: its release page has the new package. Skipped, it is not shown again; a later version is."
+msgstr "パッケージマネージャーでインストールします: 新しいパッケージはリリースのページにあります。飛ばしたバージョンはもう表示しません。それより新しいバージョンは表示します。"
+
+msgid "Check for updates"
+msgstr "アップデート確認"
+
+msgid "Once a day at most, the game asks GitHub for the latest release's update file and its signature (two small files); nothing about you is sent. A new version shows here and in a corner note. Ask: the question before the game, at the next start."
+msgstr "多くても1日1回、最新リリースのアップデートファイルとそのサイン(小さなファイル2つ)を GitHub から取得します。あなたについての情報は何も送りません。新しいバージョンはここと画面のすみのおしらせに表示します。たずねる: 次の起動時、ゲームの前にたずねます。"
+
+msgid "This is a development build: it never checks."
+msgstr "これはテスト用ビルドです: 確認はしません。"
+
+msgid "Not in this run (headless, or an online session)."
+msgstr "今回の実行では確認しません(ヘッドレス、またはオンラインセッション中)。"
+
+msgid "No check is possible: %s."
+msgstr "確認できません: %s。"
+
+msgid "Last check"
+msgstr "最後の確認"
+
+msgid "Checking..."
+msgstr "確認しています..."
+
+msgid "Last checked %s."
+msgstr "最後の確認: %s。"
+
+msgid "Not checked yet."
+msgstr "まだ確認していません。"
+
+msgid "%s: version %s found."
+msgstr "%s: バージョン %s が見つかりました。"
+
+msgid "%s: this is the latest release."
+msgstr "%s: これが最新のリリースです。"
+
+msgid "%s: version %s, skipped."
+msgstr "%s: バージョン %s(飛ばしました)。"
+
+msgid "%s: no update is offered yet."
+msgstr "%s: アップデートはまだありません。"
+
+msgid "%s: the latest release has no update file."
+msgstr "%s: 最新のリリースにアップデートファイルがありません。"
+
+msgid "%s: the update file is not signed by the release key: nothing is offered."
+msgstr "%s: アップデートファイルがリリースのサインと合いません: 何も表示しません。"
+
+msgid "%s: the update file is of a kind this build cannot read."
+msgstr "%s: このビルドでは読めない種類のアップデートファイルです。"
+
+msgid "%s: no check is possible on this system."
+msgstr "%s: このシステムでは確認できません。"
+
+msgid "%s: the check failed."
+msgstr "%s: 確認に失敗しました。"
+
+msgid "Check now"
+msgstr "今すぐ確認"
+
+msgid "Check now looks at once, whenever the last check was. Only while checks are on."
+msgstr "「今すぐ確認」は最後の確認がいつでも、すぐに確認します。確認がオンのときだけ使えます。"
+
+msgid "%.1f of %.1f MB"
+msgstr "%.1f / %.1f MB"
+
+msgid "Looking at the release..."
+msgstr "リリースを確認しています..."
+
+msgid "Checking the download..."
+msgstr "ダウンロードを確認しています..."
+
+msgid "Unpacking..."
+msgstr "展開しています..."
+
+msgid "Downloading..."
+msgstr "ダウンロードしています..."
+
+msgid "Cancel the install"
+msgstr "インストールをやめる"
+
+msgid "Starting the new version..."
+msgstr "新しいバージョンを起動しています..."
+
+msgid "The install stopped: %s."
+msgstr "インストールを中止しました: %s。"
+
+msgid "Installing it from here is not possible: %s."
+msgstr "ここからはインストールできません: %s。"
+
+msgid "Install and restart"
+msgstr "インストールして再起動"
+
+msgid "Install Xenogears PC port %s now? The game downloads its setup and checks it, then closes; Windows asks for permission, and the setup installs it and starts the game again. Progress since your last save is lost; the settings, memory cards and save states are kept."
+msgstr "ゼノギアス PC 移植版 %s を今インストールしますか? セットアップをダウンロードして確認し、ゲームを終了します。Windows が許可を求め、セットアップがインストールしてゲームをもう一度起動します。最後にセーブしてからの進み具合は失われます。設定、メモリーカード、ステートセーブはそのままです。"
+
+msgid "Install Xenogears PC port %s now? The game downloads it, checks it, puts it in place of this copy's files and starts again. Progress since your last save is lost; the settings, memory cards and save states are kept."
+msgstr "ゼノギアス PC 移植版 %s を今インストールしますか? ダウンロードして確認し、今のファイルと入れ替えて、ゲームをもう一度起動します。最後にセーブしてからの進み具合は失われます。設定、メモリーカード、ステートセーブはそのままです。"
+
+msgid "Install and restart downloads it, checks it against the signed manifest, puts it in place of this copy's files and starts the game again; the settings and saves are kept. Skipped, it is not shown again; a later version is."
+msgstr "「インストールして再起動」は新しいバージョンをダウンロードし、サイン付きのアップデートファイルと照らして確認し、今のファイルと入れ替えてゲームをもう一度起動します。設定とセーブはそのままです。飛ばしたバージョンはもう表示しません。それより新しいバージョンは表示します。"
+
 #: port/src/ui/sections.cpp
 #, c-format
 msgid "Compiler: clang %s"
@@ -7415,6 +7553,24 @@ msgstr "フィールド、戦闘、ワールドマップで、キャラクター
 
 msgid "Colour grade"
 msgstr "カラーグレード"
+
+msgid "Particles"
+msgstr "パーティクル"
+
+msgid "Particle size"
+msgstr "パーティクルの大きさ"
+
+msgid "Small"
+msgstr "小"
+
+msgid "Large"
+msgstr "大"
+
+msgid "In fields and on the world map, fine dust drifting where the place is lit, and warm embers where it is dark. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールドとワールドマップで、明るい場所には細かなほこりが、暗い場所にはあたたかな火のこがただよいます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+
+msgid "How big the particles are. Small by default."
+msgstr "パーティクルの大きさです。初期設定は小です。"
 
 msgid "In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default."
 msgstr "フィールド、戦闘、ワールドマップで、暗い部分を少しつめたい色に、明るい部分を少しあたたかい色にして、色とコントラストを少し強めます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"

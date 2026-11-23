@@ -36,6 +36,7 @@ void quitRequest(void);       /* ask for a quit (any thread) */
 int quitRequested(void);
 void quitPoll(int pump);      /* quit now if asked; pump: also look for the window closing */
 void quitNow(void);           /* shut down and exit (game thread) */
+void quitAndStart(const char* exe); /* the same, starting exe once shut down (an update: engine.c) */
 
 /* stall.c: notices a game thread that reaches no safe point (a game loop
  * that waits for an interrupt and calls nothing) and reports it. */

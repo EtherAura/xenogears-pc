@@ -135,6 +135,13 @@ union SDL_Event;
 enum { UI_SETUP_NO_DISC = 1, UI_SETUP_BIOS = 2 };
 int uiDiscSetup(const char* region, int flags, char* chosen, unsigned long size);
 
+/* Only in a build with the updater (XG_UPDATER; port/src/update/update_check.h): before
+ * kernelMain while update_check is ask: the question, once, in a window of the
+ * game's own (ui/updates.cpp): check for a new version once a day, or never. The
+ * answer is written to settings.ini; Esc or the cancel button leaves it for the
+ * next start. F1 > System > Updates changes it later. */
+void uiAskUpdates(void);
+
 /* port/src/system/pad.c */
 void uiRequestToggle(void);             /* F1, gamepad Guide or L3+R3 */
 void uiRequestBacklog(void);            /* the dialogue backlog (system/backlog.h): opens it, or closes it */

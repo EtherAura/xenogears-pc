@@ -31,6 +31,10 @@
 #include "gte_pc.h"
 #include "pc_geometry.h"
 #include "../system/ps1time.h"
+#ifdef XG_UPDATER
+#include "update/update_check.h"
+#include "update/update_install.h"
+#endif
 /* system/ps1time.c (weak: the GPU tests link this file without it). */
 void ps1timeDrawSync(void) __attribute__((weak));
 void ps1timeGpuQueued(char what) __attribute__((weak));
@@ -221,6 +225,10 @@ static void vblank(void) {
 #ifdef __ANDROID__
     if (androidPerfVBlank != NULL) androidPerfVBlank(); /* the game thread's work, for the phone's governor */
     if (androidBiosVBlank != NULL) androidBiosVBlank(); /* a BIOS image the activity opened meanwhile */
+#endif
+#ifdef XG_UPDATER
+    updateVBlank(); /* the update check: one that finished taken in, the daily one started (update/update_check.h) */
+    updateInstallVBlank(); /* an update ready to install: put in place, the game started again (update_install.h) */
 #endif
     vramStampClock(g.vblanks);
     textureDumpVBlank(g.vblanks);

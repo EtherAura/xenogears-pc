@@ -14,6 +14,18 @@ u8 openStatusMenu(void) {
     s32 i;
 
     keepGoing = 1;
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() == PC_SAFE_SUB_STATUS || pcResumeMenu() == PC_SAFE_SUB_STATUS_EQUIP ||
+        pcResumeMenu() == PC_SAFE_SUB_STATUS_ETHER || pcResumeMenu() == PC_SAFE_SUB_SKILLS) {
+        /* a stackless load: the screen's frame, or the sub-screen it opened, goes on (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_STATUS, 3, PC_LOCAL(prev), PC_LOCAL(first), PC_LOCAL(slot));
+        if (pcResumeMenu() == PC_SAFE_SUB_STATUS) {
+            pcResumeDone();
+            goto statusLoop;
+        }
+        goto statusChild;
+    }
+#endif
     prev = 0xF3;
     first = 1;
     slot = gMenuContext->m4DC_currentlySelectedCharacter;
@@ -27,6 +39,11 @@ u8 openStatusMenu(void) {
         }
     }
     while (keepGoing) {
+#ifdef PLATFORM_PC
+    statusLoop:
+        pcMenuKeep(PC_SAFE_SUB_STATUS, 3, PC_LOCAL(prev), PC_LOCAL(first), PC_LOCAL(slot));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_STATUS)); /* between frames: a canonical state's place */
+#endif
         menuDraw();
         if (slot != prev) {
             setupStatusMenuForCharacter1(gMenuContext->m330_itemData, gMenuContext->m33C_drawFlags->m30_partyMemberId[slot]);
@@ -52,9 +69,16 @@ u8 openStatusMenu(void) {
             gMenuContext->m33C_drawFlags->m7_drawCurrentSelectedCharacterInfoCard = 0;
             gMenuContext->m33C_drawFlags->m8_drawCurrentSelectedCharacterStats = 0;
             gMenuContext->m33C_drawFlags->m4B_draw360 = 0;
+#ifdef PLATFORM_PC
+            pcMenuKeep(PC_SAFE_SUB_STATUS, 3, PC_LOCAL(prev), PC_LOCAL(first), PC_LOCAL(slot)); /* as the sub-screen finds them */
+        statusChild:
+#endif
             switch (gMenuContext->m338_currentSelectedSubMenuEntry) {
             case 0:
                 gMenuContext->m33C_drawFlags->mA_354Enabled = 0;
+#ifdef PLATFORM_PC
+                pcMenuChild(PC_SAFE_SUB_STATUS_EQUIP);
+#endif
                 runEquipMenu(slot, 0, 0);
                 freeEquipMenu();
                 setupStatusMenuForCharacter3Sub2(slot, 0, 0, 0);
@@ -65,6 +89,9 @@ u8 openStatusMenu(void) {
                 gMenuContext->m33C_drawFlags->mA_354Enabled = 1;
                 break;
             case 1:
+#ifdef PLATFORM_PC
+                pcMenuChild(PC_SAFE_SUB_STATUS_ETHER);
+#endif
                 runEtherListMenu(slot, 0, 0);
                 freeEtherListMenu(0);
 #if !VERSION_JP

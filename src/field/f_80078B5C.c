@@ -593,6 +593,12 @@ static const char* const menuOverlayModules[7] = {
 #endif
 
 /* open the field menu g_menuIdToOpen: free the field VRAM/heap, run enterMenu, reload */
+#ifdef PLATFORM_PC
+/* port/src/game/field/resume.c: openFieldMenu's locals across the menu */
+void pcFieldMenuKeep(void* menuBuffer, uptr heapTop, void* walkMeshCopy, void* mechaState, u32 sfxLoops, s32 wideKind);
+s32 pcFieldMenuTake(void** menuBuffer, uptr* heapTop, void** walkMeshCopy, void** mechaState, u32* sfxLoops, s32* wideKind);
+#endif
+
 void openFieldMenu(void) {
     RECT rect;
     LoadingBatchCommand load[5];
@@ -608,6 +614,11 @@ void openFieldMenu(void) {
     u32 sfxLoops = 0;
 #endif
 
+#ifdef PLATFORM_PC
+    if (PC_SAFE_MODE(pcResumeAt()) == PC_SAFE_MODE(PC_SAFE_FIELD) && pcResumeMenu()) {
+        goto menuResume;
+    }
+#endif
     walkMeshCopy = NULL;
     if (g_menuIdToOpen == 0x80 && g_menuDisabled != 0) {
         return;
@@ -737,7 +748,17 @@ void openFieldMenu(void) {
         s32 wideKind = pcWideSetMode(PC_WIDE_MENU);
         sfxLoops = pcFieldSfxLoopingMask(); /* original-game bug fixes: sfxkeep.c */
         pcFieldWideMenu(1); /* the field's opt-out is not the menu's */
+        /* what outlives the menu, for a menu loop's safe point (port/src/game/field/resume.c) */
+        pcFieldMenuKeep(menuBuffer, heapTop, walkMeshCopy, mechaState, sfxLoops, wideKind);
+        if (0) {
+        menuResume: /* a stackless load: the menu goes on; this function's locals come back */
+            pcFieldMenuTake(&menuBuffer, &heapTop, &walkMeshCopy, &mechaState, &sfxLoops, &wideKind);
+            pcWideSetMode(PC_WIDE_MENU);
+            pcFieldWideMenu(1);
+        }
+        pcMenuHost(PC_SAFE_MODE(PC_SAFE_FIELD));
         enterMenu();
+        pcMenuHost(-1);
         pcFieldWideMenu(0);
         pcWideSetMode(wideKind);
     }

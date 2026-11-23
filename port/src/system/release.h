@@ -52,6 +52,8 @@ const char* releaseKindName(ReleaseKind kind);
 int releaseUpdatesItself(ReleaseKind kind);
 /* Writes one line to stderr: the release and the file it came from. */
 void releaseLog(void);
+/* For the tests: the release file read again at the next call (XG_RELEASE_FILE changed). */
+void releaseForget(void);
 
 /* 1 when v is a release version: YYYY.MM.N as the release tags spell it (no v, month 01-12, N a whole
  * number from 0 without leading zeros). */

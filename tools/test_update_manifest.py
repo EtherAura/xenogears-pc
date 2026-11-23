@@ -23,6 +23,9 @@
    the new key is encrypted, mode 0600, and public prints the same half.
 5. The C test's fixture (port/src/update/test/updatemanifesttest.c) is the
    tool's output for its public seed: the same manifest bytes and signature.
+6. The keys the port trusts (port/src/update/update_manifest.c): 32 bytes
+   each, Ed25519 public keys to OpenSSL, the fixture key not among them, and
+   the count the table's own.
 
 Needs openssl 3 on PATH. Exit status 1 on any failure.
 """
@@ -44,6 +47,8 @@ ROOT = Path(__file__).resolve().parent.parent
 PACKAGING = ROOT / "tools/publish/repo-port/packaging"
 HELPERS = ("update_manifest.py", "linux_release.py", "windows_release.py")
 C_TEST = ROOT / "port/src/update/test/updatemanifesttest.c"
+C_SOURCE = ROOT / "port/src/update/update_manifest.c"
+SPKI_ED25519 = bytes.fromhex("302a300506032b6570032100")
 FIXTURE_SEED_TEXT = b"xenogears-pc update manifest test key: public, trusted by no build"
 PKCS8_ED25519 = bytes.fromhex("302e020100300506032b657004220420")
 REPO = "https://github.com/EtherAura/xenogears-pc"
@@ -297,6 +302,29 @@ def fixture_tests(public: Path, work: Path) -> None:
           and re.search(r'FIXTURE_KEY = "([0-9a-f]{64})"', text)[1] in r.stdout, "the C test's fixture key is its seed's")
 
 
+def trusted_key_tests(work: Path) -> None:
+    text = C_SOURCE.read_text()
+    m = re.search(r"static const uint8_t TRUSTED_KEYS\[\]\[32\] = \{\n(.*?)\n\};\n", text, re.S)
+    if not check(m is not None, "update_manifest.c has its table of trusted keys"):
+        return
+    body = re.sub(r"/\*.*?\*/", "", m[1], flags=re.S)
+    rows = re.findall(r"\{([^{}]*)\}", body)
+    keys = [bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})\b", row)) for row in rows]
+    check(len(keys) >= 1 and all(len(k) == 32 for k in keys) and len(set(keys)) == len(keys),
+          "the trusted keys are 32 bytes each, at least one, none twice")
+    fixture = re.search(r'FIXTURE_KEY = "([0-9a-f]{64})"', C_TEST.read_text())
+    check(fixture is not None and bytes.fromhex(fixture[1]) not in keys, "the fixture key is not trusted")
+    for i, k in enumerate(keys):
+        der = work / f"trusted-{i}.der"
+        der.write_bytes(SPKI_ED25519 + k)
+        r = subprocess.run(["openssl", "pkey", "-pubin", "-inform", "DER", "-in", der, "-noout", "-text"],
+                           capture_output=True, text=True)
+        check(r.returncode == 0 and "ED25519 Public-Key" in r.stdout,
+              f"trusted key {k[:8].hex()} is an Ed25519 public key to OpenSSL")
+    check("TRUSTED_COUNT = (int)(sizeof TRUSTED_KEYS / sizeof TRUSTED_KEYS[0]);" in text,
+          "the trusted key count is the table's")
+
+
 def main() -> int:
     if not shutil.which("openssl"):
         print("test_update_manifest: no openssl on PATH")
@@ -313,6 +341,7 @@ def main() -> int:
         sign_tests(public, work)
         keygen_tests(public, work)
         fixture_tests(public, work)
+        trusted_key_tests(work)
     if FAILURES:
         print(f"test_update_manifest: {len(FAILURES)} check(s) failed")
         return 1

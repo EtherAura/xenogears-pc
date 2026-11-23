@@ -14,6 +14,9 @@
 #                                          # the app's version (a release's, from its tag), instead of
 #                                          # git's: the latest tag + short hash, and the commit count
 #   tools/build_android.sh --native-only   # the libraries, no APK
+#   tools/build_android.sh --updater       # with the opt-in update check (-DXG_UPDATER=ON, and the
+#                                          # INTERNET permission: port/src/update, xg-4oq.14.3); off
+#                                          # by default and in releases until xg-4oq.14.7
 #
 # Needs (docs/ANDROID_PLAN.md "Android tooling"): the Android SDK in
 # $ANDROID_HOME (default ~/Android/sdk: platform android-36, build-tools
@@ -55,6 +58,7 @@ VERSION_NAME=
 VERSION_CODE=
 VARIANT=debug
 NATIVE_ONLY=0
+UPDATER=OFF
 while [ $# -gt 0 ]; do
     case "$1" in
     --abi) ABIS+=("$2"); shift ;;
@@ -69,6 +73,7 @@ while [ $# -gt 0 ]; do
         VERSION_CODE="$2"; shift ;;
     --release) VARIANT=release ;;
     --native-only) NATIVE_ONLY=1 ;;
+    --updater) UPDATER=ON ;;
     -h | --help) sed -n '2,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) echo "build_android.sh: unknown option $1" >&2; exit 2 ;;
     esac
@@ -189,7 +194,7 @@ for abi in "${ABIS[@]}"; do
             cmake -S port -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$API" \
                 -DANDROID_STL=c++_shared -DXG_VERSION="${region^^}" -DXG_ENGINE="$engine" -DXG_EXTRAS=ON \
-                -DXG_SHARED=ON -DXG_LTO=OFF -DXG_DIST=ON \
+                -DXG_SHARED=ON -DXG_LTO=OFF -DXG_DIST=ON -DXG_UPDATER="$UPDATER" \
                 -DSDL3_DIR="$sdl/lib/cmake/SDL3" -DVulkan_GLSLC_EXECUTABLE="$GLSLC" \
                 -DXG_LD="$gnu_ld" -DXG_OBJCOPY="$gnu_objcopy" -DXG_PROBE_CC="$(command -v gcc)" \
                 -DPython3_EXECUTABLE="$PY"
@@ -230,7 +235,7 @@ task=assemble${VARIANT^}
 rm -f "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk
 "$GRADLE" -p port/android --project-cache-dir "$OUT/gradle-cache" --no-daemon \
     -Pxg.sdlSource="$SDL3_SOURCE" -Pxg.jniLibs="$OUT/jniLibs" -Pxg.abis="$abilist" -Pxg.buildRoot="$OUT/gradle" \
-    -Pxg.assets="$OUT/assets" -Pxg.idSuffix="$ID_SUFFIX" \
+    -Pxg.assets="$OUT/assets" -Pxg.idSuffix="$ID_SUFFIX" -Pxg.updater="${UPDATER,,}" \
     ${VERSION_NAME:+-Pxg.versionName="$VERSION_NAME"} ${VERSION_CODE:+-Pxg.versionCode="$VERSION_CODE"} \
     "$task"
 ls -l "$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk

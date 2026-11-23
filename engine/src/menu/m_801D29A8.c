@@ -84,7 +84,7 @@ void setupMenu0(void) {
 
     if (menuToEnter == 0) {
         for (j = 0; j < 2; j++) {
-            gMenuContext->m364_menuBoxes[j] = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_364), (s32)0x720), 0);
+            gMenuContext->m364_menuBoxes[j] = allocateHeap(PC_HEAP_OF(struct MenuContext_364, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_364), (s32)0x720)), 0);
             bzero(gMenuContext->m364_menuBoxes[j], (s32)sizeof(struct MenuContext_364));
             gMenuContext->m380_menuBoxAnims[j] = allocateHeap(PC_HEAP_BYTES(0x18), 0);
             bzero(gMenuContext->m380_menuBoxAnims[j], 0x18);
@@ -182,7 +182,7 @@ void processLoadSaveMenuSub7(void) {
 /* glyph 0x107 marker in m43C */
 void setupScrollBarThumb(s32 x, s32 y, s32 h) {
     if (!gMenuContext->m33C_drawFlags->m49_draw43C) {
-        gMenuContext->m43C_scrollBarThumb = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_43C), (s32)0x74), 0);
+        gMenuContext->m43C_scrollBarThumb = allocateHeap(PC_HEAP_OF(struct MenuContext_43C, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_43C), (s32)0x74)), 0);
         bzero(gMenuContext->m43C_scrollBarThumb, (s32)sizeof(struct MenuContext_43C));
     }
     setupStringInPolyFT4(gMenuContext->m2DC_font, 0x107, gMenuContext->m43C_scrollBarThumb, gMenuContext->m308_oddOrEven, x, y, 0x1000);

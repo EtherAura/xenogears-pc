@@ -254,13 +254,13 @@ s32 createParticleEffect(s32 actorId) {
     currentParticleCreatorId = actorId;
     activeParticleEffectsTable[i] = 1;
     activeParticleEffectActors[i] = actorId;
-    e = allocateHeap(PC_HEAP_SIZED(sizeof(sParticleEffect), 0x3c0), 0);
+    e = allocateHeap(PC_HEAP_OF(sParticleEffect, PC_HEAP_SIZED(sizeof(sParticleEffect), 0x3c0)), 0);
     fieldParticleEffects[i] = e;
     *e = particleCreationSetup;
     c = e->m0_configs;
     for (i = 0; i < 8; i++, c++) {
         if (c->m6_maxParticles) {
-            c->m2C_particles = allocateHeap(PC_HEAP_SIZED(c->m6_maxParticles * sizeof(sParticle), c->m6_maxParticles * 0xc0), 0);
+            c->m2C_particles = allocateHeap(PC_HEAP_OF(sParticle, PC_HEAP_SIZED(c->m6_maxParticles * sizeof(sParticle), c->m6_maxParticles * 0xc0)), 0);
             for (j = 0; j < c->m6_maxParticles; j++) {
                 c->m2C_particles[j].m0_isActive = 0;
                 initParticlesPoly(&c->m2C_particles[j], c->m54_shape, ((c->m2A_flags << 16) >> 24) + 1 & 3);

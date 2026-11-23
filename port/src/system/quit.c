@@ -54,8 +54,12 @@ extern void* __dso_handle;
 void gpuShutdown(void);
 void rewindShutdown(void) __attribute__((weak));
 void workersShutdown(void) __attribute__((weak)); /* workers.c: the helper threads, before SDL_Quit */
+void updateShutdown(void) __attribute__((weak));  /* update/update_check.c (XG_UPDATER): its check's thread */
+
+int engineStartAfter(const char* exe); /* engine.c */
 
 static volatile sig_atomic_t requested; /* 0, or the signal number (-1: the window) */
+static char startAfter[2048];           /* quitAndStart: the executable started once the rest has shut down */
 static volatile sig_atomic_t quitting;
 static uint64_t lastPump;
 static const char* volatile step = "the game thread reaching a safe point"; /* for the watchdog's message */
@@ -198,6 +202,8 @@ void quitNow(void) {
     if (rewindShutdown) rewindShutdown();
     step = "workers shutdown";
     if (workersShutdown) workersShutdown();
+    step = "update check shutdown";
+    if (updateShutdown) updateShutdown();
     step = "GPU shutdown";
     quitting = 1;
     fprintf(stderr, "xenogears: quit\n");
@@ -210,9 +216,19 @@ void quitNow(void) {
 #endif
     step = "SDL_Quit";
     SDL_Quit();
+    if (startAfter[0] != '\0') {
+        step = "start after";
+        fprintf(stderr, "xenogears: starting %s\n", startAfter);
+        if (!engineStartAfter(startAfter)) fprintf(stderr, "xenogears: could not start %s\n", startAfter);
+    }
     step = "exit handlers";
     fflush(NULL);
     processEnd();
+}
+
+void quitAndStart(const char* exe) {
+    snprintf(startAfter, sizeof startAfter, "%s", exe);
+    quitNow();
 }
 
 void quitPoll(int pump) {

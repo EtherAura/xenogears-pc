@@ -107,7 +107,7 @@ void allocateShapeTransfert(s32 size, s32 flags) {
     s32 retailBytes = size * 2;
     size *= 2;
     shapeTransfertTableSize = size;
-    shapeTransfertBuffer[0] = allocateHeap(PC_HEAP_SIZED(size * 2, retailBytes), flags);
+    shapeTransfertBuffer[0] = allocateHeap(PC_HEAP_OF(PC_PRIMS, PC_HEAP_SIZED(size * 2, retailBytes)), flags);
     shapeTransfertBuffer[1] = shapeTransfertBuffer[0] + size;
     shapeTransfertTemporaryBuffersLinkedLists[1] = NULL;
     shapeTransfertTemporaryBuffersLinkedLists[0] = NULL;
@@ -160,6 +160,7 @@ void clearShapeTransfertTableEntry(s32 index) {
      * pointers in the primitives' pads would make the bytes depend on the build) */
     if (shapeTransfertTableStart != NULL) {
         __builtin_memset(shapeTransfertTableStart, 0, shapeTransfertTableSize);
+        pcStateForget(shapeTransfertTableStart, shapeTransfertTableStart + shapeTransfertTableSize);
     }
 }
 
@@ -168,6 +169,7 @@ void clearShapeTransferEntry(void* data) {
     ShapeTransfertTempBuffer* p = (ShapeTransfertTempBuffer*)shapeTransfertTableCurrentEntry;
     shapeTransfertTableCurrentEntry += sizeof(ShapeTransfertTempBuffer);
     if (p != NULL) {
+        PC_STATE_AT(p, ShapeTransfertTempBuffer, 1);
         p->m0_data = data;
         p->m4_pNext = shapeTransfertTemporaryBuffersLinkedLists[shapeTransfertDoubleBufferIndex];
         shapeTransfertTemporaryBuffersLinkedLists[shapeTransfertDoubleBufferIndex] = p;
@@ -183,6 +185,7 @@ void addToShapeTransfertTable(void* data, s16 x, s16 y, s16 w, s16 h) {
         p->m0_rect.w = w;
         p->m0_rect.h = h;
         p->m8_data = data;
+        PC_STATE_AT(p, ShapeTransfert, 1);
         shapeTransfertTableCurrentEntry = (u8*)(p + 1);
         p->mC_pNext = shapeTransfertTable[shapeTransfertDoubleBufferIndex];
         shapeTransfertTable[shapeTransfertDoubleBufferIndex] = p;

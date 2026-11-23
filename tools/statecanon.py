@@ -765,13 +765,26 @@ def part_target(schema: Schema, tag: str):
     return var, path, tid, off
 
 
-def encode(state: Path, schema: Schema, heap: bool = True) -> tuple[dict, Encoder]:
+def part_array(schema: Schema, tag: str, size: int):
+    """A host part's chunk that holds the array a pointer variable points at (hw.queue: xgStateIo(s, "queue",
+    queue, count * sizeof(*queue))): the element type, or None."""
+    pt = part_target(schema, tag)
+    if pt is None:
+        return None
+    t = schema.types.get(pt[2], {})
+    if t.get("k") != "ptr" or t.get("fn") or t.get("to") not in schema.types:
+        return None
+    es = schema.size(t["to"])
+    return t["to"] if es and size % es == 0 and schema.types[t["to"]].get("k") in ("struct", "union") else None
+
+
+def encode(state: Path, schema: Schema, heap: bool = True, infer: bool = False) -> tuple[dict, Encoder]:
     h, body = sc.read_state(state)
     enc = Encoder(schema)
     records, raw = [], []
     covered = Counter(); total = Counter()
     chunks = {t: body[o:o + n] for t, o, n in sc.chunks(body)}
-    heap_doc = encode_heap(schema, chunks, enc) if heap and "mem.heap" in chunks else None
+    heap_doc = encode_heap(schema, chunks, enc, infer) if heap and "mem.heap" in chunks else None
     for tag, at, size in sc.chunks(body):
         data = memoryview(body)[at:at + size]
         if tag == "mem.heap" and heap_doc is not None:
@@ -808,6 +821,13 @@ def encode(state: Path, schema: Schema, heap: bool = True) -> tuple[dict, Encode
                 records.append({"part": tag, "id": var["id"], "p": path, "v": enc.value(tid, data, 0)})
                 covered["host parts"] += size; total["host parts"] += size
                 continue
+            et = part_array(schema, tag, size)
+            if et is not None:  # the array the variable points at, element by element
+                enc.current = tag; es = schema.size(et)
+                records.append({"part": tag, "id": var["id"], "p": path, "arr": stable_name(schema, et) or et,
+                                "v": [enc.value(et, data, k * es) for k in range(size // es)]})
+                covered["host parts"] += size; total["host parts"] += size
+                continue
         why = "same build only (P2: heap, P3/P4: stack)" if tag.startswith("mem.") else "part not in the schema"
         raw.append({"tag": tag, "b64": base64.b64encode(bytes(data)).decode(), "why": why})
         total["raw" if tag.startswith("mem.") else "host parts"] += size
@@ -816,9 +836,22 @@ def encode(state: Path, schema: Schema, heap: bool = True) -> tuple[dict, Encode
     return doc, enc
 
 
-def decode(doc: dict, schema: Schema, template: Path) -> tuple[bytes, Decoder]:
+STACK_CHUNKS = ("mem.stack.sp", "mem.stack.low", "mem.stack", "mem.guard")
+
+
+def safe_point_of(doc: dict) -> int:
+    """The safe point a state was saved at (port/src/game/main/statetypes.c safePointId; 0: none)."""
+    r = next((r for r in doc["records"] if r["id"].endswith(":pc:safePointId")), None)
+    return r["v"] if r is not None and isinstance(r.get("v"), int) else 0
+
+
+def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -> tuple[bytes, Decoder]:
     """The raw body for this build, chunk by chunk in the template's order (P1: the template is a raw state
-    of the same build; later the order comes from the build's own part list)."""
+    of the same build; later the order comes from the build's own part list). stackless: without the game's
+    frames, which no other build can take (a state saved at a safe point: the load starts the game again
+    there, include/pc_state.h)."""
+    if stackless and not safe_point_of(doc):
+        raise SystemExit("statecanon: a stackless state needs one saved at a safe point (XG_STATE_SAVE_SAFE)")
     _, tbody = sc.read_state(template)
     dec = Decoder(schema)
     by_id = {r["id"]: r for r in doc["records"] if "part" not in r}
@@ -831,6 +864,11 @@ def decode(doc: dict, schema: Schema, template: Path) -> tuple[bytes, Decoder]:
             decode_arena_layout(r["arena"], schema, schema.by_id[r["id"]], dec)
     out = bytearray()
     for tag, at, size in sc.chunks(tbody):
+        if stackless and tag in STACK_CHUNKS:  # no frames: stack.sp 0 says so (savestate.c memoryRegions)
+            t = tag.encode()
+            data = b"" if tag == "mem.stack" else bytes(8)
+            out += bytes([len(t)]) + t + struct.pack("<I", len(data)) + data
+            continue
         buf = bytearray(size)
         if tag == "mem.heap" and doc.get("heap"):
             buf = decode_heap(doc["heap"], schema, dec, size)
@@ -855,14 +893,19 @@ def decode(doc: dict, schema: Schema, template: Path) -> tuple[bytes, Decoder]:
         elif tag in by_part:
             r = by_part[tag]
             pt = part_target(schema, tag)
-            if pt is not None:
+            if pt is not None and "arr" in r:
+                et = schema.type_names.get(r["arr"], r["arr"]); es = schema.size(et)
+                buf = bytearray(len(r["v"]) * es)
+                for k, v in enumerate(r["v"]):
+                    dec.put(et, v, buf, k * es)
+            elif pt is not None:
                 dec.put(pt[2], r["v"], buf, 0)
         elif tag in raws:
             b = base64.b64decode(raws[tag]["b64"]); buf[:len(b)] = b[:size]
         else:
             dec.warn["chunk not in the state (left zero)"] += 1
         t = tag.encode()
-        out += bytes([len(t)]) + t + struct.pack("<I", size) + buf
+        out += bytes([len(t)]) + t + struct.pack("<I", len(buf)) + buf  # (a pointed-at array: the state's count)
     return bytes(out), dec
 
 
@@ -1230,6 +1273,12 @@ def encode_prims(enc: "Encoder", mem, off: int, size: int):
     prims, o = [], 0
     while o + 8 <= size:
         tag = int.from_bytes(mem[off + o:off + o + 8], "little")
+        if tag == 0:  # no primitive here: an arena's unused, zeroed stretch (a run of zero words)
+            j = o
+            while j + 8 <= size and not any(mem[off + j:off + j + 8]):
+                j += 8
+            prims.append({"z": j - o}); o = j
+            continue
         n = tag >> 56; link = tag & PRIM_LINK
         step = (8 + 4 * n + 7) & ~7
         if n > 16 or o + step > size:
@@ -1243,6 +1292,9 @@ def encode_prims(enc: "Encoder", mem, off: int, size: int):
 def put_prims(dec: "Decoder", val, buf, off: int, size: int):
     o = 0
     for p in val["prims"]:
+        if "z" in p:
+            buf[off + o:off + o + p["z"]] = bytes(p["z"]); o += p["z"]
+            continue
         link = PRIM_LINK if p["l"] == "end" else dec.pointer(p["l"]) & PRIM_LINK
         buf[off + o:off + o + 8] = ((p["n"] << 56) | link).to_bytes(8, "little")
         w = bytes.fromhex(p["w"]); buf[off + o + 8:off + o + 8 + len(w)] = w
@@ -1329,6 +1381,8 @@ def layout_part(schema: Schema, mem, off, room, spec, count=None):
     if not isinstance(spec, dict) or spec["tid"] not in schema.types:
         return None
     tid = spec["tid"]; es0 = schema.size(tid)
+    if spec.get("one") and count is None:  # PC_HEAP_ONE: one T, then the caller's bytes
+        count = 1
     eo, esz, cnt = [], [], []; o = 0
     while o < room and (count is None or len(eo) < count):
         es, n = element_size(schema, tid, mem, off + o, room - o)
@@ -1348,9 +1402,18 @@ def layout_part(schema: Schema, mem, off, room, spec, count=None):
 
 def block_layout(schema: Schema, mem, off: int, size: int, spec, ranges) -> list:
     """A block's parts in the saving build, in order: its own type from the start, the recorded ranges in it,
-    bytes between and after. Each part: {"off", "size", "spec", ...} (spec None: bytes)."""
+    bytes between and after; a block of primitives (a bump arena's: the shape transfers') has primitives in
+    every stretch the ranges leave. Each part: {"off", "size", "spec", ...} (spec None: bytes)."""
     parts = []; cur = 0
     starts = sorted(ranges)
+
+    def gap(a, b):
+        if spec == "prims":
+            p = layout_part(schema, mem, off + a, b - a, "prims")
+            if p is not None:
+                p["off"] = a; parts.append(p); return
+        parts.append({"off": a, "size": b - a, "spec": None})
+
     first = starts[0][0] if starts else size
     if spec is not None:
         p = layout_part(schema, mem, off, first, spec)
@@ -1364,10 +1427,10 @@ def block_layout(schema: Schema, mem, off: int, size: int, spec, ranges) -> list
         if p is None:
             continue
         if ro > cur:
-            parts.append({"off": cur, "size": ro - cur, "spec": None})
+            gap(cur, ro)
         p["off"] = ro; parts.append(p); cur = ro + p["size"]
     if cur < size:
-        parts.append({"off": cur, "size": size - cur, "spec": None})
+        gap(cur, size)
     return parts
 
 
@@ -1427,11 +1490,11 @@ def encode_part(enc: "Encoder", mem, off, p) -> dict:
     return out
 
 
-def encode_heap(schema: Schema, chunks: dict, enc: "Encoder") -> dict:
+def encode_heap(schema: Schema, chunks: dict, enc: "Encoder", infer: bool = False) -> dict:
     """The game heap as its blocks in order (the canonical heap, phase P2): free blocks by size, live ones
     with owner, flags, the allocation site, and their contents as typed parts: the type the allocation named
-    (PC_HEAP_OF, in the block's header), else the site's (the prototype's inference), and the ranges the game
-    recorded in the block (PC_STATE_AT)."""
+    (PC_HEAP_OF, in the block's header) and the ranges the game recorded in it (PC_STATE_AT); a block whose
+    allocation named nothing is bytes (infer: the prototype's guess from its call site, for diagnosis)."""
     heap_lo = schema.regions["heapArena"][0]
     mem = memoryview(chunks["mem.heap"])
     blocks = heap_blocks(schema, chunks)
@@ -1461,8 +1524,9 @@ def encode_heap(schema: Schema, chunks: dict, enc: "Encoder") -> dict:
             s = spec_of(schema, b["pctype"]) if b["pctype"] else False
             if s is False:
                 if b["pctype"]:
-                    enc.warn["heap block of a type the schema does not name (typed by its site)"] += 1
-                s = type_spec(schema, sites, b["site"]); b["by"] = "site"
+                    enc.warn["heap block of a type the schema does not name"] += 1
+                s = type_spec(schema, sites, b["site"]) if infer else None
+                b["by"] = "site" if infer else None
             else:
                 b["by"] = "source"
             b["spec"] = s
@@ -1702,19 +1766,78 @@ def put_arena(dec: "Decoder", arena: dict, buf, off: int, size: int) -> None:
         put_parts(dec, r["parts"], b["parts"], buf, h + ARENA_HEADER)
 
 
+def untyped(a_state: Path, a: Schema, b_state: Path, b: Schema, shift: int = 0x1000000) -> dict:
+    """Pointers the source types nowhere: between two layouts linked `shift` apart, saved at the same moment,
+    the words of a heap or sound-arena block's untyped bytes (no PC_HEAP_OF, a tail past its T, a stretch
+    between recorded ranges) that differ by exactly the shift. By allocation site (the arena: by block)."""
+    _, enc = encode(a_state, a)
+    _, bb = sc.read_state(b_state)
+    cb = {t: bb[o:o + n] for t, o, n in sc.chunks(bb)}
+    _, ab = sc.read_state(a_state)
+    ca = {t: ab[o:o + n] for t, o, n in sc.chunks(ab)}
+    out = Counter()
+
+    def scan(blocks_a, mem_a, base_a, blocks_b, mem_b, base_b, label):
+        for x, y in zip(blocks_a, blocks_b):
+            if not x.get("user") or x.get("end") or x["size"] != y["size"]:
+                continue
+            for p in x.get("parts", []):
+                if p["spec"] is not None:
+                    continue
+                lo = p["off"] - p["off"] % 8
+                for w in range(lo, p["off"] + p["size"] - 7, 8):
+                    va = int.from_bytes(mem_a[x["data"] - base_a + w:][:8], "little")
+                    vb = int.from_bytes(mem_b[y["data"] - base_b + w:][:8], "little")
+                    if va != vb and (vb - va == shift or any(((vb >> k) & 0xFFFFFFFF) - ((va >> k) & 0xFFFFFFFF) == shift
+                                                             for k in (0, 32))):
+                        out[label(x)] += 1
+
+    hb = heap_blocks(b, cb)
+    scan(enc.heap, ca["mem.heap"], a.regions["heapArena"][0], hb, cb["mem.heap"], b.regions["heapArena"][0],
+         lambda x: f"{x['site'][0]} ({Path(x['site'][1]).name}:{x['site'][2]})")
+    if enc.arena is not None:
+        arb = arena_blocks(b, cb)
+        ma = ca["mem." + enc.arena["sec"]]; mb = cb["mem." + arb["sec"]]
+        scan(enc.arena["blocks"], ma, enc.arena["base"] - enc.arena["off"], arb["blocks"], mb, arb["base"] - arb["off"],
+             lambda x: f"sound arena block of type {x['pctype']:08x}")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     e = sub.add_parser("encode"); e.add_argument("state", type=Path); e.add_argument("build", type=Path); e.add_argument("out", type=Path)
     d = sub.add_parser("decode"); d.add_argument("canon", type=Path); d.add_argument("build", type=Path)
     d.add_argument("template", type=Path); d.add_argument("out", type=Path)
+    d.add_argument("--stackless", action="store_true", help="without the game's frames (a safe point's state)")
+    cv = sub.add_parser("convert", help="a state of one build as another build's, stackless (a safe point's)")
+    cv.add_argument("state", type=Path); cv.add_argument("from_build", type=Path); cv.add_argument("to_build", type=Path)
+    cv.add_argument("template", type=Path, help="a state of the target build (its chunk order; parts not yet canonical)")
+    cv.add_argument("out", type=Path)
     r = sub.add_parser("roundtrip"); r.add_argument("state", type=Path); r.add_argument("build", type=Path)
     r.add_argument("--out", type=Path)
     hp = sub.add_parser("heap"); hp.add_argument("state", type=Path); hp.add_argument("build", type=Path)
     hp.add_argument("--other", nargs=2, type=Path, metavar=("STATE", "BUILD"))
     x = sub.add_parser("crosscheck"); x.add_argument("a_state", type=Path); x.add_argument("a_build", type=Path)
     x.add_argument("b_state", type=Path); x.add_argument("b_build", type=Path)
+    u = sub.add_parser("untyped", help="pointers in heap bytes no annotation types (two layouts 16 MiB apart)")
+    u.add_argument("a_state", type=Path); u.add_argument("a_build", type=Path)
+    u.add_argument("b_state", type=Path); u.add_argument("b_build", type=Path)
     a = ap.parse_args()
+    if a.cmd == "convert":
+        doc, enc = encode(a.state, Schema(a.from_build.resolve()))
+        doc = json.loads(json.dumps(doc))
+        body, dec = decode(doc, Schema(a.to_build.resolve()), a.template, stackless=True)
+        write_state(a.template, body, a.out)
+        print(f"statecanon convert: safe point {safe_point_of(doc)}; wrote {a.out} ({len(body)} bytes); "
+              f"encode {dict(enc.warn)}; decode {dict(dec.warn)}")
+        return 0
+    if a.cmd == "untyped":
+        found = untyped(a.a_state, Schema(a.a_build.resolve()), a.b_state, Schema(a.b_build.resolve()))
+        print(f"statecanon untyped: {sum(found.values())} pointer words in untyped heap bytes, {len(found)} places")
+        for k, n in found.most_common():
+            print(f"  {n:6d} {k}")
+        return 1 if found else 0
     if a.cmd == "heap":
         heap_report(a.state, Schema(a.build.resolve()),
                     (a.other[0], Schema(a.other[1].resolve())) if a.other else None)
@@ -1734,7 +1857,7 @@ def main() -> int:
         return 0
     if a.cmd == "decode":
         doc = json.load(gzip.open(a.canon, "rt"))
-        body, dec = decode(doc, schema, a.template)
+        body, dec = decode(doc, schema, a.template, stackless=a.stackless)
         write_state(a.template, body, a.out)
         print(f"statecanon: wrote {a.out} ({len(body)} bytes); {dict(dec.warn)}")
         return 0

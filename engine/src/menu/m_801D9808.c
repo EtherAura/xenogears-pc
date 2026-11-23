@@ -28,10 +28,18 @@ u8 processSoundMenu(void) {
     u8 apply;
     s32 mode;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_SOUND) {
+        pcMenuTake(PC_SAFE_SUB_SOUND, 4, PC_LOCAL(cont), PC_LOCAL(first), PC_LOCAL(apply), PC_LOCAL(mode));
+        pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+        goto soundLoop;
+    }
     cont = 1;
     first = 1;
     apply = 0;
     do {
+    soundLoop:
+        pcMenuKeep(PC_SAFE_SUB_SOUND, 4, PC_LOCAL(cont), PC_LOCAL(first), PC_LOCAL(apply), PC_LOCAL(mode));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SOUND)); /* between frames: a canonical state's place */
         menuDraw();
         if (first) {
             j_setupMenuContext4E0(4, gMenuContext->m1BE0_soundMenuLabels, soundMenuConfig, gMenuContext->m33C_drawFlags->m5C_drawSoundMenuLabels);

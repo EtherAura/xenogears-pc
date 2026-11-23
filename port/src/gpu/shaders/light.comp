@@ -100,6 +100,8 @@ layout(set = 0, binding = 21) uniform sampler2D castLayer;   // shadowImg
 // (vk.c lightBlock).
 // The fog's colour is written there too (FOG_SLOT), by pass 18.
 layout(std430, set = 0, binding = 22) buffer Spans { vec4 block[]; };
+// The same buffer as words: the particles' tile masks, set with atomicOr.
+layout(std430, set = 0, binding = 22) buffer SpanWords { uint words[]; };
 
 layout(push_constant) uniform Light {
     int pass;
@@ -737,7 +739,10 @@ void fogColour() {
         vec4 f = fogFar[0], a = fogAll[0];
         vec3 mean = f.w > 0.02 * a.w && f.w > 0.0 ? f.rgb / f.w : a.w > 0.0 ? a.rgb / a.w : FOG_NEUTRAL;
         float grey = dot(mean, vec3(0.2126, 0.7152, 0.0722));
-        block[int(pc.lens.w) + FOG_SLOT] = vec4(0.5 * mean + 0.5 * FOG_NEUTRAL * clamp(grey * 1.6 + 0.2, 0.35, 1.0), 1.0);
+        // w: how bright the room's scenery is shown on the whole (the particles' place, xg-rgcf.5.10)
+        vec3 every = a.w > 0.0 ? a.rgb / a.w : FOG_NEUTRAL;
+        block[int(pc.lens.w) + FOG_SLOT] = vec4(0.5 * mean + 0.5 * FOG_NEUTRAL * clamp(grey * 1.6 + 0.2, 0.35, 1.0),
+                                               dot(every, vec3(0.2126, 0.7152, 0.0722)));
     }
 }
 
@@ -863,8 +868,175 @@ void composite(ivec2 l) {
     imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
 }
 
+// Ambient particles (xg-rgcf.5.10), after the blur: dust where the place is
+// lit, embers where it is dark (how bright the room is on the whole: the fog
+// pass's w). Each keeps its place in the room's frame, in a box around the
+// focus that wraps as the camera moves, and drifts by the frame's time: dust
+// rises and wavers, embers wander. Pass 20 places each one (its record), as
+// blurred as the depth of field would make it at its depth, and marks the
+// tiles it may cover (particleTiles; 2048 bits a tile; atomicOr: the same bits whatever the
+// order); pass 21 adds to each pixel of the copy the particles of its tile in
+// their order, those nearer than what is drawn there. Nothing over a pixel
+// where nothing or a kept picture is drawn.
+const int PARTICLES_MAX = 2048, PARTICLE_EMBERS = 1536; // embers from this index on
+const int PART_SLOT = 4 + MAX_FIGURES;                // after the fog's colour (vk.c LIGHT_BLOCK_BYTES)
+const int PART_REC = PART_SLOT + 5, PART_MASK = PART_REC + 3 * PARTICLES_MAX;
+const int PARTICLE_TILES = 64 * 16; // the masks' room (vk.c PARTICLE_TILES)
+
+// The tiles over the frame: 16 PS1 pixels a side, twice that while the frame
+// would take more than the masks' room (a large world map frame).
+ivec3 particleTiles() {
+    int side = 16;
+    ivec2 n = (pc.work + side - 1) / side;
+    while (n.x * n.y > PARTICLE_TILES) {
+        side *= 2;
+        n = (pc.work + side - 1) / side;
+    }
+    return ivec3(n, side);
+}
+const vec3 DUST_COLOUR = vec3(1.0, 0.95, 0.86), EMBER_COLOUR = vec3(1.0, 0.72, 0.35);
+
+uint particleHash(uint x) {
+    x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
+    return x;
+}
+float particleRandom(uint i, uint k) { return float(particleHash(i * 16u + k) >> 8) / 16777216.0; }
+
+void particleRecord(int i) {
+    int b = int(pc.lens.w);
+    int rec = b + PART_REC + 3 * i;
+    vec4 setting = block[b + PART_SLOT + 3]; // the box, the time (s), the size, the level
+    vec4 lens = block[b + PART_SLOT + 4];    // the depth of field's band, gain, radius (PS1 pixels)
+    int level = int(setting.w);
+    bool ember = i >= PARTICLE_EMBERS;
+    int k = ember ? i - PARTICLE_EMBERS : i;
+    int count = ember ? (level == 1 ? 40 : level == 2 ? 70 : 110) : (level == 1 ? 500 : level == 2 ? 900 : 1400);
+    block[rec + 1] = vec4(0.0);
+    if (k >= count || level <= 0) return;
+    float grey = block[b + FOG_SLOT].w; // how bright the room is shown
+    float weight = ember ? 1.0 - smoothstep(0.10, 0.24, grey) : smoothstep(0.08, 0.22, grey);
+    if (weight <= 0.0) return;
+
+    vec3 r0 = block[b + PART_SLOT].xyz, r1 = block[b + PART_SLOT + 1].xyz, r2 = block[b + PART_SLOT + 2].xyz;
+    vec3 trans = vec3(block[b + PART_SLOT].w, block[b + PART_SLOT + 1].w, block[b + PART_SLOT + 2].w);
+    mat3 toRoom = mat3(r0, r1, r2); // its columns are the view's rows: the transpose
+    mat3 toView = transpose(toRoom);
+    float focus = pc.lens.z, box = setting.x, time = setting.y;
+    float focus0 = box / 2.5;          // the focus the room started with
+    float unit = focus0 / pc.view.w;   // a PS1 pixel at that focus, in view units
+    // They wrap in a box shaped to the view (a tenth wider than the frame at
+    // the farthest depth they take, depths 0.35 to 1.6 of that focus), with
+    // places fixed in the room: as the camera moves they keep theirs, and one
+    // that leaves the box comes back at its other side.
+    vec3 span = vec3(1.1 * 1.6 * focus0 * vec2(pc.work) / pc.view.w, 1.25 * focus0);
+    vec3 middle = vec3((vec2(pc.work) * 0.5 - pc.lens.xy) * focus0 / pc.view.w, 0.975 * focus0); // the frame's middle
+    vec3 up = toRoom * pc.view.xyz, right = toRoom * vec3(1.0, 0.0, 0.0), ahead = toRoom * vec3(0.0, 0.0, 1.0);
+    uint id = uint(i);
+    vec3 at0 = vec3(particleRandom(id, 0u), particleRandom(id, 1u), particleRandom(id, 2u)) * 8.0 * max(span.x, max(span.y, span.z));
+    vec3 ph = 6.2831853 * vec3(particleRandom(id, 3u), particleRandom(id, 4u), particleRandom(id, 5u));
+    float sp = 0.6 + 0.8 * particleRandom(id, 6u);
+    vec3 drift = ember ? right * (5.0 * sin(0.9 * time * sp + ph.x) + sin(2.3 * time + ph.z)) +
+                         up * (4.0 * sin(0.6 * time * sp + ph.y) + 0.8 * time) + ahead * (3.0 * sin(0.3 * time + ph.z))
+                       : right * (3.0 * sin(0.7 * time * sp + ph.x)) + up * (2.2 * time * sp + 1.5 * sin(0.5 * time + ph.y)) +
+                         ahead * (2.0 * sin(0.4 * time * sp + ph.z));
+    vec3 anchored = toView * (at0 + drift * unit) + trans; // its place in the room, in this view
+    vec3 v = middle + (fract((anchored - middle) / span + 0.5) - 0.5) * span;
+    if (v.z < 0.3 * focus0) return;
+    vec2 at = v.xy * pc.view.w / v.z + pc.lens.xy;
+    if (any(isnan(at)) || any(isinf(at))) return;
+    float size = (ember ? 1.0 : 0.9) * setting.z * unit * pc.view.w / v.z; // PS1 pixels
+    float u = v.z > focus ? 1.0 - focus / v.z : v.z / focus - 1.0;
+    float coc = lens.z > 0.0 ? clamp((abs(u) - lens.x) * lens.y, 0.0, lens.z) : 0.0;
+    float radius = max(size, coc);
+    float gain = level == 1 ? 0.7 : level == 2 ? 0.9 : 1.1;
+    vec3 colour;
+    float alpha, glow = 0.0;
+    if (!ember) {
+        // Dust shows in the light: the surroundings' brightness here (half as
+        // it is, half against the room's), and lit scenery close behind it, not
+        // the sky or the backdrop.
+        if (at.x < 0.0 || at.y < 0.0 || at.x >= float(pc.work.x) || at.y >= float(pc.work.y)) return;
+        ivec2 g = ivec2(at);
+        float behind = abs(imageLoad(geo, g).a);
+        if (behind <= 0.0) return;
+        float lum = sqrt(max(textureLod(surround, quarterUv(at, surround), 0.0).r, 0.0));
+        float lit = pow(clamp((0.5 * lum / 0.45 + 0.5 * lum / max(1.6 * grey, 0.08) - 0.25) / 0.6, 0.0, 1.0), 1.3);
+        lit *= clamp((2.0 * focus - behind) / (0.6 * focus), 0.0, 1.0);
+        vec3 tint = sqrt(max(imageLoad(base, g).rgb, 0.0));
+        colour = 0.7 * DUST_COLOUR + 0.3 * tint / max(max(tint.r, max(tint.g, tint.b)), 1.0e-3);
+        alpha = gain * weight * lit * (size / radius) * (1.0 + 0.3 * sin(3.0 * time + ph.z));
+    } else {
+        colour = EMBER_COLOUR;
+        glow = max(radius * 2.2, 2.0 / float(pc.n));
+        alpha = gain * weight * pow(size / radius, 0.8) * (0.6 + 0.4 * pow(sin(1.7 * time * sp + ph.x), 2.0));
+    }
+    if (alpha < 1.0 / 512.0) return;
+    block[rec] = vec4(at, v.z, radius);
+    block[rec + 1] = vec4(colour, alpha);
+    block[rec + 2] = vec4(glow, 0.35, 0.0, 0.0);
+    float reach = ember ? 3.0 * glow : 2.0 * radius + 1.0;
+    ivec3 grid = particleTiles();
+    ivec2 tiles = grid.xy;
+    float side = float(grid.z);
+    ivec2 lo = clamp(ivec2(floor(clamp(at - reach, vec2(-1.0), vec2(pc.work)) / side)), ivec2(0), tiles - 1);
+    ivec2 hi = clamp(ivec2(floor(clamp(at + reach, vec2(-1.0), vec2(pc.work)) / side)), ivec2(0), tiles - 1);
+    uint words0 = uint(b + PART_MASK) * 4u + uint(i >> 5);
+    for (int ty = lo.y; ty <= hi.y; ty++)
+        for (int tx = lo.x; tx <= hi.x; tx++)
+            atomicOr(words[words0 + uint(ty * tiles.x + tx) * uint(PARTICLES_MAX / 32)], 1u << uint(i & 31));
+}
+
+void particlesDraw(ivec2 l) {
+    uint raw = imageLoad(depth, l).r;
+    if (raw == DEPTH_FAR || raw == DEPTH_SHARP) return;
+    float z = abs(depthCode(raw));
+    int b = int(pc.lens.w);
+    vec2 at = (vec2(l) + 0.5) / float(pc.n) + vec2(pc.layer);
+    ivec3 grid = particleTiles();
+    ivec2 tiles = grid.xy;
+    ivec2 tile = clamp(ivec2(floor(at / float(grid.z))), ivec2(0), tiles - 1);
+    uint words0 = uint(b + PART_MASK) * 4u + uint(tile.y * tiles.x + tile.x) * uint(PARTICLES_MAX / 32);
+    float least = 0.6 / float(pc.n);
+    vec3 add = vec3(0.0);
+    for (int w = 0; w < PARTICLES_MAX / 32; w++) {
+        uint m = words[words0 + uint(w)];
+        while (m != 0u) {
+            int i = w * 32 + findLSB(m);
+            m &= m - 1u;
+            vec4 place = block[b + PART_REC + 3 * i];
+            if (place.z >= z) continue; // behind what is drawn here
+            vec4 colour = block[b + PART_REC + 3 * i + 1];
+            vec4 glow = block[b + PART_REC + 3 * i + 2];
+            vec2 d = at - place.xy;
+            float dd = dot(d, d), sigma = max(place.w * 0.6, least);
+            float s = exp(-0.5 * dd / (sigma * sigma));
+            if (glow.x > 0.0) s += glow.y * exp(-0.5 * dd / (glow.x * glow.x));
+            add += s * colour.a * colour.rgb;
+        }
+    }
+    if (all(lessThan(add, vec3(0.5 / 255.0)))) return;
+    ivec2 p = pc.origin + l;
+    uint word = imageLoad(color, p).r;
+    vec3 shown = vec3(float(word & 255u), float((word >> 8) & 255u), float((word >> 16) & 255u)) / 255.0;
+    shown = clamp(shown + add * (1.0 - 0.5 * shown), 0.0, 1.0);
+    uvec3 o = uvec3(shown * 255.0 + 0.5);
+    uint packed = o.r | o.g << 8 | o.b << 16;
+    if (packed == (word & 0xFFFFFFu)) return;
+    o = sceneColorMode(o, p, pc.n, pc.color, pc.ditherOrigin);
+    imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
+}
+
 void main() {
     ivec2 t = ivec2(gl_GlobalInvocationID.xy);
+    if (pc.pass == 20) {
+        int i = int(gl_WorkGroupID.x) * 64 + int(gl_LocalInvocationIndex); // groups of 8x8: 64 particles each
+        if (i < PARTICLES_MAX) particleRecord(i);
+        return;
+    }
+    if (pc.pass == 21) {
+        if (t.x < pc.size.x && t.y < pc.size.y) particlesDraw(t);
+        return;
+    }
     if (pc.pass == 11) {
         // Every invocation of the group marks the sources (barriers), then
         // those on the grid gather.

@@ -31,6 +31,12 @@ void gameStackRun(void (*entry)(void));
 /* On the game stack: let the host side serve a request, then go on. */
 void gameStackPark(void);
 
+/* On the host side, after a state without a stack was loaded (a canonical
+ * state, decoded for this build): the game's frames are gone, and the game
+ * starts again from entry, on a fresh stack, when the host switches back
+ * (kernel.c's pcResumeGame: the saved mode's loop takes up its saved frame). */
+void gameStackRestart(void (*entry)(void));
+
 /* main.c's startKernel, about to longjmp from the game's stacks back to
  * main() (the soft reset): the game is off its stack, and on Windows the
  * thread's block names the host's stack again. */

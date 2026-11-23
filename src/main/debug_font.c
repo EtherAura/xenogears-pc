@@ -384,9 +384,14 @@ DebugFont* initDebugFont(s32 x, s32 y, s32 w, s32 h, s32 bufferSize, u32 flags,
     s32 size;
     RECT rect;
 
-    tex = debugFontExternalBuffer ? (u8*)debugFontExternalBuffer : (traceNextAlloc(0x32), allocateHeap(sizeof(DebugFont) + sizeof(SPRT_8) * bufferSize * ((flags & 1) ? 1 : 2), ((flags >> 2) ^ 1) & 1));
+    tex = debugFontExternalBuffer ? (u8*)debugFontExternalBuffer : (traceNextAlloc(0x32), allocateHeap(PC_HEAP_OF(DebugFont, sizeof(DebugFont) + sizeof(SPRT_8) * bufferSize * ((flags & 1) ? 1 : 2)), ((flags >> 2) ^ 1) & 1));
     f = (DebugFont*)tex;
     buf = (SPRT_8*)(f + 1);
+#ifdef PLATFORM_PC
+    if (!debugFontExternalBuffer) {
+        PC_STATE_AT(buf, SPRT_8, bufferSize * ((flags & 1) ? 1 : 2));
+    }
+#endif
     f->m4_buffer[0] = buf;
     if (flags & 1) {
         f->m4_buffer[1] = buf;

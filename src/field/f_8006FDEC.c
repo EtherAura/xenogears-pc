@@ -749,7 +749,7 @@ void initFieldData(void) {
         fieldSceneState.m290_actorArray[i].m2C_matrixBackup.t[2] = fieldSceneState.m290_actorArray[i].mC_matrix.t[2] = setup[2];
         setup += 3;
         if (!(fieldSceneState.m290_actorArray[i].m58_flags & 0x40)) {
-            sub = allocateHeap(PC_HEAP_SIZED(sizeof(sFieldEntitySub0), 0x24), 0);
+            sub = allocateHeap(PC_HEAP_OF(sFieldEntitySub0, PC_HEAP_SIZED(sizeof(sFieldEntitySub0), 0x24)), 0);
             fieldSceneState.m290_actorArray[i].m0_model = sub;
             p = (s32*)(*setup * 4 + (sptr)fieldSceneState.m294_models);
             offset = p[1] + (sptr)fieldSceneState.m294_models;

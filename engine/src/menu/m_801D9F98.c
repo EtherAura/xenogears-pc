@@ -17,6 +17,11 @@ u8 processLoadSaveMenu(u8 arg0, u8 arg1) {
     u8 config;
 
     keepOpen = 1;
+    if (pcResumeMenu() == PC_SAFE_SUB_SAVE) {
+        pcMenuTake(PC_SAFE_SUB_SAVE, 5, PC_LOCAL(arg0), PC_LOCAL(arg1), PC_LOCAL(first), PC_LOCAL(success), PC_LOCAL(config));
+        pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+        goto saveLoop;
+    }
     first = 1;
     success = 1;
     menuVarUnk0 = 0;
@@ -29,6 +34,9 @@ u8 processLoadSaveMenu(u8 arg0, u8 arg1) {
     processLoadSaveMenuSub0();
     menuDraw();
     while (keepOpen) {
+    saveLoop:
+        pcMenuKeep(PC_SAFE_SUB_SAVE, 5, PC_LOCAL(arg0), PC_LOCAL(arg1), PC_LOCAL(first), PC_LOCAL(success), PC_LOCAL(config));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SAVE)); /* between frames: a canonical state's place */
         gMenuContext->m33C_drawFlags->mB_drawSaveScreen = 0;
         gMenuContext->m4D8_cardTilesMode = 1;
         if (first) {
@@ -459,6 +467,12 @@ u8 useItemOnParty(s32 page, s32 sel) {
     s32 i;
     MenuUsableItem* item;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_ITEM_USE) {
+        item = &gMenuContext->m330_itemData->m1C_usableItems[gameState.m2026_inventory0Ids[page * 2 + sel]];
+        pcMenuTake(PC_SAFE_SUB_ITEM_USE, 8, PC_LOCAL(page), PC_LOCAL(sel), PC_LOCAL(mask), PC_LOCAL(keepGoing), PC_LOCAL(target), PC_LOCAL(redraw), PC_LOCAL(used), PC_LOCAL(all));
+        pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+        goto useLoop;
+    }
     mask = 0;
     keepGoing = 1;
     target = gMenuContext->m4DC_currentlySelectedCharacter;
@@ -475,6 +489,9 @@ u8 useItemOnParty(s32 page, s32 sel) {
     if (mask) {
         iniMenuContext364And380(2, 0x10, 0xE, 0x90, 0xB0, 0, 0, 4, 0);
         while (keepGoing) {
+        useLoop:
+        pcMenuKeep(PC_SAFE_SUB_ITEM_USE, 8, PC_LOCAL(page), PC_LOCAL(sel), PC_LOCAL(mask), PC_LOCAL(keepGoing), PC_LOCAL(target), PC_LOCAL(redraw), PC_LOCAL(used), PC_LOCAL(all));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_ITEM_USE)); /* between frames: a canonical state's place */
             menuDraw();
             if (redraw) {
                 redraw = 0;

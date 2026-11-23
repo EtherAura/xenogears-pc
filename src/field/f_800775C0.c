@@ -366,6 +366,11 @@ void pcGauntletFieldTick(void); /* port/src/game/field/gauntlet_field.c */
 void pcArenaFieldTick(void); /* port/src/game/field/arena_field.c */
 #endif
 
+#ifdef PLATFORM_PC
+void pcFieldSafePoint(s32 firstFrame, s32 comboHeld);
+s32 pcFieldResume(s32* firstFrame, s32* comboHeld);
+#endif
+
 void fieldEntryPoint(void) {
     s32 mode;
     s32 firstFrame;
@@ -373,6 +378,15 @@ void fieldEntryPoint(void) {
     s32 playTime;
     RECT unused;
 
+#ifdef PLATFORM_PC
+    /* a stackless load: the loop goes on where its state was saved (port/src/game/field/resume.c) */
+    switch (pcFieldResume(&firstFrame, &comboHeld)) {
+    case 1:
+        goto fieldLoop;
+    case 2:
+        goto fieldMenu; /* a menu loop's safe point: the menu goes on (openFieldMenu) */
+    }
+#endif
     if (runningOnDTL != -1) {
         fieldDebugDisable = 0;
     } else {
@@ -446,6 +460,10 @@ void fieldEntryPoint(void) {
     fieldTransitionCompleted = 1;
 
     while (1) {
+#ifdef PLATFORM_PC
+    fieldLoop:
+        pcFieldSafePoint(firstFrame, comboHeld); /* between frames: a canonical state's place */
+#endif
 #if !VERSION_JP
         /* US only: wait while the controller is disconnected */
         if (isControllerConnected(0) == 0) {
@@ -618,6 +636,9 @@ void fieldEntryPoint(void) {
             if (g_menuIdToOpen != 0xFF && g_frameOddOrEven == 0 &&
                 (fieldSceneState.m290_actorArray[g_playerControlledActor].m4C_scriptEntity->m0_fieldScriptFlags & 0x1800) == 0) {
                 releaseAllDialogWindows();
+#ifdef PLATFORM_PC
+            fieldMenu:
+#endif
                 openFieldMenu();
                 g_menuIdToOpen = 0xFF;
             }

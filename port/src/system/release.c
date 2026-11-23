@@ -181,6 +181,10 @@ const char* releaseFilePath(void) {
     return rel.path;
 }
 
+void releaseForget(void) {
+    memset(&rel, 0, sizeof rel);
+}
+
 void releaseLog(void) {
     load();
     if (rel.kind != RELEASE_DEV) {

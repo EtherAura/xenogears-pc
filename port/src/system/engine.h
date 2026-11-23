@@ -44,6 +44,15 @@ const char* engineNote(void);
  * ends; whatever was not saved in the game is lost). 0 when it cannot. */
 int engineRestart(int e);
 
+/* After an update (update/update_install.c, through quit.c quitAndStart):
+ * start exe with this run's arguments and do not wait; the caller then ends.
+ * The new process (XG_WAIT_FOR_PID) waits for this one to be gone,
+ * engineWaitForStarter at the top of main, so the exit handlers' writes (the
+ * memory cards, settings.ini) are done before it reads anything. 1 when it
+ * started. */
+int engineStartAfter(const char* exe);
+void engineWaitForStarter(void);
+
 #ifdef __cplusplus
 }
 #endif

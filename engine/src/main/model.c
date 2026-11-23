@@ -431,7 +431,7 @@ void initModel1(ModelBlock* b, u8** start, u8** end) {
     s32 retailSize = pcModelRetailPrimBufferSize(b->m10_meshBlocks, b->m6_numMeshBlocks);
     if (retailSize >= 0) retailSize *= 2;
     traceNextAlloc(0x25);
-    *start = allocateHeap(PC_HEAP_SIZED(b->m34_primBufferSize * 2, retailSize), 0);
+    *start = allocateHeap(PC_HEAP_OF(PC_PRIMS, PC_HEAP_SIZED(b->m34_primBufferSize * 2, retailSize)), 0);
     *end = *start + b->m34_primBufferSize;
 }
 

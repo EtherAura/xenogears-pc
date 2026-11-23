@@ -27,13 +27,16 @@ void setupEquipSlotLabels(u8 mode, u8 slot);
 
 /* equip submenu entry: runEtherListMenu(slot, arg1, 0) */
 u8 openEtherMenu(u8 slot, u8 arg1) {
+#ifdef PLATFORM_PC
+    pcMenuChild(PC_SAFE_SUB_ETHER);
+#endif
     runEtherListMenu(slot, arg1, 0);
     return 1;
 }
 
 /* equip screen setup (m434 work area, labels m14E0) */
 void initEquipMenu(u8 slot) {
-    gMenuContext->m434_equipMenu = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_434), (s32)0xa1c), 0);
+    gMenuContext->m434_equipMenu = allocateHeap(PC_HEAP_OF(struct MenuContext_434, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_434), (s32)0xa1c)), 0);
     bzero(gMenuContext->m434_equipMenu, (s32)sizeof(struct MenuContext_434));
     j_setupMenuContext4E0(6, gMenuContext->m14E0_equipMenuLabels, &equipMenuLabelConfig[slot * 6], gMenuContext->m33C_drawFlags->m40_drawEquipMenuLabels);
     loadSharedMenuData2(7);
@@ -684,6 +687,15 @@ void runEquipMenu(u8 slot, u8 arg1, u8 isGear) {
     s32 y;
     s32 h;
 
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() != 0 && pcResumeMenu() == pcMenuChildNow() &&
+        (pcResumeMenu() == PC_SAFE_SUB_EQUIP || pcResumeMenu() == PC_SAFE_SUB_STATUS_EQUIP ||
+         pcResumeMenu() == PC_SAFE_SUB_GEAR_EQUIP)) {
+        pcMenuTake(pcMenuChildNow(), 24, PC_LOCAL(slot), PC_LOCAL(arg1), PC_LOCAL(isGear), PC_LOCAL(gear), PC_LOCAL(redraw), PC_LOCAL(isSlot), PC_LOCAL(prevSlot), PC_LOCAL(kind), PC_LOCAL(pos), PC_LOCAL(page), PC_LOCAL(changed), PC_LOCAL(ret), PC_LOCAL(cont), PC_LOCAL(boxes), PC_LOCAL(described), PC_LOCAL(drawList), PC_LOCAL(pressEnter), PC_LOCAL(listMode), PC_LOCAL(prevKind), PC_LOCAL(prevPos), PC_LOCAL(prevPage), PC_LOCAL(count), PC_LOCAL(y), PC_LOCAL(h));
+        pcResumeDone(); /* a stackless load: the screen's frame goes on (include/pc_state.h) */
+        goto equipLoop;
+    }
+#endif
     cont = 1;
     boxes = 1;
     redraw = 1;
@@ -704,6 +716,11 @@ void runEquipMenu(u8 slot, u8 arg1, u8 isGear) {
     initEquipMenu(gear);
     backupEquipment(slot, gear);
     do {
+#ifdef PLATFORM_PC
+    equipLoop:
+        pcMenuKeep(pcMenuChildNow(), 24, PC_LOCAL(slot), PC_LOCAL(arg1), PC_LOCAL(isGear), PC_LOCAL(gear), PC_LOCAL(redraw), PC_LOCAL(isSlot), PC_LOCAL(prevSlot), PC_LOCAL(kind), PC_LOCAL(pos), PC_LOCAL(page), PC_LOCAL(changed), PC_LOCAL(ret), PC_LOCAL(cont), PC_LOCAL(boxes), PC_LOCAL(described), PC_LOCAL(drawList), PC_LOCAL(pressEnter), PC_LOCAL(listMode), PC_LOCAL(prevKind), PC_LOCAL(prevPos), PC_LOCAL(prevPage), PC_LOCAL(count), PC_LOCAL(y), PC_LOCAL(h));
+        pcSafePoint(pcMenuSafeId(pcMenuChildNow())); /* between frames: a canonical state's place */
+#endif
         menuDraw();
         if (redraw || slot != prevSlot) {
             setupStatusScreenEquipNames(slot, isSlot + 1, listMode, gear);

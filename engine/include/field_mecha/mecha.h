@@ -199,6 +199,7 @@ typedef struct sMechaInitVar2Sub {
     /* 0x10 */ s16 m10_currentTime;
     /* 0x12 */ s16 m12_maxTime;
 } sMechaInitVar2Sub; /* 0x14 */
+PC_STATE_UNION(sMechaInitVar2Sub, m4, m2_type, (stream, stream, stream, v, v, v, v, v, v))
 
 /* Noah: sMechaInitVar2 (mechaInitVar2 at 0x801E86A8): the track pool. */
 typedef struct sMechaInitVar2 {

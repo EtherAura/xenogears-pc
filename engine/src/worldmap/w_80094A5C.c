@@ -779,7 +779,7 @@ void allocateWorldmapData(void) {
         for (i = 0xF; i >= 0; i--) {
             loadedWorldmapCellsFromCD[i] = NULL;
         }
-        worldmapCellsFromCD = allocateHeap(16 * (s32)sizeof(sWorldmapCellFromCD), 0);
+        worldmapCellsFromCD = allocateHeap(PC_HEAP_OF(sWorldmapCellFromCD, 16 * (s32)sizeof(sWorldmapCellFromCD)), 0);
         worldmapExtraData = allocateHeap(0x800, 0);
         worldmapCellLoadingPending = 0;
         for (i = 7, ps = &worldmapStreamingCDSyncStatus[7]; i >= 0; i--, ps--) {
@@ -792,7 +792,7 @@ void allocateWorldmapData(void) {
         for (i = 0xF; i >= 0; i--) {
             loadedWorldmapCellsFromPC[i] = NULL;
         }
-        worldmapCellsFromPC = allocateHeap(16 * (s32)sizeof(sWorldmapCellFromPC), 0);
+        worldmapCellsFromPC = allocateHeap(PC_HEAP_OF(sWorldmapCellFromPC, 16 * (s32)sizeof(sWorldmapCellFromPC)), 0);
         worldmapExtraData = allocateHeap(0x800, 0);
         worldmapCellLoadingPending = 0;
         for (i = 7, ps = &worldmapStreamingCDSyncStatus[7]; i >= 0; i--, ps--) {
@@ -1288,7 +1288,7 @@ void initWorldmapState(void);
 
 /* Noah: allocAndInitWorldmapState (worldmap.cpp) */
 void allocAndInitWorldmapState(void) {
-    gWorldmapState = allocateHeap((s32)sizeof(sWorldmapState), 0);
+    gWorldmapState = allocateHeap(PC_HEAP_OF(sWorldmapState, (s32)sizeof(sWorldmapState)), 0);
     initWorldmapState();
 }
 

@@ -1022,7 +1022,7 @@ void initJumpAnimationStuff(void) {
 /* Noah allocateJumpAnimationStruct */
 sJumpAnimationControlStruct* allocateJumpAnimationStruct(void);
 sJumpAnimationControlStruct* allocateJumpAnimationStruct(void) {
-    jumpAnimationControlStruct = allocateHeap(sizeof(sJumpAnimationControlStruct), 0);
+    jumpAnimationControlStruct = allocateHeap(PC_HEAP_OF(sJumpAnimationControlStruct, sizeof(sJumpAnimationControlStruct)), 0);
     jumpAnimationControlStruct->m8 = allocateJumpAnimationStructCallback;
     allocateJumpAnimationStructVar0 = 0;
     jumpAnimationControlStruct->m4A = 0;

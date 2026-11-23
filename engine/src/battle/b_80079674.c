@@ -2159,7 +2159,7 @@ void loadGearCommandText(u8 entity) { /* the caller passes the entity; unused */
 }
 
 void initBattleRenderStruct2(void) {
-    pBattleRenderStruct2 = allocateBattleHeap(sizeof(sBattleRenderStruct2), 0);
+    pBattleRenderStruct2 = allocateBattleHeap(PC_HEAP_OF(sBattleRenderStruct2, sizeof(sBattleRenderStruct2)), 0);
     bzero(pBattleRenderStruct2, sizeof(sBattleRenderStruct2));
     pBattleRenderStruct2->m5D9C_markerX = 0xA0;
     pBattleRenderStruct2->m5D9E_markerY = 100;
@@ -2220,6 +2220,10 @@ void setupTurnRenderLoop(u8 entity) {
     u8 hasItem;
     u8 target;
 
+    if (pcResumeAt() == PC_SAFE_BATTLE_TURN) {
+        pcResumeDone(); /* a stackless load: the command loop goes on (include/pc_state.h) */
+        goto commandLoop;
+    }
     battleVar2->m2EA_notDefending = 1;
     battleVar2->m2E9_targetConfirmed = 0;
     battleVar2->m2DE_actionDone = 0;
@@ -2296,6 +2300,8 @@ void setupTurnRenderLoop(u8 entity) {
     }
     updateCharacterBlinkingTask(characterIdToTargetBitmask(target));
     while (battleVar2->m2DE_actionDone == 0 && battleRunningVar1 == 0 && battleVar2->m2DB_turnEnded == 0) {
+    commandLoop:
+        pcSafePoint(PC_SAFE_BATTLE_TURN); /* a player's turn, between frames: a canonical state's place */
         if (apConfigArray[entity].m1_gearState == 0) {
             setAPMarksPositions(battleVar2->m2D5_maxAP, battleVar2->m2D4_remainingAP);
         }

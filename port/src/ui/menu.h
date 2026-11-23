@@ -64,6 +64,12 @@ void shaderPresetRows();
 void moviePackRows();
 // gametext.cpp: System's game text sources.
 void gameTextRows();
+// updates.cpp (a build with the updater, XG_UPDATER): System's Updates group, and
+// the question before the game (ui.h uiAskUpdates): its opening, and each of its
+// frames (true to close).
+void updatesRows();
+void updateQuestionOpened();
+bool drawUpdateQuestion();
 // states.cpp: the Saves section's save states group (system/savestate.h).
 void statesSection();
 // A modal popup on the game's message box (game mode) or in the middle:

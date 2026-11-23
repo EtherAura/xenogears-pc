@@ -445,6 +445,15 @@ typedef struct {
      * thickens past the focus (0: no fog). The colour grade's amount (0: none). */
     float fogMost, fogDensity, grade;
     float fogCap;  /* the farthest past the focus the fog thickens to (relative depth; 0: no cap) */
+    /* Ambient particles (xg-rgcf.5.10): their level (0: none) and size scale,
+     * the time they drift by (seconds), the room's frame they keep their
+     * places in (view = roomRot * room + roomTrans, the room in view units),
+     * the box they wrap in (view units), and the depth of field's band, gain
+     * and largest radius (PS1 pixels; 0: no blur) for their own blur. */
+    int particles;
+    float particleSize, particleTime, particleBox;
+    float roomRot[3][3], roomTrans[3];
+    float blurBand, blurGain, blurRadius;
 } LightParams;
 /* What is done to a scene when it ends: the lighting, then the blur. */
 typedef struct {
