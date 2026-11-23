@@ -399,9 +399,28 @@ def release_flags(helper: Path, scratch: Path) -> None:
         check(bool(problems), f"negative control caught: {what} ({problems or 'NOT caught'})")
 
 
+# CMake files no package build reads, and why: each one's include must be guarded as shown.
+NOT_PACKAGED = {
+    # the maintainer's macOS module check (xg-j98o): -O0 keeps its objects' symbols visible to its checks
+    "port/cmake/darwin-module-check.cmake":
+        'if(XG_DARWIN_MODULE_CHECK)\n    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/darwin-module-check.cmake")\n'
+        '    return()\nendif()',
+}
+
+
 def port_flag_sources() -> None:
     """The port's CMake leaves the optimisation and NDEBUG to the build type (the fixture stands in for it)."""
-    files = [ROOT / "port/CMakeLists.txt", *sorted((ROOT / "port").rglob("*.cmake"))]
+    top = (ROOT / "port/CMakeLists.txt").read_text()
+    packaging = [ROOT / "tools/publish/repo-port/build-release.sh",   # what builds the packages (not CI's macOS check)
+                 *(p for p in (ROOT / "tools/publish/repo-port/packaging").rglob("*") if p.is_file())]
+    for rel, guard in NOT_PACKAGED.items():
+        option = guard.split("(", 1)[1].split(")", 1)[0]
+        setters = [p.relative_to(ROOT).as_posix() for p in packaging if option in p.read_text(errors="replace")]
+        check(top.count(guard) == 1 and top.count(Path(rel).name) == 1 and not setters,
+              f"{rel} is read only behind {option}, which then ends the configure and no package build sets "
+              f"({setters or 'none sets it'})")
+    files = [p for p in [ROOT / "port/CMakeLists.txt", *sorted((ROOT / "port").rglob("*.cmake"))]
+             if p.relative_to(ROOT).as_posix() not in NOT_PACKAGED]
     found = [f"{p.relative_to(ROOT)}:{n}" for p in files
              for n, line in enumerate(p.read_text().splitlines(), 1)
              if not line.lstrip().startswith("#") and "glslc" not in line  # glslc -O optimises shaders, not C

@@ -249,11 +249,22 @@ u8 shopExecuteMainMenuSelection(arg0)
 void shopMainMenuExecute(void) {
     u8 cont;
 
+    if (pcResumeMenu() >= PC_SAFE_SUB_SHOP && pcResumeMenu() <= PC_SAFE_SUB_SHOP_SELL_LIST) {
+        /* a stackless load: the shop's frame, or the screen it opened, goes on (include/pc_state.h) */
+        cont = 1;
+        if (pcResumeMenu() == PC_SAFE_SUB_SHOP) {
+            pcResumeDone();
+            goto shopLoop;
+        }
+        goto shopChild;
+    }
     cont = 1;
     gMenuContext->m336_menuSelectedEntry = 2;
     setupMainMenuWithConfig(4, shopMainMenuConfig);
     setMenuLabelsEnabled(1, 4, gMenuContext->m6E0_mainMenuLabels, shopMainLabelConfig, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
     do {
+    shopLoop:
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SHOP)); /* between frames: a canonical state's place */
         menuDraw();
         switch (gMenuContext->m325_menuButton) {
         case 4:
@@ -263,6 +274,7 @@ void shopMainMenuExecute(void) {
             setMenuLabelsEnabled(0, 4, gMenuContext->m6E0_mainMenuLabels, shopMainLabelConfig, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
             gMenuContext->m348_cursor->m15B_selectionWidth = 0x4C;
             /* The PS1 passes what setMenuLabelsEnabled leaves in a0: 0 (Redux). */
+        shopChild:
             cont = shopExecuteMainMenuSelection(0);
             gMenuContext->m348_cursor->m15B_selectionWidth = 0x40;
             break;
@@ -293,6 +305,12 @@ void shopMainMenuExecute(void) {
 
 /* shop entry: allocate, set up, run, tear down */
 void shopMenuEntryPoint(void) {
+    if (pcResumeMenu() >= PC_SAFE_SUB_SHOP && pcResumeMenu() <= PC_SAFE_SUB_SHOP_SELL_LIST) {
+        /* a stackless load: the shop's contexts and stock are the state's (include/pc_state.h) */
+        shopMainMenuExecute();
+        shutdownShopMenu();
+        return;
+    }
     initMenuContext32C(1);
     initMenuContext33C(1);
     initMenuContext350MainMenu(1);
@@ -1089,6 +1107,13 @@ u8 runShopBuyMenu(void) {
     s32 newGold = gold;
     s32 price;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_SHOP_BUY) {
+        /* a stackless load: the list's frame goes on (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_SHOP_BUY, 11, PC_LOCAL(rowFlags), PC_LOCAL(first), PC_LOCAL(redraw), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(top),
+                   PC_LOCAL(prevTop), PC_LOCAL(gold), PC_LOCAL(total), PC_LOCAL(newGold), PC_LOCAL(price));
+        pcResumeDone();
+        goto buyLoop;
+    }
     for (i = 0; i < 11; i++) {
         computeShopPreviewStats(gMenuContext->m330_itemData, i);
         gMenuContext->m450_shop->m46E0_attack[i] = gMenuContext->m330_itemData->mB8_computedStats[0];
@@ -1098,6 +1123,10 @@ u8 runShopBuyMenu(void) {
     gMenuContext->m350_mainMenu->m1192_dimmed = 1;
     allocMenuPointerGlyph(0);
     while (loop) {
+    buyLoop:
+        pcMenuKeep(PC_SAFE_SUB_SHOP_BUY, 11, PC_LOCAL(rowFlags), PC_LOCAL(first), PC_LOCAL(redraw), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(top),
+                   PC_LOCAL(prevTop), PC_LOCAL(gold), PC_LOCAL(total), PC_LOCAL(newGold), PC_LOCAL(price));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SHOP_BUY)); /* between frames: a canonical state's place */
         menuDraw();
         if (top != prevTop || redraw) {
             setupShopBuyListRows(top, newGold, rowFlags);
@@ -1519,6 +1548,14 @@ void runShopSellMenu(s32 count, u8* invIds, u8* invCounts, u8 category, u8 fromI
     /* Set only when an entry passes (an empty category leaves retail's stack
      * slot): the scroll bar and the cursor limit read it. 0 is the empty list. */
     n = 0;
+    if (pcResumeMenu() == PC_SAFE_SUB_SHOP_SELL_LIST) {
+        /* a stackless load: the list's frame goes on, its entries the state's (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_SHOP_SELL_LIST, 16, PC_LOCAL(first), PC_LOCAL(redraw), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(top), PC_LOCAL(prevTop),
+                   PC_LOCAL(ids), PC_LOCAL(kinds), PC_LOCAL(sel), PC_LOCAL(flags), PC_LOCAL(avail), PC_LOCAL(gold), PC_LOCAL(total),
+                   PC_LOCAL(newGold), PC_LOCAL(price), PC_LOCAL(n));
+        pcResumeDone();
+        goto listLoop;
+    }
     for (i = 0; i < count; i++) {
         avail[i] = 0;
         flags[i] = 0;
@@ -1549,6 +1586,11 @@ void runShopSellMenu(s32 count, u8* invIds, u8* invCounts, u8 category, u8 fromI
     }
     allocMenuPointerGlyph(0);
     while (loop) {
+    listLoop:
+        pcMenuKeep(PC_SAFE_SUB_SHOP_SELL_LIST, 16, PC_LOCAL(first), PC_LOCAL(redraw), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(top), PC_LOCAL(prevTop),
+                   PC_LOCAL(ids), PC_LOCAL(kinds), PC_LOCAL(sel), PC_LOCAL(flags), PC_LOCAL(avail), PC_LOCAL(gold), PC_LOCAL(total),
+                   PC_LOCAL(newGold), PC_LOCAL(price), PC_LOCAL(n));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SHOP_SELL_LIST)); /* between frames: a canonical state's place */
         menuDraw();
         if (top != prevTop || redraw) {
             setupShopSellListRows(top, ids, kinds, sel, avail);
@@ -1684,12 +1726,28 @@ u8 runShopSellEquippedAccessories(void) {
     u8 counts[8];
     u8 flags[8];
 
+    if (pcResumeMenu() == PC_SAFE_SUB_SHOP_SELL_EQUIPPED) {
+        /* a stackless load: the picker's frame goes on (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_SHOP_SELL_EQUIPPED, 2, PC_LOCAL(sel), PC_LOCAL(prev));
+        result = 2;
+        pcResumeDone();
+        goto equippedLoop;
+    }
+    if (pcResumeMenu() == PC_SAFE_SUB_SHOP_SELL_LIST) {
+        /* or the list it opened, with what it passed the list */
+        pcMenuTake(PC_SAFE_SUB_SHOP_SELL_EQUIPPED, 7, PC_LOCAL(sel), PC_LOCAL(prev), PC_LOCAL(result), PC_LOCAL(i), PC_LOCAL(ids), PC_LOCAL(counts),
+                   PC_LOCAL(flags));
+        goto equippedList;
+    }
     sel = 0;
     prev = 1;
     result = 2;
     showShopPartyMembers();
     processLoadSaveMenuSub5(0x98);
     do {
+    equippedLoop:
+        pcMenuKeep(PC_SAFE_SUB_SHOP_SELL_EQUIPPED, 2, PC_LOCAL(sel), PC_LOCAL(prev));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SHOP_SELL_EQUIPPED)); /* between frames: a canonical state's place */
         menuDraw();
         switch (gMenuContext->m325_menuButton) {
         case 5:
@@ -1739,6 +1797,9 @@ u8 runShopSellEquippedAccessories(void) {
                 k++;
             }
         }
+        pcMenuKeep(PC_SAFE_SUB_SHOP_SELL_EQUIPPED, 7, PC_LOCAL(sel), PC_LOCAL(prev), PC_LOCAL(result), PC_LOCAL(i), PC_LOCAL(ids), PC_LOCAL(counts),
+                   PC_LOCAL(flags)); /* as the list finds them */
+    equippedList:
         runShopSellMenu(8, ids, counts, 1, 0, flags, i);
     }
     return result;
@@ -1792,11 +1853,16 @@ void clearShopScreen(u8 arg0, u8 arg1) {
 void executeShopSellSelection(void) {
     u8 ret;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_SHOP_SELL_EQUIPPED || pcResumeMenu() == PC_SAFE_SUB_SHOP_SELL_LIST) {
+        ret = 1;
+        goto sellPick; /* a stackless load: the screen it opened goes on (include/pc_state.h) */
+    }
     gMenuContext->m33C_drawFlags->m4_drawCursor = 0;
     gMenuContext->m33C_drawFlags->m3_drawSelectionBox = 0;
     gMenuContext->m33C_drawFlags->mA_354Enabled = 0;
     setMenuLabelsEnabled(0, 4, gMenuContext->m6E0_mainMenuLabels, shopSellLabelConfig, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
     ret = 1;
+sellPick:
     switch (gMenuContext->m338_currentSelectedSubMenuEntry) {
     case 0:
         ret = runShopSellEquippedAccessories();
@@ -1822,11 +1888,24 @@ u8 openShopSellMenu(void) {
     u8 loop;
     u8 first;
 
+    if (pcResumeMenu() >= PC_SAFE_SUB_SHOP_SELL && pcResumeMenu() <= PC_SAFE_SUB_SHOP_SELL_LIST) {
+        /* a stackless load: the sell menu's frame, or the screen it opened, goes on (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_SHOP_SELL, 1, PC_LOCAL(first));
+        loop = 1;
+        if (pcResumeMenu() == PC_SAFE_SUB_SHOP_SELL) {
+            pcResumeDone();
+            goto sellLoop;
+        }
+        goto sellChild;
+    }
     loop = 1;
     first = 1;
     gMenuContext->m338_currentSelectedSubMenuEntry = 3;
     gMenuContext->m339_previousSelectedSubMenuEntry = 0xFF;
     do {
+    sellLoop:
+        pcMenuKeep(PC_SAFE_SUB_SHOP_SELL, 1, PC_LOCAL(first));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_SHOP_SELL)); /* between frames: a canonical state's place */
         menuDraw();
         if (first) {
             setMenuLabelsEnabled(1, 4, gMenuContext->m6E0_mainMenuLabels, shopSellLabelConfig, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
@@ -1843,6 +1922,8 @@ u8 openShopSellMenu(void) {
         switch (gMenuContext->m325_menuButton) {
         case 4:
             playMenuSoundEffect(2);
+            pcMenuKeep(PC_SAFE_SUB_SHOP_SELL, 1, PC_LOCAL(first)); /* as the screen finds them */
+        sellChild:
             executeShopSellSelection();
             gMenuContext->m339_previousSelectedSubMenuEntry = 0xFF;
             break;

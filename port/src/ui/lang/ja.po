@@ -3152,6 +3152,21 @@ msgstr "ここからはインストールできません: %s。"
 msgid "Install and restart"
 msgstr "インストールして再起動"
 
+msgid "apt installs it: sudo apt update && sudo apt upgrade, once this port's APT repository is added (the Build and set up page says how). Skipped, it is not shown again; a later version is."
+msgstr "apt でインストールします: この移植版の APT リポジトリを追加すれば(方法は「ビルドとセットアップ」のページにあります)、sudo apt update && sudo apt upgrade です。飛ばしたバージョンはもう表示しません。それより新しいバージョンは表示します。"
+
+msgid "Android installs it (confirm on its screen if it asks) and closes the app: open it again."
+msgstr "Android がインストールし(確認を求められたらその画面で確かめてください)、アプリを閉じます。もう一度開いてください。"
+
+msgid "Install Xenogears PC port %s now? The app downloads it and checks it; Android then installs it over this app (it may ask you to confirm first) and closes the app: open it again afterwards. Progress since your last save is lost; the settings, memory cards and save states are kept."
+msgstr "ゼノギアス PC 移植版 %s を今インストールしますか? ダウンロードして確認すると、Android がこのアプリの上にインストールし(先に確認を求めることがあります)、アプリを閉じます。そのあと、アプリをもう一度開いてください。最後にセーブしてからの進み具合は失われます。設定、メモリーカード、ステートセーブはそのままです。"
+
+msgid "Allow installs from this app in the settings Android opened, then choose Install and restart again."
+msgstr "Android が開いた設定で、このアプリからのインストールを許可してから、もう一度「インストールして再起動」を選んでください。"
+
+msgid "Install and restart downloads it and checks it against the signed manifest; Android installs it over this app (it may ask you to confirm first), keeping its settings and saves. Skipped, it is not shown again; a later version is."
+msgstr "「インストールして再起動」は新しいバージョンをダウンロードし、サイン付きのアップデートファイルと照らして確認します。Android がこのアプリの上にインストールします(先に確認を求めることがあります)。設定とセーブはそのままです。飛ばしたバージョンはもう表示しません。それより新しいバージョンは表示します。"
+
 msgid "Install Xenogears PC port %s now? The game downloads its setup and checks it, then closes; Windows asks for permission, and the setup installs it and starts the game again. Progress since your last save is lost; the settings, memory cards and save states are kept."
 msgstr "ゼノギアス PC 移植版 %s を今インストールしますか? セットアップをダウンロードして確認し、ゲームを終了します。Windows が許可を求め、セットアップがインストールしてゲームをもう一度起動します。最後にセーブしてからの進み具合は失われます。設定、メモリーカード、ステートセーブはそのままです。"
 
@@ -7566,8 +7581,8 @@ msgstr "小"
 msgid "Large"
 msgstr "大"
 
-msgid "In fields and on the world map, fine dust drifting where the place is lit, and warm embers where it is dark. Dialogue, portraits and the HUD are not touched. Off by default."
-msgstr "フィールドとワールドマップで、明るい場所には細かなほこりが、暗い場所にはあたたかな火のこがただよいます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, fine dust drifting where the place is lit, and warm embers where it is dark. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、明るい場所には細かなほこりが、暗い場所にはあたたかな火のこがただよいます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
 msgid "How big the particles are. Small by default."
 msgstr "パーティクルの大きさです。初期設定は小です。"

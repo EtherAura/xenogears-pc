@@ -23,6 +23,7 @@
 #define PC_SCENE_FIELD 0
 #define PC_SCENE_BATTLE 1
 #define PC_SCENE_WORLDMAP 2
+#define PC_SCENE_BATTLING 3 /* Battling's arena: a battle's, without the ambient particles */
 void pcScenePlace(int place);
 void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int groundCount, int zPerSlot,
                   const void* uiTag, int focusZ, int pictureSlot);

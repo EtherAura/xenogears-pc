@@ -335,7 +335,7 @@ void fillStringDisplayBuffer(u32 value) {
 /* Noah initMenuContext32C */
 void initMenuContext32C(u8 arg0) {
     if (arg0) {
-        gMenuContext->m32C_memoryCardContext = allocateHeap(sizeof(MenuContext_32C), 0);
+        gMenuContext->m32C_memoryCardContext = allocateHeap(PC_HEAP_OF(MenuContext_32C, sizeof(MenuContext_32C)), 0);
         bzero(gMenuContext->m32C_memoryCardContext, sizeof(MenuContext_32C));
     } else {
         freeHeap(gMenuContext->m32C_memoryCardContext);
@@ -355,7 +355,7 @@ void initMenuContext33C(u8 arg0) {
 /* Noah initMenuContext350MainMenu */
 void initMenuContext350MainMenu(u8 arg0) {
     if (arg0) {
-        gMenuContext->m350_mainMenu = allocateHeap(sizeof(MenuContext_350), 0);
+        gMenuContext->m350_mainMenu = allocateHeap(PC_HEAP_OF(MenuContext_350, sizeof(MenuContext_350)), 0);
         bzero(gMenuContext->m350_mainMenu, sizeof(MenuContext_350));
     } else {
         freeHeap(gMenuContext->m350_mainMenu);
@@ -365,7 +365,7 @@ void initMenuContext350MainMenu(u8 arg0) {
 /* Noah initMenuContext354 */
 void initMenuContext354(u8 arg0) {
     if (arg0) {
-        gMenuContext->m354_subMenu = allocateHeap((s32)sizeof(struct MenuContext_354), 0);
+        gMenuContext->m354_subMenu = allocateHeap(PC_HEAP_OF(struct MenuContext_354, (s32)sizeof(struct MenuContext_354)), 0);
         bzero(gMenuContext->m354_subMenu, (s32)sizeof(struct MenuContext_354));
     } else {
         freeHeap(gMenuContext->m354_subMenu);
@@ -375,7 +375,7 @@ void initMenuContext354(u8 arg0) {
 /* Noah initMenuContext330 */
 void initMenuContext330(u8 arg0) {
     if (arg0) {
-        gMenuContext->m330_itemData = allocateHeap((s32)sizeof(struct MenuContext_330), 0);
+        gMenuContext->m330_itemData = allocateHeap(PC_HEAP_OF(struct MenuContext_330, (s32)sizeof(struct MenuContext_330)), 0);
         bzero(gMenuContext->m330_itemData, (s32)sizeof(struct MenuContext_330));
     } else {
         freeHeap(gMenuContext->m330_itemData);
@@ -385,7 +385,7 @@ void initMenuContext330(u8 arg0) {
 /* Noah initMenuContext348 */
 void initMenuContext348(u8 arg0) {
     if (arg0) {
-        gMenuContext->m348_cursor = allocateHeap(sizeof(MenuContext_348), 0);
+        gMenuContext->m348_cursor = allocateHeap(PC_HEAP_OF(MenuContext_348, sizeof(MenuContext_348)), 0);
         bzero(gMenuContext->m348_cursor, sizeof(MenuContext_348));
     } else {
         freeHeap(gMenuContext->m348_cursor);
@@ -394,7 +394,7 @@ void initMenuContext348(u8 arg0) {
 
 void initMenuContext1E20(u8 arg0) {
     if (arg0) {
-        gMenuContext->m1E20_nameEntry = allocateHeap(sizeof(MenuContext_1E20), 0);
+        gMenuContext->m1E20_nameEntry = allocateHeap(PC_HEAP_OF(MenuContext_1E20, sizeof(MenuContext_1E20)), 0);
         bzero(gMenuContext->m1E20_nameEntry, sizeof(MenuContext_1E20));
     } else {
         freeHeap(gMenuContext->m1E20_nameEntry);
@@ -403,7 +403,7 @@ void initMenuContext1E20(u8 arg0) {
 
 void initMenuContext450Shop(u8 arg0) {
     if (arg0) {
-        gMenuContext->m450_shop = allocateHeap(sizeof(MenuShop), 0);
+        gMenuContext->m450_shop = allocateHeap(PC_HEAP_OF(MenuShop, sizeof(MenuShop)), 0);
         bzero(gMenuContext->m450_shop, sizeof(MenuShop));
     } else {
         freeHeap(gMenuContext->m450_shop);
@@ -412,7 +412,7 @@ void initMenuContext450Shop(u8 arg0) {
 
 void initMenuContext454GearShop(u8 arg0) {
     if (arg0) {
-        gMenuContext->m454_gearShop = allocateHeap(sizeof(MenuGearShop), 0);
+        gMenuContext->m454_gearShop = allocateHeap(PC_HEAP_OF(MenuGearShop, sizeof(MenuGearShop)), 0);
         bzero(gMenuContext->m454_gearShop, sizeof(MenuGearShop));
     } else {
         freeHeap(gMenuContext->m454_gearShop);
@@ -898,7 +898,7 @@ void setupScrollBarThumb(s32 x, s32 y, s32 h, s32 count, s32 pos) {
     s32 offset = 0;
 
     if (!gMenuContext->m33C_drawFlags->m49_draw43C) {
-        gMenuContext->m43C_scrollBarThumb = allocateHeap((s32)sizeof(struct MenuContext_43C), 0);
+        gMenuContext->m43C_scrollBarThumb = allocateHeap(PC_HEAP_OF(struct MenuContext_43C, (s32)sizeof(struct MenuContext_43C)), 0);
         bzero(gMenuContext->m43C_scrollBarThumb, (s32)sizeof(struct MenuContext_43C));
     }
     if (count < 9) {
@@ -921,7 +921,7 @@ void freeScrollBarThumb(void) {
 
 /* allocate the pointer glyph m444[slot] */
 void allocMenuPointerGlyph(u8 arg0) {
-    gMenuContext->m444_pointerGlyphs[arg0] = allocateHeap((s32)sizeof(struct MenuContext_444), 0);
+    gMenuContext->m444_pointerGlyphs[arg0] = allocateHeap(PC_HEAP_OF(struct MenuContext_444, (s32)sizeof(struct MenuContext_444)), 0);
     bzero(gMenuContext->m444_pointerGlyphs[arg0], (s32)sizeof(struct MenuContext_444));
     gMenuContext->m444_pointerGlyphs[arg0]->m70_frame = 4;
     gMenuContext->m444_pointerGlyphs[arg0]->m74_timer = 0;
@@ -1231,7 +1231,7 @@ void iniMenuContext364And380(u8 index, u16 x, u16 y, u16 width, u16 height, u8 a
     MenuContext_380* anim;
 
     if (index >= 2) {
-        gMenuContext->m364_menuBoxes[index] = allocateHeap(sizeof(MenuContext_364), 0);
+        gMenuContext->m364_menuBoxes[index] = allocateHeap(PC_HEAP_OF(MenuContext_364, sizeof(MenuContext_364)), 0);
         bzero(gMenuContext->m364_menuBoxes[index], sizeof(MenuContext_364));
         gMenuContext->m380_menuBoxAnims[index] = allocateHeap(sizeof(MenuContext_380), 0);
         bzero(gMenuContext->m380_menuBoxAnims[index], sizeof(MenuContext_380));
@@ -2124,7 +2124,7 @@ extern s32 gearShopCardCursorStartY[];
 void setupDraw428(u8 mode) {
     s32 i;
 
-    gMenuContext->m428_cardCursors = allocateHeap((s32)sizeof(struct MenuContext_428), 0);
+    gMenuContext->m428_cardCursors = allocateHeap(PC_HEAP_OF(MenuContext_428, (s32)sizeof(struct MenuContext_428)), 0);
     bzero(gMenuContext->m428_cardCursors, (s32)sizeof(struct MenuContext_428));
     switch (mode) {
     case 0:
@@ -2180,7 +2180,7 @@ void processLoadSaveMenuSub5(u8 msg) {
         menuDraw();
     }
     for (i = 0; i < 4; i++) {
-        gMenuContext->m1DE0_messageLines[i] = allocateHeap((s32)sizeof(MenuContext_4E0), 0);
+        gMenuContext->m1DE0_messageLines[i] = allocateHeap(PC_HEAP_OF(MenuContext_4E0, (s32)sizeof(MenuContext_4E0)), 0);
         bzero(gMenuContext->m1DE0_messageLines[i], (s32)sizeof(MenuContext_4E0));
         if ((i & 1) == 0) {
             gMenuContext->m1DE0_messageLines[i]->m78_imageData = ALLOC_TEXT_IMAGE(0x5CA);

@@ -2,6 +2,7 @@
 #include "bookmarks.h"
 #include "library.h"
 #include "ui/l10n.h"
+#include "ui/wrapped.h"
 #include "viewer.h"
 #include <algorithm>
 #include <cstring>
@@ -148,7 +149,7 @@ void draw(const Area& area) {
                 N_("Explore fields and the world map."), N_("Pictures, movies and story scenes.")};
             if (beginPane("##description", ImVec2(area.min.x, listMax.y + 12 * area.unit), area.max, nullptr, true)) {
                 ImGui::TextUnformatted(tr(section.name));
-                ImGui::TextWrapped("%s", tr(descriptions[section.engine]));
+                wrappedText("%s", tr(descriptions[section.engine]));
             }
             endPane();
         }

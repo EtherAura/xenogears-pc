@@ -220,6 +220,9 @@ if [ "$TESTS" = 1 ]; then
     gate art-tags "$PY" tools/test_art_tags.py
     gate chapter-row "$PY" tools/test_chapter_row.py
     gate doll-queue "$PY" tools/test_doll_queue.py
+    # The release's signed files (xg-4oq.14.2, xg-4oq.14.6): fixture keys and packages only.
+    gate update-manifest-tests "$PY" tools/test_update_manifest.py
+    gate apt-repo-tests "$PY" tools/test_apt_repo.py
     if [ -f "$TEST_BUILD/CMakeCache.txt" ]; then
         gate port-tests "$PY" tools/port_tests.py --build "$TEST_BUILD"
     else

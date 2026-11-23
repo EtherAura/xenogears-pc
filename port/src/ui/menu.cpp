@@ -25,6 +25,8 @@
 #include "options.h"
 #include "sfx.h"
 #include "skin.h"
+#include "textwrap.h"
+#include "wrapped.h"
 
 extern "C" {
 #include "gpu/gpu.h"
@@ -1911,36 +1913,57 @@ void run() {
 
 // ---- for sections.cpp ------------------------------------------------------------------
 
-void textLines(const char* text) {
-    // ImGui's wrapped text puts its lines a font height (13) apart; the
-    // game's are 16 apart (processLoadSaveMenuSub5, the lists): each line an
-    // item of its own. In the menu's language (l10n.h).
-    text = tr(text);
+// A character's width at the current font size, for textWrapCut.
+static float glyphAdvance(unsigned c, void* font) {
+    ImFontBaked* baked = ((ImFont*)font)->GetFontBaked(ImGui::GetFontSize());
+    return baked->GetCharAdvance((ImWchar)c) * (ImGui::GetFontSize() / baked->Size);
+}
+
+// The lines [text, end) breaks into at width, each given to line(begin, end) (an empty
+// one for a blank line): ImGui's word wrap, or for a line with CJK in it textWrapCut,
+// which breaks Japanese between characters and keeps 。」 off a line's start (xg-em4y).
+template <typename Line> static void wrapLines(const char* text, const char* end, float width, Line line) {
     ImFont* font = ImGui::GetFont();
-    float size = ImGui::GetFontSize(), width = ImGui::GetContentRegionAvail().x;
-    const char* end = text + strlen(text);
-    if (text == end) {
-        ImGui::NewLine();
-        return;
-    }
+    float size = ImGui::GetFontSize();
     for (const char* p = text; p < end;) {
         const char* nl = (const char*)memchr(p, '\n', (size_t)(end - p));
         const char* lineEnd = nl != nullptr ? nl : end;
         if (p == lineEnd) {
-            ImGui::NewLine();
+            line(p, p);
         }
+        bool cjk = textHasCjk(p, lineEnd);
         while (p < lineEnd) {
-            const char* cut = font->CalcWordWrapPosition(size, p, lineEnd, width);
+            const char* cut = cjk ? textWrapCut(p, lineEnd, width, glyphAdvance, font) :
+                                    font->CalcWordWrapPosition(size, p, lineEnd, width);
             if (cut <= p) {
                 unsigned c;
                 cut = p + ImTextCharFromUtf8(&c, p, lineEnd); // a word wider than the line
             }
-            ImGui::TextUnformatted(p, cut);
+            line(p, cut);
             p = cut;
             while (p < lineEnd && *p == ' ') p++;
         }
         p = nl != nullptr ? nl + 1 : end;
     }
+}
+
+void textLines(const char* text) {
+    // ImGui's wrapped text puts its lines a font height (13) apart; the
+    // game's are 16 apart (processLoadSaveMenuSub5, the lists): each line an
+    // item of its own. In the menu's language (l10n.h).
+    text = tr(text);
+    const char* end = text + strlen(text);
+    if (text == end) {
+        ImGui::NewLine();
+        return;
+    }
+    wrapLines(text, end, ImGui::GetContentRegionAvail().x, [](const char* a, const char* b) {
+        if (a == b) {
+            ImGui::NewLine();
+        } else {
+            ImGui::TextUnformatted(a, b);
+        }
+    });
 }
 
 void nextModal() {
@@ -2041,6 +2064,33 @@ void overrideNote(const char* key) {
 } // namespace menu
 
 using namespace menu;
+
+// ui/wrapped.h: global, for the extras too.
+void wrappedText(const char* fmt, ...) {
+    va_list ap, again;
+    va_start(ap, fmt);
+    va_copy(again, ap);
+    int n = vsnprintf(nullptr, 0, fmt, again);
+    va_end(again);
+    std::vector<char> buf(n > 0 ? (size_t)n + 1 : 1, '\0');
+    if (n > 0) vsnprintf(buf.data(), buf.size(), fmt, ap);
+    va_end(ap);
+    const char* text = buf.data();
+    const char* end = text + (n > 0 ? n : 0);
+    if (!textHasCjk(text, end)) {
+        ImGui::TextWrapped("%s", text); // exactly as before
+        return;
+    }
+    // TextWrapped's width: to the wrap position pushed, else the content region's edge.
+    ImGuiWindow* w = ImGui::GetCurrentWindow();
+    float width = ImGui::CalcWrapWidthForPos(w->DC.CursorPos, w->DC.TextWrapPos < 0.0f ? 0.0f : w->DC.TextWrapPos);
+    std::string lines;
+    wrapLines(text, end, width, [&lines](const char* a, const char* b) {
+        if (!lines.empty()) lines += '\n';
+        lines.append(a, b);
+    });
+    ImGui::TextUnformatted(lines.data(), lines.data() + lines.size()); // one item, TextWrapped's line spacing
+}
 
 // ---- ui.h ----------------------------------------------------------------------------------
 

@@ -470,7 +470,7 @@ skip:
             op = *pNext++;
             for (tmp = 8; tmp < 10; tmp++) {
                 if (loadedMechas[tmp] == NULL) {
-                    pNew = allocateHeap(PC_HEAP_SIZED(sizeof(sLoadedMechas), 0x134), 1);
+                    pNew = allocateHeap(PC_HEAP_OF(sLoadedMechas, PC_HEAP_SIZED(sizeof(sLoadedMechas), 0x134)), 1);
                     break;
                 }
             }
@@ -492,7 +492,7 @@ skip:
             pNew->m10D_num114 = 0;
             pNew->m10E_num118 = 0;
             initMechSub110(pNew);
-            newBones = allocateHeap(PC_HEAP_SIZED(pMecha->m4_bones->mA_numBones * sizeof(sMechaBone), pMecha->m4_bones->mA_numBones * 0x7c), 1);
+            newBones = allocateHeap(PC_HEAP_OF(sMechaBone, PC_HEAP_SIZED(pMecha->m4_bones->mA_numBones * sizeof(sMechaBone), pMecha->m4_bones->mA_numBones * 0x7c)), 1);
             pNew->m4_bones = newBones;
             for (tmp = 0; tmp < pMecha->m4_bones->mA_numBones; tmp++) {
                 newBones[tmp] = pMecha->m4_bones[tmp];
@@ -1898,7 +1898,7 @@ void mechaInitNewMecha(s32 entryId, u16 flags, sMechaDataTable2* pData2, sMechaD
     if (loadedMechas[entryId] != NULL) {
         return;
     }
-    pMecha = allocateHeap(PC_HEAP_SIZED(sizeof(sLoadedMechas), 0x134), 0);
+    pMecha = allocateHeap(PC_HEAP_OF(sLoadedMechas, PC_HEAP_SIZED(sizeof(sLoadedMechas), 0x134)), 0);
     if (!(flags & 1)) {
 #ifndef PLATFORM_PC
         doPointerRelocation((u32*)pData1);
@@ -2010,7 +2010,7 @@ void mechaInitNewMecha(s32 entryId, u16 flags, sMechaDataTable2* pData2, sMechaD
     initMechSub110(pMecha);
     pMecha->m10E_num118 = p[8];
     if (pMecha->m10E_num118 != 0) {
-        pMecha->m118_colorAnims = allocateHeap(PC_HEAP_SIZED(pMecha->m10E_num118 * sizeof(sLoadedMechas_118), pMecha->m10E_num118 * 0x30), 0);
+        pMecha->m118_colorAnims = allocateHeap(PC_HEAP_OF(sLoadedMechas_118, PC_HEAP_SIZED(pMecha->m10E_num118 * sizeof(sLoadedMechas_118), pMecha->m10E_num118 * 0x30)), 0);
         for (i = 0; i < pMecha->m10E_num118; i++) {
             pMecha->m118_colorAnims[i].m1A_isActive = 0;
             pMecha->m118_colorAnims[i].m4_baseColors = 0;
@@ -2021,7 +2021,7 @@ void mechaInitNewMecha(s32 entryId, u16 flags, sMechaDataTable2* pData2, sMechaD
     pMecha->m10D_num114 = p[9];
     if (pMecha->m10D_num114 != 0) {
         p += 10;
-        pMecha->m114_cloths = p114 = allocateHeap(PC_HEAP_SIZED(pMecha->m10D_num114 * sizeof(sLoadedMechas_114), pMecha->m10D_num114 * 0x24), 0);
+        pMecha->m114_cloths = p114 = allocateHeap(PC_HEAP_OF(sLoadedMechas_114, PC_HEAP_SIZED(pMecha->m10D_num114 * sizeof(sLoadedMechas_114), pMecha->m10D_num114 * 0x24)), 0);
         for (i = 0; i < pMecha->m10D_num114; i++, p114++) {
             count = (s16)p[17];
             p114->m0_boneIndex = *p++;

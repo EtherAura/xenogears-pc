@@ -108,6 +108,7 @@ public class XgActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        readUpdateAllowed();
         boolean again = getIntent().getBooleanExtra("discs-picker", false);
         if (again || (discTree() == null && getIntent().getStringExtra("discs-dir") == null)) {
             pickDiscFolder();
@@ -603,6 +604,115 @@ public class XgActivity extends SDLActivity {
             return body.toByteArray();
         } finally {
             c.disconnect();
+        }
+    }
+
+    // ---- the in-app update's install (port/src/update/update_install.c, xg-4oq.14.5) -------
+    //
+    // The game downloads the newer release's APK into its own folder and checks it against the
+    // signed manifest; then updateInstall hands it to Android through a PackageInstaller session.
+    // Android asks the player to confirm (the first time an install from this app is also to be
+    // allowed: updateCanInstall, updateAllowInstalls), checks that the APK is signed with this
+    // app's own key, and replaces the app, which ends this process; the player opens it again.
+    // updateInstallState says how it went for the game to show: "" (nothing), "installing",
+    // "waiting" (Android's confirmation is showing), "done", or "failed:<Android's words>". Every
+    // method returns at once and calls into no Binder: the game calls them on its own stack, where
+    // ART aborts on a native call with object arguments (see restartApp). So whether installs are
+    // allowed is read on the UI thread (at the start, when the app comes back, when asked) and the
+    // last answer given.
+    // Needs REQUEST_INSTALL_PACKAGES, which only a build with the updater asks for
+    // (app/src/updater/AndroidManifest.xml).
+
+    private static final String UPDATE_STATUS = "io.github.etheraura.xgport.UPDATE_STATUS";
+    private volatile String updateState = "";
+    private volatile boolean updateAllowed;
+    private boolean updateReceiving;
+
+    private void readUpdateAllowed() {
+        updateAllowed = getPackageManager().canRequestPackageInstalls();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        readUpdateAllowed(); // back from the settings page updateAllowInstalls opened
+    }
+
+    public String updateCanInstall() {
+        runOnUiThread(this::readUpdateAllowed);
+        return updateAllowed ? "yes" : "no";
+    }
+
+    public void updateAllowInstalls() {
+        runOnUiThread(() -> startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Uri.parse("package:" + getPackageName()))));
+    }
+
+    public String updateInstallState() {
+        return updateState;
+    }
+
+    public void updateInstall(String apk) {
+        updateState = "installing";
+        runOnUiThread(() -> new Thread(() -> installUpdate(apk), "xg-update-apk").start());
+    }
+
+    private final android.content.BroadcastReceiver updateReceiver = new android.content.BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int status = intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS,
+                    android.content.pm.PackageInstaller.STATUS_FAILURE);
+            String message = intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE);
+            Log.i(TAG, "update: install status " + status + (message != null ? ": " + message : ""));
+            if (status == android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION) {
+                Intent confirm = intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent.class);
+                if (confirm != null) {
+                    updateState = "waiting";
+                    startActivity(confirm);
+                } else {
+                    updateState = "failed:Android asked for a confirmation it did not show";
+                }
+            } else if (status == android.content.pm.PackageInstaller.STATUS_SUCCESS) {
+                updateState = "done";
+            } else {
+                updateState = "failed:" + (message != null ? message : "status " + status);
+            }
+        }
+    };
+
+    private void installUpdate(String apk) {
+        try {
+            if (!updateReceiving) {
+                registerReceiver(updateReceiver, new android.content.IntentFilter(UPDATE_STATUS),
+                        Context.RECEIVER_NOT_EXPORTED);
+                updateReceiving = true;
+            }
+            File file = new File(apk);
+            android.content.pm.PackageInstaller installer = getPackageManager().getPackageInstaller();
+            android.content.pm.PackageInstaller.SessionParams params = new android.content.pm.PackageInstaller.SessionParams(
+                    android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+            params.setAppPackageName(getPackageName());
+            params.setSize(file.length());
+            // Without asking again, where Android allows it: this app updating itself once it is the
+            // app that installed it (Android 12 and later).
+            params.setRequireUserAction(android.content.pm.PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED);
+            int id = installer.createSession(params);
+            try (android.content.pm.PackageInstaller.Session session = installer.openSession(id)) {
+                try (java.io.InputStream in = new java.io.FileInputStream(file);
+                     java.io.OutputStream out = session.openWrite("xenogears.apk", 0, file.length())) {
+                    byte[] chunk = new byte[1 << 16];
+                    for (int n; (n = in.read(chunk)) > 0; ) out.write(chunk, 0, n);
+                    session.fsync(out);
+                }
+                Intent status = new Intent(UPDATE_STATUS).setPackage(getPackageName());
+                android.app.PendingIntent sender = android.app.PendingIntent.getBroadcast(this, id, status,
+                        android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_MUTABLE);
+                Log.i(TAG, "update: installing " + apk + " (" + file.length() + " bytes, session " + id + ")");
+                session.commit(sender.getIntentSender());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "update: install failed", e);
+            updateState = "failed:" + e;
         }
     }
 

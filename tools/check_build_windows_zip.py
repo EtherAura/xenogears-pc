@@ -29,6 +29,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -444,10 +445,26 @@ def scan(helper: Path) -> None:
     flagged = [line for line in helper.read_text().splitlines()
                if publish.LEFTOVER_DATE.search(line) or publish.TIME_OF_DAY.search(line) or publish.FORBIDDEN.search(line)]
     check(not flagged, f"{helper.name} passes the publisher's date/time/private scan ({flagged or 'clean'})")
-    text = helper.read_text()
-    check("build-release.sh" not in text and "fetch" not in text.replace("Nothing is fetched", "")
-          .replace("nothing fetched", "").replace("deps.py fetch --cache DIR", ""),
-          f"{helper.name} fetches nothing and names no build-release.sh")
+    found = runs_or_fetches(helper.read_text())
+    check(not found, f"{helper.name} fetches nothing and runs no build-release.sh ({found or 'none'})")
+    controls = ['bash "$ROOT/build-release.sh"', "curl -fsSLo x.tar.gz https://example.org/x.tar.gz",
+                "python3 tools/deps.py fetch sdl3", 'die "no cache"; wget "$URL"']
+    check(all(runs_or_fetches(line) for line in controls), "the scan catches a run of build-release.sh and a fetch")
+
+
+def runs_or_fetches(text: str) -> list[str]:
+    """The code lines that run build-release.sh or fetch anything. Comments and quoted prose (a string with a space:
+    a message may name build-release.sh as a hint, xg-oerj) are left out; a quoted path or word is code."""
+    found = []
+    for line in text.splitlines():
+        if line.lstrip().startswith("#"):
+            continue
+        code = re.sub(r'"(?:[^"\\]|\\.)*"|\'[^\']*\'', lambda m: "" if " " in m.group(0) else m.group(0),
+                      line).split(" #", 1)[0]
+        if re.search(r"build-release\.sh|\bfetch\b|\b(curl|wget|aria2c)\b|\bgit\s+(clone|fetch|pull)\b|"
+                     r"\bdocker\s+pull\b|\bpip3?\s+install\b", code):
+            found.append(line.strip())
+    return found
 
 
 def main() -> int:

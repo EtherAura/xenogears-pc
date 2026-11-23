@@ -132,7 +132,7 @@ void processLoadSaveMenuSub5(u8 msg) {
     }
     x = 0x84;
     for (i = 0; i < 4; i++) {
-        gMenuContext->m1DE0_messageLines[i] = allocateHeap(PC_HEAP_SIZED((s32)sizeof(MenuContext_4E0), (s32)0x80), 0);
+        gMenuContext->m1DE0_messageLines[i] = allocateHeap(PC_HEAP_OF(MenuContext_4E0, PC_HEAP_SIZED((s32)sizeof(MenuContext_4E0), (s32)0x80)), 0);
         bzero(gMenuContext->m1DE0_messageLines[i], (s32)sizeof(MenuContext_4E0));
         if ((i & 1) == 0) {
             gMenuContext->m1DE0_messageLines[i]->m78_imageData = ALLOC_TEXT_IMAGE(0x5CA);
@@ -209,7 +209,7 @@ void initStatusMenuSub1(u8 which, u8 mode) {
     }
     if (count != 1) {
         if (!gMenuContext->m33C_drawFlags->m67_arrowsAllocated) {
-            gMenuContext->m440_arrows = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_440), (s32)0x1c4), 0);
+            gMenuContext->m440_arrows = allocateHeap(PC_HEAP_OF(struct MenuContext_440, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_440), (s32)0x1c4)), 0);
             bzero(gMenuContext->m440_arrows, (s32)sizeof(struct MenuContext_440));
             gMenuContext->m33C_drawFlags->m67_arrowsAllocated = 1;
         }

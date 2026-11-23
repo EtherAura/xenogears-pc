@@ -2,6 +2,7 @@
 // image <path>; field <id>; actor <id>; routine <0-31>; tab scripts|variables|exits|trace|history
 // watch <hex byte address>; trace <0|1>; history <0|1>; clear trace|history; info
 #include "ui/l10n.h"
+#include "ui/wrapped.h"
 #include "viewer.h"
 #include "view.h"
 #include "ui/assets.h"
@@ -117,14 +118,14 @@ void instruction(int pc) {
     ImGui::Text("%04X  %s%s  [%s]", pc, xgScriptName(c[0], ext), annotation.c_str(), bytes.c_str());
 }
 void scripts() {
-    if (!S->script.code) { ImGui::TextWrapped("%s", tr(S->why.c_str())); return; }
+    if (!S->script.code) { wrappedText("%s", tr(S->why.c_str())); return; }
     int actor = S->actor, slot = S->routine;
     ImGui::SetNextItemWidth(100 * unit());
     if (ImGui::InputInt(tr("Actor"), &actor) && actor >= 0 && actor < S->script.actors) { S->actor = actor; routine(); }
     ImGui::SetNextItemWidth(100 * unit());
     if (ImGui::SliderInt(tr("Routine"), &slot, 0, 31)) { S->routine = slot; routine(); }
     ImGui::Text(tr("%d actors; %d code bytes; routine entry %04X"), S->script.actors, S->script.codeSize, S->script.routines[S->actor][S->routine]);
-    ImGui::TextWrapped(tr("Reachable instructions, including calls and conditional branches. Hex bytes retain operands for unnamed operations."));
+    wrappedText(tr("Reachable instructions, including calls and conditional branches. Hex bytes retain operands for unnamed operations."));
     if (S->snapshot) ImGui::Text(tr("%s PC %04X, slot %d, routine %d"), S->live ? tr("Paused game") : tr("Sandbox"), S->vm.pc, S->vm.slot, S->vm.routine);
     if (ImGui::TreeNode(tr("All actor routine entries"))) {
         for (int i = 0; i < 32; i++) { ImGui::PushID(i); char b[40]; snprintf(b, sizeof(b), "%02d: %04X", i, S->script.routines[S->actor][i]);
@@ -137,8 +138,8 @@ void scripts() {
     ImGui::EndChild();
 }
 void variables() {
-    ImGui::TextWrapped(tr("Read-only values from the paused field or after sandbox setup. Addresses are even byte offsets 000-7FE; signedness comes from this field's script header."));
-    if (!S->snapshot) { ImGui::TextWrapped(tr("No actor snapshot: %s"), tr(S->why.c_str())); return; }
+    wrappedText(tr("Read-only values from the paused field or after sandbox setup. Addresses are even byte offsets 000-7FE; signedness comes from this field's script header."));
+    if (!S->snapshot) { wrappedText(tr("No actor snapshot: %s"), tr(S->why.c_str())); return; }
     ImGui::BeginChild("##variables");
     ImGui::Text(tr("Actor %d: PC %04X, running slot %d"), S->actor, S->vm.pc, S->vm.slot);
     for (int i = 0; i < 8; i++) ImGui::Text(tr("Slot %d: routine %3d, PC %04X, priority %d, delay %d"), i, S->vm.slotRoutine[i], S->vm.slotPC[i], S->vm.priority[i], S->vm.delay[i]);
@@ -152,7 +153,7 @@ void variables() {
     ImGui::EndChild();
 }
 void exits() {
-    ImGui::TextWrapped(tr("Static requests in the selected routine are annotated in Scripts. Probe triggers below in a separate sandbox; the paused game stays unchanged."));
+    wrappedText(tr("Static requests in the selected routine are annotated in Scripts. Probe triggers below in a separate sandbox; the paused game stays unchanged."));
     if (!S->field) return;
     if (ImGui::Button(tr("Probe field exits"))) { xgFieldFindExits(S->field); routine(); }
     const XgFieldInfo* in = xgFieldInfo(S->field);
@@ -164,7 +165,7 @@ void exits() {
 void traces() {
     bool on = xgTraceEnabled(); if (ImGui::Checkbox(tr("Record execution trace"), &on)) xgTraceEnable(on);
     ImGui::SameLine(); if (ImGui::Button(tr("Clear trace"))) xgTraceClear();
-    ImGui::TextWrapped(tr("Latest %d / %d operations from the running game, oldest first. Recording takes effect on resume; inspection never executes a script or advances paused time."), xgTraceCount(), XG_TRACE_CAPACITY);
+    wrappedText(tr("Latest %d / %d operations from the running game, oldest first. Recording takes effect on resume; inspection never executes a script or advances paused time."), xgTraceCount(), XG_TRACE_CAPACITY);
     ImGui::BeginChild("##trace", ImVec2(0,0), 0, ImGuiWindowFlags_HorizontalScrollbar);
     ImGuiListClipper clip; clip.Begin(xgTraceCount());
     while (clip.Step()) for (int i = clip.DisplayStart; i < clip.DisplayEnd; i++) { XgTrace t; if (!xgTraceGet(i, &t)) continue;
@@ -174,7 +175,7 @@ void traces() {
 void history() {
     bool on = xgHistoryEnabled(); if (ImGui::Checkbox(tr("Keep dialogue history"), &on)) xgHistoryEnable(on);
     ImGui::SameLine(); if (ImGui::Button(tr("Clear history"))) { xgHistoryClear(); S->shown = 0; }
-    ImGui::TextWrapped(tr("The last %d dialogue entries as printed by the game. Only revealed text is retained, including Japanese glyphs, names and number substitutions. History lasts for this run."), XG_HISTORY_CAPACITY);
+    wrappedText(tr("The last %d dialogue entries as printed by the game. Only revealed text is retained, including Japanese glyphs, names and number substitutions. History lasts for this run."), XG_HISTORY_CAPACITY);
     int count = xgHistoryCount();
     ImGui::SetNextItemWidth(160 * unit());
     if (ImGui::BeginCombo(tr("Entry"), S->history < 0 ? tr("Newest") : std::to_string(S->history + 1).c_str())) {
@@ -211,7 +212,7 @@ void draw(const Area& a) {
         }
         if (S->live) { ImGui::SameLine(); if (ImGui::Button(tr("Inspect sandbox"))) { S->live = false; routine(); } }
         if (S->disc) ImGui::TextDisabled(tr("%s disc %d: %s"), xgDiscRegion(S->disc), xgDiscNumber(S->disc), xgDiscPath(S->disc));
-        if (!S->why.empty()) ImGui::TextWrapped("%s", tr(S->why.c_str()));
+        if (!S->why.empty()) wrappedText("%s", tr(S->why.c_str()));
         if (ImGui::BeginTabBar("##scriptTabs")) {
             for (int i = 0; i < 5; i++) if (ImGui::BeginTabItem(tr(tabs[i]), nullptr, S->requestedTab == i ? ImGuiTabItemFlags_SetSelected : 0)) {
                 S->tab = i;

@@ -57,6 +57,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "imgui_internal.h"
 #include "picker.h"
 #include "ui/skin.h"
@@ -459,7 +460,7 @@ void scenePane(ImVec2 min, ImVec2 max, bool focused = false) {
     if (beginPane("##scene", min, max, title, false)) {
         if (S->field == nullptr) {
             ImGui::PushStyleColor(ImGuiCol_Text, S->fieldId < 0 ? skin::textHint : skin::textError);
-            ImGui::TextWrapped("%s", S->fieldId < 0 ? tr("Choose a field.") : tr(S->why.c_str()));
+            wrappedText("%s", S->fieldId < 0 ? tr("Choose a field.") : tr(S->why.c_str()));
             ImGui::PopStyleColor();
         } else {
             // The free camera's screen takes the pane's shape (the GTE's
@@ -554,7 +555,7 @@ void viewTab() {
             S->redraw = true;
         }
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        ImGui::TextWrapped(tr("Drag: orbit. Right drag or Shift: pan. Wheel: closer. W A S D Q E: move. Right stick, "
+        wrappedText(tr("Drag: orbit. Right drag or Shift: pan. Wheel: closer. W A S D Q E: move. Right stick, "
                            "triggers."));
         ImGui::PopStyleColor();
     }
@@ -647,7 +648,7 @@ bool followMedia(int index) {
 
 void assetsTab() {
     ImGui::Text(tr("%s disc %d  -  field %d"), xgDiscRegion(S->disc), xgDiscNumber(S->disc), S->fieldId);
-    ImGui::TextWrapped("%s", xgDiscPath(S->disc));
+    wrappedText("%s", xgDiscPath(S->disc));
     ImGui::Separator();
     char label[96];
     snprintf(label, sizeof(label), tr("Open field archive 04/%03X"), 0xB8 + 2 * S->fieldId);
@@ -666,11 +667,11 @@ void assetsTab() {
         if (ImGui::Button(label)) followSection(k);
     }
     ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-    ImGui::TextWrapped(tr("Back returns to this field with its camera and selection preserved."));
+    wrappedText(tr("Back returns to this field with its camera and selection preserved."));
     ImGui::PopStyleColor();
     readMedia();
     ImGui::SeparatorText(tr("Movies and event pictures"));
-    if (S->media.empty()) ImGui::TextWrapped(tr("No reachable media requests in this field script."));
+    if (S->media.empty()) wrappedText(tr("No reachable media requests in this field script."));
     for (size_t k = 0; k < S->media.size(); ++k) {
         const auto& r = S->media[k];
         ImGui::PushID((int)k + 100);
@@ -679,7 +680,7 @@ void assetsTab() {
         ImGui::BeginDisabled(!S->mediaProblems[k].empty());
         if (ImGui::Button(label)) followMedia((int)k);
         ImGui::EndDisabled();
-        if (!S->mediaProblems[k].empty()) ImGui::TextWrapped(tr("Unavailable: %s"), tr(S->mediaProblems[k].c_str()));
+        if (!S->mediaProblems[k].empty()) wrappedText(tr("Unavailable: %s"), tr(S->mediaProblems[k].c_str()));
         ImGui::PopID();
     }
 
@@ -775,11 +776,11 @@ void exitsTab() {
         S->redraw = true;
     }
     ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-    ImGui::TextWrapped(tr("Found by the field's own scripts: the player put in each trigger zone and at each actor."));
+    wrappedText(tr("Found by the field's own scripts: the player put in each trigger zone and at each actor."));
     ImGui::PopStyleColor();
     if (in->exits == 0) {
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        ImGui::TextWrapped(tr("No exits found in this field's scripts."));
+        wrappedText(tr("No exits found in this field's scripts."));
         ImGui::PopStyleColor();
         return;
     }
@@ -803,7 +804,7 @@ void exitsTab() {
 void startTab() {
     float u = unit();
     bool reload = false;
-    ImGui::TextWrapped(tr("Script routine 0 places the actors from the game's state: the story progress (field "
+    wrappedText(tr("Script routine 0 places the actors from the game's state: the story progress (field "
                        "variable 0) and the entry point (variable 2)."));
     reload |= ImGui::RadioButton(tr("The start of a new game"), &S->startFrom, START_INITIAL);
     if (!S->gameState.empty()) {
@@ -953,7 +954,7 @@ bool exportScene() {
 void exportTab() {
     if (ImGui::Button(tr("Bookmark"))) bookmarkSelection();
     float u = unit();
-    ImGui::TextWrapped(tr("Exports go to %s"), exportDir());
+    wrappedText(tr("Exports go to %s"), exportDir());
     ImGui::SeparatorText(tr("Pictures (PNG)"));
     ImGui::SetNextItemWidth(100 * u);
     ImGui::SliderInt(tr("Scale"), &S->pictureScale, 1, 8, "%d x");
@@ -965,7 +966,7 @@ void exportTab() {
         exportPicture(true);
     }
     ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-    ImGui::TextWrapped(tr("The layers shown (View) are drawn: models, sprites, walkmesh, triggers, exits, actors."));
+    wrappedText(tr("The layers shown (View) are drawn: models, sprites, walkmesh, triggers, exits, actors."));
     ImGui::PopStyleColor();
     ImGui::SeparatorText(tr("Scene (glTF binary)"));
     ImGui::Checkbox(tr("Models"), &S->exportModels);
@@ -979,7 +980,7 @@ void exportTab() {
         exportScene();
     }
     ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-    ImGui::TextWrapped(tr("Models and Gears in their current poses and places, textured from the field (nearest filtering; "
+    wrappedText(tr("Models and Gears in their current poses and places, textured from the field (nearest filtering; "
                        "semi-transparency approximated); y up, 512 field units to the metre."));
     ImGui::PopStyleColor();
     if (ImGui::Button(tr("Open the folder")) && !openExportDir()) {
@@ -991,7 +992,7 @@ void detailPane(ImVec2 min, ImVec2 max) {
     if (beginPane("##detail", min, max, nullptr, false)) {
         if (S->field == nullptr) {
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-            ImGui::TextWrapped(tr("The fields are read from disc 1 and set up by the field overlay's own code; the "
+            wrappedText(tr("The fields are read from disc 1 and set up by the field overlay's own code; the "
                                "scene is drawn by its own renderers."));
             ImGui::PopStyleColor();
         } else if (ImGui::BeginTabBar("##tabs")) {
@@ -1243,7 +1244,7 @@ void worldScenePane(ImVec2 min, ImVec2 max, bool focused = false) {
     if (beginPane("##worldscene", min, max, title, false)) {
         if (S->world == nullptr) {
             ImGui::PushStyleColor(ImGuiCol_Text, S->worldWhy.empty() ? skin::textHint : skin::textError);
-            ImGui::TextWrapped("%s", S->worldWhy.empty() ? tr("Choose a stage.") : tr(S->worldWhy.c_str()));
+            wrappedText("%s", S->worldWhy.empty() ? tr("Choose a stage.") : tr(S->worldWhy.c_str()));
             ImGui::PopStyleColor();
         } else {
             ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -1345,7 +1346,7 @@ void worldDetailPane(ImVec2 min, ImVec2 max) {
     if (beginPane("##worlddetail", min, max, nullptr, false)) {
         if (S->world == nullptr) {
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-            ImGui::TextWrapped(tr("The world map is set up by its overlay's own code; the terrain is streamed in and "
+            wrappedText(tr("The world map is set up by its overlay's own code; the terrain is streamed in and "
                                "drawn by its own renderers."));
             ImGui::PopStyleColor();
         } else if (ImGui::BeginTabBar("##worldtabs")) {
@@ -1384,7 +1385,7 @@ void worldDetailPane(ImVec2 min, ImVec2 max) {
                 worldLayer("Landmark marks", XG_WORLD_MARKS);
                 ImGui::Text(tr("%s; the camera at %.0f, %.0f"), in->note, S->worldOrbit.at[0], S->worldOrbit.at[2]);
                 ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-                ImGui::TextWrapped(S->overview ? tr("Right click: the free camera there. Wheel and drag: zoom and pan.")
+                wrappedText(S->overview ? tr("Right click: the free camera there. Wheel and drag: zoom and pan.")
                                                : tr("Drag: orbit. Right drag or Shift: pan. Wheel: closer. W A S D Q E: "
                                                  "move. The game draws the ground to about 3800 units."));
                 ImGui::PopStyleColor();
@@ -1448,7 +1449,7 @@ void worldDetailPane(ImVec2 min, ImVec2 max) {
             if (ImGui::BeginTabItem(tr("Export"))) {
                 ImGui::BeginChild("##tab", ImVec2(0, 0), ImGuiChildFlags_NavFlattened);
                 if (ImGui::Button(tr("Bookmark"))) bookmarkSelection();
-                ImGui::TextWrapped(tr("Exports go to %s"), exportDir());
+                wrappedText(tr("Exports go to %s"), exportDir());
                 ImGui::SetNextItemWidth(100 * u);
                 ImGui::SliderInt(tr("Pixels a chunk"), &S->worldPx, 32, 512);
                 if (ImGui::Button(tr("The whole area top-down (PNG)"))) {
@@ -1460,7 +1461,7 @@ void worldDetailPane(ImVec2 min, ImVec2 max) {
                     exportWorldPicture();
                 }
                 ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-                ImGui::TextWrapped(tr("The top-down map is drawn chunk by chunk, each seen straight down with the "
+                wrappedText(tr("The top-down map is drawn chunk by chunk, each seen straight down with the "
                                    "terrain's heights flattened (a flat ground seen from above is an exact map)."));
                 ImGui::PopStyleColor();
                 ImGui::EndChild();

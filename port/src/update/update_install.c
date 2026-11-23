@@ -27,6 +27,9 @@
 #include "monocypher-ed25519.h"
 #include "system/engine.h"
 #include "system/release.h"
+#ifdef __ANDROID__
+#include "system/android.h"
+#endif
 
 /* system/quit.c, gpu/present.c (weak: the tests have no game to quit, no picture). */
 void quitNow(void) __attribute__((weak));
@@ -145,12 +148,22 @@ int updateInstallPlace(UpdateInstallPlace* p, char* why, size_t whySize) {
         say(why, whySize, "a development build never updates itself");
         return 0;
     }
-    if (!releaseUpdatesItself(p->kind) || p->kind == RELEASE_ANDROID) {
-        say(why, whySize, p->kind == RELEASE_ANDROID ? "the Android app is updated from its release page for now"
-                                                     : "a package manager updates this copy");
+    if (!releaseUpdatesItself(p->kind)) {
+        say(why, whySize, "a package manager updates this copy");
         return 0;
     }
-    const char* base = SDL_GetBasePath();
+#ifndef __ANDROID__
+    if (p->kind == RELEASE_ANDROID) {
+        say(why, whySize, "an Android release's file outside Android");
+        return 0;
+    }
+#else
+    if (p->kind != RELEASE_ANDROID) {
+        say(why, whySize, "a desktop release's file on Android");
+        return 0;
+    }
+#endif
+    const char* base = p->kind == RELEASE_ANDROID ? "./" : SDL_GetBasePath(); /* Android: no folder of ours to write */
     if (base == NULL) {
         say(why, whySize, "the game's folder is not known");
         return 0;
@@ -184,7 +197,8 @@ int updateInstallPlace(UpdateInstallPlace* p, char* why, size_t whySize) {
         say(why, whySize, "no way to download on this system");
         return 0;
     }
-    if (p->kind == RELEASE_SETUP) return 1; /* the setup writes Program Files, with Windows's permission */
+    /* The setup writes Program Files, with Windows's permission; Android installs the APK itself. */
+    if (p->kind == RELEASE_SETUP || p->kind == RELEASE_ANDROID) return 1;
     if (!writable(p->root, why, whySize)) return 0;
     if (p->kind == RELEASE_TARBALL) {
         char bin[1100];
@@ -202,7 +216,8 @@ static struct {
     int wanted; /* updateInstallStart: finished and restarted at the vblank once READY */
     UpdateInstallStatus st; /* the thread's: version and why, complete before stage is set to READY or FAILED */
     UpdateInstallPlace place;
-    char setup[1300];       /* setup: the downloaded setup.exe */
+    char setup[1300];       /* setup, android: the downloaded setup.exe or APK, run or installed as it is */
+    int watch, ticks;       /* android: Android's answer looked at (XgActivity.updateInstallState) */
 } I;
 
 static void stage(UpdateInstallStatus* st, UpdateInstallStage s) {
@@ -372,7 +387,7 @@ int updateInstallPrepare(const UpdateInstallPlace* p, UpdateInstallStatus* st) {
     }
     SDL_RemovePath(path);
     if (!SDL_RenamePath(part, path)) return fail(st, "cannot rename %s: %s", part, SDL_GetError());
-    if (p->kind == RELEASE_SETUP) {
+    if (p->kind == RELEASE_SETUP || p->kind == RELEASE_ANDROID) {
         snprintf(I.setup, sizeof I.setup, "%s", path);
         stage(st, INSTALL_READY);
         return 1;
@@ -531,7 +546,7 @@ int updateInstallFinish(char* why, size_t whySize) {
         say(why, whySize, "nothing is ready to install");
         return 0;
     }
-    if (I.place.kind == RELEASE_SETUP) return 1;
+    if (I.place.kind == RELEASE_SETUP || I.place.kind == RELEASE_ANDROID) return 1;
     return updateInstallSwap(&I.place, why, whySize);
 }
 
@@ -579,10 +594,71 @@ void updateInstallRestart(char* why, size_t whySize) {
     say(why, whySize, "cannot start %s", exe);
 }
 
+int updateInstallAllowed(char* why, size_t whySize) {
+#ifdef __ANDROID__
+    char can[8];
+    if (strcmp(androidActivityText("updateCanInstall", can, sizeof can), "no") == 0) {
+        androidActivityAction("updateAllowInstalls");
+        say(why, whySize, "Android asks to allow installs from this app first: allow it in the settings it "
+                          "opened, then choose Install and restart again");
+        return 0;
+    }
+#endif
+    (void)why, (void)whySize;
+    return 1;
+}
+
 void updateInstallVBlank(void) {
+#ifdef XG_UPDATER_TEST
+    /* A test build (XG_UPDATER_TEST): XG_UPDATE_TEST_INSTALL=1 starts an install at the first vblank,
+     * as the menu's Install and restart would (the device tests, which have no menu to drive). */
+    static int tested;
+    if (!tested) {
+        tested = 1;
+        const char* go = SDL_getenv("XG_UPDATE_TEST_INSTALL");
+        UpdateInstallPlace place;
+        char why[256] = "";
+        if (go != NULL && go[0] == '1') {
+            if (updateInstallPlace(&place, why, sizeof why) && updateInstallAllowed(why, sizeof why)) {
+                updateInstallStart(&place);
+            } else {
+                fprintf(stderr, "update: install: test: %s\n", why);
+            }
+        }
+    }
+#endif
+#ifdef __ANDROID__
+    if (I.watch && ++I.ticks % 30 == 0) { /* Android's answer, twice a second */
+        char state[300], note[340];
+        androidActivityText("updateInstallState", state, sizeof state);
+        if (strncmp(state, "failed:", 7) == 0) {
+            I.watch = 0;
+            const char* said = state + 7;
+            fprintf(stderr, "update: install: Android did not install it: %s\n", said);
+            /* Android's codes in words (PackageInstaller's status messages): the two a player meets. */
+            const char* words = strstr(said, "INSTALL_FAILED_UPDATE_INCOMPATIBLE") != NULL
+                                    ? "it is signed with another key than this app"
+                                : strstr(said, "INSTALL_FAILED_ABORTED") != NULL ? "it was cancelled"
+                                                                                 : said;
+            snprintf(note, sizeof note, "Android did not install the update: %s", words);
+            if (presentShowNote != NULL) presentShowNote(note);
+            snprintf(I.st.why, sizeof I.st.why, "Android did not install it: %s", words);
+            SDL_SetAtomicInt(&I.stage, INSTALL_FAILED); /* the menu offers it again */
+        }
+    }
+#endif
     if (!I.wanted || SDL_GetAtomicInt(&I.stage) != INSTALL_READY) return;
     I.wanted = 0;
     char why[256] = "", note[300];
+#ifdef __ANDROID__
+    if (I.place.kind == RELEASE_ANDROID) { /* Android installs it, asking the player; this process then ends */
+        fprintf(stderr, "update: install: %s handed to Android\n", I.setup);
+        androidActivityActionText("updateInstall", I.setup);
+        I.watch = 1;
+        I.ticks = 0;
+        return;
+    }
+#endif
     if (!updateInstallFinish(why, sizeof why)) {
         snprintf(note, sizeof note, "The update stopped: %s", why);
     } else {

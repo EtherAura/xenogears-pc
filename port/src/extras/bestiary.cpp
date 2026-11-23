@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "imgui_internal.h"
 #include "ui/l10n.h"
 #include "ui/skin.h"
@@ -690,17 +691,17 @@ void numbersTable(const XgBeast& b) {
 
 void weaknesses(const XgBeast& b) {
     std::string weak = elementList(b.weakness & 0x3F);
-    ImGui::TextWrapped(tr("Weak to: %s%s"), weak.empty() ? tr("nothing") : weak.c_str(),
+    wrappedText(tr("Weak to: %s%s"), weak.empty() ? tr("nothing") : weak.c_str(),
                        !weak.empty() && (b.weakness & 0x40) ? " (x1.8)" : !weak.empty() ? " (x1.5)" : "");
     int res = (b.resist[0] | b.resist[1]) >> 8 & 0xF, own = (b.resist[0] | b.resist[1]) >> 12 & 0xF;
     std::string blocks = elementList(res), elem = elementList(own);
     int low = (b.resist[0] | b.resist[1]) & 0xE;
-    ImGui::TextWrapped(tr("Resists: %s%s"), blocks.empty() ? tr("nothing") : blocks.c_str(),
+    wrappedText(tr("Resists: %s%s"), blocks.empty() ? tr("nothing") : blocks.c_str(),
                        blocks.empty() ? "" : (low & 8) ? tr(" (absorbs)") : (low & 4) ? tr(" (strongly)") : "");
-    if (!elem.empty()) ImGui::TextWrapped(tr("Its own element: %s"), elem.c_str());
-    if (b.monsterFlags2 & 0x8000) ImGui::TextWrapped(tr("Damage heals it and healing hurts it."));
-    else if (b.monsterFlags2 & 0x4000) ImGui::TextWrapped(tr("Ether attacks heal it."));
-    else if (b.monsterFlags2 & 0x2000) ImGui::TextWrapped(tr("Non-elemental Ether attacks heal it."));
+    if (!elem.empty()) wrappedText(tr("Its own element: %s"), elem.c_str());
+    if (b.monsterFlags2 & 0x8000) wrappedText(tr("Damage heals it and healing hurts it."));
+    else if (b.monsterFlags2 & 0x4000) wrappedText(tr("Ether attacks heal it."));
+    else if (b.monsterFlags2 & 0x2000) wrappedText(tr("Non-elemental Ether attacks heal it."));
     // Status immunities: m7C[1] guards m7C[0]'s, m7C[3] m7C[2]'s (b_800941A4.c).
     const uint8_t* r = b.raw;
     int g1 = r[0x7E] | r[0x7F] << 8, g3 = r[0x82] | r[0x83] << 8;
@@ -712,16 +713,16 @@ void weaknesses(const XgBeast& b) {
     for (auto& s : st)
         if ((s.word == 1 ? g1 : g3) & s.bit) imm += (imm.empty() ? "" : ", ") + std::string(tr(s.name));
     if (b.gear) imm = tr("every status (a Gear)");
-    if (!imm.empty()) ImGui::TextWrapped(tr("Immune to: %s"), imm.c_str());
+    if (!imm.empty()) wrappedText(tr("Immune to: %s"), imm.c_str());
     if (((b.weakness | own | res) & 0x30) || ((b.weakness & 0x30))) hint("* Light and Dark are named only by Billy's ammunition.");
 }
 
 void rewards(const XgBeast& b) {
     const XgBeast& w = S->withOptions;
     if (w.exp != b.exp || w.gold != b.gold)
-        ImGui::TextWrapped(tr("EXP %d, gold %d (your options: EXP %d, gold %d)"), b.exp, b.gold, w.exp, w.gold);
+        wrappedText(tr("EXP %d, gold %d (your options: EXP %d, gold %d)"), b.exp, b.gold, w.exp, w.gold);
     else
-        ImGui::TextWrapped(tr("EXP %d, gold %d"), b.exp, b.gold);
+        wrappedText(tr("EXP %d, gold %d"), b.exp, b.gold);
     // rollItemDrops (src/battle_result/br_801DE5C4.c): the first at its
     // chance, else the second at its own; a thief's accessory makes the first
     // certain.
@@ -729,14 +730,14 @@ void rewards(const XgBeast& b) {
     const XgBeastDrop& d2 = b.drops[1];
     auto name = [](const XgBeastDrop& d) { return d.name[0] ? d.name : tr("an item the font cannot spell"); };
     if (d1.chance > 0) {
-        if (d1.chance >= 100) ImGui::TextWrapped(tr("Drops %s (always)"), name(d1));
-        else ImGui::TextWrapped(tr("Drops %s (%d%%)"), name(d1), d1.chance);
+        if (d1.chance >= 100) wrappedText(tr("Drops %s (always)"), name(d1));
+        else wrappedText(tr("Drops %s (%d%%)"), name(d1), d1.chance);
     }
     if (d2.chance > 0 && d1.chance < 100) {
-        if (d1.chance > 0) ImGui::TextWrapped(tr("otherwise %s (%d%%)"), name(d2), std::min(d2.chance, 100));
-        else ImGui::TextWrapped(tr("Drops %s (%d%%)"), name(d2), std::min(d2.chance, 100));
+        if (d1.chance > 0) wrappedText(tr("otherwise %s (%d%%)"), name(d2), std::min(d2.chance, 100));
+        else wrappedText(tr("Drops %s (%d%%)"), name(d2), std::min(d2.chance, 100));
     }
-    if (d1.chance <= 0 && d2.chance <= 0) ImGui::TextWrapped(tr("Drops nothing."));
+    if (d1.chance <= 0 && d2.chance <= 0) wrappedText(tr("Drops nothing."));
     else if (d1.chance > 0 && d1.chance < 100) hint("A thief's accessory in the party makes the first drop certain.");
     hint("Its own script can change these during a battle.");
 }
@@ -782,7 +783,7 @@ void attacksList(const Entry& e) {
     if (lines) {
         ImGui::TextUnformatted(tr("Lines its own battle scripts show:"));
         for (const XgBeastAttack& a : S->attacks)
-            if (a.kind == 12) ImGui::TextWrapped("%s", a.name);
+            if (a.kind == 12) wrappedText("%s", a.name);
     }
 }
 
@@ -838,7 +839,7 @@ bool placesList(const Entry& e) {
         const char* disc2 = S->discs[1] && p.disc == 2 ? tr(", disc 2") : "";
         ImGui::PushID(r.pi);
         if (p.kind == XG_PLACE_WORLD) {
-            ImGui::TextWrapped(tr("World map %d, area %d"), p.world, p.zone);
+            wrappedText(tr("World map %d, area %d"), p.world, p.zone);
             ImGui::Indent();
             hint("Random battles from story %d on: %d in %d%s", xgBeastRangeStory(p.range), r.weight, p.total, disc2);
             ImGui::Unindent();
@@ -880,7 +881,7 @@ void overview(ImVec2 min, ImVec2 max) {
             metCount += (f & (XG_BESTIARY_SEEN | XG_BESTIARY_CAUGHT_UP)) != 0;
             beaten += (f & XG_BESTIARY_DEFEATED) != 0;
         }
-        ImGui::TextWrapped(tr("%zu enemies on these discs. You have met %d and defeated %d."), S->entries.size(), metCount, beaten);
+        wrappedText(tr("%zu enemies on these discs. You have met %d and defeated %d."), S->entries.size(), metCount, beaten);
         ImGui::Dummy(ImVec2(0, 4 * unit()));
         ImGui::SeparatorText(tr("Show"));
         bool all = !S->progress;
@@ -952,8 +953,8 @@ void overview(ImVec2 min, ImVec2 max) {
             status("The next new game starts with this bestiary");
         }
         if (pending != XG_BESTIARY_CARRY_NONE) {
-            if (pending == 0) ImGui::TextWrapped(tr("Pending: the shared record carries into the next new game."));
-            else ImGui::TextWrapped(tr("Pending: record %08x carries into the next new game."), pending);
+            if (pending == 0) wrappedText(tr("Pending: the shared record carries into the next new game."));
+            else wrappedText(tr("Pending: record %08x carries into the next new game."), pending);
             if (ImGui::Button(tr("Cancel the carry-over"))) {
                 xgBestiaryCarry(XG_BESTIARY_CARRY_NONE);
                 status("No record carries into the next new game");
@@ -1027,7 +1028,7 @@ void infoPane(ImVec2 min, ImVec2 max) {
             return;
         }
         details();
-        ImGui::TextWrapped("%s%s", b.visual < 0 ? tr("A 3D model") : tr("A sprite"), b.gear ? tr(", a Gear") : "");
+        wrappedText("%s%s", b.visual < 0 ? tr("A 3D model") : tr("A sprite"), b.gear ? tr(", a Gear") : "");
         if (e.name.empty())
             hint(regionOf(b.disc) == 'J' ? "Its name is not a text of the JP font (a code that is no letter)."
                                          : "Its name has no spelling in the game font's narrow letters.");
@@ -1117,7 +1118,7 @@ void draw(const Area& a) {
     ImVec2 listMax(a.min.x + split, a.max.y), paneMin(a.min.x + split + 16 * u, a.min.y);
     if (!S->scanned) {
         if (beginPane("##bestscan", a.min, a.max, "Bestiary", false)) {
-            ImGui::TextWrapped(tr("Reading the enemies' battles from the discs: the fields' random tables and story battles, "
+            wrappedText(tr("Reading the enemies' battles from the discs: the fields' random tables and story battles, "
                                "the world map's areas."));
             ImGui::ProgressBar((float)scanProgress(), ImVec2(-1, 0));
         }

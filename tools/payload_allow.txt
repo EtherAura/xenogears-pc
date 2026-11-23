@@ -30,6 +30,7 @@ port/src/game/worldmap/start.c           32  # clang builds: the vectoriser's la
 port/src/extras/*                       256  # "%d %d %d %d" and "(%d,%d)-(%d,%d)" formats, hex digits, consecutive numbers: coincidence
 port/src/ui/*                            96  # hex digits, button glyph ids, -1 fills: coincidence
 port/third_party/imgui/*                320  # Dear ImGui (unmodified): glyph ranges and its embedded fonts' tables hold runs of small consecutive numbers: coincidence
+port/third_party/puff/puff.c             96  # puff (zlib's reference inflater, unmodified; the updater): deflate's length and distance base tables (RFC 1951), runs of consecutive numbers a game table also holds: coincidence
 
 # Ubuntu amd64 glslang 16.2.0-2 and SPIRV-Tools 2026.1-1. Each limit is measured
 # in the stripped US package and tied to the source archive member's section.

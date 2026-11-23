@@ -12,8 +12,14 @@
 /* ---- the screens' integer locals, as bytes ---------------------------------- */
 
 /* Each screen's locals, kept at its loop's top: integers only (u8, s32), the
- * same bytes in every build. */
-static u8 screenLocals[PC_SAFE_SUB_COUNT][128];
+ * same bytes in every build. The shops' sell lists keep the most: five byte
+ * arrays of their entry count (up to 200) and a dozen integers. */
+#define LOCALS_BYTES 1088
+static u8 screenLocals[PC_SAFE_SUB_COUNT][LOCALS_BYTES];
+
+static void tooMany(void) {
+    portTodo(__FUNCTION__, "a menu screen keeps more locals than LOCALS_BYTES");
+}
 /* The screen a shared loop (runEquipMenu, runEtherListMenu) runs as: its caller
  * names it, so its safe point's id says the way back to it. */
 static s32 menuChild;
@@ -27,7 +33,11 @@ void pcMenuKeep(s32 sub, s32 n, ...) {
         u8* p = __builtin_va_arg(ap, u8*);
         s32 size = __builtin_va_arg(ap, s32);
         s32 i;
-        for (i = 0; i < size && used < (s32)sizeof(screenLocals[0]); i++) {
+        if (used + size > LOCALS_BYTES) {
+            tooMany();
+            break;
+        }
+        for (i = 0; i < size; i++) {
             out[used++] = p[i];
         }
     }
@@ -43,7 +53,11 @@ void pcMenuTake(s32 sub, s32 n, ...) {
         u8* p = __builtin_va_arg(ap, u8*);
         s32 size = __builtin_va_arg(ap, s32);
         s32 i;
-        for (i = 0; i < size && used < (s32)sizeof(screenLocals[0]); i++) {
+        if (used + size > LOCALS_BYTES) {
+            tooMany();
+            break;
+        }
+        for (i = 0; i < size; i++) {
             p[i] = in[used++];
         }
     }

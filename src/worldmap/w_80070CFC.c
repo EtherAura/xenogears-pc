@@ -272,7 +272,7 @@ void worldmapEntryPoint(void) {
 
 #ifdef PLATFORM_PC
     /* a stackless load: the frame loop goes on where its state was saved (include/pc_state.h) */
-    if (pcResumeAt() == PC_SAFE_WORLDMAP) {
+    if (PC_SAFE_MODE(pcResumeAt()) == PC_SAFE_MODE(PC_SAFE_WORLDMAP)) {
         goto resumeFrames;
     }
 #endif
@@ -424,6 +424,9 @@ void worldmapMainLoop(void) {
         pcResumeDone(); /* every frame's state is the module's: nothing to take back */
         goto frameTop;
     }
+    if (PC_SAFE_MODE(pcResumeAt()) == PC_SAFE_MODE(PC_SAFE_WORLDMAP) && pcResumeMenu()) {
+        goto worldmapMenu; /* a menu loop's safe point: the frame's menu call goes on */
+    }
 #endif
     pCurrentWorldmapRenderingStruct = &worldmapRenderingStructs[1];
     worldmapOddOrEven = 1;
@@ -550,10 +553,13 @@ void worldmapMainLoop(void) {
                     g_menuOpenArg = 1;
                     worldmapFlushCacheAndSync();
 #ifdef PLATFORM_PC
+                worldmapMenu:
                     {
                         /* The menu's own kind for the wide picture (include/pc_wide.h). */
                         s32 wideKind = pcWideSetMode(PC_WIDE_MENU);
+                        pcMenuHost(PC_SAFE_MODE(PC_SAFE_WORLDMAP));
                         enterMenu();
+                        pcMenuHost(-1);
                         pcWideSetMode(wideKind);
                     }
 #else

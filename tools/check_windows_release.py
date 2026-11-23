@@ -201,11 +201,21 @@ def check_script(text: str, version: str, nsis: str, setup: str, files: dict[str
           and 'FileOpen $R2 "$INSTDIR\\$UpdateExe" a' in text,
           "script: /UPDATE= takes the two executables only, waits for the game, then starts it again through "
           "Explorer (the in-app updater's silent update)")
+    init = text[text.find("Function .onInit"):text.find("FunctionEnd", text.find("Function .onInit"))]
+    reinstall = re.search(r'  \$\{If\} \$UpdateExe == ""\n  \$\{AndIf\} \$INSTDIR == "\$PROGRAMFILES64\\\$\{PRODUCT\}"\n'
+                          r'    ClearErrors\n    ReadRegStr \$R1 HKLM "\$\{UNINSTALL_KEY\}" "InstallLocation"\n'
+                          r'    \$\{IfNot\} \$\{Errors\}\n    \$\{AndIf\} \$R1 != ""\n      StrCpy \$INSTDIR \$R1\n', init)
+    check(reinstall is not None and init.find("SetRegView 64") < reinstall.start()
+          and not re.search(r"^InstallDirRegKey", text, re.M),
+          "script: a reinstall proposes the installed copy's folder, read in the 64-bit view the key is written "
+          "in, unless /D= gave one (xg-dyci)")
     check(not re.search(r"(Delete|RMDir)[^\n]*\$(APPDATA|LOCALAPPDATA|PROFILE|DOCUMENTS)", text),
           "script: the uninstaller touches none of the player's folders")
     check('"$INSTDIR\\xenogears.exe"' in text and '"$INSTDIR\\xenogears-enhanced.exe"' in text
           and text.count("CreateShortcut") == 3, "script: shortcuts for both executables and the uninstaller")
-    check(f'MUI_PAGE_LICENSE "{os.path.relpath(stage / "COPYING.txt", script.parent)}"' in text,
+    # resolved as windows_release.py writes it: a work folder parked behind a symlink stays the same (xg-3hmq)
+    licence = os.path.relpath((stage / "COPYING.txt").resolve(), script.parent.resolve())
+    check(f'MUI_PAGE_LICENSE "{licence}"' in text,
           "script: the licence page shows the staged COPYING.txt")
     size = -(-sum(len(b) for b in files.values()) // 1024)
     check(f'"EstimatedSize" {size}\n' in text, f"script: EstimatedSize {size} KiB")

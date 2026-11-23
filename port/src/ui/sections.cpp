@@ -22,6 +22,7 @@ extern "C" void pcFirstPersonNavigationSet(int on);
 #include <string.h>
 
 #include "imgui.h"
+#include "wrapped.h"
 #include "imgui_internal.h" // FocusItem: the browser's cursor on its first entry
 #include "diagnostics.h"
 #include "menu.h"
@@ -83,7 +84,7 @@ bool checkbox(const char* label, bool* value) {
     ImGui::BeginGroup();
     bool changed = ImGui::Checkbox("##value", value);
     ImGui::SameLine();
-    ImGui::TextWrapped("%s", tr(label));
+    wrappedText("%s", tr(label));
     ImGui::EndGroup();
     ImGui::PopID();
     return changed;
@@ -208,7 +209,7 @@ struct Message {
     void draw() const {
         if (text[0] != '\0') {
             ImGui::PushStyleColor(ImGuiCol_Text, error ? skin::textError : skin::textGood);
-            ImGui::TextWrapped("%s", text);
+            wrappedText("%s", text);
             ImGui::PopStyleColor();
         }
     }
@@ -227,7 +228,7 @@ const char* shownPath(const char* path) {
 void pathText(const char* path, const char* none) {
     path = shownPath(path);
     if (path != NULL && path[0] != '\0') {
-        ImGui::TextWrapped("%s", path);
+        wrappedText("%s", path);
     } else {
         ImGui::TextDisabled("%s", tr(none));
     }
@@ -967,8 +968,8 @@ void displaySection() {
         int chosen = listChoice("##particles", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetParticles(chosen);
-        hint("In fields and on the world map, fine dust drifting where the place is lit, and warm embers where it is "
-             "dark. Dialogue, portraits and the HUD are not touched. Off by default.");
+        hint("In fields, battles and on the world map, fine dust drifting where the place is lit, and warm embers where "
+             "it is dark. Dialogue, portraits and the HUD are not touched. Off by default.");
         overrideNote("particles");
     }
     if (row("Particle size", "particle_size", opt::ENHANCED)) {
@@ -1304,7 +1305,7 @@ void androidPacksRow() {
     }
     if (message[0] != '\0') {
         ImGui::PushStyleColor(ImGuiCol_Text, failed ? skin::textError : skin::textGood);
-        ImGui::TextWrapped("%s", message);
+        wrappedText("%s", message);
         ImGui::PopStyleColor();
     }
     hint("Copies the pack into %s: a texture pack's, sprite pack's or glyph pack's folder holds SLUS-00664 or "
@@ -1354,7 +1355,7 @@ void androidPacksModal() {
     if (!beginModal("Remove pack")) return;
     bool there = packRemoveAt >= 0 && packRemoveAt < packListCount;
     if (there) {
-        ImGui::TextWrapped(tr("Remove %s/%s from the app's packs folder? Its files are deleted; a copy elsewhere is "
+        wrappedText(tr("Remove %s/%s from the app's packs folder? Its files are deleted; a copy elsewhere is "
                               "not touched."), packList[packRemoveAt].library, packList[packRemoveAt].name);
     }
     ImGui::BeginDisabled(!there);
@@ -1384,7 +1385,7 @@ void androidBackupRows() {
     ImGui::EndDisabled();
     if (text[0] != '\0') {
         ImGui::PushStyleColor(ImGuiCol_Text, error ? skin::textError : skin::textGood);
-        ImGui::TextWrapped("%s", text);
+        wrappedText("%s", text);
         ImGui::PopStyleColor();
     }
     hint("The memory cards, their earlier versions, the save states and the settings, as one .zip file where you "
@@ -1411,7 +1412,7 @@ void packsSection() {
         if (ImGui::Button(tr("Disable pack"))) { texturePackSetRoot(""); packPath[0]=0; }
         TexturePackStats pack;
         texturePackStats(&pack);
-        if (pack.name[0]) ImGui::TextWrapped("%s%s%s",pack.name,pack.author[0]?tr(" by "):"",pack.author);
+        if (pack.name[0]) wrappedText("%s%s%s",pack.name,pack.author[0]?tr(" by "):"",pack.author);
         hint("%s: %s",texturePackVersion(),pack.message);
         if (pack.enabled) hint("%llu PNG loads, %llu replacement draws, %llu missing keys, %llu invalid files; %.1f MiB cached",
             (unsigned long long)pack.loads,(unsigned long long)pack.draws,(unsigned long long)pack.misses,
@@ -1713,7 +1714,7 @@ void audioSection() {
     if (row("Output")) {
         const char* driver = SDL_GetCurrentAudioDriver();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextWrapped(tr("SDL audio driver: %s"), driver != NULL ? driver : tr("none"));
+        wrappedText(tr("SDL audio driver: %s"), driver != NULL ? driver : tr("none"));
         hint("The system's sound driver the game plays through (SDL_AUDIO_DRIVER chooses another).");
     }
     opt::endPage();
@@ -1783,7 +1784,7 @@ void capturePopup() {
             ImGui::EndPopup();
             return;
         }
-        ImGui::TextWrapped(tr("Press a gamepad button or pull a trigger for %s."), tr(padButtonLabel(cap.button)));
+        wrappedText(tr("Press a gamepad button or pull a trigger for %s."), tr(padButtonLabel(cap.button)));
         int count = 0;
         SDL_free(SDL_GetGamepads(&count));
         if (count == 0) {
@@ -1792,7 +1793,7 @@ void capturePopup() {
         hint("Esc cancels (or wait %d s). Guide opens the menu: it cannot be bound.",
              (int)(CAPTURE_TIMEOUT_NS / 1000000000ull));
     } else {
-        ImGui::TextWrapped(tr("Press a key for %s (%s)."), tr(padButtonLabel(cap.button)), cap.slot == 0 ? tr("first key") : tr("second key"));
+        wrappedText(tr("Press a key for %s (%s)."), tr(padButtonLabel(cap.button)), cap.slot == 0 ? tr("first key") : tr("second key"));
         hint("Esc or any gamepad button cancels (or wait %d s), Delete clears. F1 to F12 are the hotkeys: they "
              "cannot be bound.",
              (int)(CAPTURE_TIMEOUT_NS / 1000000000ull));
@@ -1825,7 +1826,7 @@ void bindingTable(const char* id, bool keys, bool gamepad) {
         for (int b = 0; b < PAD_BUTTONS; b++) {
             ImGui::PushID(b);
             markBlock();
-            ImGui::TextWrapped("%s %s", skin::psButtonGlyph(padButtonName(b)), tr(padButtonLabel(b)));
+            wrappedText("%s %s", skin::psButtonGlyph(padButtonName(b)), tr(padButtonLabel(b)));
             for (int k = 0; keys && k < PAD_KEYS; k++) {
                 ImGui::PushID(k);
                 if (k) sameLineFor(keyLabel(padKey(b,k)));
@@ -2184,9 +2185,9 @@ void controlsSection() {
             for (const auto& h : hotkeys) {
                 ImGui::TableNextRow(0, ROW * scale());
                 ImGui::TableSetColumnIndex(0);
-                ImGui::TextWrapped("%s", tr(h[0])); // (wrapped: a narrow pane cuts nothing)
+                wrappedText("%s", tr(h[0])); // (wrapped: a narrow pane cuts nothing)
                 ImGui::TableSetColumnIndex(1);
-                ImGui::TextWrapped("%s", tr(h[1]));
+                wrappedText("%s", tr(h[1]));
             }
             ImGui::EndTable();
         }
@@ -2433,7 +2434,7 @@ void cardsSection() {
         restoreAsk = false;
     }
     if (beginModal("Restore card")) {
-        ImGui::TextWrapped(tr("Replace all saves in slot %d with this backup? The current card will be kept in its "
+        wrappedText(tr("Replace all saves in slot %d with this backup? The current card will be kept in its "
                            "backup history."), restoreSlot + 1);
         bool changed = strcmp(cards[restoreSlot].path, restoreImage) != 0;
         bool unavailable = changed || cardBusy(restoreSlot) || !cards[restoreSlot].present;
@@ -2463,7 +2464,7 @@ void cardsSection() {
         replaceAsk = false;
     }
     if (beginModal("Replace")) {
-        ImGui::TextWrapped(tr("A save of that name is on the card in slot %d already. Replace it with the one in the file?"),
+        wrappedText(tr("A save of that name is on the card in slot %d already. Replace it with the one in the file?"),
                            cardSlot + 1);
         if (ImGui::Button(tr("Replace"))) {
             importSave(cardSlot, replaceFrom, true);
@@ -3249,39 +3250,39 @@ void aboutRows() {
 #else
         const char* game = tr("US version (SLUS-00664)");
 #endif
-        ImGui::TextWrapped(tr("Xenogears PC port, %s"), game);
-        ImGui::TextWrapped(tr("Build %s, %s, %s"), XG_BUILD_REV, XG_BUILD_DAY, XG_BUILD_TYPE);
+        wrappedText(tr("Xenogears PC port, %s"), game);
+        wrappedText(tr("Build %s, %s, %s"), XG_BUILD_REV, XG_BUILD_DAY, XG_BUILD_TYPE);
         // How this copy was installed (system/release.h): what an update of it would replace.
         static const char* const kindTitle[RELEASE_KINDS] = {
             N_("a development build"), N_("Linux tarball"),  N_("Windows zip"),    N_("Windows installer"),
             N_("Android app"),         N_("Ubuntu package"), N_("Arch package"),   N_("Gentoo package"),
         };
         if (releaseKind() == RELEASE_DEV) {
-            ImGui::TextWrapped("%s", tr("Not a release: a development build"));
+            wrappedText("%s", tr("Not a release: a development build"));
         } else {
-            ImGui::TextWrapped(tr("Release %s, %s"), releaseVersion(), tr(kindTitle[releaseKind()]));
+            wrappedText(tr("Release %s, %s"), releaseVersion(), tr(kindTitle[releaseKind()]));
         }
-        ImGui::TextWrapped(tr("Engine: %s (%s)"), tr(engineTitle(engineThis())),
+        wrappedText(tr("Engine: %s (%s)"), tr(engineTitle(engineThis())),
                            engineThis() == ENGINE_ENHANCED ? "xenogears-enhanced, engine/" : "xenogears, src/");
 #if defined(__clang__)
-        ImGui::TextWrapped(tr("Compiler: clang %s"), __clang_version__);
+        wrappedText(tr("Compiler: clang %s"), __clang_version__);
 #elif defined(__GNUC__)
-        ImGui::TextWrapped(tr("Compiler: GCC %s"), __VERSION__);
+        wrappedText(tr("Compiler: GCC %s"), __VERSION__);
 #endif
         int sdl = SDL_GetVersion();
-        ImGui::TextWrapped(tr("SDL %d.%d.%d (built with %d.%d.%d), video %s, audio %s"), SDL_VERSIONNUM_MAJOR(sdl),
+        wrappedText(tr("SDL %d.%d.%d (built with %d.%d.%d), video %s, audio %s"), SDL_VERSIONNUM_MAJOR(sdl),
                     SDL_VERSIONNUM_MINOR(sdl), SDL_VERSIONNUM_MICRO(sdl), SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
                     SDL_MICRO_VERSION, SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "-",
                     SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "-");
-        ImGui::TextWrapped(tr("Vulkan: %s"), deviceLine);
-        ImGui::TextWrapped(tr("Dear ImGui %s"), ImGui::GetVersion());
+        wrappedText(tr("Vulkan: %s"), deviceLine);
+        wrappedText(tr("Dear ImGui %s"), ImGui::GetVersion());
         hint("The game's code is rebuilt from the original as C (a matching decompilation); its data is read from "
              "your own disc. Keep this build for your own use.");
     }
     if (row("Licences")) {
         // The GPL's "Appropriate Legal Notices" (GPLv3 section 0 and 5d): who
         // holds the copyright, that there is no warranty, and where the licence is.
-        ImGui::TextWrapped(tr("Xenogears PC port. Copyright (C) 2026 carl. This program is free software under the GNU "
+        wrappedText(tr("Xenogears PC port. Copyright (C) 2026 carl. This program is free software under the GNU "
                            "General Public License, version 3 or any later version, and comes with ABSOLUTELY NO "
                            "WARRANTY; see the licence below. The licence does not cover Xenogears itself: the game's "
                            "data comes from your own discs."));
@@ -3305,7 +3306,7 @@ void aboutRows() {
         }
         markBlock();
         if (ImGui::CollapsingHeader(tr("Binaural headphone measurements"))) {
-            ImGui::TextWrapped("%s", "HRTF Measurements of a KEMAR Dummy-Head Microphone, Bill Gardner and Keith Martin. "
+            wrappedText("%s", "HRTF Measurements of a KEMAR Dummy-Head Microphone, Bill Gardner and Keith Martin. "
                                 "Copyright 1994 MIT Media Laboratory. Use is permitted with attribution to the authors. "
                                 "https://sound.media.mit.edu/resources/KEMAR.html");
         }
@@ -3582,7 +3583,7 @@ extern "C" int netplayActive(void) __attribute__((weak)); // system/netplay.c
 
 void extrasSection() {
     markBlock();
-    ImGui::TextWrapped(tr("The asset browser and the viewers: the game's files, pictures, models and sounds, from your "
+    wrappedText(tr("The asset browser and the viewers: the game's files, pictures, models and sounds, from your "
                        "own disc."));
     if (extrasOpenFromMenu == nullptr) {
         hint("Not in this build.");

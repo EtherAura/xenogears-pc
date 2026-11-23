@@ -452,6 +452,12 @@ void portBootLongjmp(void** context) __attribute__((noreturn));
 /* this run's frames: a canonical state does not carry it (scratch64), a load
  * from one arms it again (pcBootResume) */
 static scratch64 bootContext[BOOT_CONTEXT_WORDS];
+
+/* The menu mode's menus have their safe points in it; another mode's menus
+ * get theirs from the loop that opens them (include/pc_state.h). */
+static void menuModeHost(BootModeEntry* mode) {
+    pcMenuHost(mode == &gameModes[PC_SAFE_MODE(PC_SAFE_MENU)] ? PC_SAFE_MODE(PC_SAFE_MENU) : -1);
+}
 static s32 bootContextReady;
 static s32 bootErrNo;
 
@@ -478,6 +484,7 @@ void bootGame(s32 errNo) {
          * saved, and nothing here sets the mode up again. */
         mode = &gameModes[PC_SAFE_MODE(pcResumeAt())];
         pcWideSetMode((s32)(mode - gameModes));
+        menuModeHost(mode);
         mode->m0_entryPoint();
         bootGame(0);
     }
@@ -525,6 +532,7 @@ void bootGame(s32 errNo) {
      * what ran before at that depth (a rewind capture's park among them)
      * in the slots they never write (port/src/system/gamestack.h). */
     gameStackScrub();
+    menuModeHost(mode);
     mode->m0_entryPoint();
     bootGame(0);
 }

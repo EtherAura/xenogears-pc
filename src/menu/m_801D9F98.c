@@ -312,7 +312,7 @@ void setupItemMenuSelection(s32 sel, s32 page) {
 
 /* allocate the pointer glyph m444[slot] */
 void allocMenuPointerGlyph(u8 arg0) {
-    gMenuContext->m444_pointerGlyphs[arg0] = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_444), (s32)0x78), 0);
+    gMenuContext->m444_pointerGlyphs[arg0] = allocateHeap(PC_HEAP_OF(struct MenuContext_444, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_444), (s32)0x78)), 0);
     bzero(gMenuContext->m444_pointerGlyphs[arg0], (s32)sizeof(struct MenuContext_444));
     gMenuContext->m444_pointerGlyphs[arg0]->m70_frame = 4;
     gMenuContext->m444_pointerGlyphs[arg0]->m74_timer = 0;
@@ -415,7 +415,7 @@ void setupTargetPartyCards(u8 mode) {
 
     if (partyCardsAllocated == 0) {
         for (i = 0; i < 3; i++) {
-            gMenuContext->m1E08_partyCards[i] = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_1E08), (s32)0xbec), 0);
+            gMenuContext->m1E08_partyCards[i] = allocateHeap(PC_HEAP_OF(struct MenuContext_1E08, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_1E08), (s32)0xbec)), 0);
             bzero(gMenuContext->m1E08_partyCards[i], (s32)sizeof(struct MenuContext_1E08));
         }
         partyCardsAllocated = 1;

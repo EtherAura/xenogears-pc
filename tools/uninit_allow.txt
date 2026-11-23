@@ -175,7 +175,6 @@ src/menu_gear_shop/gs_801CDC68.c | updateGearShopSpark | x | FP: set whenever se
 src/menu_gear_shop/gs_801CDC68.c | updateGearShopSpark | y | FP: set whenever set = 1, read only under it
 src/menu_gear_shop/gs_801D1304.c | showGearShopSellItemInfo | value | FP: the only caller passes the category, 3 or 4
 src/menu_gear_shop/gs_801D1304.c | showGearShopSellItemInfo | price | FP: the only caller passes the category, 3 or 4
-src/menu_gear_shop/gs_801D1304.c | runGearShopSellMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showGearShopSellItemInfo sets it
 src/menu_gear_shop/gs_801D1304.c | setupGearShopBuyListRows | value | FP: kinds are 0-4 (group 0: 0-2, group 1: 3-4, unused entries zeroed)
 src/menu_gear_shop/gs_801D1304.c | setupGearShopBuyListRows | price | FP: kinds are 0-4 (group 0: 0-2, group 1: 3-4, unused entries zeroed)
 src/menu_gear_shop/gs_801D1304.c | setupGearShopBuyListRows | mask | FP: kinds are 0-4 (group 0: 0-2, group 1: 3-4, unused entries zeroed)
@@ -185,13 +184,8 @@ src/menu_gear_shop/gs_801D1304.c | setupGearShopOwnedCount | ids | FP: read only
 src/menu_gear_shop/gs_801D1304.c | setupGearShopOwnedCount | counts | FP: read only under found, which is set together with it
 src/menu_gear_shop/gs_801D1304.c | setupGearShopOwnedCount | n | FP: read only under found, which is set together with it
 src/menu_gear_shop/gs_801D1304.c | showGearShopBuyItemInfo | price | FP: kinds are 0-4, all cases
-src/menu_gear_shop/gs_801D1304.c | runGearShopBuyMenu | tradeInNew | FP: set on the first pass (scroll 0 != 0xFF) before the row block, used only for flagged rows
-src/menu_gear_shop/gs_801D1304.c | runGearShopBuyMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showGearShopBuyItemInfo sets it
 src/menu_name_entry/ne_801C5040.c | updateMenuInput | time | FP: read only while paused, which is set together with it
 src/menu_party/pt_801C5018.c | updateMenuInput | time | FP: read only while paused, which is set together with it
-src/menu_party/pt_801C5018.c | runPartyChangeMenu | prevSide | FP: swapPartyMember runs only when selected, which is set together with it
-src/menu_party/pt_801C5018.c | runPartyChangeMenu | prevRow | FP: swapPartyMember runs only when selected, which is set together with it
-src/menu_party/pt_801C5018.c | runPartyChangeMenu | prevScroll | FP: swapPartyMember runs only when selected, which is set together with it
 src/menu_shop/sh_801C5040.c | loadShopData | bundle | FP: case 0 implies arg0 < 16, the test that sets it
 src/menu_shop/sh_801C5040.c | loadShopData | raw | FP: set and freed under the same arg0 < 16 test
 src/menu_shop/sh_801C5040.c | updateMenuPointerGlyph | x | FP: every caller passes mode 0
@@ -206,7 +200,5 @@ src/menu_shop/sh_801CC720.c | setupShopOwnedCount | n | FP: the only caller pass
 src/menu_shop/sh_801CC720.c | setupShopOwnedCount | ids | FP: the only caller passes kind 0-2
 src/menu_shop/sh_801CC720.c | setupShopOwnedCount | counts | FP: the only caller passes kind 0-2
 src/menu_shop/sh_801CC720.c | showShopBuyItemInfo | price | FP: setupShopStock writes only kinds 0-2, all cases
-src/menu_shop/sh_801CC720.c | runShopBuyMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showShopBuyItemInfo sets it
 src/menu_shop/sh_801CC720.c | showShopSellItemInfo | value | harmless: an empty row of the equipped-accessory list passes a stale kind with id 0, and id 0 hides both labels
 src/menu_shop/sh_801CC720.c | showShopSellItemInfo | price | harmless: an empty row passes a stale kind; the price is used only for flagged rows, which recompute it
-src/menu_shop/sh_801CC720.c | runShopSellMenu | price | FP: on the first pass row 0 != prevRow 0xFF, so showShopSellItemInfo sets it

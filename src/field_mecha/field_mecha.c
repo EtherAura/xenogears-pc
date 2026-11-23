@@ -67,7 +67,7 @@ sMechaInitVar4* sMechaModel_init(sModel* model, sMechaInitVar4* out) {
 
     resetMemoryAllocStats(4, 0);
     n = fieldModelRelocation(model);
-    out->m0_blocks = allocateHeap(PC_HEAP_SIZED(n * sizeof(sModelBlock*), n * 0x4), 0);
+    out->m0_blocks = allocateHeap(PC_HEAP_OF(sModelBlock*, PC_HEAP_SIZED(n * sizeof(sModelBlock*), n * 0x4)), 0);
     out->m4_count = n;
     if (out->m0_blocks != NULL) {
         for (i = 0; i < n; i++) {
@@ -104,7 +104,7 @@ sMechaBone* processMechaMesh(sMechaInitVar4* model, sMechaDataTable1_C* entries,
         return NULL;
     }
     n++;
-    bones = allocateHeap(PC_HEAP_SIZED(n * sizeof(sMechaBone), n * 0x7c), 0);
+    bones = allocateHeap(PC_HEAP_OF(sMechaBone, PC_HEAP_SIZED(n * sizeof(sMechaBone), n * 0x7c)), 0);
     if (bones == NULL) {
         return NULL;
     }
@@ -1379,7 +1379,7 @@ sMechaInitVar2* initMechaInitVar2(sMechaInitVar2* arg0, s32 count) {
     if (count > 0) {
         arg0->m6_count = count;
         resetMemoryAllocStats(4, 0);
-        arg0->m0_tracks = allocateHeap(PC_HEAP_SIZED(count * sizeof(sMechaInitVar2Sub), count * 0x14), 0);
+        arg0->m0_tracks = allocateHeap(PC_HEAP_OF(sMechaInitVar2Sub, PC_HEAP_SIZED(count * sizeof(sMechaInitVar2Sub), count * 0x14)), 0);
         if (arg0->m0_tracks == NULL) {
             return NULL;
         }
@@ -1729,7 +1729,7 @@ sMechaInitVar3* initMechaInitVar3(sMechaInitVar3* arg0, s32 count) {
     resetMemoryAllocStats(4, 0);
     arg0->m4_count = count;
     arg0->m6_next = 0;
-    arg0->m0_entries = allocateHeap(PC_HEAP_SIZED((count + 1) * sizeof(sMechaInitVar3Sub), (count + 1) * 0x7c), 0);
+    arg0->m0_entries = allocateHeap(PC_HEAP_OF(sMechaInitVar3Sub, PC_HEAP_SIZED((count + 1) * sizeof(sMechaInitVar3Sub), (count + 1) * 0x7c)), 0);
     if (arg0->m0_entries != NULL) {
         initMechaInitVar3Sub(arg0);
     } else {

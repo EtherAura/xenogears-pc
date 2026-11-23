@@ -4272,7 +4272,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
                                 float centerX, float centerY);
 static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
                                  int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
-                                 float centerX, float centerY, int32_t block);
+                                 float centerX, float centerY, int32_t block, int brightness);
 static size_t lightBlockBytes(const LightParams* p);
 /* A picture between's scene draws (interpolationRender): the depth builds'
  * set 1, the replay canvas's depth image; VK_NULL_HANDLE otherwise. */
@@ -5125,7 +5125,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                     if (f->sceneBlur)
                         sceneBlurRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &blur);
                     sceneParticlesRecord(cmd, ctx, SCENE_REPLAY, 0, 0, f->viewW, f->viewH, -1, 0, 0, 0, 0, 0, 0, vk.interpolationN, &lit,
-                                         lit.centerX + (float)f->originX, lit.centerY + (float)f->originY, particleBlock);
+                                         lit.centerX + (float)f->originX, lit.centerY + (float)f->originY, particleBlock, 0);
                     vk.scene.ditherX = vk.scene.ditherY = 0;
                     interpolationBarrier(cmd);
                     vkCmdBindVertexBuffers(cmd,0,1,&ctx->vertices.buffer,&offset);
@@ -6400,7 +6400,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
  * as the composite (xg-rgcf.5.10). */
 static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
                                  int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const LightParams* p,
-                                 float centerX, float centerY, int32_t block) {
+                                 float centerX, float centerY, int32_t block, int brightness) {
     if (block < 0 || p->particles <= 0) return;
     rasterBarrier(cmd);
     vk.needBarrier = 0;
@@ -6412,6 +6412,15 @@ static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary
                         p->top, p->shade, p->bounce, p->glow};
     c.color = vk.hiColor;
     c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
+    if (brightness) {
+        /* A block of this frame's own (sceneParticlesDraw): the room's
+         * brightness again (the fog's pass), from the lighting's layers. */
+        c.pass = LIGHT_FOG;
+        vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+        vkCmdDispatch(cmd, 1, 1, 1);
+        rasterBarrier(cmd);
+        c.pass = 20;
+    }
     vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
     vkCmdDispatch(cmd, PARTICLES_MAX / 64, 1, 1); /* one invocation a particle */
     rasterBarrier(cmd);
@@ -6431,10 +6440,9 @@ static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary
     vk.needBarrier = 1;
 }
 
-/* The frame context sceneLight recorded the particles' block into: the
- * particles are drawn only into the same one (a blur that makes its images
- * anew waits for the device, and the frame after has neither the block nor
- * these sets written). */
+/* The frame context sceneLight recorded the particles' block into. When a
+ * submission comes between (Battling's scenes did, before they went without), the particles take a block
+ * of the new frame's own, and its sets are written for it. */
 static FrameCtx* sceneParticleFrame;
 
 /* The lighting for a frame of the copy (sceneBlur's arguments): the block
@@ -6465,11 +6473,19 @@ static void sceneParticlesDraw(int primary, int x, int y, int w, int h, int seco
     if (block < 0 || w <= 0 || h <= 0 || n <= 0 || vk.hiN != n) return;
     cpuResolveFlush();
     endBatch();
-    if (frame() != sceneParticleFrame) return; /* another frame since the lighting: this scene goes without */
-    sceneLightSets(frame(), primary);
-    if (second >= 0) sceneLightSets(frame(), second);
-    sceneParticlesRecord(recording(), frame(), primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p, centerX,
-                         centerY, block);
+    FrameCtx* ctx = frame();
+    int moved = ctx != sceneParticleFrame;
+    if (moved) {
+        /* Another frame since the lighting: a block in this one, the
+         * lighting's layers (images) still hold what it made. */
+        if (ctx->spanUsed + lightBlockBytes(p) > SPAN_BYTES) return;
+        block = lightBlock(ctx, p);
+        if (block < 0) return;
+    }
+    sceneLightSets(ctx, primary);
+    if (second >= 0) sceneLightSets(ctx, second);
+    sceneParticlesRecord(recording(), ctx, primary, x, y, w, h, second, sx, sy, sw, sh, layerX, layerY, n, p, centerX,
+                         centerY, block, moved);
 }
 
 /* The copy of VRAM's depth round (cx, cy), PS1 pixels from its frame's

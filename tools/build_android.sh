@@ -14,9 +14,15 @@
 #                                          # the app's version (a release's, from its tag), instead of
 #                                          # git's: the latest tag + short hash, and the commit count
 #   tools/build_android.sh --native-only   # the libraries, no APK
-#   tools/build_android.sh --updater       # with the opt-in update check (-DXG_UPDATER=ON, and the
-#                                          # INTERNET permission: port/src/update, xg-4oq.14.3); off
-#                                          # by default and in releases until xg-4oq.14.7
+#   tools/build_android.sh --updater       # with the opt-in update check and install (-DXG_UPDATER=ON;
+#                                          # the INTERNET and REQUEST_INSTALL_PACKAGES permissions:
+#                                          # port/src/update, xg-4oq.14.3, .14.5); off by default and
+#                                          # in releases until xg-4oq.14.7
+#   tools/build_android.sh --updater-test  # the same as a test build, never to hand out
+#                                          # (-DXG_UPDATER_TEST=ON: the tests' FIXTURE key trusted,
+#                                          # XG_UPDATE_TEST_DIR read instead of the network; built
+#                                          # without -DXG_DIST, its payload checked without --dist)
+#   XG_ANDROID_OUT=DIR tools/build_android.sh ...   # build in DIR instead of build/android
 #
 # Needs (docs/ANDROID_PLAN.md "Android tooling"): the Android SDK in
 # $ANDROID_HOME (default ~/Android/sdk: platform android-36, build-tools
@@ -59,6 +65,7 @@ VERSION_CODE=
 VARIANT=debug
 NATIVE_ONLY=0
 UPDATER=OFF
+UPDATER_TEST=OFF
 while [ $# -gt 0 ]; do
     case "$1" in
     --abi) ABIS+=("$2"); shift ;;
@@ -74,6 +81,7 @@ while [ $# -gt 0 ]; do
     --release) VARIANT=release ;;
     --native-only) NATIVE_ONLY=1 ;;
     --updater) UPDATER=ON ;;
+    --updater-test) UPDATER=ON; UPDATER_TEST=ON ;;
     -h | --help) sed -n '2,/^set /p' "$0" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
     *) echo "build_android.sh: unknown option $1" >&2; exit 2 ;;
     esac
@@ -97,6 +105,13 @@ fi
 [ ${#ABIS[@]} -gt 0 ] || ABIS=(x86_64 arm64-v8a)
 [ ${#REGIONS[@]} -gt 0 ] || REGIONS=(us jp)
 [ ${#ENGINES[@]} -gt 0 ] || ENGINES=(original enhanced)
+# A test build of the updater is never handed out: no -DXG_DIST (CMake refuses the two together).
+DIST=ON
+DIST_CHECK=--dist
+if [ "$UPDATER_TEST" = ON ]; then
+    DIST=OFF
+    DIST_CHECK=
+fi
 case " ${ABIS[*]} " in *" arm64-v8a "*) HAS_ARM64=1 ;; *) HAS_ARM64=0 ;; esac
 
 export ANDROID_HOME="${ANDROID_HOME:-$HOME/Android/sdk}"
@@ -104,7 +119,18 @@ NDK_VERSION="${XG_NDK_VERSION:-29.0.14206865}"
 NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
 GRADLE="${XG_GRADLE:-$HOME/Android/gradle-9.9.0/bin/gradle}"
 API=33 # Android 13: Vulkan 1.3 on current drivers (docs/ANDROID_PLAN.md decisions)
-OUT="$ROOT/build/android"
+OUT="${XG_ANDROID_OUT:-$ROOT/build/android}"
+# A build to hand out maps the repository's and the home's paths out of its debug information
+# (port/CMakeLists.txt XG_DIST), not other folders': SDL3's headers under an OUT outside both
+# would stay in it and fail the payload audit at the end.
+if [ "$DIST" = ON ]; then
+    case "$(realpath -ms "$OUT")/" in
+        "$(realpath -ms "$ROOT")"/* | "$(realpath -ms "$HOME")"/*) ;;
+        *) echo "build_android.sh: XG_ANDROID_OUT=$OUT is outside the repository and \$HOME; a build to hand" >&2
+           echo "  out would carry its path. Build under one of them (or --updater-test). Nothing was built." >&2
+           exit 2 ;;
+    esac
+fi
 PY="$ROOT/.venv/bin/python"
 [ -x "$PY" ] || PY=python3
 # SDL3's source: the pinned version, unpacked from its checked tarball (xg-mrj.3.17), unless
@@ -194,7 +220,8 @@ for abi in "${ABIS[@]}"; do
             cmake -S port -B "$b" -G Ninja -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN" -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$API" \
                 -DANDROID_STL=c++_shared -DXG_VERSION="${region^^}" -DXG_ENGINE="$engine" -DXG_EXTRAS=ON \
-                -DXG_SHARED=ON -DXG_LTO=OFF -DXG_DIST=ON -DXG_UPDATER="$UPDATER" \
+                -DXG_SHARED=ON -DXG_LTO=OFF -DXG_DIST="$DIST" -DXG_UPDATER="$UPDATER" \
+                -DXG_UPDATER_TEST="$UPDATER_TEST" \
                 -DSDL3_DIR="$sdl/lib/cmake/SDL3" -DVulkan_GLSLC_EXECUTABLE="$GLSLC" \
                 -DXG_LD="$gnu_ld" -DXG_OBJCOPY="$gnu_objcopy" -DXG_PROBE_CC="$(command -v gcc)" \
                 -DPython3_EXECUTABLE="$PY"
@@ -204,7 +231,7 @@ for abi in "${ABIS[@]}"; do
             # the packed, stripped one, with the symbols that attribute them), and no folder of this
             # machine (--dist, xg-4oq.9: an app never runs from the repository, so every Android
             # build is one to hand out).
-            "$PY" tools/payloadcheck.py --dist --build "$b" --exe "$b/$lib"
+            "$PY" tools/payloadcheck.py $DIST_CHECK --build "$b" --exe "$b/$lib"
         done
     done
 done

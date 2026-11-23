@@ -14,6 +14,7 @@
 #include <time.h>
 
 #include "imgui.h"
+#include "wrapped.h"
 #include "l10n.h"
 #include "menu.h"
 #include "options.h"
@@ -34,7 +35,7 @@ namespace {
 // A wrapped line in a colour (the menu's warning gold, its dimmed grey).
 void colouredText(const ImVec4& colour, const char* text) {
     ImGui::PushStyleColor(ImGuiCol_Text, colour);
-    ImGui::TextWrapped("%s", text);
+    wrappedText("%s", text);
     ImGui::PopStyleColor();
 }
 
@@ -93,6 +94,7 @@ bool questionOpen;
 struct {
     bool looked, possible, leaving;
     char why[256];
+    char ask[300]; // Android: allow installs from this app first (updateInstallAllowed)
     UpdateInstallPlace place;
 } inst;
 
@@ -129,7 +131,9 @@ void installRows(const UpdateStatus* s) {
         return;
     }
     if (now.stage == INSTALL_READY) {
-        textLines("Starting the new version...");
+        textLines(inst.place.kind == RELEASE_ANDROID ? "Android installs it (confirm on its screen if it asks) and "
+                                                       "closes the app: open it again."
+                                                     : "Starting the new version...");
         if (!inst.leaving && !opt::indexing()) {
             inst.leaving = true;
             closeMenu(); // the game's next vblank puts it in place and starts it (update_install.c)
@@ -137,39 +141,59 @@ void installRows(const UpdateStatus* s) {
         return;
     }
     if (now.stage == INSTALL_FAILED) {
+        inst.leaving = false; // a later install closes the menu again
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
-        ImGui::TextWrapped(tr("The install stopped: %s."), now.why); // the reason in English, as the log has it
+        wrappedText(tr("The install stopped: %s."), now.why); // the reason in English, as the log has it
         ImGui::PopStyleColor();
     }
     if (!inst.possible) {
         if (inst.looked) {
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textDimmed);
-            ImGui::TextWrapped(tr("Installing it from here is not possible: %s."), inst.why);
+            wrappedText(tr("Installing it from here is not possible: %s."), inst.why);
             ImGui::PopStyleColor();
         }
         return;
     }
+    if (inst.ask[0] != '\0') {
+        ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
+        wrappedText("%s", tr(inst.ask));
+        ImGui::PopStyleColor();
+    }
     if (ImGui::Button(tr("Install and restart")) && !opt::indexing()) ImGui::OpenPopup("##install-question");
     if (beginModal("##install-question")) {
-        bool setup = inst.place.kind == RELEASE_SETUP;
-        char text[600];
+        char text[700];
         snprintf(text, sizeof text,
-                 tr(setup ? "Install Xenogears PC port %s now? The game downloads its setup and checks it, then "
-                            "closes; Windows asks for permission, and the setup installs it and starts the game "
-                            "again. Progress since your last save is lost; the settings, memory cards and save "
-                            "states are kept."
-                          : "Install Xenogears PC port %s now? The game downloads it, checks it, puts it in place of "
-                            "this copy's files and starts again. Progress since your last save is lost; the "
-                            "settings, memory cards and save states are kept."),
+                 tr(inst.place.kind == RELEASE_SETUP
+                        ? "Install Xenogears PC port %s now? The game downloads its setup and checks it, then "
+                          "closes; Windows asks for permission, and the setup installs it and starts the game "
+                          "again. Progress since your last save is lost; the settings, memory cards and save "
+                          "states are kept."
+                    : inst.place.kind == RELEASE_ANDROID
+                        ? "Install Xenogears PC port %s now? The app downloads it and checks it; Android then installs "
+                          "it over this app (it may ask you to confirm first) and closes the app: open it again "
+                          "afterwards. Progress since your last save is lost; the settings, memory cards and save "
+                          "states are kept."
+                        : "Install Xenogears PC port %s now? The game downloads it, checks it, puts it in place of "
+                          "this copy's files and starts again. Progress since your last save is lost; the "
+                          "settings, memory cards and save states are kept."),
                  s->available);
         textLines(text);
         ImGui::Spacing();
         if (ImGui::Button(tr("Install and restart##go"))) {
             UpdateInstallPlace again; // looked at again: the folder, the fetcher
             char why[256];
+            inst.ask[0] = '\0';
             if (updateInstallPlace(&again, why, sizeof why)) {
-                updateInstallStart(&again);
-                fprintf(stderr, "update: install of %s started\n", s->available);
+                if (updateInstallAllowed(why, sizeof why)) {
+                    updateInstallStart(&again);
+                    fprintf(stderr, "update: install of %s started\n", s->available);
+                } else {
+                    // Android's settings page is open: the player allows it and chooses again.
+                    snprintf(inst.ask, sizeof inst.ask, "%s",
+                             N_("Allow installs from this app in the settings Android opened, then choose Install "
+                                "and restart again."));
+                    fprintf(stderr, "update: install: %s\n", why);
+                }
             } else {
                 inst.possible = false;
                 snprintf(inst.why, sizeof inst.why, "%s", why);
@@ -249,7 +273,7 @@ void updatesRows() {
     // A newer version: first, where it is seen.
     if (s->available[0] != '\0' && opt::row("New version", "update_skip")) {
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textGood);
-        ImGui::TextWrapped(tr("Xenogears PC port %s is out (this is %s)."), s->available,
+        wrappedText(tr("Xenogears PC port %s is out (this is %s)."), s->available,
                            releaseVersion()[0] ? releaseVersion() : tr("a development build"));
         ImGui::PopStyleColor();
         if (ImGui::Button(tr("Open the release page"))) {
@@ -259,12 +283,20 @@ void updatesRows() {
         }
         sameLineFor("Skip this version");
         if (ImGui::Button(tr("Skip this version"))) updateSkip(s->available);
-        if (releaseUpdatesItself(releaseKind()) && releaseKind() != RELEASE_ANDROID) {
+        if (releaseKind() == RELEASE_ANDROID) {
+            installRows(s);
+            hint("Install and restart downloads it and checks it against the signed manifest; Android installs it "
+                 "over this app (it may ask you to confirm first), keeping its settings and saves. Skipped, it is not "
+                 "shown again; a later version is.");
+        } else if (releaseUpdatesItself(releaseKind())) {
             installRows(s);
             hint("Install and restart downloads it, checks it against the signed manifest, puts it in place of this "
                  "copy's files and starts the game again; the settings and saves are kept. Skipped, it is not shown "
                  "again; a later version is.");
-        } else if (releaseUpdatesItself(releaseKind()) || releaseKind() == RELEASE_DEV) {
+        } else if (releaseKind() == RELEASE_DEB) {
+            hint("apt installs it: sudo apt update && sudo apt upgrade, once this port's APT repository is added "
+                 "(the Build and set up page says how). Skipped, it is not shown again; a later version is.");
+        } else if (releaseKind() == RELEASE_DEV) {
             hint("Its release page has the downloads. Skipped, it is not shown again; a later version is.");
         } else {
             hint("Your package manager installs it: its release page has the new package. Skipped, it is not "
@@ -288,7 +320,7 @@ void updatesRows() {
                                                    : "Not in this run (headless, or an online session)."));
         } else if (!canFetch) {
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
-            ImGui::TextWrapped(tr("No check is possible: %s."), fetcher);
+            wrappedText(tr("No check is possible: %s."), fetcher);
             ImGui::PopStyleColor();
         }
         overrideNote("update_check");
@@ -300,23 +332,23 @@ void updatesRows() {
         if (s->running) {
             textLines("Checking...");
         } else if (s->outcome == UPDATE_UNCHECKED) {
-            if (s->checkedAt > 0) ImGui::TextWrapped(tr("Last checked %s."), when);
+            if (s->checkedAt > 0) wrappedText(tr("Last checked %s."), when);
             else textLines("Not checked yet.");
         } else {
             switch (s->outcome) {
-            case UPDATE_NEWER: ImGui::TextWrapped(tr("%s: version %s found."), when, s->version); break;
-            case UPDATE_LATEST: ImGui::TextWrapped(tr("%s: this is the latest release."), when); break;
-            case UPDATE_SKIPPED: ImGui::TextWrapped(tr("%s: version %s, skipped."), when, s->version); break;
-            case UPDATE_NOT_OFFERED: ImGui::TextWrapped(tr("%s: no update is offered yet."), when); break;
-            case UPDATE_NO_MANIFEST: ImGui::TextWrapped(tr("%s: the latest release has no update file."), when); break;
+            case UPDATE_NEWER: wrappedText(tr("%s: version %s found."), when, s->version); break;
+            case UPDATE_LATEST: wrappedText(tr("%s: this is the latest release."), when); break;
+            case UPDATE_SKIPPED: wrappedText(tr("%s: version %s, skipped."), when, s->version); break;
+            case UPDATE_NOT_OFFERED: wrappedText(tr("%s: no update is offered yet."), when); break;
+            case UPDATE_NO_MANIFEST: wrappedText(tr("%s: the latest release has no update file."), when); break;
             case UPDATE_UNTRUSTED:
-                ImGui::TextWrapped(tr("%s: the update file is not signed by the release key: nothing is offered."), when);
+                wrappedText(tr("%s: the update file is not signed by the release key: nothing is offered."), when);
                 break;
             case UPDATE_BAD_MANIFEST:
-                ImGui::TextWrapped(tr("%s: the update file is of a kind this build cannot read."), when);
+                wrappedText(tr("%s: the update file is of a kind this build cannot read."), when);
                 break;
-            case UPDATE_NO_FETCHER: ImGui::TextWrapped(tr("%s: no check is possible on this system."), when); break;
-            default: ImGui::TextWrapped(tr("%s: the check failed."), when); break;
+            case UPDATE_NO_FETCHER: wrappedText(tr("%s: no check is possible on this system."), when); break;
+            default: wrappedText(tr("%s: the check failed."), when); break;
             }
             if (s->outcome != UPDATE_NEWER && s->outcome != UPDATE_LATEST && s->outcome != UPDATE_SKIPPED) {
                 colouredText(skin::textDimmed, s->why); // the system's words, as the log has them

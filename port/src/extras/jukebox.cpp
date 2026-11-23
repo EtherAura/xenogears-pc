@@ -74,6 +74,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "imgui_internal.h"
 #include "picker.h"
 #include "ui/l10n.h"
@@ -1380,7 +1381,7 @@ void songDetail(int i) {
     Song& s = S->songs[(size_t)i];
     bool playing = S->song == i && S->st.music;
     float u = unit();
-    ImGui::TextWrapped("%s", songTitle(s));
+    wrappedText("%s", songTitle(s));
     const JukeboxTitle* title = jukeboxTitle(s.hash, s.size);
     if (title) hint("Internal name: %s  /  OST %d-%02d", s.name.c_str(), title->disc, title->track);
     else hint("Internal name: %s  /  No verified OST title (ambience or unmapped variant)", s.name.c_str());

@@ -8,6 +8,7 @@
 #include <time.h>
 
 #include "imgui.h"
+#include "wrapped.h"
 #include "imgui_internal.h" // RegisterUserTexture: the slots' pictures
 #include "l10n.h"
 #include "menu.h"
@@ -259,7 +260,7 @@ void statesSection() {
     if (!stateAvailable(&why)) {
         if (opt::row("Save states")) {
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
-            ImGui::TextWrapped("%s", tr(why));
+            wrappedText("%s", tr(why));
             ImGui::PopStyleColor();
         }
         return;
@@ -319,7 +320,7 @@ void statesSection() {
         }
         if (exists && !cur.info.usable) {
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
-            ImGui::TextWrapped(tr("Slot %d cannot be loaded: %s."), selected, cur.info.why);
+            wrappedText(tr("Slot %d cannot be loaded: %s."), selected, cur.info.why);
             ImGui::PopStyleColor();
         }
 #ifdef __ANDROID__

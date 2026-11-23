@@ -39,7 +39,6 @@ Var UpdateExe ; the game's executable, when the game runs this setup to update i
 Name "${PRODUCT} @VERSION@"
 OutFile "@SETUP_NAME@"
 InstallDir "$PROGRAMFILES64\${PRODUCT}"
-InstallDirRegKey HKLM "${UNINSTALL_KEY}" "InstallLocation"
 
 VIProductVersion "@NSIS_VERSION@"
 VIFileVersion "@NSIS_VERSION@"
@@ -73,6 +72,19 @@ Function .onInit
   ${OrIf} $UpdateExe != "xenogears.exe"
   ${AndIf} $UpdateExe != "xenogears-enhanced.exe"
     StrCpy $UpdateExe ""
+  ${EndIf}
+  ; A copy installed before: its folder, from the key the Install section writes in the
+  ; 64-bit view (InstallDirRegKey would read the 32-bit one: this setup is a 32-bit program).
+  ; A folder given with /D= (an update always gives one) is kept: only then does $INSTDIR
+  ; differ from InstallDir here.
+  ${If} $UpdateExe == ""
+  ${AndIf} $INSTDIR == "$PROGRAMFILES64\${PRODUCT}"
+    ClearErrors
+    ReadRegStr $R1 HKLM "${UNINSTALL_KEY}" "InstallLocation"
+    ${IfNot} ${Errors}
+    ${AndIf} $R1 != ""
+      StrCpy $INSTDIR $R1
+    ${EndIf}
   ${EndIf}
 FunctionEnd
 

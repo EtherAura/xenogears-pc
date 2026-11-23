@@ -384,8 +384,10 @@ void processDebugMenuForMenuList(void) {
     void* p1;
 
 #ifdef PLATFORM_PC
-    if (pcResumeMenu() && useDebugMenuList == 0) {
-        goto dispatch; /* a stackless load: the menu opened from a mode goes on (include/pc_state.h) */
+    if (pcResumeMenu()) {
+        /* a stackless load: the menu that was open goes on, the one a mode opened
+         * or the menu mode's pick, its overlay's data the state's (include/pc_state.h) */
+        goto dispatch;
     }
 #endif
     if (useDebugMenuList != 0) {
@@ -474,8 +476,8 @@ void processDebugMenuForMenuList(void) {
 #endif
             waitReadCompletion(0);
             setCurrentDirectory(0x10, 0);
-            gearShopOrderingTables[0] = allocateHeap(4096 * (s32)sizeof(OTag), 0);
-            gearShopOrderingTables[1] = allocateHeap(4096 * (s32)sizeof(OTag), 0);
+            gearShopOrderingTables[0] = allocateHeap(PC_HEAP_OF(OTag, 4096 * (s32)sizeof(OTag)), 0);
+            gearShopOrderingTables[1] = allocateHeap(PC_HEAP_OF(OTag, 4096 * (s32)sizeof(OTag)), 0);
         }
 #ifndef PLATFORM_PC
         p0 = allocateHeap(PC_HEAP_BYTES(4), 1);

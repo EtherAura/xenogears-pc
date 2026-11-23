@@ -1,6 +1,7 @@
 // The retail battle loader/renderers run in a private hardware world. The
 // controls choose its actors and moves; they never touch the paused game.
 #include "ui/l10n.h"
+#include "ui/wrapped.h"
 #include "viewer.h"
 #include "replace.h"
 #include "view.h"
@@ -592,13 +593,13 @@ void draw(const Area &a) {
             ImGui::PopID();
         }
         if (!S->preview)
-            ImGui::TextWrapped(tr("Choose an arena and actors, then load the scene."));
+            wrappedText(tr("Choose an arena and actors, then load the scene."));
     }
     endPane();
     if (beginPane("battleview", ImVec2(a.min.x + split + 8 * a.unit, a.min.y), a.max, "Battle preview",
                   false)) {
         if (S->selected >= 0 && S->selected < int(S->moves.size()))
-            ImGui::TextWrapped("%s", S->moves[S->selected].label.c_str());
+            wrappedText("%s", S->moves[S->selected].label.c_str());
         if (ImGui::Checkbox(tr("Full battle"), &S->full)) {
             if (S->selected >= 0)
                 seek(0);
@@ -659,7 +660,7 @@ void battleOptions() {
             openPicker("battledisc", "Open a disc image", "", ".cue;.bin", false);
         if (ImGui::Button(tr("Export PNG")))
             exportPng();
-        ImGui::TextWrapped(tr("L2/R2: previous/next arena. X: play/pause. Y: one frame. R3: fit."));
+        wrappedText(tr("L2/R2: previous/next arena. X: play/pause. Y: one frame. R3: fit."));
         ImGui::EndPopup();
     }
     std::string chosen;

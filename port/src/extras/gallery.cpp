@@ -46,6 +46,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "imgui_internal.h"
 #include "picker.h"
 #include "ui/l10n.h"
@@ -371,7 +372,7 @@ bool scanPane(ImVec2 min, ImVec2 max, const char* title) {
         if (S->scan == nullptr) {
             hint("No Xenogears disc image was found.");
         } else {
-            ImGui::TextWrapped(tr("Reading the discs: movie streams, field scripts and battle events."));
+            wrappedText(tr("Reading the discs: movie streams, field scripts and battle events."));
             ImGui::ProgressBar((float)xgScanProgress(S->scan), ImVec2(-1, 0), xgScanDoing(S->scan));
         }
     }
@@ -683,9 +684,9 @@ void moviePane(ImVec2 min, ImVec2 max) {
             return;
         }
         if (S->hasMedia && S->media.kind == XG_MEDIA_MOVIE) {
-            ImGui::TextWrapped(tr("%s disc %d - field %d, script PC %04X, frames %d-%d"), xgDiscRegion(S->discs[m->disc - 1]),
+            wrappedText(tr("%s disc %d - field %d, script PC %04X, frames %d-%d"), xgDiscRegion(S->discs[m->disc - 1]),
                 m->disc, S->media.field, S->media.pc, S->media.first, S->media.last);
-            ImGui::TextWrapped("%s", xgDiscPath(S->discs[m->disc - 1]));
+            wrappedText("%s", xgDiscPath(S->discs[m->disc - 1]));
         }
         float u = unit();
         bool linked = S->hasMedia && S->media.kind == XG_MEDIA_MOVIE;
@@ -764,7 +765,7 @@ void moviePane(ImVec2 min, ImVec2 max) {
         for (int k = 0; k < xgScanUseCount(S->scan); k++) {
             const XgMovieUse* use = xgScanUse(S->scan, k);
             if (use->movie == i) {
-                ImGui::TextWrapped("%s", useText(use).c_str());
+                wrappedText("%s", useText(use).c_str());
             }
         }
         if (uses == 0) {
@@ -922,9 +923,9 @@ void picturePane(ImVec2 min, ImVec2 max) {
             return;
         }
         if (S->hasMedia && S->media.kind == XG_MEDIA_PICTURE) {
-            ImGui::TextWrapped(tr("%s disc %d - field %d, script PC %04X - 04/%03X"), xgDiscRegion(pictureDisc()),
+            wrappedText(tr("%s disc %d - field %d, script PC %04X - 04/%03X"), xgDiscRegion(pictureDisc()),
                 xgDiscNumber(pictureDisc()), S->media.field, S->media.pc, 0x7fb + S->media.picture);
-            ImGui::TextWrapped("%s", xgDiscPath(pictureDisc()));
+            wrappedText("%s", xgDiscPath(pictureDisc()));
         }
         float u = unit();
         bool portrait=S->picSel>=0 && S->pics[(size_t)S->picSel].kind==0;
@@ -1095,12 +1096,12 @@ void scenePane(ImVec2 min, ImVec2 max) {
             return;
         }
         float u = unit();
-        ImGui::TextWrapped("%s", fieldName(sc->field).c_str());
+        wrappedText("%s", fieldName(sc->field).c_str());
         const char* ch = xgStoryName != nullptr ? xgStoryName(sc->progress) : nullptr;
         if (ch != nullptr && ch[0] != '\0') {
-            ImGui::TextWrapped(tr("Story: %s"), ch);
+            wrappedText(tr("Story: %s"), ch);
         }
-        ImGui::TextWrapped(tr("Its script sets the story progress to %d."), sc->setsTo);
+        wrappedText(tr("Its script sets the story progress to %d."), sc->setsTo);
         XgDisc* presetDisc = S->discs[sc->disc - 1];
         const XgScenePreset* preset = xgScenePreset(sc, presetDisc != nullptr ? xgDiscRegion(presetDisc) : nullptr);
         if (xgScenePresetMatches(preset, &S->start)) {
@@ -1118,7 +1119,7 @@ void scenePane(ImVec2 min, ImVec2 max) {
                               : "The indexed script may need player interaction or story flags that this start does not supply.");
         }
         if (sc->use >= 0) {
-            ImGui::TextWrapped(tr("It plays a movie: %s"), useText(xgScanUse(S->scan, sc->use)).c_str());
+            wrappedText(tr("It plays a movie: %s"), useText(xgScanUse(S->scan, sc->use)).c_str());
         }
         ImGui::Dummy(ImVec2(0, 4 * u));
         ImGui::SeparatorText(tr("Start the game here"));
@@ -1134,7 +1135,7 @@ void scenePane(ImVec2 min, ImVec2 max) {
             party += (id == 255 ? tr("Empty") : id >= 0 && id < 11 ? S->partyNames[id] : tr("Invalid")) +
                      std::string(" (") + std::to_string(id) + ")";
         }
-        ImGui::TextWrapped(tr("Party: %s"), party.c_str());
+        wrappedText(tr("Party: %s"), party.c_str());
         ImGui::BeginDisabled(!S->overrideStart);
         ImGui::SetNextItemWidth(120 * u);
         ImGui::InputInt(tr("Field"), &S->start.field);

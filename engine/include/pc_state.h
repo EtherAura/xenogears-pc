@@ -59,14 +59,18 @@ typedef struct PC_PRIMS PC_PRIMS;
  * which of the mode's loops (0: its main loop). bootGame's bootMode is 0 while
  * a mode runs, so the id names the mode to take up. */
 enum { PC_SAFE_NONE = 0, PC_SAFE_FIELD = 1 << 8, PC_SAFE_BATTLE = 2 << 8, PC_SAFE_BATTLE_TURN = (2 << 8) | 1,
-       PC_SAFE_WORLDMAP = 3 << 8 };
+       PC_SAFE_WORLDMAP = 3 << 8, PC_SAFE_MENU = 5 << 8 /* the menu mode: its menus' loops only */ };
 #define PC_SAFE_MODE(id) ((id) >> 8)
 /* The menus' loops (the low byte, from 2): the same in every mode that opens them
  * (field, world map, the menu mode itself); pcMenuSafeId adds the mode. */
 enum {
     PC_SAFE_SUB_MENU = 2, PC_SAFE_SUB_STATUS, PC_SAFE_SUB_ITEM, PC_SAFE_SUB_EQUIP, PC_SAFE_SUB_GEAR, PC_SAFE_SUB_ETHER,
     PC_SAFE_SUB_SAVE, PC_SAFE_SUB_SOUND, PC_SAFE_SUB_STATUS_EQUIP, PC_SAFE_SUB_STATUS_ETHER, PC_SAFE_SUB_SKILLS,
-    PC_SAFE_SUB_ITEM_USE, PC_SAFE_SUB_GEAR_EQUIP, PC_SAFE_SUB_GEAR_ETHER, PC_SAFE_SUB_GEAR_ETHER2, PC_SAFE_SUB_COUNT
+    PC_SAFE_SUB_ITEM_USE, PC_SAFE_SUB_GEAR_EQUIP, PC_SAFE_SUB_GEAR_ETHER, PC_SAFE_SUB_GEAR_ETHER2,
+    /* the shop, the gear shop, name entry and party change (menuToEnter 4, 5, 3, 1) */
+    PC_SAFE_SUB_SHOP, PC_SAFE_SUB_SHOP_BUY, PC_SAFE_SUB_SHOP_SELL, PC_SAFE_SUB_SHOP_SELL_EQUIPPED, PC_SAFE_SUB_SHOP_SELL_LIST,
+    PC_SAFE_SUB_GEAR_SHOP, PC_SAFE_SUB_GEAR_SHOP_SUB, PC_SAFE_SUB_GEAR_SHOP_BUY, PC_SAFE_SUB_GEAR_SHOP_SELL_LIST,
+    PC_SAFE_SUB_NAME_ENTRY, PC_SAFE_SUB_PARTY, PC_SAFE_SUB_COUNT
 };
 /* port/src/game/menu/resume.c: a screen's integer locals at its loop's top, and the
  * screen a shared one (equip, ether) is opened as. pcMenuKeep/pcMenuTake take n

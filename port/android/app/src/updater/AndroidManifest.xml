@@ -1,8 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- A build with the updater (Gradle property xg.updater=on, the game built with XG_UPDATER;
-     xg-4oq.14.3): merged over the app's manifest (app/build.gradle sets it as both build types'
-     manifest). The update check fetches the latest release's signed manifest (port/src/update):
-     the network. A build without the updater asks for no network. -->
+     xg-4oq.14.3, xg-4oq.14.5): merged over the app's manifest (app/build.gradle sets it as both
+     build types' manifest). The update check fetches the latest release's signed manifest
+     (port/src/update): the network. The install hands the newer release's APK to Android's
+     package installer (XgActivity.updateInstall), which asks the player to confirm. A build
+     without the updater asks for neither. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Once the app is the one that installed itself (after its first in-app update), Android 12
+         and later skip the confirmation for its own updates when it asks for this (a normal
+         permission, granted at install); XgActivity.updateInstall asks USER_ACTION_NOT_REQUIRED. -->
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 </manifest>

@@ -564,6 +564,14 @@ void runGearShopSellMenu(s32 count, u8* ids, u8* counts, u8 category, u8 arg4, u
     s32 j;
     s32 idx;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_GEAR_SHOP_SELL_LIST) {
+        /* a stackless load: the list's frame goes on, its entries the state's (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_GEAR_SHOP_SELL_LIST, 16, PC_LOCAL(redraw), PC_LOCAL(dirty), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(scroll),
+                   PC_LOCAL(prevScroll), PC_LOCAL(listIds), PC_LOCAL(listKinds), PC_LOCAL(listAmounts), PC_LOCAL(listValid),
+                   PC_LOCAL(listCounts), PC_LOCAL(gold0), PC_LOCAL(gold), PC_LOCAL(total), PC_LOCAL(price), PC_LOCAL(numEntries));
+        pcResumeDone();
+        goto listLoop;
+    }
     gold = gold0;
     for (i = 0; i < count; i++) {
         listCounts[i] = 0;
@@ -584,6 +592,11 @@ void runGearShopSellMenu(s32 count, u8* ids, u8* counts, u8 category, u8 arg4, u
     numEntries = j;
     allocMenuPointerGlyph(0);
     while (running) {
+    listLoop:
+        pcMenuKeep(PC_SAFE_SUB_GEAR_SHOP_SELL_LIST, 16, PC_LOCAL(redraw), PC_LOCAL(dirty), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(scroll),
+                   PC_LOCAL(prevScroll), PC_LOCAL(listIds), PC_LOCAL(listKinds), PC_LOCAL(listAmounts), PC_LOCAL(listValid),
+                   PC_LOCAL(listCounts), PC_LOCAL(gold0), PC_LOCAL(gold), PC_LOCAL(total), PC_LOCAL(price), PC_LOCAL(numEntries));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_GEAR_SHOP_SELL_LIST)); /* between frames: a canonical state's place */
         menuDraw();
         if (scroll != prevScroll || dirty) {
             setupGearShopSellListRows(scroll, listIds, listKinds, listAmounts, listCounts);
@@ -717,10 +730,14 @@ void runGearShopSellWeapons(void) {
 void executeGearShopSellSelection(u8 arg0) {
     u8 show = 1;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_GEAR_SHOP_SELL_LIST) {
+        goto sellPick; /* a stackless load: the list it opened goes on (include/pc_state.h) */
+    }
     gMenuContext->m33C_drawFlags->m4_drawCursor = 0;
     gMenuContext->m33C_drawFlags->m3_drawSelectionBox = 0;
     gMenuContext->m33C_drawFlags->mA_354Enabled = 0;
     countField33C_C(4, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
+sellPick:
     switch (gMenuContext->m338_currentSelectedSubMenuEntry + arg0 * 3) {
     case 3:
         runGearShopSellAccessories();
@@ -1329,6 +1346,14 @@ s32 runGearShopBuyMenu(u8 group, u8 isPart) {
     s32 price;
     s32 i;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_GEAR_SHOP_BUY) {
+        /* a stackless load: the list's frame goes on (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_GEAR_SHOP_BUY, 19, PC_LOCAL(flags), PC_LOCAL(redraw), PC_LOCAL(dirty), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(scroll),
+                   PC_LOCAL(prevScroll), PC_LOCAL(total), PC_LOCAL(gold0), PC_LOCAL(goldStart), PC_LOCAL(tradeInNew), PC_LOCAL(tradeIn),
+                   PC_LOCAL(msg), PC_LOCAL(arg), PC_LOCAL(boxX), PC_LOCAL(boxW), PC_LOCAL(numEntries), PC_LOCAL(gold), PC_LOCAL(price));
+        pcResumeDone();
+        goto buyLoop;
+    }
     gold = gold0;
     goldStart = gold;
     for (i = 0; i < 11; i++) {
@@ -1351,6 +1376,11 @@ s32 runGearShopBuyMenu(u8 group, u8 isPart) {
     gMenuContext->m350_mainMenu->m1192_dimmed = 1;
     allocMenuPointerGlyph(0);
     while (running) {
+    buyLoop:
+        pcMenuKeep(PC_SAFE_SUB_GEAR_SHOP_BUY, 19, PC_LOCAL(flags), PC_LOCAL(redraw), PC_LOCAL(dirty), PC_LOCAL(row), PC_LOCAL(prevRow), PC_LOCAL(scroll),
+                   PC_LOCAL(prevScroll), PC_LOCAL(total), PC_LOCAL(gold0), PC_LOCAL(goldStart), PC_LOCAL(tradeInNew), PC_LOCAL(tradeIn),
+                   PC_LOCAL(msg), PC_LOCAL(arg), PC_LOCAL(boxX), PC_LOCAL(boxW), PC_LOCAL(numEntries), PC_LOCAL(gold), PC_LOCAL(price));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_GEAR_SHOP_BUY)); /* between frames: a canonical state's place */
         menuDraw();
         if (scroll != prevScroll || dirty) {
             if (isPart) {
@@ -1614,6 +1644,16 @@ u8 runGearShopSubmenu(void) {
     u8 redraw;
     u8 base;
 
+    if (pcResumeMenu() >= PC_SAFE_SUB_GEAR_SHOP_SUB && pcResumeMenu() <= PC_SAFE_SUB_GEAR_SHOP_SELL_LIST) {
+        /* a stackless load: the submenu's frame, or the list it opened, goes on (include/pc_state.h) */
+        pcMenuTake(PC_SAFE_SUB_GEAR_SHOP_SUB, 2, PC_LOCAL(redraw), PC_LOCAL(base));
+        loop = 1;
+        if (pcResumeMenu() == PC_SAFE_SUB_GEAR_SHOP_SUB) {
+            pcResumeDone();
+            goto submenuLoop;
+        }
+        goto submenuChild;
+    }
     loop = 1;
     redraw = 1;
     base = 0;
@@ -1629,6 +1669,9 @@ u8 runGearShopSubmenu(void) {
         base = 4;
     }
     while (loop) {
+    submenuLoop:
+        pcMenuKeep(PC_SAFE_SUB_GEAR_SHOP_SUB, 2, PC_LOCAL(redraw), PC_LOCAL(base));
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_GEAR_SHOP_SUB)); /* between frames: a canonical state's place */
         menuDraw();
         if (gMenuContext->m329_animationState == 0 && gearShopAvailableCount >= 2) {
             gMenuContext->m33C_drawFlags->m53_draw440 = 1;
@@ -1658,6 +1701,8 @@ u8 runGearShopSubmenu(void) {
             playMenuSoundEffect(2);
             turnGearToSelectedPart();
             gMenuContext->m33C_drawFlags->m53_draw440 = 0;
+            pcMenuKeep(PC_SAFE_SUB_GEAR_SHOP_SUB, 2, PC_LOCAL(redraw), PC_LOCAL(base)); /* as the list finds them */
+        submenuChild:
             switch (gMenuContext->m336_menuSelectedEntry) {
             case 1:
                 executeGearShopSellSelection(1);
@@ -1736,9 +1781,9 @@ void initGearShopView(void) {
     SetBackColor(0x3C, 0x3C, 0x3C);
     gMenuContext->m6C_drawContexts[0].mB0 = gearShopOrderingTables[0];
     gMenuContext->m6C_drawContexts[1].mB0 = gearShopOrderingTables[1];
-    gMenuContext->m458_files[0] = allocateHeap((s32)sizeof(struct MenuShopFiles), 0);
+    gMenuContext->m458_files[0] = allocateHeap(PC_HEAP_OF(struct MenuShopFiles, (s32)sizeof(struct MenuShopFiles)), 0);
     bzero(gMenuContext->m458_files[0], (s32)sizeof(struct MenuShopFiles));
-    gMenuContext->m458_files[1] = allocateHeap((s32)sizeof(struct MenuShopFiles), 0);
+    gMenuContext->m458_files[1] = allocateHeap(PC_HEAP_OF(struct MenuShopFiles, (s32)sizeof(struct MenuShopFiles)), 0);
     bzero(gMenuContext->m458_files[1], (s32)sizeof(struct MenuShopFiles));
     while (gMenuContext->m30C_characterAvailable[i] == 0) {
         i++;

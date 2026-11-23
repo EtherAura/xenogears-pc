@@ -530,7 +530,9 @@ void pcBattling60RenderHook(BattlingScene* scene, int demo) {
  * it, so the effects run where the walk reaches the layer's ot[0]. Its view
  * is the scene root's world matrix (relative to the camera's target, whose
  * view depth, t[2], is the focus; its rows carry the 320 x 218 aspect, which
- * the effects take as it is). Battling's arena is a battle's for the fog. */
+ * the effects take as it is). Battling's arena is a battle's for the fog;
+ * the ambient particles leave it out (their depths would not be its depth
+ * image's: every one lay behind the arena, xg-rgcf.5.11). */
 extern u8 battlingBufferIndex;
 void hwClockHold(int on); /* port/src/system/hw.c */
 void pcBattlingSceneDepth(BattlingScene* scene) {
@@ -548,7 +550,7 @@ void pcBattlingSceneDepth(BattlingScene* scene) {
     h = ReadGeomScreen();
     hwClockHold(0);
     pcSceneView(m->m, m->t, h, cx, cy, 0x30000);
-    pcScenePlace(PC_SCENE_BATTLE);
+    pcScenePlace(PC_SCENE_BATTLING);
     pcSceneDepth(ot, layer->m14_otSize, 0, 0, 4 << layer->m17_otShift, &ot[0], m->t[2], -1);
 }
 

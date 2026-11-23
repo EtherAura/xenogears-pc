@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "imgui_internal.h"
 #include "picker.h"
 #include "ui/skin.h"
@@ -508,7 +509,7 @@ void pagesPane(ImVec2 min, ImVec2 max) {
         }
         ImGui::Dummy(ImVec2(0, 8 * unit()));
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        ImGui::TextWrapped(tr("Disc: %s"), S->region.empty() ? "none" : S->region.c_str());
+        wrappedText(tr("Disc: %s"), S->region.empty() ? "none" : S->region.c_str());
         ImGui::PopStyleColor();
     }
     endPane();
@@ -518,7 +519,7 @@ void rowsPane(ImVec2 min, ImVec2 max) {
     const PageInfo& pi = pages[S->page];
     if (beginPane("##tablerows", min, max, pi.title, false)) {
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        ImGui::TextWrapped("%s", tr(pi.about));
+        wrappedText("%s", tr(pi.about));
         ImGui::PopStyleColor();
         if (S->page == P_COMPARE) {
             if (ImGui::Button(tr("Compare with a disc image..."))) {
@@ -542,7 +543,7 @@ void rowsPane(ImVec2 min, ImVec2 max) {
                 }
             }
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-            ImGui::TextWrapped("%s %s: %s", tr(t.head[0].c_str()), r[0].c_str(), more.empty() ? "-" : more.c_str());
+            wrappedText("%s %s: %s", tr(t.head[0].c_str()), r[0].c_str(), more.empty() ? "-" : more.c_str());
             ImGui::PopStyleColor();
         }
         Columns cols = columns(t, ImGui::GetContentRegionAvail().x - 22 * unit() - ImGui::GetStyle().ScrollbarSize);

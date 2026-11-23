@@ -248,7 +248,7 @@ int sceneFog(void);              /* fog: 0 off (default) .. 3 strong */
 void sceneSetFog(int level);
 int sceneGrade(void);            /* color_grade: 0 off (default) .. 3 strong */
 void sceneSetGrade(int level);
-int sceneParticles(void);        /* particles: 0 off (default) .. 3 strong (fields and the world map) */
+int sceneParticles(void);        /* particles: 0 off (default) .. 3 strong (fields, battles, the world map) */
 void sceneSetParticles(int level);
 int sceneParticleSize(void);     /* particle_size: 0 small (default), 1 medium, 2 large */
 void sceneSetParticleSize(int size);

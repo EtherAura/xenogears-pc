@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "imgui.h"
+#include "wrapped.h"
 #include "l10n.h"
 #include "menu.h"
 #include "options.h"
@@ -202,7 +203,7 @@ bool checkbox(const char* label, bool* value) {
     ImGui::BeginGroup();
     bool changed = ImGui::Checkbox("##value", value);
     ImGui::SameLine();
-    ImGui::TextWrapped("%s", tr(label));
+    wrappedText("%s", tr(label));
     ImGui::EndGroup();
     ImGui::PopID();
     return changed;
@@ -324,7 +325,7 @@ void gameTextRows() {
     ImGui::BeginDisabled(!imageName[0] || (!imagePaths[0][0] && !imagePaths[1][0]));
     if (ImGui::Button(tr("Remember these images"))) rememberImages();
     ImGui::EndDisabled();
-    if (imageMessage[0]) ImGui::TextWrapped("%s", imageMessage);
+    if (imageMessage[0]) wrappedText("%s", imageMessage);
     hint("Use the same name to update a saved pair. You can also save a single disc.");
     hint("A translation patch (PPF, xdelta...) applied to your own image: the game keeps running from your verified "
          "image; the patched one is only read for its text, window sizes and font, chosen above as Text image. A "
@@ -353,7 +354,7 @@ void gameTextRows() {
     }
     if (exportMessage[0] != '\0') {
         ImGui::PushStyleColor(ImGuiCol_Text, exportFailed ? skin::textError : skin::textGood);
-        ImGui::TextWrapped("%s", exportMessage);
+        wrappedText("%s", exportMessage);
         ImGui::PopStyleColor();
     }
     hint("A pack is the game's text as UTF-8 files (field.txt, kernel.txt, menu.txt, battle.txt, world.txt) in %s, "

@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "ui/l10n.h"
+#include "ui/wrapped.h"
 #include "viewer.h"
 #include "replace.h"
 #include "library.h"
@@ -448,7 +449,7 @@ void draw(const Area& a) {
                 focus = true; // chosen: across the area once this frame is drawn
             }
         if (S->items.empty())
-            ImGui::TextWrapped(tr("No effect assets in this image."));
+            wrappedText(tr("No effect assets in this image."));
     }
     endPane();
     if (beginPane("fxdetail", ImVec2(a.min.x + split + 8 * a.unit, a.min.y), a.max, "Battle effects", false)) {
@@ -486,7 +487,7 @@ void fxOptions() {
         if (S->sprite) {
             xgSpriteGetState(S->sprite, &sprite);
             ImGui::Text(tr("%d effect tasks / %d native commands"), sprite.effects, sprite.nativeCommands);
-            ImGui::TextWrapped(tr("Effect assets isolate the effect on a preview stage. Use Battle scene for the arena, actor, camera and audio."));
+            wrappedText(tr("Effect assets isolate the effect on a preview stage. Use Battle scene for the arena, actor, camera and audio."));
         }
         if (S->scene) {
             int yaw = S->camera.yaw;

@@ -253,9 +253,9 @@ static void load(void) {
     settingsDescribe("color_grade", "color_grade: off (default), subtle, medium or strong: shadows a little cool and "
                                     "highlights a little warm in fields (the Enhanced engine)");
     sc.grade = levelOf("color_grade");
-    settingsDescribe("particles", "particles: off (default), subtle, medium or strong: ambient particles in fields and on "
-                                  "the world map, dust where the place is lit and embers where it is dark (the Enhanced "
-                                  "engine)");
+    settingsDescribe("particles", "particles: off (default), subtle, medium or strong: ambient particles in fields, "
+                                  "battles and on the world map, dust where the place is lit and embers where it is dark "
+                                  "(the Enhanced engine)");
     sc.particles = levelOf("particles");
     settingsDescribe("particle_size", "particle_size: small (default), medium or large: how big the ambient particles are");
     s = settingsGet("particle_size");
@@ -389,8 +389,8 @@ static void params(SceneParams* p) {
     LightParams* l = &p->light;
     memset(l, 0, sizeof(*l));
     int lighting = sceneLighting(), glow = sceneGlow(), shadows = sceneShadows(), fog = sceneFog(), grade = sceneGrade();
-    /* Particles: fields and the world map only. */
-    int particles = sc.place == PC_SCENE_FIELD || sc.place == PC_SCENE_WORLDMAP ? sceneParticles() : 0;
+    /* Particles: fields, battles and the world map (xg-rgcf.5.11), not Battling. */
+    int particles = sc.place == PC_SCENE_BATTLING ? 0 : sceneParticles();
     sc.lightStatus = NULL;
     if (!lighting && !glow && !shadows && !fog && !grade && !particles) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
@@ -411,7 +411,7 @@ static void params(SceneParams* p) {
      * fog stops thickening at twice the focus distance (the backdrop takes
      * the far arena's haze, not a wall of it). The world map has its own
      * depth fog: this one is half as thick on top of it (xg-rgcf.5.3). */
-    if (sc.place == PC_SCENE_BATTLE) l->fogCap = 1.0f;
+    if (sc.place == PC_SCENE_BATTLE || sc.place == PC_SCENE_BATTLING) l->fogCap = 1.0f;
     if (sc.place == PC_SCENE_WORLDMAP) l->fogDensity *= 0.5f;
     l->grade = gradeAmount[grade] * gain;
     if (sc.sunSet) {

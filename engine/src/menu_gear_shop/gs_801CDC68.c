@@ -342,6 +342,15 @@ u8 gearShopExecuteMainMenuSelection(void) {
 void gearShopMainMenuExecute(void) {
     u8 loop;
 
+    if (pcResumeMenu() >= PC_SAFE_SUB_GEAR_SHOP && pcResumeMenu() <= PC_SAFE_SUB_GEAR_SHOP_SELL_LIST) {
+        /* a stackless load: the shop's frame, or the screen it opened, goes on (include/pc_state.h) */
+        loop = 1;
+        if (pcResumeMenu() == PC_SAFE_SUB_GEAR_SHOP) {
+            pcResumeDone();
+            goto gearShopLoop;
+        }
+        goto gearShopChild;
+    }
     loop = 1;
     setupGearShopModel(1, gearShopGearId);
     gMenuContext->m33C_drawFlags->m63_drawGearShop[0] = 1;
@@ -352,6 +361,8 @@ void gearShopMainMenuExecute(void) {
         gMenuContext->m33C_drawFlags->m53_draw440 = 1;
     }
     do {
+    gearShopLoop:
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_GEAR_SHOP)); /* between frames: a canonical state's place */
         menuDraw();
         switch (gMenuContext->m325_menuButton) {
         case 4:
@@ -360,6 +371,7 @@ void gearShopMainMenuExecute(void) {
             resetCursorState();
             countField33C_C(4, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
             gMenuContext->m348_cursor->m15B_selectionWidth = 0x4C;
+        gearShopChild:
             loop = gearShopExecuteMainMenuSelection();
             gMenuContext->m348_cursor->m15B_selectionWidth = 0x40;
             break;
@@ -399,6 +411,12 @@ void gearShopMainMenuExecute(void) {
 
 /* gear shop entry point: allocate the contexts, set up the gear view, run the shop, tear down */
 void gearShopMenuEntryPoint(void) {
+    if (pcResumeMenu() >= PC_SAFE_SUB_GEAR_SHOP && pcResumeMenu() <= PC_SAFE_SUB_GEAR_SHOP_SELL_LIST) {
+        /* a stackless load: the gear shop's contexts, view and stock are the state's (include/pc_state.h) */
+        gearShopMainMenuExecute();
+        shutdownGearShopMenu();
+        return;
+    }
     initMenuContext32C(1);
     initMenuContext33C(1);
     initMenuContext350MainMenu(1);
@@ -436,7 +454,7 @@ void gearShopMenuEntryPoint(void) {
     computeMenuBorders();
     setupGearShopStock();
     initGearShopView();
-    gMenuContext->m440_arrows = allocateHeap((s32)sizeof(struct MenuContext_440), 0);
+    gMenuContext->m440_arrows = allocateHeap(PC_HEAP_OF(struct MenuContext_440, (s32)sizeof(struct MenuContext_440)), 0);
     bzero(gMenuContext->m440_arrows, (s32)sizeof(struct MenuContext_440));
     setupGearSwitchArrows();
     gMenuContext->m327_drawEnabled = 1;

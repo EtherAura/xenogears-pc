@@ -360,8 +360,10 @@ void processDebugMenuForMenuList(void) {
     void* p0;
     void* p1;
 
-    if (pcResumeMenu() && useDebugMenuList == 0) {
-        goto dispatch; /* a stackless load: the menu opened from a mode goes on (include/pc_state.h) */
+    if (pcResumeMenu()) {
+        /* a stackless load: the menu that was open goes on, the one a mode opened
+         * or the menu mode's pick, its overlay's data the state's (include/pc_state.h) */
+        goto dispatch;
     }
     if (useDebugMenuList != 0) {
         do {
@@ -443,8 +445,8 @@ void processDebugMenuForMenuList(void) {
             portResetModule("field_mecha"); /* linked in: a fresh load resets its data */
             waitReadCompletion(0);
             setCurrentDirectory(0x10, 0);
-            gearShopOrderingTables[0] = allocateHeap(4096 * (s32)sizeof(OTag), 0);
-            gearShopOrderingTables[1] = allocateHeap(4096 * (s32)sizeof(OTag), 0);
+            gearShopOrderingTables[0] = allocateHeap(PC_HEAP_OF(OTag, 4096 * (s32)sizeof(OTag)), 0);
+            gearShopOrderingTables[1] = allocateHeap(PC_HEAP_OF(OTag, 4096 * (s32)sizeof(OTag)), 0);
         }
         {
             /* The menu overlay (dir 0x10, file menu + 5) is linked in: a fresh

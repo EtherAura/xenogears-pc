@@ -69,6 +69,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "picker.h"
 #include "ui/l10n.h"
 #include "ui/skin.h"
@@ -1429,8 +1430,8 @@ void sourcesList() {
             // has moved above the viewport.
             if (S->haveSource && S->entry.kind == K_NPC) {
                 const auto& l = fieldLocation(S->entry.field);
-                ImGui::TextWrapped("%s", l.area);
-                ImGui::TextWrapped("%s", l.room);
+                wrappedText("%s", l.area);
+                wrappedText("%s", l.room);
             } else ImGui::TextUnformatted(tr("Field NPCs"));
             ImGui::Separator();
             wrapNpcHeadings();
@@ -1576,7 +1577,7 @@ void controls() {
     if (flowButton("Fit")) S->wantZoom = 0;
     {
         ImGui::Text(tr("%s disc %d, %02X/%03X"), xgDiscRegion(disc()), xgDiscNumber(disc()), S->entry.dir, S->entry.file);
-        ImGui::TextWrapped(tr("%d animations / %d frames / %.3f ticks/s"), xgSpriteAnimationCount(sp), xgSpriteFrameCount(sp), stepRate());
+        wrappedText(tr("%d animations / %d frames / %.3f ticks/s"), xgSpriteAnimationCount(sp), xgSpriteFrameCount(sp), stepRate());
         if (anim) {
             ImGui::SetNextItemWidth(100 * unit());
             ImGui::SliderFloat(tr("Speed"), &S->speed, .125f, 4.f, "x%.3g", ImGuiSliderFlags_Logarithmic);
@@ -1616,7 +1617,7 @@ void spriteOptions() {
         if (ImGui::Button(tr("Close"))) ImGui::CloseCurrentPopup();
         if (S->sprite) {
             if (ImGui::Button(tr("Bookmark"))) bookmarkSelection();
-            ImGui::TextWrapped("%s", S->entry.title.c_str());
+            wrappedText("%s", S->entry.title.c_str());
             if (S->entry.kind == K_NPC && S->entry.npcGroup >= 0) {
                 const auto& locations = S->cats[K_NPC].entries[S->entry.npcGroup].locations;
                 ImGui::Text(tr("Source: field %03d, NPC %02d"), S->entry.field, S->entry.npc);
@@ -1676,7 +1677,7 @@ void rightPane(ImVec2 min, ImVec2 max) {
     if (beginPane("##right", min, pictureMax, nullptr, false)) drawPicture();
     endPane();
     if (beginPane("##sprite-details", ImVec2(min.x, pictureMax.y + 12 * unit()), max, nullptr, true)) {
-        ImGui::TextWrapped("%s", S->entry.title.c_str());
+        wrappedText("%s", S->entry.title.c_str());
         ImGui::Text("%s %02d/%02d", S->tab == TAB_ANIMS ? tr("Animation") : tr("Frame"),
                     S->tab == TAB_ANIMS ? S->anim + 1 : S->frame,
                     S->tab == TAB_ANIMS ? xgSpriteAnimationCount(sp) : xgSpriteFrameCount(sp));

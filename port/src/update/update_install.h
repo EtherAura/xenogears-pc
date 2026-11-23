@@ -1,9 +1,9 @@
 #ifndef PORT_UPDATE_INSTALL_H
 #define PORT_UPDATE_INSTALL_H
 
-/* The one-click update (xg-4oq.14.4), in a build with the updater: a copy that
- * installs itself (release.h releaseUpdatesItself: the Linux tarball, the
- * Windows zip and setup; Android's is xg-4oq.14.5) fetches the newer release's
+/* The one-click update (xg-4oq.14.4, Android's xg-4oq.14.5), in a build with
+ * the updater: a copy that installs itself (release.h releaseUpdatesItself: the
+ * Linux tarball, the Windows zip and setup, the Android app) fetches the newer release's
  * own asset, checks it, installs it and starts again in it.
  *
  *   1. checking: the manifest again (update_check.c: its signature, the
@@ -15,12 +15,17 @@
  *      installed one as <name>.new (update_archive.c), after the archive's own
  *      release.txt is found to name that version and this copy's kind, and the
  *      running executable is found in it; setup: nothing;
+ *      Android: the APK, as it is (XgActivity installs it);
  *   4. finishing (the game's thread): each installed file renamed to
  *      <name>.old, each .new to its name; a failure puts every one back and
  *      nothing has changed. Then the game quits and starts again in the new
  *      executable with the same arguments. Setup: the new setup.exe is
  *      started silently ("/S /UPDATE=<executable>": Windows asks for admin),
- *      the game quits, and the setup starts it again when it is done;
+ *      the game quits, and the setup starts it again when it is done.
+ *      Android: the APK handed to XgActivity.updateInstall (a PackageInstaller
+ *      session): Android asks the player, checks the APK's signing key is the
+ *      app's own, and replaces the app, ending this process; a refusal or a
+ *      failure comes back as a corner note (XgActivity.updateInstallState);
  *   5. at the next start (updateInstallCleanup): the .old files and the
  *      download deleted.
  *
@@ -93,6 +98,9 @@ int updateInstallFinish(char* why, size_t whySize);
 void updateInstallRestart(char* why, size_t whySize);
 /* At the start (main.c): what an earlier install left, finished or undone, then deleted. */
 void updateInstallCleanup(void);
+/* Whether this copy may install now: on Android, installs from this app must be allowed; when they
+ * are not, Android's settings page for it is opened and 0 returned with why (the menu says it). */
+int updateInstallAllowed(char* why, size_t whySize);
 /* The game's vblank (gpu/libgpu.c): an install updateInstallStart began and that is READY is
  * finished and the game restarted (outside the menu's frame: the quit shuts the menu down); when
  * that fails, a corner note says why and the game goes on. */

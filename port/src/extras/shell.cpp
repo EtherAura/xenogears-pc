@@ -49,6 +49,7 @@
 #include <memory>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_vulkan.h"
 #include "imgui_internal.h"
@@ -980,7 +981,7 @@ void drawHome(ImVec2 min, ImVec2 max) {
         if (nameKey != b.key()) { nameKey = b.key(); snprintf(name, sizeof(name), "%s", b.label.c_str()); }
         if (beginPane("##bookmark", paneMin, max, b.label.c_str(), true)) {
             ImGui::Text(tr("%s  %s disc %d"), b.target.viewer.c_str(), b.region.c_str(), b.disc);
-            ImGui::TextWrapped("%s", b.boot.c_str());
+            wrappedText("%s", b.boot.c_str());
             if (st.pictureKey != b.key()) {
                 st.bookmarkPicture.reset(); st.pictureKey = b.key();
                 std::vector<uint32_t> pixels;
@@ -992,7 +993,7 @@ void drawHome(ImVec2 min, ImVec2 max) {
             if (st.bookmarkPicture) {
                 float w = fminf(160 * u, ImGui::GetContentRegionAvail().x);
                 st.bookmarkPicture->draw(ImVec2(w, w * bookmarkHeight / bookmarkWidth));
-            } else ImGui::TextWrapped(tr("No cached picture. The saved asset location is ready to open."));
+            } else wrappedText(tr("No cached picture. The saved asset location is ready to open."));
             if (ImGui::Button(tr("Open bookmark"))) queueBookmark(index);
             ImGui::InputText(tr("Name"), name, sizeof(name));
             std::string why;
@@ -1004,7 +1005,7 @@ void drawHome(ImVec2 min, ImVec2 max) {
                 if (!store.erase(index, why)) error("%s", why.c_str());
                 else { cursor = 0; nameKey.clear(); st.pictureKey.clear(); status("Bookmark deleted"); }
             }
-            ImGui::TextWrapped(tr("Source: %s"), b.image.c_str());
+            wrappedText(tr("Source: %s"), b.image.c_str());
             if (ImGui::Button(tr("Locate image..."))) openPicker("bookmark-image", tr("Locate the original disc image"), b.image.c_str(), ".cue;.bin", false);
             std::string path;
             if (picker("bookmark-image", &path) && sourceAvailable(b, path)) {
@@ -1021,10 +1022,10 @@ void drawHome(ImVec2 min, ImVec2 max) {
                             !strcmp(e.id, "jukebox") ? N_("Music and sound effects.") :
                             !strcmp(e.id, "tables") ? N_("Names and data from the game.") :
                             !strcmp(e.id, "scripts") ? N_("Dialogue and actor routines.") : e.blurb;
-        ImGui::TextWrapped("%s", tr(about));
+        wrappedText("%s", tr(about));
         if (e.viewer == nullptr) {
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-            ImGui::TextWrapped(tr("Coming in a later phase."));
+            wrappedText(tr("Coming in a later phase."));
             ImGui::PopStyleColor();
         }
     }
@@ -1032,7 +1033,7 @@ void drawHome(ImVec2 min, ImVec2 max) {
     ImVec2 exportMin(paneMin.x, aboutMax.y + 12 * u);
     if (beginPane("##exports", exportMin, max, "Exports", true)) {
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        ImGui::TextWrapped("%s", exportDir());
+        wrappedText("%s", exportDir());
         ImGui::PopStyleColor();
         if (ImGui::Button(tr("Change..."))) {
             openPicker("export", tr("The export folder"), exportDir(), "", true);
@@ -1050,7 +1051,7 @@ void drawHome(ImVec2 min, ImVec2 max) {
         }
         ImGui::Dummy(ImVec2(0, 8 * u));
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        ImGui::TextWrapped(tr("Save an asset with Bookmark in its Options menu."));
+        wrappedText(tr("Save an asset with Bookmark in its Options menu."));
         ImGui::PopStyleColor();
     }
     endPane();
@@ -1302,12 +1303,12 @@ void drawShell() {
     if (libraryOptions("extras-help", helpRequested, 336, 216)) {
         ImGui::TextUnformatted(tr("Extras controls"));
         ImGui::Spacing();
-        ImGui::TextWrapped(tr("Enter / confirm: open the asset full size. Esc / cancel: back to the list, then out. F1: return to the game menu."));
-        ImGui::TextWrapped(tr("Up/Down or L1/R1: character. Left/Right: animation. Square or Space: play/pause. Triangle: one frame. Start: Options."));
-        ImGui::TextWrapped(tr("Gallery, Map viewer, effects: L1/R1 change the tabs above the list."));
-        ImGui::TextWrapped(tr("Select or F12: Stock / Enhanced, the assets as on the disc or with the installed replacement packs (in the viewers that offer it)."));
-        ImGui::TextWrapped(tr("Right stick: camera. L2/R2: zoom (arena in Battle scene). R3: fit the picture."));
-        ImGui::TextWrapped(tr("Mouse: choose a row, drag to move the picture, wheel to zoom. Drag the red track to scroll a list."));
+        wrappedText(tr("Enter / confirm: open the asset full size. Esc / cancel: back to the list, then out. F1: return to the game menu."));
+        wrappedText(tr("Up/Down or L1/R1: character. Left/Right: animation. Square or Space: play/pause. Triangle: one frame. Start: Options."));
+        wrappedText(tr("Gallery, Map viewer, effects: L1/R1 change the tabs above the list."));
+        wrappedText(tr("Select or F12: Stock / Enhanced, the assets as on the disc or with the installed replacement packs (in the viewers that offer it)."));
+        wrappedText(tr("Right stick: camera. L2/R2: zoom (arena in Battle scene). R3: fit the picture."));
+        wrappedText(tr("Mouse: choose a row, drag to move the picture, wheel to zoom. Drag the red track to scroll a list."));
         if (ImGui::Button(tr("Close"))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
@@ -1945,7 +1946,7 @@ void lookOptions(unsigned wanted, int covered, bool compare, const char* none) {
     const char* note = lookNote(wanted, covered, none);
     if (note != nullptr) {
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        ImGui::TextWrapped("%s", tr(note));
+        wrappedText("%s", tr(note));
         ImGui::PopStyleColor();
     }
 }

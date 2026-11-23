@@ -311,7 +311,7 @@ void worldmapEntryPoint(void) {
     void* buf;
 
     /* a stackless load: the frame loop goes on where its state was saved (include/pc_state.h) */
-    if (pcResumeAt() == PC_SAFE_WORLDMAP) {
+    if (PC_SAFE_MODE(pcResumeAt()) == PC_SAFE_MODE(PC_SAFE_WORLDMAP)) {
         goto resumeFrames;
     }
     worldmapFlushCacheAndSync();
@@ -1047,6 +1047,18 @@ void worldmapMainLoop(void) {
         in[5] = &worldmapInput3_1;
         goto frameTop;
     }
+    if (PC_SAFE_MODE(pcResumeAt()) == PC_SAFE_MODE(PC_SAFE_WORLDMAP) && pcResumeMenu()) {
+        /* a menu loop's safe point: the tick frame's menu call goes on, in[] at the inputs */
+        in[0] = &worldmapInput1_0;
+        in[1] = &worldmapInput1_1;
+        in[2] = &worldmapInput2_0;
+        in[3] = &worldmapInput2_1;
+        in[4] = &worldmapInput3_0;
+        in[5] = &worldmapInput3_1;
+        tick = 1;
+        decide = 1;
+        goto worldmapMenu;
+    }
     pCurrentWorldmapRenderingStruct = &worldmapRenderingStructs[1];
     worldmapOddOrEven = 1;
     continueWorldmapLoop = 1;
@@ -1243,10 +1255,13 @@ void worldmapMainLoop(void) {
                         useDebugMenuList = 0;
                         g_menuOpenArg = 1;
                         worldmapFlushCacheAndSync();
+                    worldmapMenu:
                         {
                             /* The menu's own kind for the wide picture (include/pc_wide.h). */
                             s32 wideKind = pcWideSetMode(PC_WIDE_MENU);
+                            pcMenuHost(PC_SAFE_MODE(PC_SAFE_WORLDMAP));
                             enterMenu();
+                            pcMenuHost(-1);
                             pcWideSetMode(wideKind);
                         }
                         worldmapFlushCacheAndSync();

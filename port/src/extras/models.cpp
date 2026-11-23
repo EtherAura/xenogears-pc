@@ -50,6 +50,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "imgui_internal.h"
 #include "picker.h"
 #include "ui/l10n.h"
@@ -1626,7 +1627,7 @@ void detailPane(ImVec2 min, ImVec2 max) {
     }
     endPane();
     if (beginPane("##model-details", ImVec2(min.x, pictureMax.y + 12 * unit()), max, nullptr, true)) {
-        ImGui::TextWrapped("%s", S->shown.title.c_str());
+        wrappedText("%s", S->shown.title.c_str());
         if (S->info.animations > 0) ImGui::Text(tr("Animation %02d/%02d"), S->anim + 1, S->info.animations);
         else ImGui::Text(tr("%d parts  %d polygons"), S->info.parts, S->info.polygons);
     }
@@ -1646,9 +1647,9 @@ void modelOptions() {
         if (ImGui::Button(tr("Close"))) ImGui::CloseCurrentPopup();
         if (shownOrHint()) {
             if (ImGui::Button(tr("Bookmark"))) bookmarkSelection();
-            ImGui::TextWrapped("%s", S->shown.title.c_str());
+            wrappedText("%s", S->shown.title.c_str());
             ImGui::Text(tr("%s disc %d"), xgDiscRegion(disc()), xgDiscNumber(disc()));
-            ImGui::TextWrapped(tr("%d parts, %d polygons, %d bones, %d animations"), S->info.parts, S->info.polygons, std::max(0, S->info.bones - 1), S->info.animations);
+            wrappedText(tr("%d parts, %d polygons, %d bones, %d animations"), S->info.parts, S->info.polygons, std::max(0, S->info.bones - 1), S->info.animations);
             if (S->info.animations > 0) transport();
             morphControls();
             viewToggles();

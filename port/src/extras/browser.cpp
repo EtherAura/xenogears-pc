@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ui/wrapped.h"
 #include "picker.h"
 #include "ui/l10n.h"
 #include "ui/skin.h"
@@ -450,12 +451,12 @@ void infoTab() {
     XgDisc* d = disc();
     if (d != nullptr) {
         ImGui::Text(tr("Source: %s disc %d (%s)"), xgDiscRegion(d), xgDiscNumber(d), xgDiscBootName(d));
-        ImGui::TextWrapped("%s", xgDiscPath(d));
+        wrappedText("%s", xgDiscPath(d));
         ImGui::Separator();
     }
     if (b.field >= 0) {
         ImGui::Text(tr("Field %d"), b.field);
-        if (b.section >= 0) ImGui::TextWrapped(tr("Section %d: %s (archive offset %X)"), b.section,
+        if (b.section >= 0) wrappedText(tr("Section %d: %s (archive offset %X)"), b.section,
                                       xgFieldSectionName(b.section), b.sourceOffset);
         if (b.fieldArchive) ImGui::TextUnformatted(tr("Field archive: 9 compressed sections"));
     }
@@ -464,11 +465,11 @@ void infoTab() {
         XgEntry e = xgDiscEntry(d, index);
         char where[128];
         xgKnownLocation(xgDiscNumber(d), S->selDir, S->selFile, where, sizeof(where));
-        ImGui::TextWrapped(tr("Directory %02X, file %03X: table entry %d"), S->selDir, S->selFile, index);
+        wrappedText(tr("Directory %02X, file %03X: table entry %d"), S->selDir, S->selFile, index);
         if (e.size < 0) {
-            ImGui::TextWrapped(tr("A group of %d entries from LBA %d, read as one"), -e.size, e.lba);
+            wrappedText(tr("A group of %d entries from LBA %d, read as one"), -e.size, e.lba);
         } else {
-            ImGui::TextWrapped(tr("LBA %d, %d bytes"), e.lba, e.size);
+            wrappedText(tr("LBA %d, %d bytes"), e.lba, e.size);
         }
         int lba, size, group;
         if (xgDiscGameLookup(d, S->selDir, S->selFile, &lba, &size, &group)) {
@@ -480,48 +481,48 @@ void infoTab() {
             ImGui::TextColored(skin::textWarning, tr("File map: %s"), where);
         }
     } else {
-        ImGui::TextWrapped(tr("%s: %d bytes"), b.crumb.c_str(), b.size);
+        wrappedText(tr("%s: %d bytes"), b.crumb.c_str(), b.size);
     }
-    ImGui::TextWrapped(tr("Kind: %s"), kindName(b));
+    wrappedText(tr("Kind: %s"), kindName(b));
     switch (b.kind) {
     case XG_KIND_LZSS:
-        ImGui::TextWrapped(tr("An LZSS stream of %d bytes"), b.lzss);
+        wrappedText(tr("An LZSS stream of %d bytes"), b.lzss);
         if (ImGui::Button(tr("Decompress (the game's decoder)"))) {
             decompressTop();
         }
         break;
     case XG_KIND_TIM:
-        ImGui::TextWrapped(tr("TIM, %d-bit, %d x %d at VRAM (%d, %d)"), b.tim.bpp, b.tim.width, b.tim.imgH, b.tim.imgX,
+        wrappedText(tr("TIM, %d-bit, %d x %d at VRAM (%d, %d)"), b.tim.bpp, b.tim.width, b.tim.imgH, b.tim.imgX,
                     b.tim.imgY);
         if (b.tim.hasClut) {
-            ImGui::TextWrapped(tr("%d CLUTs at (%d, %d), %d x %d"), xgTimClutCount(&b.tim), b.tim.clutX, b.tim.clutY,
+            wrappedText(tr("%d CLUTs at (%d, %d), %d x %d"), xgTimClutCount(&b.tim), b.tim.clutX, b.tim.clutY,
                         b.tim.clutW, b.tim.clutH);
         }
         break;
     case XG_KIND_BUNDLE:
-        ImGui::TextWrapped(tr("Offset bundle of %d members%s"), b.bundle.count, b.bundle.hasEnd ? tr(" (with its end offset)") : "");
+        wrappedText(tr("Offset bundle of %d members%s"), b.bundle.count, b.bundle.hasEnd ? tr(" (with its end offset)") : "");
         break;
     case XG_KIND_TIMS:
-        ImGui::TextWrapped(tr("%d TIM pictures back to back"), (int)b.mAt.size());
+        wrappedText(tr("%d TIM pictures back to back"), (int)b.mAt.size());
         break;
     case XG_KIND_TEXTURES:
-        ImGui::TextWrapped(tr("Packed VRAM uploads: %d records"), xgTexturesCheck(b.data.data(), b.size));
+        wrappedText(tr("Packed VRAM uploads: %d records"), xgTexturesCheck(b.data.data(), b.size));
         break;
     case XG_KIND_MODEL:
-        ImGui::TextWrapped(tr("Model archive of %d parts"), xgModelCheck(b.data.data(), b.size));
+        wrappedText(tr("Model archive of %d parts"), xgModelCheck(b.data.data(), b.size));
         break;
     case XG_KIND_WDS:
-        ImGui::TextWrapped(tr("Sample bank %d: %d presets"), xgWdsBank(b.data.data(), b.size), xgWdsPresets(b.data.data(), b.size));
+        wrappedText(tr("Sample bank %d: %d presets"), xgWdsBank(b.data.data(), b.size), xgWdsPresets(b.data.data(), b.size));
         break;
     case XG_KIND_SEDS: {
         int bank;
         int n = xgSedsEffects(b.data.data(), b.size, &bank);
-        ImGui::TextWrapped(tr("%d sound effects, sample bank %d"), n, bank);
+        wrappedText(tr("%d sound effects, sample bank %d"), n, bank);
         break;
     }
     case XG_KIND_SMDS: {
         char name[64];
-        ImGui::TextWrapped(tr("Music score \"%s\""), xgSmdsName(b.data.data(), b.size, name, sizeof(name)));
+        wrappedText(tr("Music score \"%s\""), xgSmdsName(b.data.data(), b.size, name, sizeof(name)));
         hint("The jukebox (coming) plays scores with the game's own sound driver.");
         break;
     }
@@ -532,7 +533,7 @@ void infoTab() {
         int used;
         int lz = xgLzssCheck(b.data.data(), b.size, &used);
         if (lz > 0) {
-            ImGui::TextWrapped(tr("Also reads as an LZSS stream of %d bytes"), lz);
+            wrappedText(tr("Also reads as an LZSS stream of %d bytes"), lz);
             if (ImGui::Button(tr("Decompress (the game's decoder)"))) {
                 decompressTop();
             }
@@ -993,7 +994,7 @@ void detailPane(ImVec2 min, ImVec2 max, bool focused = false) {
                 hint("No Xenogears disc image was found. Open one with Image...");
             } else {
                 ImGui::Text(tr("%s, disc %d (%s)"), xgDiscRegion(d), xgDiscNumber(d), xgDiscBootName(d));
-                ImGui::TextWrapped("%s", xgDiscPath(d));
+                wrappedText("%s", xgDiscPath(d));
                 ImGui::Text(tr("%d table entries, %d sectors"), xgDiscEntryCount(d), xgDiscSectors(d));
                 Disc& slot = S->discs[S->disc];
                 if (slot.check == -2) {
@@ -1001,9 +1002,9 @@ void detailPane(ImVec2 min, ImVec2 max, bool focused = false) {
                 }
                 ImGui::PushStyleColor(ImGuiCol_Text, slot.check == 0 ? skin::textGood : skin::textError);
                 if (slot.check == 0) {
-                    ImGui::TextWrapped(tr("The game's own file lookups (filesystem.c, in a sandbox) agree with the table."));
+                    wrappedText(tr("The game's own file lookups (filesystem.c, in a sandbox) agree with the table."));
                 } else {
-                    ImGui::TextWrapped(tr("The game's own lookups differ in %d files."), slot.check);
+                    wrappedText(tr("The game's own lookups differ in %d files."), slot.check);
                 }
                 ImGui::PopStyleColor();
                 hint("Open a directory and choose a file. Files are read from the image as the game's file "

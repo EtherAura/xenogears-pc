@@ -113,7 +113,7 @@ Strong).
 
 ## Particles
 
-In fields and on the world map, fine dust drifts where the place is lit
+In fields, battles and on the world map, fine dust drifts where the place is lit
 (windows, lamps, sunlit ground) and warm embers where it is dark, chosen by
 how bright the place is. Each stays at its place in the room as the camera
 moves, behind the scenery and the characters in front of it, and as blurred

@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "wrapped.h"
 #include "l10n.h"
 #include "menu.h"
 #include "sfx.h"
@@ -181,7 +182,7 @@ void fightList(int preset, const PcGauntletRoster& roster) {
                 ImGui::AlignTextToFramePadding();
                 ImGui::Text("%d. %s%s%s", i + 1, b.name, b.gear ? tr(" (Gear)") : "", none ? tr(" - skipped") : "");
             } else {
-                ImGui::TextWrapped("%d. %s%s%s", i + 1, b.name, b.gear ? tr(" (Gear)") : "", none ? tr(" - skipped") : "");
+                wrappedText("%d. %s%s%s", i + 1, b.name, b.gear ? tr(" (Gear)") : "", none ? tr(" - skipped") : "");
             }
             if (ImGui::IsItemHovered()) {
                 tooltip("%s battle; disc %d, field %d, config %d; story %s%d%s", b.gear ? tr("Gear") : tr("Character"),
