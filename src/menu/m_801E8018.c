@@ -419,7 +419,17 @@ s32 checkInsertedDisc(s32 disc) {
         return ret;
     }
     CdIntToPos(0, &loc);
+#ifdef PLATFORM_PC
+    if (pcResumeMenu() == PC_SAFE_SUB_DISC) {
+        pcResumeDone(); /* a stackless load: the wait for the shell to open goes on (include/pc_state.h) */
+        goto shellWait;
+    }
+#endif
     do {
+#ifdef PLATFORM_PC
+    shellWait:
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_DISC)); /* "insert disc N" until the shell opens: between frames: a canonical state's place */
+#endif
         VSync(3);
         CdControlB(1, 0, cdResultBuffer);
     } while (!(cdResultBuffer[0] & 0x10));

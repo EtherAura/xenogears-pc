@@ -157,6 +157,12 @@ void mainMenuExecute(void) {
 void cdChangeMenuExecute(void) {
     u8 flag;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_SAVE) {
+        goto discSave; /* a stackless load: the save before the change goes on (include/pc_state.h) */
+    }
+    if (pcResumeMenu() == PC_SAFE_SUB_DISC) {
+        goto discCheck; /* or the wait for the other disc */
+    }
     g_menuOpenArg = 1;
     menuVarUnk1 = 0;
     flag = 1;
@@ -174,12 +180,14 @@ void cdChangeMenuExecute(void) {
     disableDraw428();
     if (flag) {
         processLoadSaveMenuVar0 = discChangeSaveActive = 1;
+    discSave:
         menu2_executeMainMenuSelection(0);
         processLoadSaveMenuVar0 = 0;
         discChangeSaveActive = 0;
     }
     gMenuContext->m33C_drawFlags->m4_drawCursor = 0;
     gMenuContext->m33C_drawFlags->m3_drawSelectionBox = 0;
+discCheck:
     checkCurrentDiscNumber(g_menuOpenArg);
 }
 
@@ -189,6 +197,14 @@ void loadSaveGameMenuExecute(void) {
     u8 cont;
 
     cont = 1;
+    if (pcResumeMenu() == PC_SAFE_SUB_TITLE || pcResumeMenu() == PC_SAFE_SUB_SAVE || pcResumeMenu() == PC_SAFE_SUB_SOUND) {
+        /* a stackless load: the menu's frame, or the screen it opened, goes on (include/pc_state.h) */
+        if (pcResumeMenu() == PC_SAFE_SUB_TITLE) {
+            pcResumeDone();
+            goto titleLoop;
+        }
+        goto titleChild;
+    }
 #if VERSION_JP
     gMenuContext->m336_menuSelectedEntry = 1;
 #endif
@@ -196,6 +212,8 @@ void loadSaveGameMenuExecute(void) {
     j_setupMenuContext4E0(8, gMenuContext->m6E0_mainMenuLabels, saveGameMainMenuConfig2, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
     gMenuContext->m2D8_frameCounter = 0;
     do {
+    titleLoop:
+        pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_TITLE)); /* between frames: a canonical state's place */
         menuDraw();
         switch (gMenuContext->m325_menuButton) {
         case 4:
@@ -203,6 +221,7 @@ void loadSaveGameMenuExecute(void) {
             resetCursorState();
             countField33C_C(8, gMenuContext->m33C_drawFlags->mC_drawMainMenuLabels);
             gMenuContext->m348_cursor->m15B_selectionWidth = 0x40;
+        titleChild:
             cont = menu2_executeMainMenuSelection(7);
             menuVarUnk0 = 0;
             gMenuContext->m2D8_frameCounter = 0;
@@ -415,6 +434,15 @@ void menu2_loadGame_entryPoint(void) {
     if (pcResumeMenu() && menuToEnter == 0) {
         goto resumeMain; /* a stackless load: the main menu goes on (include/pc_state.h) */
     }
+    if (pcResumeMenu() == PC_SAFE_SUB_DISC && menuToEnter == 2) {
+        goto resumeTitleDisc; /* or the wait for the disc of the save the title loaded */
+    }
+    if (pcResumeMenu() && menuToEnter == 2) {
+        goto resumeTitle; /* or the title's Continue/New Game menu */
+    }
+    if (pcResumeMenu() && menuToEnter == 6) {
+        goto resumeDisc; /* or the disc change */
+    }
     initMenuContext();
     setupMainMenu();
     gMenuContext->m327_drawEnabled = 1;
@@ -427,10 +455,12 @@ void menu2_loadGame_entryPoint(void) {
         break;
     case 2:
         menuReturnState0 = 0;
+    resumeTitle:
         loadSaveGameMenuExecute();
         gMenuContext->m33C_drawFlags->m9_drawMainMenu = 0;
         gMenuContext->m33C_drawFlags->m4_drawCursor = 0;
         gMenuContext->m33C_drawFlags->m3_drawSelectionBox = 0;
+    resumeTitleDisc:
         switch (menuReturnState0) {
         case 0:
             checkCurrentDiscNumber(0);
@@ -441,6 +471,7 @@ void menu2_loadGame_entryPoint(void) {
         }
         break;
     case 6:
+    resumeDisc:
         cdChangeMenuExecute();
         break;
     }

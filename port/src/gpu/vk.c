@@ -5734,7 +5734,7 @@ typedef struct {
     float up[3], screenZ;
     float centerX, centerY, focus, block; /* block: the vec4 lightBlock wrote, or -1 */
     float top, shade, bounce, glow;
-    int32_t color, colorPad, ditherX, ditherY; /* scene_color.glsl */
+    int32_t color, vignette, ditherX, ditherY; /* scene_color.glsl; vignette: the corners' darkening, 1/4096 */
     float fogMost, fogDensity, grade, fogCap; /* 128 bytes: Vulkan's least push constant room */
 } LightConstants;
 
@@ -6350,13 +6350,14 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
     c.color = vk.hiColor;
     c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
     c.fogMost = fog ? p->fogMost : 0; c.fogDensity = p->fogDensity; c.grade = p->grade; c.fogCap = p->fogCap;
+    c.vignette = (int32_t)(p->vignette * 4096.0f + 0.5f);
     /* Only the passes the parts in use need (all of them when asked: the
      * checks, the debug colours). The composite reads nothing of a part
      * that is off. */
     int glow = p->all || p->glow > 0, bounce = p->all || p->bounce > 0, shade = p->all || p->shade > 0;
     int surface = shade || p->top > 0;
     /* With particles alone the composite would change nothing: not run. */
-    int composite = p->all || surface || glow || bounce || shadows || fog || p->grade > 0;
+    int composite = p->all || surface || glow || bounce || shadows || fog || p->grade > 0 || p->vignette > 0;
     for (int pass = 0; pass <= LIGHT_COMPOSITE; pass++) {
         int needed = pass == 0 || (pass == LIGHT_COMPOSITE && composite) ||
                      (pass >= 1 && pass <= 3 && (glow || bounce || particles)) || /* the surroundings (the particles' light too), the glow's wide spreads */

@@ -445,6 +445,7 @@ typedef struct {
      * thickens past the focus (0: no fog). The colour grade's amount (0: none). */
     float fogMost, fogDensity, grade;
     float fogCap;  /* the farthest past the focus the fog thickens to (relative depth; 0: no cap) */
+    float vignette; /* how much darker the frame's corners are (0: no vignette, xg-rgcf.5.13) */
     /* Ambient particles (xg-rgcf.5.10): their level (0: none) and size scale,
      * the time they drift by (seconds), the room's frame they keep their
      * places in (view = roomRot * room + roomTrans, the room in view units),

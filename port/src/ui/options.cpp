@@ -232,6 +232,8 @@ std::vector<Spec>& table() {
     static const char* const particleSizes[] = {N_("Small"), N_("Medium"), N_("Large")};
     add("particle_size", N_("Particle size"), [](int) { return sceneParticleSize(); },
         [](int, int v) { sceneSetParticleSize(v); }, 0, particleSizes, 3);
+    add("vignette", N_("Vignette"), [](int) { return sceneVignette(); }, [](int, int v) { sceneSetVignette(v); }, 0,
+        dofLevels, 4);
     add("present_filter", N_("Filter"), [](int) { return presentFilter(); }, [](int, int v) { presentSetFilter(v); }, 0,
         filterNames, 5);
     add("present_movie_filter", N_("Movies"), [](int) { return presentMovieFilter() - PRESENT_FILTER_SAME; },

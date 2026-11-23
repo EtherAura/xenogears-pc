@@ -116,7 +116,7 @@ layout(push_constant) uniform Light {
     vec4 lens;     // xy: the projection centre in the frame, PS1 pixels; z: the focus depth; w: the shadows' block, or -1
     vec4 strength; // top light, shade, bounce, glow
     int color;     // the copy's colour mode (scene_color.glsl)
-    int colorPad;
+    int vignette;  // how much darker the frame's corners are, in 1/4096 (0: no vignette, xg-rgcf.5.13)
     ivec2 ditherOrigin; // scene_color.glsl
     vec4 atmos;    // x: the most of a pixel the fog takes (0: no fog), y: how quickly it thickens, z: the grade,
                    // w: the farthest past the focus it thickens to (relative depth; 0: no cap)
@@ -180,6 +180,8 @@ const int SHADOW_STEPS = 24, MAX_FIGURES = 32;
 const int FOG_SLOT = 2 + MAX_FIGURES;
 const float FOG_FAR_FROM = 1.2, FOG_FAR_TO = 3.0;
 const vec3 FOG_NEUTRAL = vec3(0.66, 0.70, 0.76);
+// The vignette starts darkening this far from the middle (of the way to the corners).
+const float VIGNETTE_FROM = 0.45;
 const float FIGURE_HEIGHT = 96.0, FIGURE_WIDTH = 32.0, FIGURE_DEPTH = 0.15, GROUND_DEPTH = 0.05;
 const float FIGURE_FADE = 0.8 * FIGURE_HEIGHT, FIGURE_FADE_TO = 0.15;
 
@@ -860,6 +862,14 @@ void composite(ivec2 l) {
         shown = mix(shown, block[b + FOG_SLOT].rgb, pc.atmos.x * (1.0 - exp(-pc.atmos.y * past)));
     }
     if (pc.atmos.z > 0.0) shown = grade(shown, pc.atmos.z);
+    if (pc.vignette > 0) {
+        // The vignette: the edges darker by a smooth falloff from the frame's
+        // middle (an ellipse, its aspect kept), from 0.45 of the way to the
+        // corners; the frame is the one the layers were made from.
+        vec2 off = at / vec2(pc.work) * 2.0 - 1.0;
+        float far = clamp((length(off) / sqrt(2.0) - VIGNETTE_FROM) / (1.0 - VIGNETTE_FROM), 0.0, 1.0);
+        shown *= 1.0 - float(pc.vignette) / 4096.0 * far * far * (3.0 - 2.0 * far);
+    }
     uvec3 o = uvec3(shown * 255.0 + 0.5);
     uint packed = o.r | o.g << 8 | o.b << 16;
     // A pixel nothing changed is not written: it stays bit for bit what was drawn.

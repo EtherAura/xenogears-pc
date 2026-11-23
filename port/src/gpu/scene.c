@@ -129,6 +129,8 @@ static const float shadowDark[] = {0, 0.25f, 0.45f, 0.6f};
 static const float fogMost[] = {0, 0.35f, 0.5f, 0.7f};
 static const float fogDensity[] = {0, 0.8f, 1.1f, 1.4f};
 static const float gradeAmount[] = {0, 0.5f, 1.0f, 1.5f};
+/* The vignette: the corners' darkening per level (xg-rgcf.5.13, carl's pick). */
+static const float vignetteAmount[] = {0, 0.12f, 0.22f, 0.35f};
 /* The sun: this far above the ground, from the camera's left and a little
  * from beyond the scene, when the room starts. */
 #define SUN_ELEVATION 55.0f
@@ -144,6 +146,7 @@ static struct {
     int haveBand;
     int lighting, glow, shadows, fog, grade; /* levels, 0 off */
     int particles, particleSize;             /* particles' level (0 off) and size (0 small .. 2 large) */
+    int vignette;                            /* the vignette's level, 0 off */
     int shadePart, bouncePart;
     int lightDebug, haveLightGain;
     float lightGain;
@@ -258,6 +261,9 @@ static void load(void) {
                                   "(the Enhanced engine)");
     sc.particles = levelOf("particles");
     settingsDescribe("particle_size", "particle_size: small (default), medium or large: how big the ambient particles are");
+    settingsDescribe("vignette", "vignette: off (default), subtle, medium or strong: the frame's edges a little darker in "
+                                 "fields, battles and on the world map (the Enhanced engine)");
+    sc.vignette = levelOf("vignette");
     s = settingsGet("particle_size");
     sc.particleSize = s != NULL && strcmp(s, "medium") == 0 ? 1 : s != NULL && strcmp(s, "large") == 0 ? 2 : 0;
     s = settingsGet("lighting_shade");
@@ -349,6 +355,13 @@ int sceneParticles(void) {
 
 void sceneSetParticles(int level) { setLevel("particles", &sc.particles, level); }
 
+int sceneVignette(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.vignette : 0;
+}
+
+void sceneSetVignette(int level) { setLevel("vignette", &sc.vignette, level); }
+
 int sceneParticleSize(void) {
     load();
     return sc.particleSize;
@@ -363,13 +376,15 @@ void sceneSetParticleSize(int size) {
 }
 
 const char* sceneLightingStatus(void) {
-    if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && !sceneGrade() && !sceneParticles()) return NULL;
+    if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && !sceneGrade() && !sceneParticles() &&
+        !sceneVignette())
+        return NULL;
     return sc.status != NULL ? sc.status : sc.lightStatus;
 }
 
 int sceneWantsCopy(void) {
     return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0 || sceneFog() != 0 ||
-           sceneGrade() != 0 || sceneParticles() != 0;
+           sceneGrade() != 0 || sceneParticles() != 0 || sceneVignette() != 0;
 }
 
 static void normalize3(float v[3]) {
@@ -389,10 +404,11 @@ static void params(SceneParams* p) {
     LightParams* l = &p->light;
     memset(l, 0, sizeof(*l));
     int lighting = sceneLighting(), glow = sceneGlow(), shadows = sceneShadows(), fog = sceneFog(), grade = sceneGrade();
+    int vignette = sceneVignette();
     /* Particles: fields, battles and the world map (xg-rgcf.5.11), not Battling. */
     int particles = sc.place == PC_SCENE_BATTLING ? 0 : sceneParticles();
     sc.lightStatus = NULL;
-    if (!lighting && !glow && !shadows && !fog && !grade && !particles) return;
+    if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
         return;
@@ -414,6 +430,7 @@ static void params(SceneParams* p) {
     if (sc.place == PC_SCENE_BATTLE || sc.place == PC_SCENE_BATTLING) l->fogCap = 1.0f;
     if (sc.place == PC_SCENE_WORLDMAP) l->fogDensity *= 0.5f;
     l->grade = gradeAmount[grade] * gain;
+    l->vignette = vignetteAmount[vignette];
     if (sc.sunSet) {
         /* The room's sun in this frame's view. */
         for (int i = 0; i < 3; i++)

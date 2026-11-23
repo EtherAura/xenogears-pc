@@ -252,6 +252,8 @@ int sceneParticles(void);        /* particles: 0 off (default) .. 3 strong (fiel
 void sceneSetParticles(int level);
 int sceneParticleSize(void);     /* particle_size: 0 small (default), 1 medium, 2 large */
 void sceneSetParticleSize(int size);
+int sceneVignette(void);         /* vignette: 0 off (default) .. 3 strong */
+void sceneSetVignette(int level);
 const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class

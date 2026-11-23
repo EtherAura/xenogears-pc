@@ -868,6 +868,12 @@ void battlingMainTask(void) {
     void* tmp;
     u32* pcFile;
 
+    switch (pcBattlingResume(&task, &timer, &state, &hold)) {
+    case 1:
+        goto menuYielded; /* a stackless load: the menu loop goes on after its yield (resume.c) */
+    case 2:
+        goto fightYielded; /* or the fight loop */
+    }
     battlingDebugDisplayFlags = 0;
     battlingScreenClearFlag |= 1;
     battlingHeightMap = allocateHeap(0x10010, 0);
@@ -1040,7 +1046,9 @@ top:
             break;
         }
         renderBattlingFireScene(task);
+        pcBattlingKeep(1, task, timer, state, hold); /* the menu loop waits here: a safe point's (resume.c) */
         yieldBattlingThread();
+    menuYielded:;
     }
     battlingVsyncInterval = 0;
     if (shouldBattlingSkipGearSelect() != 0) {
@@ -1174,7 +1182,9 @@ restart:
             }
             setDebugFontLineStart(0x9E, 0);
             setDebugFontColor(0xFF, 0xFF, 0);
+            pcBattlingKeep(2, task, timer, state, hold); /* the fight loop waits here: a safe point's (resume.c) */
             yieldBattlingThread();
+        fightYielded:;
         }
     }
 }
@@ -2299,10 +2309,17 @@ void battlingMain(void) {
     u32 prev = 0;
     u8 buf;
 
+    if (PC_SAFE_MODE(pcResumeAt()) == PC_SAFE_MODE(PC_SAFE_BATTLING)) {
+        /* a stackless load: the arena's memory is the state's; its coroutine starts
+         * again, and the task takes up the loop it waited in (resume.c) */
+        task = pcBattlingRestart(&prev);
+        goto loop;
+    }
     initBattlingSystem();
     task = createBattlingThread(battlingMainTaskTable[battlingMainTaskIndex], 0, (void*)0x801FE000, 0x400);
     g_playTimeInVsync; /* dead volatile read: retail loads it into v0 here */
 loop:
+        pcBattlingSafePoint(task, prev); /* between frames, the task at a yield: a canonical state's place */
         fieldPolyCount2 = 0;
         fieldPolyCount = 0;
         buf = (battlingFrameCounter + 1) & 1;

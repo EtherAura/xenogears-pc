@@ -22,6 +22,7 @@
 #include "common.h"
 #include "psyq.h"
 #include "battling/battling.h"
+#include "pc_state.h"
 
 void battlingMainTask(void);
 void pcArenaBattlingStart(void); /* include/pc_arena.h */
@@ -293,6 +294,13 @@ void yieldBattlingThread(void) {
     PcThread* pc = (PcThread*)currentThread->m0_regs[0];
 
     portBattlingSwitch(&pc->sp, resumerSp);
+    pcBattlingYielded(); /* going on: the next yield is a safe point's only if it says so (resume.c) */
+}
+
+/* A stackless load (resume.c): the thread's PC stack is not in the state, so
+ * its next resume starts the entry again on a fresh one. */
+void pcBattlingThreadRestart(BattlingThread* t) {
+    t->m0_regs[0] = 0;
 }
 
 /* Save and restore the resumer and the current thread (around a nested

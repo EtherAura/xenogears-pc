@@ -7587,6 +7587,12 @@ msgstr "フィールド、戦闘、ワールドマップで、明るい場所に
 msgid "How big the particles are. Small by default."
 msgstr "パーティクルの大きさです。初期設定は小です。"
 
+msgid "Vignette"
+msgstr "ビネット"
+
+msgid "In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the middle. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、画面のふちを少し暗くして、目を中央へ向けます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+
 msgid "In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default."
 msgstr "フィールド、戦闘、ワールドマップで、暗い部分を少しつめたい色に、明るい部分を少しあたたかい色にして、色とコントラストを少し強めます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 

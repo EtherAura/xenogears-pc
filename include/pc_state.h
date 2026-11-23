@@ -60,7 +60,8 @@ typedef struct PC_PRIMS PC_PRIMS;
  * which of the mode's loops (0: its main loop). bootGame's bootMode is 0 while
  * a mode runs, so the id names the mode to take up. */
 enum { PC_SAFE_NONE = 0, PC_SAFE_FIELD = 1 << 8, PC_SAFE_BATTLE = 2 << 8, PC_SAFE_BATTLE_TURN = (2 << 8) | 1,
-       PC_SAFE_WORLDMAP = 3 << 8, PC_SAFE_MENU = 5 << 8 /* the menu mode: its menus' loops only */ };
+       PC_SAFE_WORLDMAP = 3 << 8, PC_SAFE_BATTLING = 4 << 8 /* the arena's task waiting at a menu or a fight */,
+       PC_SAFE_MENU = 5 << 8 /* the menu mode: its menus' loops only */ };
 #define PC_SAFE_MODE(id) ((id) >> 8)
 /* The menus' loops (the low byte, from 2): the same in every mode that opens them
  * (field, world map, the menu mode itself); pcMenuSafeId adds the mode. */
@@ -71,7 +72,9 @@ enum {
     /* the shop, the gear shop, name entry and party change (menuToEnter 4, 5, 3, 1) */
     PC_SAFE_SUB_SHOP, PC_SAFE_SUB_SHOP_BUY, PC_SAFE_SUB_SHOP_SELL, PC_SAFE_SUB_SHOP_SELL_EQUIPPED, PC_SAFE_SUB_SHOP_SELL_LIST,
     PC_SAFE_SUB_GEAR_SHOP, PC_SAFE_SUB_GEAR_SHOP_SUB, PC_SAFE_SUB_GEAR_SHOP_BUY, PC_SAFE_SUB_GEAR_SHOP_SELL_LIST,
-    PC_SAFE_SUB_NAME_ENTRY, PC_SAFE_SUB_PARTY, PC_SAFE_SUB_COUNT
+    PC_SAFE_SUB_NAME_ENTRY, PC_SAFE_SUB_PARTY,
+    /* the title's Continue/New Game menu (menuToEnter 2), the disc change's wait for the other disc (6) */
+    PC_SAFE_SUB_TITLE, PC_SAFE_SUB_DISC, PC_SAFE_SUB_COUNT
 };
 /* port/src/game/menu/resume.c: a screen's integer locals at its loop's top, and the
  * screen a shared one (equip, ether) is opened as. pcMenuKeep/pcMenuTake take n
@@ -84,6 +87,15 @@ s32 pcMenuChildNow(void);
 void pcMenuHost(s32 mode);   /* the mode opening the menu (kernel.c gameModes[] index) */
 s32 pcMenuSafeId(s32 sub);   /* a menu loop's safe point in that mode */
 s32 pcResumeMenu(void);      /* the menu loop a stackless load takes up (its sub), or 0 */
+/* port/src/game/battling/resume.c: the arena task's locals at the yield where it waits, and
+ * battlingMain's at its safe point (BattlingScene and BattlingThread: battling.h) */
+struct BattlingScene;
+struct BattlingThread;
+void pcBattlingKeep(s32 site, struct BattlingScene* task, s32 timer, s32 state, s32 hold);
+void pcBattlingYielded(void);
+s32 pcBattlingResume(struct BattlingScene** task, s32* timer, s32* state, s32* hold);
+void pcBattlingSafePoint(struct BattlingThread* thread, u32 prev);
+struct BattlingThread* pcBattlingRestart(u32* prev);
 void pcSafePoint(s32 where);   /* in the loop: keep `where`, park if a safe save is due */
 s32 pcResumeAt(void);          /* an entry: the safe point to take up, or 0 */
 void pcResumeDone(void);       /* the entry has taken it up */

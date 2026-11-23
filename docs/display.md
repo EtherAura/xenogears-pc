@@ -122,6 +122,14 @@ the HUD are not touched. The Enhanced engine only (F1 > System > Engine).
 F1 > Display > Particles (Off, Subtle, Medium, Strong) and Particle size
 (Small, Medium, Large).
 
+## Vignette
+
+In fields, battles and on the world map, the picture's edges a little
+darker, drawing the eye to the middle: up to 12, 22 or 35% darker at the
+corners. Dialogue, portraits and the HUD are not touched. The Enhanced engine
+only (F1 > System > Engine). F1 > Display > Vignette (Off, Subtle, Medium,
+Strong).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -160,6 +168,7 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Colour grade | Off |
 | Particles | Off |
 | Particle size | Small |
+| Vignette | Off |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

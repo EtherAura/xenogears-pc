@@ -982,6 +982,18 @@ void displaySection() {
         hint("How big the particles are. Small by default.");
         overrideNote("particle_size");
     }
+    // The vignette (xg-rgcf.5.13), on the shown colour with the colour grade.
+    if (row("Vignette", "vignette", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneVignette();
+        int chosen = listChoice("##vignette", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetVignette(chosen);
+        hint("In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the "
+             "middle. Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("vignette");
+    }
 
     if (row("Filter", "present_filter")) {
         static const char* const filters[] = {"Nearest", "Linear", "Sharp", "Bicubic", "xBR (edges)"};

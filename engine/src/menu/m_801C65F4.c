@@ -756,6 +756,10 @@ void checkCurrentDiscNumber(u8 disc) {
     u8 loop;
     u8 n;
 
+    if (pcResumeMenu() == PC_SAFE_SUB_DISC) {
+        loop = 1;
+        goto discWait; /* a stackless load: the wait for the disc goes on (include/pc_state.h) */
+    }
     processLoadSaveMenuSub1();
     loop = 1;
     while (gMenuContext->m329_animationState != 0) {
@@ -768,6 +772,7 @@ void checkCurrentDiscNumber(u8 disc) {
         } else {
             stopCdDrive();
             processLoadSaveMenuSub5(disc * 3 - 0x7D);
+        discWait:
             if (checkInsertedDisc(disc + 1)) {
                 processLoadSaveMenuSub7();
                 processLoadSaveMenuSub5(0x89);
