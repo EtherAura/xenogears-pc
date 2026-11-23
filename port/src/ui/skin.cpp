@@ -317,6 +317,10 @@ bool native() {
     return st.native;
 }
 
+ImFont* dialogueFont() {
+    return st.native ? st.dialogueFont : nullptr;
+}
+
 bool caption(ImDrawList* dl, const char* text, ImVec2 min, ImVec2 max) {
     float w = max.x - min.x, h = max.y - min.y;
     if (!st.native || st.dialogueFont == nullptr || text == nullptr || text[0] == '\0' || w < 16 || h < 24) {

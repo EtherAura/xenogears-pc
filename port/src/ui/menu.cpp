@@ -72,6 +72,8 @@ struct Release {
 
 struct State {
     bool want;       // asked to open (F1, Guide, L3+R3)
+    bool wantBacklog; // asked to open as the dialogue backlog (H, Select+Square: system/backlog.h)
+    bool backlog;    // open as the dialogue backlog (backlog.cpp), not the settings
     bool open;
     bool closing;    // asked to close: the loop ends after this frame
     bool ready;      // ImGui context and the SDL backend
@@ -845,6 +847,21 @@ struct Layout {
     ImVec2 centre() const { return game ? at(160, 112) : ImVec2(); } // the menu's projection centre
 };
 
+// The touch pad drawn over the menu (frame()) has its Select and Start in the
+// middle of the window's bottom edge, where the legend goes: their top (window
+// pixels), the lowest the panel may reach. With no pad shown, the window's bottom.
+float touchPadFloor() {
+    ImGuiIO& io = ImGui::GetIO();
+    float bottom = io.DisplaySize.y;
+    if (!touchShown()) return bottom;
+    TouchControl cs[32];
+    int n = touchControls(cs, 32, io.DisplaySize.x, io.DisplaySize.y);
+    for (int i = 0; i < n; i++) {
+        if (cs[i].kind == TOUCH_SELECT || cs[i].kind == TOUCH_START) bottom = std::min(bottom, cs[i].y - cs[i].h / 2);
+    }
+    return std::max(bottom, 0.0f);
+}
+
 // opened: a section is open (its pane across the panel; else beside the commands).
 Layout layout(bool opened) {
     ImGuiIO& io = ImGui::GetIO();
@@ -871,9 +888,9 @@ Layout layout(bool opened) {
     }
     // Compact: the port's own panel, up to 560 x 336 game pixels: the
     // commands' column, the sheet beside it, the message box under the sheet
-    // and the legend at the bottom.
+    // and the legend at the bottom, above a touch pad's Select and Start.
     const int footH = 17, edge = 8, gap = 8, listW = 148; // the enlarged arc's longest names end at 136
-    int cw = (int)(io.DisplaySize.x / u), ch = (int)(io.DisplaySize.y / u);
+    int cw = (int)(io.DisplaySize.x / u), ch = (int)(touchPadFloor() / u);
     int pw = cw - 2 * edge < 560 ? cw - 2 * edge : 560, ph = ch - 2 * edge < 336 ? ch - 2 * edge : 336;
     // The message box's three lines, or two where the panel is low (a large
     // menu size in a small window), so the sheet keeps room for its rows.
@@ -932,9 +949,12 @@ bool stepped(ImGuiKey key) {
 // coordinates within a quarter of a second, over two events at least: not
 // the one motion a window gets when it appears under the cursor); a
 // controller's button, a trigger pulled past a quarter, a stick pushed past
-// its dead zone (Controls, at least 30%). Events of every kind count, while
-// the game runs too (uiEvent sees them all). A controller connecting changes
-// nothing; the controller in use going, with none left, means the keyboard.
+// its dead zone (Controls, at least 30%); a touch with the touch pad on (its
+// buttons are the ones a touch screen has: a touch on the menu shows an
+// automatic pad too, touch.c), and never the mouse SDL makes of a touch.
+// Events of every kind count, while the game runs too (uiEvent sees them
+// all). A controller connecting changes nothing; the controller in use going,
+// with none left, means the keyboard.
 // Before any of that: a controller if one is connected when the menu opens.
 enum Method { METHOD_UNSET, METHOD_KEYS, METHOD_PAD };
 struct InputUse {
@@ -958,10 +978,16 @@ void noteInput(const SDL_Event* e) {
         if (!e->key.repeat && !modifierKey(e->key.scancode)) m = METHOD_KEYS;
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (e->button.which != SDL_TOUCH_MOUSEID) m = METHOD_KEYS;
+        break;
     case SDL_EVENT_MOUSE_WHEEL:
-        m = METHOD_KEYS;
+        if (e->wheel.which != SDL_TOUCH_MOUSEID) m = METHOD_KEYS;
+        break;
+    case SDL_EVENT_FINGER_DOWN:
+        if (touchMode() != 0) m = METHOD_PAD;
         break;
     case SDL_EVENT_MOUSE_MOTION: {
+        if (e->motion.which == SDL_TOUCH_MOUSEID) break;
         uint64_t now = e->motion.timestamp;
         if (now - inputUse.motionAt > 250000000ull) {
             inputUse.motion = 0;
@@ -1646,10 +1672,10 @@ void frame() {
     Layout L = layout(st.opened);
     st.centre = L.game ? L.centre() : ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2);
     unsigned age = unsigned(st.frames - st.openedAt);
-    bool moving = !st.setup && (age < menuMotion::OPENING_FRAMES || st.leaving);
+    bool moving = !st.setup && !st.backlog && (age < menuMotion::OPENING_FRAMES || st.leaving);
     menuMotion::View view = st.leaving ? menuMotion::leaving(st.centre, skin::unit(), unsigned(st.frames - st.closedAt))
                                        : menuMotion::opening(st.centre, skin::unit(), age);
-    if (!st.setup && ImGui::IsMousePosValid(&st.mouse)) {
+    if (!st.setup && !st.backlog && ImGui::IsMousePosValid(&st.mouse)) {
         ImVec2 mouse = st.mouse;
         if (moving) {
             if (st.leaving) mouse = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -1659,7 +1685,11 @@ void frame() {
     }
     ImGui::NewFrame();
     skin::beginFrame();
-    drawFrame();
+    if (st.backlog) {
+        if (drawBacklog()) st.closing = true;
+    } else {
+        drawFrame();
+    }
     sounds();
     skin::endFrame(st.listWindow);
     ImGui::Render();
@@ -1788,8 +1818,8 @@ void run() {
         int lw = 0, lh = 0, pw = 0, ph = 0;
         SDL_GetWindowSize(presentWindow(), &lw, &lh);
         SDL_GetWindowSizeInPixels(presentWindow(), &pw, &ph);
-        fprintf(stderr, "ui: settings menu open (vblank %u, window %dx%d, %dx%d pixels); the game is paused\n",
-                hwVSyncCount(), lw, lh, pw, ph);
+        fprintf(stderr, "ui: %s open (vblank %u, window %dx%d, %dx%d pixels); the game is paused\n",
+                st.backlog ? "dialogue backlog" : "settings menu", hwVSyncCount(), lw, lh, pw, ph);
     }
     st.open = true;
     st.closing = false;
@@ -1807,7 +1837,9 @@ void run() {
     st.lastNav = 0;
     st.openedAt = st.frames;
     sfx::opened();
-    if (!st.setup) {
+    if (st.backlog) {
+        backlogOpened();
+    } else if (!st.setup) {
         sfx::play(sfx::OPEN); // as a sub-menu's box starts turning in (processLoadSaveMenuSub1)
     }
     for (int i = 0; i < st.releaseCount; i++) {
@@ -1819,8 +1851,8 @@ void run() {
     }
     // ImGui's keys are as they were (uiEvent passes it the releases made while
     // closed), so a key held from the game is no press in the menu.
-    ImGui::SetNavCursorVisible(true);
-    sectionsOpened();
+    ImGui::SetNavCursorVisible(!st.backlog);
+    if (!st.backlog) sectionsOpened();
     uint64_t next = SDL_GetTicksNS();
     while (true) {
         padPumpEvents(); // the window's events: ImGui's through uiEvent, the hotkeys, quitting
@@ -1829,9 +1861,9 @@ void run() {
             st.leaving = true;
             st.closedAt = st.frames;
             // As a sub-menu starts turning away (processLoadSaveMenuSub1Alt2).
-            sfx::play(st.setup ? sfx::BACK : sfx::CLOSE);
+            sfx::play(st.setup || st.backlog ? sfx::BACK : sfx::CLOSE);
         }
-        if (st.leaving && st.frames - st.closedAt >= menuMotion::LEAVING_FRAMES) break;
+        if (st.leaving && (st.backlog || st.frames - st.closedAt >= menuMotion::LEAVING_FRAMES)) break;
         if (st.suspendWanted) {
             suspend(true); // nothing drawn meanwhile; the menu as it was after
             next = SDL_GetTicksNS();
@@ -1861,7 +1893,7 @@ void run() {
     if (extrasJukeboxEnd) extrasJukeboxEnd();
     spuOutputPause(0);
     hwPause(0);
-    fprintf(stderr, "ui: settings menu closed; the game goes on\n");
+    fprintf(stderr, "ui: %s closed; the game goes on\n", st.backlog ? "dialogue backlog" : "settings menu");
 }
 
 } // namespace
@@ -1951,6 +1983,10 @@ void closeMenu() {
     st.closing = true;
 }
 
+bool padHeld(const char* button) {
+    return buttonHeld(padButton(button), ImGui::GetIO().WantTextInput);
+}
+
 void showSetupSection(int section) {
     st.section = section;
     st.enterContent = true;
@@ -2008,6 +2044,14 @@ extern "C" void uiRequestToggle(void) {
     }
 }
 
+extern "C" void uiRequestBacklog(void) {
+    if (st.open) {
+        if (st.backlog) st.closing = true; /* its key again: closed */
+        return;
+    }
+    st.wantBacklog = true;
+}
+
 extern "C" int uiIsOpen(void) {
     return st.open;
 }
@@ -2033,7 +2077,6 @@ extern "C" int uiEvent(const SDL_Event* e) {
     // controls is the pad's, with its mouse, and moves about as a controller
     // does (buttonHeld); the other touches tap and drag the menu.
     if (touchMenuEvent(e)) {
-        if (e->type == SDL_EVENT_FINGER_DOWN) inputUse.method = METHOD_PAD; // the legend shows the pad's buttons
         return 1;
     }
     switch (e->type) {
@@ -2135,14 +2178,17 @@ extern "C" int uiVBlank(void) {
         }
         st.lastVBlankNs = now;
     }
-    if (!st.want) {
+    if (!st.want && !st.wantBacklog) {
         return 0;
     }
-    st.want = false;
+    bool backlog = st.wantBacklog && !st.want; // F1 wins
+    st.want = st.wantBacklog = false;
     if (!begin()) {
         return 0;
     }
+    st.backlog = backlog;
     run();
+    st.backlog = false;
     return 1;
 }
 

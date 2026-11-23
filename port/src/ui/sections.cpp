@@ -58,6 +58,7 @@ extern "C" {
 #include "system/ps1time.h"
 #include "system/battlespeed.h"
 #include "system/fieldspeed.h"
+#include "system/backlog.h"
 #include "system/mouse.h"
 #include "system/rumble.h"
 #include "system/android.h"
@@ -212,7 +213,18 @@ struct Message {
     }
 };
 
+// A path as the menu shows it: on Android a disc the activity opened by its name, not its
+// descriptor's /proc/self/fd/N.
+const char* shownPath(const char* path) {
+#ifdef __ANDROID__
+    return androidPathName(path);
+#else
+    return path;
+#endif
+}
+
 void pathText(const char* path, const char* none) {
+    path = shownPath(path);
     if (path != NULL && path[0] != '\0') {
         ImGui::TextWrapped("%s", path);
     } else {
@@ -2119,6 +2131,8 @@ void controlsSection() {
             {"F11, Alt+Enter", "fullscreen"},
             {"Start+Select+L1+R1", N_("the game's own soft reset")},
             {"Tab, Select+R2", N_("in a battle: battle speed 1x, 2x, 4x (Gameplay > Battle speed on)")},
+            {"Tab, Select+R2", N_("on the field and the world map: field speed 1x, 2x, 4x (Gameplay > Field speed on)")},
+            {"H, Select+Square", N_("the dialogue backlog: the text shown so far (Gameplay > Dialogue backlog on)")},
         };
         if (ImGui::BeginTable("hotkeys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
             for (const auto& h : hotkeys) {
@@ -2470,7 +2484,7 @@ void gameplaySection() {
              "speed, and the control does nothing.");
         overrideNote("battle_speed");
     }
-    if (row("Field speed", "field_speed")) {
+    if (row("Field speed", "field_speed field_speed_key")) {
         static const char* const fieldSpeedNames[] = {N_("Off"), "1x", "2x", "4x"};
         static const int fieldSpeeds[] = {0, 1, 2, 4};
         int chosen = fieldSpeedChosen(), index = 0;
@@ -2479,8 +2493,22 @@ void gameplaySection() {
         if (picked != index && picked >= 0) fieldSpeedSetChosen(fieldSpeeds[picked]);
         hint("The field and the world map at 2x or 4x, their scenes and dialogue included: the game runs that many "
              "of its own frames per picture. Menus, movies and battles keep their own speed (Battle speed above "
-             "is the battles'). Off and 1x: the original speed.");
+             "is the battles'). On the field and the world map, Tab (or Select + R2 together on a gamepad) steps "
+             "1x, 2x, 4x; while this is on, Select there does its own job (the area map, the minimap) as you let "
+             "it go, and nothing when pressed with L1, R1, L2, R2 or Square. Off and 1x: the original speed; off, "
+             "the control does nothing.");
         overrideNote("field_speed");
+    }
+    if (row("Dialogue backlog", "dialogue_backlog")) {
+        bool backlog = backlogChosen() != 0;
+        if (offOnList("##dialogue_backlog", &backlog)) backlogSetChosen(backlog);
+        hint("Keeps the text the game shows (the field's and the world map's windows, a battle's story lines and a "
+             "movie's captions), so a line passed too soon can be read again: H, or Select + Square together on a "
+             "gamepad, opens it over the paused game, in the game's own window and letters. Up and Down scroll, L1 "
+             "and R1 a page; the cancel button, H or Select + Square closes it. While it is on, Select on the field, "
+             "the world map and in battles does its own job as you let it go, and nothing when pressed with Square "
+             "or a shoulder button. Off: nothing is kept.");
+        overrideNote("dialogue_backlog");
     }
     if (row("PS1 frame rate", "ps1_frame_rate")) {
         bool ps1Rate = ps1timeFrameRateOn() != 0;
@@ -3093,7 +3121,7 @@ void systemSection() {
         ImGui::BeginDisabled(cdSwapPath(1) == NULL || !cdSwapWanted());
         if (ImGui::Button(tr("Swap discs now"))) {
             if (cdSwapRequest() > 0) {
-                discMsg.set(false, "Swapped: the drive has %s", cdSwapPath(0));
+                discMsg.set(false, "Swapped: the drive has %s", shownPath(cdSwapPath(0)));
             } else {
                 discMsg.set(true, "Could not swap discs");
             }

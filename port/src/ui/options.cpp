@@ -43,6 +43,7 @@ extern "C" {
 #include "system/touch.h"
 #include "system/battlespeed.h"
 #include "system/fieldspeed.h"
+#include "system/backlog.h"
 int pcFreeCameraEnabled(void); /* port/src/system/freecam.c */
 void pcFreeCameraSet(int on);
 int pcFirstPersonEnabled(void);
@@ -428,6 +429,8 @@ std::vector<Spec>& table() {
         [](int, int v) { battleSpeedSetChosen(v); }, 0, battleSpeedNames, 4, battleSpeedValues);
     add("field_speed", N_("Field speed"), [](int) { return fieldSpeedChosen(); },
         [](int, int v) { fieldSpeedSetChosen(v); }, 0, battleSpeedNames, 4, battleSpeedValues);
+    add("dialogue_backlog", N_("Dialogue backlog"), [](int) { return backlogChosen() != 0 ? 1 : 0; },
+        [](int, int v) { backlogSetChosen(v); }, 0);
     add("field60", N_("60 Hz fields"), [](int) { return pcGameplayField60(); },
         [](int, int v) { pcGameplaySetField60(v); }, 0)
         .def = [](int) { return engineThis() == ENGINE_ENHANCED ? 1 : 0; };

@@ -59,6 +59,7 @@
 #include "main/memory.h"
 #include "battle/battle.h"
 #include "pc_arena.h"
+#include "pc_backlog.h"
 
 s32 battleRenderDebugAndMain(void);
 u8 executeMonsterScriptLower(sBattleScriptExecutionContext* ctx, u8 entity, u8 index);
@@ -490,6 +491,7 @@ static int openWindow(const u8* lines, s32 count, s32 selected) {
     window.m10_flags |= 2; /* no background tile: the window is the background */
     window.m68_charsPerStep = 0x20;
     resetDialogWindow18(&window);
+    if (pcBacklogIgnore) pcBacklogIgnore(&window); /* the port's prompt: not the game's text */
     addDialogWindowsToOTSub2(&window, (u8*)lines);
     if (selected >= 0) {
         setupMultiChoiceColor(&window, 0xEF, 0x1E, 0xF0);

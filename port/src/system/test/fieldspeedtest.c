@@ -13,7 +13,13 @@
  *   - a field movie is at 1x from pcFieldMovieBlock(1) to pcFieldMovieBlock(0)
  *     with no CD audio queued, whatever the wide picture does with it; the
  *     flag ends with the field mode and travels in a state;
- *   - online, the slowdown replay and CD audio hold 1x as in battles.
+ *   - online, the slowdown replay and CD audio hold 1x as in battles;
+ *   - the control: Tab and Select+R2 step field_speed on the field and the
+ *     world map with it on, battle_speed's in a battle, nothing elsewhere;
+ *   - Select as the port's chord button there (selectchord.c, linked
+ *     whole): a chord with a shoulder button is kept from the game, a lone
+ *     Select reaches it as it is let go, and with the option off, on other
+ *     screens, online or with Start held the buttons go through as they are.
  *
  * With arguments it is the setting in a process of its own
  * (tools/test_field_speed.py: XG_SETTINGS names the file):
@@ -25,6 +31,7 @@
 
 #include "../hw.c"
 #include "../battlespeed.c"
+#include "../selectchord.c"
 #include "../fieldspeed.h"
 #include "common.h"
 #include "field/field.h"
@@ -459,6 +466,134 @@ int main(int argc, char** argv) {
         }
     }
     CHECK(fieldSpeedChosen() == 0 && battleSpeedChosen() == 0 && hwGameSpeed() == 1);
+
+    /* The control: Tab and Select+R2 step field_speed on the field and the
+     * world map, with the option on; nowhere else, and in a battle they are
+     * battle_speed's. */
+    section = "control";
+    enum { L2 = 0x0001, R2 = 0x0002, L1 = 0x0004, R1 = 0x0008, CROSS = 0x0040, SEL = 0x0100, START = 0x0800 };
+    static const int cycle[] = {2, 4, 1, 2, 4};
+    for (int p = 0; p < 2; p++) {
+        pcWideSetMode(places[p]);
+        fieldSpeedSetChosen(0);
+        CHECK(fieldSpeedStep() == 0 && battleSpeedKey(SDL_SCANCODE_TAB, 0) == 0 && fieldSpeedChosen() == 0); /* off */
+        battleSpeedPad(0);
+        battleSpeedPad(SEL | R2);
+        CHECK(fieldSpeedChosen() == 0);
+        battleSpeedPad(0);
+        fieldSpeedSetChosen(1);
+        for (int i = 0; i < 5; i++) {
+            CHECK(battleSpeedKey(SDL_SCANCODE_TAB, 0) == 1 && fieldSpeedChosen() == cycle[i] && battleSpeedChosen() == 0);
+        }
+        CHECK(battleSpeedKey(SDL_SCANCODE_TAB, SDL_KMOD_SHIFT) == 0 && fieldSpeedChosen() == 4); /* not the key */
+        fieldSpeedSetChosen(1);
+        battleSpeedPad(SEL); /* Select, then R2 */
+        CHECK(fieldSpeedChosen() == 1);
+        battleSpeedPad(SEL | R2);
+        CHECK(fieldSpeedChosen() == 2);
+        battleSpeedPad(SEL | R2); /* held: once */
+        CHECK(fieldSpeedChosen() == 2);
+        battleSpeedPad(0);
+        battleSpeedPad(R2); /* R2, then Select */
+        battleSpeedPad(R2 | SEL);
+        CHECK(fieldSpeedChosen() == 4);
+        battleSpeedPad(0);
+        battleSpeedPad(SEL | R2); /* together */
+        CHECK(fieldSpeedChosen() == 1);
+        battleSpeedPad(L1 | R1 | START);
+        battleSpeedPad(L1 | R1 | START | SEL | R2); /* inside the soft reset's buttons: nothing */
+        CHECK(fieldSpeedChosen() == 1);
+        battleSpeedPad(0);
+        online = 1; /* online: a note, and 1x stays */
+        CHECK(fieldSpeedStep() == 1 && fieldSpeedChosen() == 1);
+        online = 0;
+    }
+    for (int o = 0; o < 5; o++) { /* the menus over them, a battle's loading, the kernel's screens, the movie mode */
+        pcWideSetMode(others[o]);
+        CHECK(fieldSpeedStep() == 0 && battleSpeedKey(SDL_SCANCODE_TAB, 0) == 0);
+        battleSpeedPad(SEL | R2);
+        battleSpeedPad(0);
+        CHECK(fieldSpeedChosen() == 1 && battleSpeedChosen() == 0);
+    }
+    pcWideSetMode(PC_WIDE_BATTLE); /* in a battle: battle speed's control */
+    battleSpeedSetChosen(1);
+    battleSpeedBattleFrame(0, 0);
+    CHECK(battleSpeedKey(SDL_SCANCODE_TAB, 0) == 1 && battleSpeedChosen() == 2 && fieldSpeedChosen() == 1);
+    battleSpeedPad(SEL | R2);
+    battleSpeedPad(0);
+    CHECK(battleSpeedChosen() == 4 && fieldSpeedChosen() == 1);
+    battleSpeedSetChosen(0);
+    for (int i = 0; i < BATTLE_GAP + 2; i++) hwWaitVSync();
+    settingsSet("field_speed_key", "F7"); /* the keys of its own */
+    settingsSet("field_speed_button", "l1+r1");
+    pcWideSetMode(PC_WIDE_FIELD);
+    CHECK(battleSpeedKey(SDL_SCANCODE_TAB, 0) == 0 && fieldSpeedChosen() == 1);
+    CHECK(battleSpeedKey(SDL_SCANCODE_F7, 0) == 1 && fieldSpeedChosen() == 2);
+    battleSpeedPad(SEL | R2);
+    battleSpeedPad(0);
+    CHECK(fieldSpeedChosen() == 2);
+    battleSpeedPad(L1 | R1);
+    battleSpeedPad(0);
+    CHECK(fieldSpeedChosen() == 4);
+
+    /* Select as the port's chord button on the field and the world map. */
+    section = "select chord";
+    CHECK(speedControlHoldsSelect() == 0); /* field_speed_button without Select: */
+    CHECK(selectChordFilter(SEL) == SEL && selectChordFilter(SEL | R2) == (SEL | R2) && selectChordFilter(0) == 0);
+    settingsUnset("field_speed_key");
+    settingsUnset("field_speed_button");
+    for (int p = 0; p < 2; p++) {
+        pcWideSetMode(places[p]);
+        fieldSpeedSetChosen(0); /* off: as they are */
+        static const unsigned plain[] = {SEL, SEL | R2, R2, 0, SEL | L1, SEL, 0};
+        for (int i = 0; i < 7; i++) CHECK(selectChordFilter(plain[i]) == plain[i]);
+        fieldSpeedSetChosen(1);
+        CHECK(speedControlHoldsSelect() == 1);
+        /* A lone Select: kept while held, the game's as it is let go. */
+        CHECK(selectChordFilter(0) == 0);
+        for (int i = 0; i < 5; i++) CHECK(selectChordFilter(SEL) == 0);
+        for (int i = 0; i < SELECT_TAP; i++) CHECK(selectChordFilter(0) == SEL);
+        CHECK(selectChordFilter(0) == 0);
+        /* Select, then R2: neither reaches the game, R2 until let go. */
+        CHECK(selectChordFilter(SEL) == 0 && selectChordFilter(SEL | R2) == 0 && selectChordFilter(SEL | R2) == 0);
+        CHECK(selectChordFilter(R2) == 0 && selectChordFilter(0) == 0 && selectChordFilter(0) == 0);
+        /* R2 held, then Select: R2 the game's all along, Select never. */
+        CHECK(selectChordFilter(R2) == R2 && selectChordFilter(R2 | SEL) == R2 && selectChordFilter(R2) == R2);
+        CHECK(selectChordFilter(0) == 0);
+        /* Together (rewind's Select+L2 as well), and an L1 joining later. */
+        CHECK(selectChordFilter(SEL | L2) == 0 && selectChordFilter(SEL | L2 | L1) == 0 && selectChordFilter(L1) == 0);
+        CHECK(selectChordFilter(0) == 0 && selectChordFilter(0) == 0);
+        /* Another button with Select: the game's; Select comes as it is let go. */
+        CHECK(selectChordFilter(SEL | CROSS) == CROSS && selectChordFilter(CROSS) == (CROSS | SEL));
+        for (int i = 1; i < SELECT_TAP; i++) CHECK(selectChordFilter(0) == SEL);
+        CHECK(selectChordFilter(0) == 0);
+        /* Pressed again while handed over: kept again. */
+        CHECK(selectChordFilter(SEL) == 0 && selectChordFilter(0) == SEL && selectChordFilter(SEL) == 0);
+        CHECK(selectChordFilter(SEL | R2) == 0 && selectChordFilter(0) == 0);
+        /* Start: the soft reset's buttons go through as they are. */
+        CHECK(selectChordFilter(SEL) == 0 && selectChordFilter(SEL | START) == (SEL | START));
+        CHECK(selectChordFilter(SEL | START | L1 | R1) == (SEL | START | L1 | R1) && selectChordFilter(0) == 0);
+        CHECK(selectChordFilter(0) == 0);
+        /* Online, and on a menu over the screen: as they are. */
+        online = 1;
+        CHECK(selectChordFilter(SEL) == SEL && selectChordFilter(SEL | R2) == (SEL | R2) && selectChordFilter(0) == 0);
+        online = 0;
+        int old = pcWideSetMode(PC_WIDE_MENU);
+        CHECK(selectChordFilter(SEL) == SEL && selectChordFilter(0) == 0);
+        /* Select held as the menu closes: the game has it already, so it stays
+         * held, and its release hands nothing over. */
+        CHECK(selectChordFilter(SEL) == SEL);
+        pcWideSetMode(old);
+        CHECK(selectChordFilter(SEL) == SEL && selectChordFilter(0) == 0 && selectChordFilter(0) == 0);
+        /* ... and as the menu opens: the game's at once. */
+        CHECK(selectChordFilter(SEL) == 0);
+        pcWideSetMode(PC_WIDE_MENU);
+        CHECK(selectChordFilter(SEL) == SEL && selectChordFilter(0) == 0);
+        pcWideSetMode(old);
+        CHECK(selectChordFilter(0) == 0);
+    }
+    fieldSpeedSetChosen(0);
+    CHECK(fieldSpeedChosen() == 0 && battleSpeedChosen() == 0);
 
     SDL_Quit();
     printf("Field speed: %d checks passed\n", checks);

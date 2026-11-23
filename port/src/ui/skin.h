@@ -44,6 +44,9 @@ bool native();
 // movies (menu.cpp uiRecord) and the extras' movie viewer draw them so.
 // False (nothing drawn): no game font, no text, or a picture too small.
 bool caption(ImDrawList* dl, const char* text, ImVec2 min, ImVec2 max);
+// The game's dialogue font in its own colours (what caption draws with), or
+// nullptr without the game's look. Its size: 14 game pixels a line.
+ImFont* dialogueFont();
 
 // The unit (ImGui units per game pixel), and the style for it.
 void setUnit(float unit);

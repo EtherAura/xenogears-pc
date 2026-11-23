@@ -244,7 +244,10 @@ add_executable(battlespeedtest EXCLUDE_FROM_ALL src/system/test/battlespeedtest.
 # The stall watchdog in the app's background (stall.c, xg-mrj.3.19): SDL's
 # lifecycle events, polls without a thread or a clock.
 add_executable(stallwatchtest EXCLUDE_FROM_ALL src/system/test/stallwatchtest.c src/system/stall.c)
-foreach(tool rewindpacktest statefiletest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest stallwatchtest)
+# The dialogue backlog's capture (backlog.c, xg-htn.57): the printer's calls
+# as dialog.c makes them, the screens, captions, its controls.
+add_executable(backlogtest EXCLUDE_FROM_ALL src/system/test/backlogtest.c src/system/backlog.c src/system/settings.c)
+foreach(tool rewindpacktest statefiletest seamreusetest spansteptest battlepacingtest hostpolltest gameidtest battlespeedtest backuptest stallwatchtest backlogtest)
     target_include_directories(${tool} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
     target_compile_definitions(${tool} PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
     target_compile_options(${tool} PRIVATE -fno-strict-aliasing)

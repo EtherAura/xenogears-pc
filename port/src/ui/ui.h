@@ -137,6 +137,7 @@ int uiDiscSetup(const char* region, int flags, char* chosen, unsigned long size)
 
 /* port/src/system/pad.c */
 void uiRequestToggle(void);             /* F1, gamepad Guide or L3+R3 */
+void uiRequestBacklog(void);            /* the dialogue backlog (system/backlog.h): opens it, or closes it */
 int uiEvent(const union SDL_Event* e);  /* every event the pump takes: 1 when the menu used it */
 int uiVBlank(void);                     /* after the vblank's pump: runs the menu if it was asked
                                          * for, until it closes; 1 if it ran */

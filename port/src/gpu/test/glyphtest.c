@@ -25,8 +25,18 @@ static void upload(int x,int y,int w,int h,const uint16_t* data) {
     vramMarkUploaded((VRect){x,y,x+w-1,y+h-1},0);
     textureGlyphUpload(x,y,w,h,data);
 }
+/* An overlay is an index map the GPU colours with the primitive's live CLUT:
+ * colour it here with the CLUT of the decode it was composed from, as the
+ * shader does (hires.frag samplePixel). */
+static const DecodedTexture* shown;
+static int glyphSample(const DecodedTexture* d,TextureSample* s) { shown=d; return textureGlyphSample(d,s); }
+#define textureGlyphSample glyphSample
 static const uint8_t* pixel(TextureSample s,int x,int y,int subx,int suby) {
-    return s.rgba+((y*s.scale+suby)*s.w*s.scale+x*s.scale+subx)*4;
+    static uint8_t rgba[4];
+    uint16_t c=shown->palette[s.indices[(y*s.scale+suby)*s.w*s.scale+x*s.scale+subx]];
+    for (int k=0;k<3;++k) rgba[k]=(uint8_t)((((c>>(k*5))&31)<<3)|(((c>>(k*5))&31)>>2));
+    rgba[3]=c==0?0:c&0x8000?128:255;
+    return rgba;
 }
 static int textOn(void) { return 1; }
 static int nearestBlocks(TextureSample s,const DecodedTexture* d) {
@@ -77,9 +87,10 @@ int main(int argc,char** argv) {
     CHECK(textureGlyphSample(d,&s) && pixel(s,1,1,0,0)[1]==255 && pixel(s,1,1,0,0)[3]==255);
     CHECK(testSetEnv("XG_GLYPH_PACKS","none")==0);texturePackSetRoot("");
     CHECK(textureGlyphSample(d,&s) && nearestBlocks(s,d));previous=s.revision;
-    /* Palette changes never change source indices or their packed planes. */
+    /* Palette changes never change source indices or their packed planes:
+     * the same index map, coloured by the new CLUT. */
     palette[13]=0x8000; palette[14]=0; upload(976,480,16,1,palette); d=textureCacheGet(r);
-    CHECK(textureGlyphSample(d,&s) && s.revision!=previous);
+    CHECK(textureGlyphSample(d,&s) && s.revision==previous);
     CHECK(nearestBlocks(s,d));
     CHECK(pixel(s,1,0,0,0)[0]==0 && pixel(s,1,0,0,0)[3]==128);
     CHECK(pixel(s,1,1,7,7)[3]==0);
@@ -183,7 +194,7 @@ int main(int argc,char** argv) {
     /* Overlays are found by content (xg-j85.22): more than eight text draws
      * keep their compositions, and so does a re-decode of identical indices
      * and CLUT (battle re-decodes its atlases every frame). A CLUT change
-     * still composes anew. */
+     * keeps them too: the GPU colours the index map with the new CLUT. */
     textureGlyphReset(); uint16_t line[48*13]={0}; uint64_t revs[12],decodes[12];
     for (int k=0;k<12;++k) line[6*48+k*4+1]=(uint16_t)(0xc8|(k+1)<<8);
     upload(256,256,48,13,line);
@@ -198,23 +209,32 @@ int main(int argc,char** argv) {
             CHECK(dq && textureGlyphSample(dq,&s));
             if (pass==0) { revs[k]=s.revision; decodes[k]=dq->revision; }
             else if (pass==1) CHECK(dq->revision==decodes[k] && s.revision==revs[k]); /* the texels and CLUT unchanged: not even re-decoded (texture.c paletteOnly) */
-            else CHECK(s.revision!=revs[k] && pixel(s,2,6,0,0)[0]==255);
+            else CHECK(s.revision==revs[k] && pixel(s,2,6,0,0)[0]==255);
         }
     }
-    textureGlyphStats(&stats); CHECK(stats.cached==24);
+    textureGlyphStats(&stats); CHECK(stats.cached==12);
+    /* A piece added elsewhere leaves the others' overlays be. */
+    uint16_t other[4*13]={0}; other[4*6+1]=0x00c8; upload(256,320,4,13,other); pcGlyphTile(148,0,64,8,13);
+    textureGlyphStats(&stats); CHECK(stats.pieces==13);
+    for (int k=0;k<12;++k) {
+        TextureRequest q=eight; q.u=k*8;
+        CHECK(textureGlyphSample(textureCacheGet(q),&s) && s.revision==revs[k]);
+    }
+    textureGlyphStats(&stats); CHECK(stats.cached==12);
     /* RAM records and native source storage have independent hard bounds. */
     uint16_t* many=calloc(1040*39,2); CHECK(many);
     for (int i=0;i<1040;++i) pcGlyphDialog(many+i*39,3,8,0);
     textureGlyphStats(&stats); CHECK(stats.ramRecords==1024); free(many);
     for (int i=0;i<320;++i) pcGlyphTile((unsigned)(i%16),0,i/16,256,64);
     textureGlyphStats(&stats); CHECK(stats.sourceBytes<=4*1024*1024 && stats.pieces<=2048);
-    /* Frame snapshots are at most 4 MiB, even for full 256-square requests. */
+    /* Frame snapshots are at most 1 MiB (a byte a pixel), even for full
+     * 256-square requests, and the cache holds at most 16 MiB of them. */
     textureGlyphReset(); pcGlyphTile(0,0,0,16,13);
     uint8_t* native=calloc(256*256,1); CHECK(native);
     DecodedTexture full={0}; full.request=(TextureRequest){0,0,0,0,0,256,256,0,0};
     full.depth=4; full.paletteSize=16; full.texels=native;
-    for (int i=0;i<6;++i) { full.revision=100000+i; CHECK(textureGlyphSample(&full,&s) && s.scale==4); }
-    free(native); textureGlyphStats(&stats); CHECK(stats.cacheBytes<=16*1024*1024 && stats.cached<=4);
+    for (int i=0;i<20;++i) { full.revision=100000+i; CHECK(textureGlyphSample(&full,&s) && s.scale==4 && s.indices && !s.rgba); }
+    free(native); textureGlyphStats(&stats); CHECK(stats.cacheBytes<=16*1024*1024 && stats.cached<=16);
     textureDumpShutdown(); CHECK(!textureDumpEnabled());
     /* A GPU-drawn atlas is read back when the text category uses glyphs,
      * even with the legacy switch off (texture_style_text=glyphs). */

@@ -12,13 +12,20 @@
 /* Composed overlays, found by content: battle re-decodes its HUD/text
  * atlases every frame with identical pixels, so a decode revision alone
  * matched nothing. One battle or dialogue screen draws dozens of text
- * primitives; the byte cap bounds memory (xg-j85.22). */
-#define CACHE_SLOTS 256
-#define CACHE_BUCKETS 512
+ * primitives; the byte cap bounds memory (xg-j85.22). An overlay is an
+ * index map (a byte a pixel) that the GPU colours with the primitive's live
+ * CLUT, as the native texel would be: a CLUT change composes nothing anew. */
+#define CACHE_SLOTS 1024
+#define CACHE_BUCKETS 2048
 #define CACHE_BYTES (16u*1024u*1024u)
 /* Pieces indexed by the 64-halfword VRAM column blocks they overlap (16
  * across, 2 down), so a draw visits only pieces near its texture page. */
 #define CELLS 32
+/* The pieces a draw's rectangle overlaps, kept while no piece comes or goes
+ * (layout): a menu draws each letter from a page holding a few hundred
+ * pieces, and three lookups a letter scanned them all every frame (xg-e3tz). */
+#define MEMO_SLOTS 1024
+#define MEMO_PIECES 30
 typedef struct {
     uintptr_t addr;
     uint64_t age;
@@ -26,28 +33,37 @@ typedef struct {
     uint8_t indices[14*13];
 } RamGlyph;
 typedef struct {
-    uint64_t age, key, checked, group;
+    /* serial: this piece's own number, never reused: its indices and place
+     * never change while it lives, so an overlay names its pieces by it. */
+    uint64_t age, key, checked, group, serial;
     int x, y, w, h, depth, shift, mask, limit, valid, proportional;
     uint8_t* indices;
 } Piece;
 typedef struct {
-    /* keyed: texels/palette are the decode's content keys and place its
-     * page and UVs; otherwise decoded is the decode's revision. */
-    uint64_t age, decoded, texels, palette, layout, pack;
+    /* keyed: texels is the decode's content key and place its page and
+     * UVs; otherwise decoded is the decode's revision. made: the serials of
+     * the pieces composed in, hashed. */
+    uint64_t age, decoded, texels, made, pack;
     uint32_t place;
     int w, h, keyed, next; /* next: slot+1 in this bucket's chain */
     TextureSample sample;
-    uint8_t* rgba;
+    uint8_t* indices;
     size_t bytes;
 } Sample;
+typedef struct {
+    uint64_t layout;
+    int x, y, w, h, depth, count;
+    uint16_t piece[MEMO_PIECES];
+} Memo;
 static RamGlyph ram[RAM_SLOTS];
 static Piece pieces[PIECE_SLOTS];
 static Sample samples[CACHE_SLOTS];
 static int buckets[CACHE_BUCKETS]; /* slot+1, 0 empty */
+static Memo memos[MEMO_SLOTS];
 static uint64_t cellPieces[CELLS][PIECE_SLOTS/64];
 static int (*textPolicy)(void);
 static TextureGlyphStats stats;
-static uint64_t clock, layout, revision;
+static uint64_t clock, layout = 1, revision, serials;
 static int loaded, enabled;
 
 int textureGlyphsEnabled(void) {
@@ -97,20 +113,20 @@ static void dropPiece(Piece* p) {
     memset(p,0,sizeof(*p)); ++layout;
 }
 static uint32_t sampleHash(const Sample* s) {
-    uint64_t h=s->keyed?s->texels^s->palette*UINT64_C(0x9E3779B97F4A7C15)^((uint64_t)s->place<<17)^
+    uint64_t h=s->keyed?s->texels^((uint64_t)s->place<<17)^
                ((uint64_t)(unsigned)s->w<<40)^((uint64_t)(unsigned)s->h<<52):s->decoded;
-    h^=s->layout*UINT64_C(0xC2B2AE3D27D4EB4F)^s->pack*UINT64_C(0x165667B19E3779F9);
+    h^=s->made*UINT64_C(0xC2B2AE3D27D4EB4F)^s->pack*UINT64_C(0x165667B19E3779F9);
     h^=h>>29; h*=UINT64_C(0xBF58476D1CE4E5B9); h^=h>>32;
     return (uint32_t)(h%CACHE_BUCKETS);
 }
 static int sameSample(const Sample* a,const Sample* b) {
-    if (a->keyed!=b->keyed || a->layout!=b->layout || a->pack!=b->pack) return 0;
-    return a->keyed?a->texels==b->texels && a->palette==b->palette && a->place==b->place && a->w==b->w && a->h==b->h:
+    if (a->keyed!=b->keyed || a->made!=b->made || a->pack!=b->pack) return 0;
+    return a->keyed?a->texels==b->texels && a->place==b->place && a->w==b->w && a->h==b->h:
                     a->decoded==b->decoded;
 }
 static void dropSample(Sample* s) {
-    if (s->rgba) {
-        stats.cacheBytes-=s->bytes; --stats.cached; free(s->rgba);
+    if (s->indices) {
+        stats.cacheBytes-=s->bytes; --stats.cached; free(s->indices);
         int at=(int)(s-samples)+1;
         for (int* link=&buckets[sampleHash(s)];*link;link=&samples[*link-1].next)
             if (*link==at) { *link=s->next; break; }
@@ -121,7 +137,7 @@ void textureGlyphReset(void) {
     for (int i=0;i<PIECE_SLOTS;++i) dropPiece(&pieces[i]);
     for (int i=0;i<CACHE_SLOTS;++i) dropSample(&samples[i]);
     memset(ram,0,sizeof(ram)); memset(&stats,0,sizeof(stats));
-    memset(cellPieces,0,sizeof(cellPieces)); memset(buckets,0,sizeof(buckets));
+    memset(cellPieces,0,sizeof(cellPieces)); memset(buckets,0,sizeof(buckets)); memset(memos,0,sizeof(memos));
     /* Revisions never repeat while a queued immutable GPU copy can exist. */
 }
 static uint64_t byte(uint64_t h,unsigned b) { return (h^(uint8_t)b)*UINT64_C(1099511628211); }
@@ -209,7 +225,7 @@ static void addPiece(int x,int y,int w,int h,int depth,int shift,int mask,int li
     while (stats.sourceBytes+bytes>SOURCE_BYTES) dropPiece(oldestPiece());
     p->indices=copy; p->x=x; p->y=y; p->w=w; p->h=h; p->depth=depth;
     p->shift=shift; p->mask=mask; p->limit=limit; p->age=++clock;
-    p->proportional=group!=0; p->group=group;
+    p->proportional=group!=0; p->group=group; p->serial=++serials;
     p->key=textureGlyphKey(indices,w,h,depth);
     markPiece(p,1);
     stats.sourceBytes+=bytes; ++stats.pieces;
@@ -345,18 +361,36 @@ static int selectPieces(TextureRequest r,int depth,int* x,int* y,int* selected) 
     if (r.u+r.w>256 || r.v+r.h>256 || *x+r.w>VRAM_W*ppw || *y+r.h>VRAM_H) return 0;
     /* Ascending piece order, as a scan of every slot: overlapping pieces
      * of one plane compose in that order. A word is read before its pieces
-     * are checked; one dropped meanwhile has no indices. */
-    uint32_t cells=cellsOf(*x/ppw,*y,(*x+r.w-1)/ppw,*y+r.h-1);
+     * are checked; one dropped meanwhile has no indices. The memo keeps the
+     * same pieces in the same order, so it visits what the scan would. */
+    uint64_t k=(uint64_t)(unsigned)*x|(uint64_t)(unsigned)*y<<13|(uint64_t)(unsigned)r.w<<22|
+               (uint64_t)(unsigned)r.h<<31|(uint64_t)(unsigned)depth<<40;
+    k*=UINT64_C(0x9E3779B97F4A7C15);
+    Memo* m=&memos[(k>>40)&(MEMO_SLOTS-1)];
     int count=0;
-    for (int word=0;word<PIECE_SLOTS/64;++word) {
-        uint64_t bits=0;
-        for (int c=0;c<CELLS;++c) if (cells&(1u<<c)) bits|=cellPieces[c][word];
-        for (;bits;bits&=bits-1) {
-            int i=word*64+__builtin_ctzll(bits);
-            Piece* p=&pieces[i];
-            if (p->indices && p->depth==depth && p->x<*x+r.w && p->x+p->w>*x &&
-                p->y<*y+r.h && p->y+p->h>*y && matches(p)) selected[count++]=i;
+    if (m->layout==layout && m->x==*x && m->y==*y && m->w==r.w && m->h==r.h && m->depth==depth) {
+        for (int j=0;j<m->count;++j) {
+            Piece* p=&pieces[m->piece[j]];
+            if (p->indices && matches(p)) selected[count++]=m->piece[j];
         }
+    } else {
+        Memo made={layout,*x,*y,r.w,r.h,depth,0,{0}};
+        uint32_t cells=cellsOf(*x/ppw,*y,(*x+r.w-1)/ppw,*y+r.h-1);
+        for (int word=0;word<PIECE_SLOTS/64;++word) {
+            uint64_t bits=0;
+            for (int c=0;c<CELLS;++c) if (cells&(1u<<c)) bits|=cellPieces[c][word];
+            for (;bits;bits&=bits-1) {
+                int i=word*64+__builtin_ctzll(bits);
+                Piece* p=&pieces[i];
+                if (!p->indices || p->depth!=depth || p->x>=*x+r.w || p->x+p->w<=*x ||
+                    p->y>=*y+r.h || p->y+p->h<=*y) continue;
+                if (made.count<MEMO_PIECES) made.piece[made.count]=(uint16_t)i;
+                ++made.count;
+                if (matches(p)) selected[count++]=i;
+            }
+        }
+        /* Kept only when complete and no piece went meanwhile. */
+        if (made.count<=MEMO_PIECES && layout==made.layout) *m=made;
     }
     /* A later mismatch can retire a composition already selected above. */
     int kept=0;
@@ -393,29 +427,38 @@ int textureGlyphCompose(const DecodedTexture* d,TextureSample* out) {
     int x,y,selected[PIECE_SLOTS];
     int count=selectPieces(r,d->depth,&x,&y,selected);
     if (!count) return 0;
-    /* The overlay is a function of the decoded indices and palette, the
-     * pieces over its page position (layout) and the authored maps (pack). */
+    /* The overlay is a function of the decoded indices, the pieces composed
+     * in (their serials: a piece added or dropped elsewhere leaves it be) and
+     * the authored maps (pack). The CLUT colours it on the GPU. */
     Sample want={0};
     want.keyed=d->texelKey && !r.stableTo;
-    want.decoded=d->revision; want.texels=d->texelKey; want.palette=d->paletteKey;
+    want.decoded=d->revision; want.texels=d->texelKey;
     want.place=(uint32_t)r.tpage|(uint32_t)(r.u&255)<<16|(uint32_t)(r.v&255)<<24;
-    want.w=r.w; want.h=r.h; want.layout=layout;
+    want.w=r.w; want.h=r.h;
+    want.made=UINT64_C(14695981039346656037)^(uint64_t)count;
+    for (int i=0;i<count;++i) {
+        want.made=(want.made^pieces[selected[i]].serial)*UINT64_C(0x9E3779B97F4A7C15);
+        want.made^=want.made>>29;
+    }
     want.pack=texturePackGeneration()*2+!textureReplacementsShown(); /* the A/B comparison's overlays apart */
     uint32_t bucket=sampleHash(&want);
     for (int at=buckets[bucket];at;at=samples[at-1].next) {
         Sample* s=&samples[at-1];
-        if (s->rgba && sameSample(s,&want)) { s->age=++clock; *out=s->sample; ++stats.overlays; return 1; }
+        if (s->indices && sameSample(s,&want)) { s->age=++clock; *out=s->sample; ++stats.overlays; return 1; }
     }
     Sample* slot=&samples[0];
-    for (int i=0;i<CACHE_SLOTS && slot->rgba;++i) if (!samples[i].rgba || samples[i].age<slot->age) slot=&samples[i];
+    for (int i=0;i<CACHE_SLOTS && slot->indices;++i) if (!samples[i].indices || samples[i].age<slot->age) slot=&samples[i];
     int scale=8;
     while ((size_t)r.w*r.h*scale*scale>1024*1024) scale/=2;
-    int width=r.w*scale,height=r.h*scale;
-    size_t pixels=(size_t)width*height, bytes=pixels*4;
-    uint8_t* indices=malloc(pixels), *rgba=malloc(bytes);
-    if (!indices || !rgba) { free(indices); free(rgba); return 0; }
-    for (int yy=0;yy<height;++yy) for (int xx=0;xx<width;++xx)
-        indices[(size_t)yy*width+xx]=d->texels[(yy/scale)*r.w+xx/scale];
+    int width=r.w*scale;
+    size_t pixels=(size_t)width*r.h*scale, bytes=pixels;
+    uint8_t* indices=malloc(pixels);
+    if (!indices) return 0;
+    for (int ty=0;ty<r.h;++ty) { /* each native texel a scale x scale block */
+        uint8_t* row=indices+(size_t)ty*scale*width;
+        for (int tx=0;tx<r.w;++tx) memset(row+tx*scale,d->texels[ty*r.w+tx],(size_t)scale);
+        for (int k=1;k<scale;++k) memcpy(row+(size_t)k*width,row,(size_t)width);
+    }
     /* Clear just the selected proportional planes before OR-compositing their
      * enhanced glyphs. The other packed line and palette remain native. */
     for (int i=0;i<count;++i) {
@@ -444,20 +487,15 @@ int textureGlyphCompose(const DecodedTexture* d,TextureSample* out) {
             else indices[at]=(uint8_t)((indices[at]&~p->mask)|((index<<p->shift)&p->mask));
         }
     }
-    for (size_t i=0;i<pixels;++i) {
-        uint16_t word=d->palette[indices[i]];
-        for (int k=0;k<3;++k) { int c=(word>>(k*5))&31; rgba[i*4+k]=(uint8_t)((c<<3)|(c>>2)); }
-        rgba[i*4+3]=word==0?0:word&0x8000?128:255;
-    }
-    free(indices); dropSample(slot);
+    dropSample(slot);
     while (stats.cacheBytes+bytes>CACHE_BYTES) {
         Sample* victim=NULL;
-        for (int i=0;i<CACHE_SLOTS;++i) if (samples[i].rgba && (!victim || samples[i].age<victim->age)) victim=&samples[i];
+        for (int i=0;i<CACHE_SLOTS;++i) if (samples[i].indices && (!victim || samples[i].age<victim->age)) victim=&samples[i];
         dropSample(victim);
     }
     *slot=want;
-    slot->rgba=rgba; slot->bytes=bytes; slot->age=++clock;
+    slot->indices=indices; slot->bytes=bytes; slot->age=++clock;
     slot->next=buckets[bucket]; buckets[bucket]=(int)(slot-samples)+1;
-    slot->sample=(TextureSample){rgba,UINT64_C(0x4000000000000000)|++revision,r.u,r.v,r.w,r.h,scale,NULL,0};
+    slot->sample=(TextureSample){NULL,UINT64_C(0x4000000000000000)|++revision,r.u,r.v,r.w,r.h,scale,indices,0};
     stats.cacheBytes+=bytes; ++stats.cached; ++stats.overlays; *out=slot->sample; return 1;
 }

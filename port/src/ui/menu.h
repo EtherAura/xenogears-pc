@@ -42,6 +42,11 @@ void touchpadDraw(ImDrawList* d, float w, float h);
 void markBlock();                // an option's block starts here (at the cursor): scrolling shows it whole
 SDL_Window* window();
 void closeMenu();                // leave the menu at the end of this frame
+bool padHeld(const char* button); // a PS1 button ("select", "square", "confirm"...) held: its keys, gamepads, touch pad
+// The dialogue backlog (backlog.cpp; system/backlog.h): the menu opened as
+// it (uiRequestBacklog), and each of its frames: true to close.
+void backlogOpened();
+bool drawBacklog();
 void showSetupSection(int section); // the setup screen: that page, the cursor in it
 // A setting's line under its control: the environment overrides it (XG_<KEY>),
 // or a note in the hint colour.

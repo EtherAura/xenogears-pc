@@ -14,10 +14,20 @@ typedef unsigned long long u64;
  * Integers that hold a pointer (PC port, docs/PORT_PLAN.md). On the PS1 a
  * pointer is 32 bits, so these are exactly u32/s32 and change no code; on a
  * 64-bit host they are pointer-sized. Use them where the game keeps an
- * address in an integer (offset arithmetic, relocation, packed fields).
+ * address in an integer (offset arithmetic, relocation, packed fields), and
+ * only there: canonical save states (tools/state_schema.py) move what they
+ * hold with the build, as they move pointers.
  */
 typedef __UINTPTR_TYPE__ uptr;
 typedef __INTPTR_TYPE__ sptr;
+
+/*
+ * scratch64: a work area's words that hold nothing a save state carries to
+ * another version (the game rebuilds them before it reads them again; the PC's
+ * buffers handed to code that lays out its own structs there). Canonical save
+ * states (tools/state_schema.py) leave such memory zero.
+ */
+typedef u64 scratch64;
 
 /*
  * REG_PIN("$n"): pin a register variable to a MIPS register, the documented

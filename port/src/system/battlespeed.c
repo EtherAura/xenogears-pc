@@ -63,6 +63,8 @@ void presentShowNote(const char* text) __attribute__((weak)); /* gpu/present.c *
  * state (weak: battlespeedtest links this file without it). */
 extern int fieldSpeedChosen(void) __attribute__((weak));
 extern int fieldSpeedWanted(void) __attribute__((weak));
+extern int fieldSpeedOnScreen(void) __attribute__((weak));
+extern int fieldSpeedStep(void) __attribute__((weak));
 extern void fieldSpeedStateIo(XgState* s) __attribute__((weak));
 /* gameplay.c: the class of the battle that started last (weak: fieldspeedtest
  * links this file without it, and every battle is then the saved speed's). */
@@ -287,46 +289,53 @@ int battleSpeedStep(void) {
 }
 
 enum { MOD_SHIFT = 1, MOD_CTRL = 2, MOD_ALT = 4 };
-static struct {
-    unsigned revision;
-    int valid;
+typedef struct {
     SDL_Scancode key;
     int mods;
     unsigned button; /* the pad bits of the chord (pad.c's active-high order), 0 for none */
+} SpeedControl;
+static struct {
+    unsigned revision;
+    int valid;
+    SpeedControl battle; /* battle_speed_key, battle_speed_button: in a battle */
+    SpeedControl field;  /* field_speed_key, field_speed_button: on the field and the world map (fieldspeed.c) */
 } control;
 
 /* "Tab", "Shift+Tab", "none" (as port/src/ui/diagnostics.cpp's hotkeys). */
-static void parseKey(const char* s) {
+static void parseKey(SpeedControl* c, const char* s) {
     char buf[64];
     SDL_strlcpy(buf, s != NULL && s[0] != '\0' ? s : "Tab", sizeof buf);
     char* name = buf;
-    control.mods = 0;
+    c->mods = 0;
     for (;;) {
         char* plus = strchr(name, '+');
         if (plus == NULL || plus[1] == '\0') break;
         *plus = '\0';
-        if (!SDL_strcasecmp(name, "shift")) control.mods |= MOD_SHIFT;
-        else if (!SDL_strcasecmp(name, "ctrl") || !SDL_strcasecmp(name, "control")) control.mods |= MOD_CTRL;
-        else if (!SDL_strcasecmp(name, "alt")) control.mods |= MOD_ALT;
+        if (!SDL_strcasecmp(name, "shift")) c->mods |= MOD_SHIFT;
+        else if (!SDL_strcasecmp(name, "ctrl") || !SDL_strcasecmp(name, "control")) c->mods |= MOD_CTRL;
+        else if (!SDL_strcasecmp(name, "alt")) c->mods |= MOD_ALT;
         name = plus + 1;
     }
-    control.key = SDL_strcasecmp(name, "none") == 0 ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(name);
-    if (control.key == SDL_SCANCODE_UNKNOWN && SDL_strcasecmp(name, "none") != 0) {
-        control.key = SDL_SCANCODE_TAB; /* not a key name: the default */
-        control.mods = 0;
+    c->key = SDL_strcasecmp(name, "none") == 0 ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(name);
+    if (c->key == SDL_SCANCODE_UNKNOWN && SDL_strcasecmp(name, "none") != 0) {
+        c->key = SDL_SCANCODE_TAB; /* not a key name: the default */
+        c->mods = 0;
     }
 }
 
 /* The pad's control: a button or a chord ("select+r2", either order) of the
  * shoulders and Select, which character and Gear battles never read
  * (battleHandleInput, b_80089B50.c: only the debug kit's), or none. Not a
- * known name: the default chord. */
+ * known name: the default chord. On the field and the world map Select is
+ * the game's too (the area map, the minimap): there selectchord.c keeps a
+ * chord of it from the game. */
 #define DEFAULT_CHORD 0x0102u /* Select + R2 */
+#define PAD_SELECT 0x0100u
 static unsigned parseButton(const char* s) {
     static const struct {
         const char* name;
         unsigned bit;
-    } names[] = {{"l2", 0x0001}, {"r2", 0x0002}, {"l1", 0x0004}, {"r1", 0x0008}, {"select", 0x0100}};
+    } names[] = {{"l2", 0x0001}, {"r2", 0x0002}, {"l1", 0x0004}, {"r1", 0x0008}, {"select", PAD_SELECT}};
     char buf[64];
     if (s == NULL || s[0] == '\0') return DEFAULT_CHORD;
     if (!SDL_strcasecmp(s, "none")) return 0;
@@ -350,36 +359,62 @@ static unsigned parseButton(const char* s) {
 static void loadControl(void) {
     if (!control.valid || control.revision != settingsRevision()) {
         describe();
-        parseKey(settingsGet("battle_speed_key"));
-        control.button = parseButton(settingsGet("battle_speed_button"));
+        settingsDescribe("field_speed_key", "field_speed_key: the field speed control on the keyboard, on the field and the "
+                                            "world map (default Tab; Shift+, Ctrl+, Alt+ or none)");
+        settingsDescribe("field_speed_button", "field_speed_button: the field speed control on the pad, as battle_speed_button "
+                                               "(default select+r2; there the game does not see a Select pressed with a "
+                                               "shoulder button)");
+        parseKey(&control.battle, settingsGet("battle_speed_key"));
+        control.battle.button = parseButton(settingsGet("battle_speed_button"));
+        parseKey(&control.field, settingsGet("field_speed_key"));
+        control.field.button = parseButton(settingsGet("field_speed_button"));
         control.revision = settingsRevision();
         control.valid = 1;
     }
+}
+
+static int keyIs(const SpeedControl* c, int scancode, int mods) {
+    return c->key != SDL_SCANCODE_UNKNOWN && scancode == (int)c->key && mods == c->mods;
 }
 
 int battleSpeedKey(int scancode, int mod) {
     loadControl();
     int mods = (mod & SDL_KMOD_SHIFT ? MOD_SHIFT : 0) | (mod & SDL_KMOD_CTRL ? MOD_CTRL : 0) |
                (mod & SDL_KMOD_ALT ? MOD_ALT : 0);
-    if (control.key == SDL_SCANCODE_UNKNOWN || scancode != (int)control.key || mods != control.mods) {
-        return 0;
+    if (keyIs(&control.battle, scancode, mods) && battleSpeedStep()) {
+        return 1;
     }
-    return battleSpeedStep();
+    return fieldSpeedStep != NULL && keyIs(&control.field, scancode, mods) && fieldSpeedStep();
 }
 
 /* pad.c, each vblank: port 1's buttons (live or scripted, before the game's
- * own remapping); the control acts when its chord completes: every button
- * of it held, one of them down this vblank (in either order, or together).
- * The game sees the buttons as well: battles do nothing with them. */
+ * own remapping); a control acts when its chord completes: every button of
+ * it held, one of them down this vblank (in either order, or together).
+ * Battles do nothing with the buttons; on the field and the world map
+ * selectchord.c keeps a live Select chord from the game. */
 static unsigned lastButtons;
+static int chordDown(unsigned chord, unsigned buttons, unsigned down) {
+    /* (not inside the soft reset's L1+R1+Select+Start) */
+    return chord != 0 && (buttons & chord) == chord && (down & chord) && (buttons & 0x0900) != 0x0900;
+}
 void battleSpeedPad(unsigned buttons) {
     loadControl();
     unsigned down = buttons & ~lastButtons;
     lastButtons = buttons;
-    unsigned chord = control.button;
-    if (chord != 0 && (buttons & chord) == chord && (down & chord) && (buttons & 0x0900) != 0x0900) {
-        battleSpeedStep(); /* (not inside the soft reset's L1+R1+Select+Start) */
+    if (chordDown(control.battle.button, buttons, down) && battleSpeedStep()) {
+        return;
     }
+    if (fieldSpeedStep != NULL && chordDown(control.field.button, buttons, down)) {
+        fieldSpeedStep();
+    }
+}
+
+int speedControlHoldsSelect(void) {
+    if (fieldSpeedChosen == NULL || fieldSpeedOnScreen == NULL) {
+        return 0;
+    }
+    loadControl();
+    return (control.field.button & PAD_SELECT) && fieldSpeedChosen() > 0 && fieldSpeedOnScreen() && !netplayActive();
 }
 
 /* ---- save states (savestate.h) ---- */

@@ -16,7 +16,11 @@
  *            F1  the settings menu (port/src/ui; the game pauses while it is open)
  *            F2  swap discs when the game asks for one (port/src/cd/swap.c)
  *            Tab in a battle, with Battle speed on: 1x, 2x, 4x (battlespeed.c,
- *                battle_speed_key; the pad's Select+R2 too, battle_speed_button)
+ *                battle_speed_key; the pad's Select+R2 too, battle_speed_button);
+ *                on the field and the world map, with Field speed on, the same
+ *                for it (field_speed_key, field_speed_button; selectchord.h)
+ *            H   with Dialogue backlog on: the text shown so far (backlog.c;
+ *                the pad's Select+Square too)
  * Display:   F3  aspect: 4:3, 1:1 (square pixels), 16:9, 16:10, 21:9, 32:9
  *            F4  scale: fit, integer, stretch
  *            Shift+F4  resolution: exact 1x, or back to the upscaled
@@ -714,6 +718,12 @@ extern int diagnosticsHotkey(int scancode, int mod) __attribute__((weak));
  * button (weak: pad tests link this file without it). */
 extern int battleSpeedKey(int scancode, int mod) __attribute__((weak));
 extern void battleSpeedPad(unsigned buttons) __attribute__((weak));
+/* selectchord.c: a live Select chord of the port's is kept from the game
+ * (weak, as battlespeed.c's). */
+extern unsigned selectChordFilter(unsigned live) __attribute__((weak));
+/* backlog.c: the dialogue backlog's key (H) and pad chord (Select+Square). */
+extern int backlogKey(int scancode, int mod) __attribute__((weak));
+extern void backlogPad(unsigned buttons) __attribute__((weak));
 
 static int keyBound(SDL_Scancode key);
 static void keyDown(SDL_Scancode key, SDL_Keymod mod) {
@@ -728,7 +738,11 @@ static void keyDown(SDL_Scancode key, SDL_Keymod mod) {
         return;
     }
     if (battleSpeedKey != NULL && battleSpeedKey((int)key, (int)mod)) {
-        return; /* the battle speed control (battlespeed.c), in a battle only */
+        return; /* the speed controls (battlespeed.c): in a battle, on the field and the world map */
+    }
+    if (backlogKey != NULL && !(mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT | SDL_KMOD_SHIFT | SDL_KMOD_GUI)) &&
+        !keyBound(key) && backlogKey((int)key, (int)mod)) {
+        return; /* the dialogue backlog (backlog.c), with it on */
     }
     switch (key) {
     case SDL_SCANCODE_F1:
@@ -1235,7 +1249,13 @@ void padVBlank(void) {
         live1 = live2 = 0;
     }
     if (battleSpeedPad != NULL) {
-        battleSpeedPad((unsigned)(port1 | live1)); /* its button, in a battle (battlespeed.c) */
+        battleSpeedPad((unsigned)(port1 | live1)); /* the speed controls' chords (battlespeed.c) */
+    }
+    if (backlogPad != NULL) {
+        backlogPad((unsigned)(port1 | live1)); /* the dialogue backlog's (backlog.c) */
+    }
+    if (!scripted && selectChordFilter != NULL) {
+        live1 = (u16)selectChordFilter(live1); /* ... and Select in one is not the game's (selectchord.h) */
     }
     if (netplayActive()) {
         /* netplay: this side's input out, both players' in (netplay.c) */

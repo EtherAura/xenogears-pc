@@ -70,6 +70,7 @@ class Schema:
             raise SystemExit(f"statecanon: no schema in {build} (tools/state_schema.py {build})")
         s = json.load(gzip.open(path, "rt"))
         self.types = s["types"]
+        self.type_names = s.get("type_names", {})
         # one object per address (DWARF can describe one twice: a definition and LTO's copy)
         seen_addr = {}
         for v in s["variables"]:
@@ -237,6 +238,33 @@ class Schema:
     def size(self, tid):
         return self.types[tid]["size"] if tid in self.types else 0
 
+    def gaps(self, tid):
+        """A struct's byte ranges outside every field (padding), as (lo, hi) pairs; cached."""
+        if not hasattr(self, "_gaps"):
+            self._gaps = {}
+        g = self._gaps.get(tid)
+        if g is None:
+            t = self.types.get(tid, {})
+            cover = bytearray(t.get("size", 0))
+            for f in t.get("fields", []):
+                if f.get("bits") is not None:
+                    lo_ = f["bit"] // 8; hi_ = (f["bit"] + f["bits"] + 7) // 8
+                else:
+                    lo_ = f["off"]; hi_ = f["off"] + self.size(f["type"])
+                for i in range(max(0, lo_), min(len(cover), hi_)):
+                    cover[i] = 1
+            g = []; i = 0
+            while i < len(cover):
+                if not cover[i]:
+                    j = i
+                    while j < len(cover) and not cover[j]:
+                        j += 1
+                    g.append((i, j)); i = j
+                else:
+                    i += 1
+            self._gaps[tid] = g
+        return g
+
 
 # ---- encoding -------------------------------------------------------------------------------------
 
@@ -244,6 +272,8 @@ class Encoder:
     def __init__(self, schema: Schema):
         self.s = schema
         self.warn = Counter()
+        self.heap = None      # the heap's blocks (encode_heap), for pointers into them
+        self.heap_lo = []
         self.current = ""
         self.unknown = Counter()  # (holder, value's symbol) of pointers to nothing known
 
@@ -299,9 +329,38 @@ class Encoder:
             break
         return path, off
 
+    def heap_pointer(self, v):
+        """A pointer into a heap block: the block's index, then by the block's type the element and field path
+        (a struct array), the word (pointers, OT links), or the byte (primitives, raw)."""
+        i = bisect.bisect_right(self.heap_lo, v + HEAP_HEADER) - 1
+        if i < 0:
+            return None
+        b = self.heap[i]
+        off = v - b["data"]
+        if off > b["size"] or off < -HEAP_HEADER:
+            return None
+        spec = b.get("spec")
+        if isinstance(spec, dict) and 0 <= off < b["size"]:
+            es = self.s.size(spec["tid"])
+            if es and off < (b["size"] // es) * es:
+                path, rest = self.path_of(spec["tid"], off % es)
+                out = {"hb": i, "e": off // es, "p": path}
+                if rest:
+                    out["b"] = rest
+                return out
+        if spec in ("ptrs", "otags") and 0 <= off < b["size"]:
+            return {"hb": i, "e": off // 8, "b": off % 8}
+        return {"hb": i, "o": off}
+
     def pointer(self, v, quiet=False):
         if v == 0:
             return None
+        if self.heap is not None and self.s.regions["heapArena"][0] <= v <= self.s.regions["heapArena"][1]:
+            hp = self.heap_pointer(v)
+            if hp is not None:
+                return hp
+            if not quiet:
+                self.warn["pointer into the heap outside every block (kept as an offset)"] += 1
         for name, key in (("heapArena", "heap"), ("gameStack", "stack"), ("pcScratchpad", "scratchpad")):
             lo, hi = self.s.regions.get(name, (0, 0))
             if lo <= v <= hi:
@@ -379,6 +438,11 @@ class Encoder:
             return [self.value(of, mem, off + i * es) for i in range(n)]
         if k == "struct":
             out = {}; seen = set()
+            gaps = self.s.gaps(tid)
+            if gaps:
+                pad = bytes(b for lo_, hi_ in gaps for b in mem[off + lo_:off + hi_])
+                if any(pad):
+                    out["pad"] = pad.hex()
             for f in t["fields"]:
                 key = self.field_key(f, seen)
                 if f.get("bits") is not None:
@@ -406,6 +470,7 @@ class Decoder:
     def __init__(self, schema: Schema):
         self.s = schema
         self.warn = Counter()
+        self.heap = None  # the target layout's blocks (decode_heap_layout)
 
     def offset_of(self, tid, path):
         off = 0
@@ -443,6 +508,21 @@ class Decoder:
             return 0
         if "raw" in p:
             return p["raw"]
+        if "hb" in p:
+            if self.heap is None or p["hb"] >= len(self.heap):
+                self.warn["pointer into a heap block not in the state"] += 1
+                return 0
+            b = self.heap[p["hb"]]
+            if "o" in p:
+                return b["data"] + p["o"]
+            spec = b.get("spec")
+            if isinstance(spec, dict):
+                o = self.offset_of(spec["tid"], p.get("p", []))
+                if o is None:
+                    self.warn["heap pointer path not in this build"] += 1
+                    o = 0
+                return b["data"] + p["e"] * self.s.size(spec["tid"]) + o + p.get("b", 0)
+            return b["data"] + p["e"] * 8 + p.get("b", 0)
         for name, key in (("heapArena", "heap"), ("gameStack", "stack"), ("pcScratchpad", "scratchpad")):
             if key in p:
                 return self.s.regions[name][0] + p[key]
@@ -511,6 +591,11 @@ class Decoder:
                     self.put(t["of"], e, buf, off + i * es)
         elif k == "struct":
             seen = set()
+            if "pad" in val:  # the saving build's bytes outside every field, where this build has the same layout
+                gaps = self.s.gaps(tid); pad = bytes.fromhex(val["pad"]); at = 0
+                if sum(h - l for l, h in gaps) == len(pad):
+                    for lo_, hi_ in gaps:
+                        buf[off + lo_:off + hi_] = pad[at:at + hi_ - lo_]; at += hi_ - lo_
             for f in t["fields"]:
                 key = Encoder.field_key(None, f, seen)
                 if key not in val:
@@ -602,13 +687,18 @@ def part_target(schema: Schema, tag: str):
     return var, path, tid, off
 
 
-def encode(state: Path, schema: Schema) -> tuple[dict, Encoder]:
+def encode(state: Path, schema: Schema, heap: bool = True) -> tuple[dict, Encoder]:
     h, body = sc.read_state(state)
     enc = Encoder(schema)
     records, raw = [], []
     covered = Counter(); total = Counter()
+    chunks = {t: body[o:o + n] for t, o, n in sc.chunks(body)}
+    heap_doc = encode_heap(schema, chunks, enc) if heap and "mem.heap" in chunks else None
     for tag, at, size in sc.chunks(body):
         data = memoryview(body)[at:at + size]
+        if tag == "mem.heap" and heap_doc is not None:
+            covered["heap"] += size; total["heap"] += size
+            continue
         m = re.fullmatch(r"mem\.(\w+)\.(data|bss)", tag)
         if m:
             sec = schema.sections.get(f"{m.group(1)}.{m.group(2)}")
@@ -640,7 +730,7 @@ def encode(state: Path, schema: Schema) -> tuple[dict, Encoder]:
         why = "same build only (P2: heap, P3/P4: stack)" if tag.startswith("mem.") else "part not in the schema"
         raw.append({"tag": tag, "b64": base64.b64encode(bytes(data)).decode(), "why": why})
         total["raw" if tag.startswith("mem.") else "host parts"] += size
-    doc = {"format": FORMAT, "header": h, "records": records, "raw": raw,
+    doc = {"format": FORMAT, "header": h, "records": records, "raw": raw, "heap": heap_doc,
            "coverage": {k: [covered[k], total[k]] for k in total}}
     return doc, enc
 
@@ -653,9 +743,16 @@ def decode(doc: dict, schema: Schema, template: Path) -> tuple[bytes, Decoder]:
     by_id = {r["id"]: r for r in doc["records"] if "part" not in r}
     by_part = {r["part"]: r for r in doc["records"] if "part" in r}
     raws = {r["tag"]: r for r in doc["raw"]}
+    if doc.get("heap"):
+        decode_heap_layout(doc["heap"], schema, dec)
     out = bytearray()
     for tag, at, size in sc.chunks(tbody):
         buf = bytearray(size)
+        if tag == "mem.heap" and doc.get("heap"):
+            buf = decode_heap(doc["heap"], schema, dec, size)
+            t = tag.encode()
+            out += bytes([len(t)]) + t + struct.pack("<I", size) + buf
+            continue
         m = re.fullmatch(r"mem\.(\w+)\.(data|bss)", tag)
         if m and f"{m.group(1)}.{m.group(2)}" in schema.sections:
             lo, hi = schema.sections[f"{m.group(1)}.{m.group(2)}"]
@@ -698,7 +795,36 @@ def write_state(template: Path, body: bytes, out: Path) -> None:
     out.write_bytes(bytes(head) + thumb + bytes(blocks))
 
 
+def masked_heap(schema: Schema, body: bytes) -> bytes:
+    """A body with its heap's caller fields (code addresses of the saving build: heap debugging) and free
+    blocks' contents (leftovers) zeroed: what a canonical state does not carry."""
+    chunks = {t: (o, n) for t, o, n in sc.chunks(body)}
+    if "mem.heap" not in chunks:
+        return body
+    o0, n0 = chunks["mem.heap"]
+    out = bytearray(body)
+    heap_lo = schema.regions["heapArena"][0]
+    blocks = heap_blocks(schema, {t: body[o:o + n] for t, (o, n) in chunks.items()})
+    for b in blocks:
+        hdr = o0 + b["data"] - HEAP_HEADER - heap_lo
+        if b.get("end"):
+            bits = int.from_bytes(out[hdr + 8:hdr + 12], "little") & ~0x1FFFFF
+            out[hdr + 8:hdr + 16] = bits.to_bytes(4, "little") + bytes(4)
+            continue
+        bits = int.from_bytes(out[hdr + 8:hdr + 12], "little") & ~0x1FFFFF
+        out[hdr + 8:hdr + 12] = bits.to_bytes(4, "little")
+        out[hdr + 12:hdr + 16] = bytes(4)
+        if not b["user"]:
+            d = o0 + b["data"] - heap_lo
+            out[d:d + b["size"]] = bytes(b["size"])
+    if blocks:  # after the end marker: unused
+        e = o0 + blocks[-1]["data"] - heap_lo
+        out[e:o0 + n0] = bytes(max(0, o0 + n0 - e))
+    return bytes(out)
+
+
 def compare(a: bytes, b: bytes, schema: Schema, limit=12) -> list[str]:
+    a, b = masked_heap(schema, a), masked_heap(schema, b)
     ca = {t: (o, n) for t, o, n in sc.chunks(a)}
     cb = {t: (o, n) for t, o, n in sc.chunks(b)}
     lines, where = [], Counter()
@@ -738,6 +864,7 @@ def crosscheck(a_state: Path, a: Schema, b_state: Path, b: Schema, limit=25) -> 
     doc = json.loads(json.dumps(doc))
     body, dec = decode(doc, b, b_state)
     _, bbody = sc.read_state(b_state)
+    body, bbody = masked_heap(b, body), masked_heap(b, bbody)
     raw_tags = {r["tag"] for r in doc["raw"] if r["why"].startswith(("same build", "part not"))}
     ca = {t: (o, n) for t, o, n in sc.chunks(body)}
     where = Counter(); checked = 0
@@ -765,6 +892,328 @@ def crosscheck(a_state: Path, a: Schema, b_state: Path, b: Schema, limit=25) -> 
     return lines, {"checked": checked, "differing": sum(where.values()), "encode": dict(enc.warn), "decode": dict(dec.warn)}
 
 
+# ---- the game heap (phase P2) -----------------------------------------------------------------
+
+HEAP_HEADER = 16  # sizeof(HeapBlock) on the PC (include/main/memory.h)
+
+
+def heap_blocks(schema: Schema, chunks: dict) -> list[dict]:
+    """The heap's blocks from heapFirstBlockData, in order: data address, size, owner (0 free), caller (the
+    allocating call's return address: HeapBlock m4_caller keeps it >> 2 in 21 bits), type, pinned."""
+    heap_lo = schema.regions["heapArena"][0]
+    heap = chunks["mem.heap"]
+    v = schema.by_name["heapFirstBlockData"]
+    sec = next(k for k, (lo, hi) in schema.sections.items() if lo <= v["addr"] < hi)
+    data = int.from_bytes(chunks["mem." + sec][v["addr"] - schema.sections[sec][0]:][:8], "little")
+    blocks = []
+    for _ in range(1 << 18):
+        o = data - HEAP_HEADER - heap_lo
+        if not (0 <= o <= len(heap) - HEAP_HEADER):
+            break
+        nxt = int.from_bytes(heap[o:o + 8], "little")
+        bits = int.from_bytes(heap[o + 8:o + 12], "little")
+        user = (bits >> 21) & 0xF
+        if user == 1:
+            blocks.append({"data": data, "size": 0, "user": 1, "end": True, "next": nxt, "bits": bits})
+            break
+        caller = (bits & 0x1FFFFF) << 2
+        blocks.append({"data": data, "size": nxt - HEAP_HEADER - data, "user": user, "caller": caller,
+                       "pinned": (bits >> 25) & 1, "type": (bits >> 26) & 0x3F, "bits": bits})
+        data = nxt
+    return blocks
+
+
+class Sites:
+    """Allocation call sites: a block's caller to its source line and the type allocated there."""
+
+    def __init__(self, schema: Schema):
+        self.s = schema
+        self.cache = {}
+        self.names = dict(schema.type_names)
+
+    def full(self, caller):
+        # 21 bits of address >> 2 keep 8 MiB: this executable's text (from 0x400000) is unique in it
+        return caller + (1 << 23) if caller < 0x400000 else caller
+
+    def lookup(self, callers):
+        todo = sorted({self.full(c) for c in callers} - set(self.cache))
+        if todo:
+            out = subprocess.run(["addr2line", "-f", "-i", "-e", str(self.s.exe)] + [hex(a - 1) for a in todo],
+                                 capture_output=True, text=True).stdout.splitlines()
+            # -i prints inlined frames too: the first pair is the innermost (the call's own line)
+            it = iter(out); rows = []
+            for fn in it:
+                loc = next(it, "?:0")
+                rows.append((fn, loc))
+            k = 0
+            for a in todo:
+                fn, loc = rows[k] if k < len(rows) else ("?", "?:0")
+                k += 1
+                f, _, line = loc.rpartition(":")
+                line = int(re.match(r"\d+", line).group(0)) if re.match(r"\d+", line) else 0
+                self.cache[a] = (fn, f, line)
+            # inlined frames shift the pairing: redo one by one where needed
+            if len(rows) != len(todo):
+                for a in todo:
+                    o = subprocess.run(["addr2line", "-f", "-e", str(self.s.exe), hex(a - 1)], capture_output=True,
+                                       text=True).stdout.splitlines()
+                    f, _, line = (o[1] if len(o) > 1 else "?:0").rpartition(":")
+                    self.cache[a] = (o[0] if o else "?", f, int(re.match(r"\d+", line).group(0)) if re.match(r"\d+", line) else 0)
+        return {c: self.cache[self.full(c)] for c in callers}
+
+    # P2 prototype: what a site allocates where its line does not say (sizeof) and no static's field takes it.
+    # The C runtime replaces this table with the type each site's request names (PC_HEAP_*, carl: types in the
+    # source); until then: (file, line) -> "prims" (a primitive buffer: OT tags and GPU words), "ptrs" (an
+    # array of pointers), or a type name.
+    OVERRIDES = {
+        ("model.c", 507): "prims", ("shape_transfer.c", 112): "prims",
+        ("convert.c", 12): "ptrs",
+    }
+
+    def type_of(self, site):
+        """The type allocated at a site: the tool's table, sizeof(T) in the request, or the pointer type of
+        the static field the block is assigned to (fieldSceneState.m298_walkMesh = allocateHeap(...))."""
+        fn, f, line = site
+        o = self.OVERRIDES.get((Path(f).name, line))
+        if o:
+            return o
+        try:
+            text = Path(f).read_text(errors="replace").splitlines()
+        except OSError:
+            return None
+        stmt = " ".join(text[max(0, line - 1):line + 1])
+        m = re.search(r"sizeof\s*\(\s*(?:struct\s+)?(\w+)\s*\)", stmt)
+        if m and m.group(1) in self.names:
+            return m.group(1)
+        m = re.search(r"\b(?:struct\s+)?(\w+)\s*\*\s*\w+\s*=\s*(?:\([^)]*\)\s*)?allocate\w*\(", stmt)  # T* x = allocate...
+        if m and m.group(1) in self.names:
+            return m.group(1)
+        m = re.search(r"([A-Za-z_][\w.]*(?:\[\w+\])?(?:\.[A-Za-z_]\w*)*)\s*=\s*(?:\([^)]*\)\s*)?allocate\w*\(", stmt)
+        if m:
+            path = re.sub(r"\[\w+\]", "", m.group(1)).split(".")
+            v = self.s.by_name.get(path[0])
+            if v is not None:
+                tid = v["tid"]
+                for name in path[1:]:
+                    t = self.s.types.get(tid, {})
+                    while t.get("k") == "arr":
+                        tid = t["of"]; t = self.s.types.get(tid, {})
+                    f2 = next((x for x in t.get("fields", []) if x["name"] == name), None)
+                    if f2 is None:
+                        return None
+                    tid = f2["type"]
+                t = self.s.types.get(tid, {})
+                while t.get("k") == "arr":
+                    tid = t["of"]; t = self.s.types.get(tid, {})
+                if t.get("k") == "ptr" and t.get("to") in self.s.types:
+                    tt = self.s.types[t["to"]]
+                    if tt.get("k") in ("struct", "union", "ptr", "arr"):
+                        return {"tid": t["to"]}
+        return None
+
+
+def heap_report(state: Path, schema: Schema, other=None, top: int = 40) -> None:
+    """Each allocation site's live blocks and the type the prototype gives them; with the same moment from a
+    build linked 0x1000000 higher (other: (state, schema)), the words that are pointers (they moved by it)."""
+    h, body = sc.read_state(state)
+    chunks = {t: body[o:o + n] for t, o, n in sc.chunks(body)}
+    blocks = [b for b in heap_blocks(schema, chunks) if b.get("user") and not b.get("end")]
+    ptrs = {}
+    if other is not None:
+        _, ob = sc.read_state(other[0])
+        oc = {t: ob[o:o + n] for t, o, n in sc.chunks(ob)}
+        oblocks = [b for b in heap_blocks(other[1], oc) if b.get("user") and not b.get("end")]
+        ha, hb = chunks["mem.heap"], oc["mem.heap"]
+        a0, b0 = schema.regions["heapArena"][0], other[1].regions["heapArena"][0]
+        for x, y in zip(blocks, oblocks):
+            n = 0
+            for w in range(0, min(x["size"], y["size"]) - 7, 8):
+                oa = x["data"] - a0 + w; ob_ = y["data"] - b0 + w
+                va = int.from_bytes(ha[oa:oa + 8], "little"); vb = int.from_bytes(hb[ob_:ob_ + 8], "little")
+                if va != vb and (vb - va == 0x1000000 or any(((vb >> k) & 0xFFFFFFFF) - ((va >> k) & 0xFFFFFFFF) == 0x1000000 for k in (0, 32))):
+                    n += 1
+            ptrs[x["data"]] = n
+    sites = Sites(schema)
+    where = sites.lookup([b["caller"] for b in blocks])
+    by = {}
+    for b in blocks:
+        site = where[b["caller"]]
+        t = sites.type_of(site)
+        if isinstance(t, dict):
+            t = schema.types[t["tid"]].get("name") or f"<{t['tid']}>"
+        key = (site[0], Path(site[1]).name, site[2], t)
+        st = by.setdefault(key, [0, 0, 0])
+        st[0] += 1; st[1] += b["size"]; st[2] += ptrs.get(b["data"], 0)
+    typed = sum(st[1] for k, st in by.items() if k[3])
+    total = sum(st[1] for st in by.values())
+    need = [k for k, st in by.items() if st[2] and not k[3]]
+    print(f"statecanon heap: {len(blocks)} live blocks, {total} bytes; {len(by)} sites; typed: "
+          f"{sum(1 for k in by if k[3])} sites, {typed} bytes" +
+          (f"; untyped sites holding pointers: {len(need)}" if other is not None else ""))
+    for (fn, f, line, t), (n, size, p) in sorted(by.items(), key=lambda kv: -kv[1][1])[:top]:
+        print(f"  {size:8d} {n:4d} {p if other is not None else '':>6}  {fn} ({f}:{line})  {t or '-'}")
+
+
+PRIM_LINK = (1 << 56) - 1
+
+
+def type_spec(schema: Schema, sites: "Sites", site) -> object:
+    """A block's type for the encoder: {"tid"} for a struct (an array of them), or "prims", "ptrs", "otags",
+    or None (raw bytes)."""
+    t = sites.type_of(site)
+    if isinstance(t, dict):
+        tt = schema.types.get(t["tid"], {})
+        if tt.get("k") == "ptr":
+            return "ptrs"
+        if tt.get("k") == "otag":
+            return "otags"
+        return {"tid": t["tid"]} if tt.get("k") in ("struct", "union") else None
+    if t in ("prims", "ptrs", "otags"):
+        return t
+    if isinstance(t, str) and t in schema.type_names:
+        return {"tid": schema.type_names[t]}
+    return None
+
+
+def encode_prims(enc: "Encoder", mem, off: int, size: int):
+    """A primitive buffer: each primitive's tag (the words' count and the link) and its GPU words. Stops at what
+    does not parse as primitives; the rest is kept as bytes."""
+    prims, o = [], 0
+    while o + 8 <= size:
+        tag = int.from_bytes(mem[off + o:off + o + 8], "little")
+        n = tag >> 56; link = tag & PRIM_LINK
+        step = (8 + 4 * n + 7) & ~7
+        if n > 16 or o + step > size:
+            break
+        prims.append({"n": n, "l": "end" if link == PRIM_LINK else enc.pointer(link, quiet=True),
+                      "w": bytes(mem[off + o + 8:off + o + step]).hex()})
+        o += step
+    return {"prims": prims, "x": bytes(mem[off + o:off + size]).hex()}
+
+
+def put_prims(dec: "Decoder", val, buf, off: int, size: int):
+    o = 0
+    for p in val["prims"]:
+        link = PRIM_LINK if p["l"] == "end" else dec.pointer(p["l"]) & PRIM_LINK
+        buf[off + o:off + o + 8] = ((p["n"] << 56) | link).to_bytes(8, "little")
+        w = bytes.fromhex(p["w"]); buf[off + o + 8:off + o + 8 + len(w)] = w
+        o += 8 + len(w)
+    x = bytes.fromhex(val["x"]); buf[off + o:off + o + len(x)] = x[:max(0, size - o)]
+
+
+def encode_heap(schema: Schema, chunks: dict, enc: "Encoder") -> dict:
+    """The game heap as its blocks in order (the canonical heap, phase P2): free blocks by size, live ones
+    with owner, flags, the allocation site, and their contents by type."""
+    heap_lo = schema.regions["heapArena"][0]
+    mem = memoryview(chunks["mem.heap"])
+    blocks = heap_blocks(schema, chunks)
+    sites = Sites(schema)
+    where = sites.lookup([b["caller"] for b in blocks if b.get("user") and not b.get("end")])
+    for b in blocks:
+        if b.get("user") and not b.get("end"):
+            b["site"] = where[b["caller"]]
+            b["spec"] = type_spec(schema, sites, b["site"])
+    enc.heap = blocks
+    enc.heap_lo = [b["data"] for b in blocks]
+    out = []
+    for i, b in enumerate(blocks):
+        if b.get("end"):
+            out.append({"end": True, "next": enc.pointer(b["next"], quiet=True), "bits": b["bits"] & ~0x1FFFFF}); continue
+        if not b["user"]:
+            out.append({"free": b["size"], "pin": b["pinned"], "ty": b["type"]}); continue
+        rec = {"u": b["user"], "pin": b["pinned"], "ty": b["type"], "size": b["size"],
+               "site": [b["site"][0], Path(b["site"][1]).name, b["site"][2]]}
+        off = b["data"] - heap_lo; spec = b["spec"]; size = b["size"]
+        enc.current = f"heap block {i} ({b['site'][0]})"
+        if isinstance(spec, dict):
+            es = schema.size(spec["tid"]); n = size // es if es else 0
+            rec["t"] = spec; rec["n"] = n
+            rec["v"] = [enc.value(spec["tid"], mem, off + k * es) for k in range(n)]
+            rec["x"] = bytes(mem[off + n * es:off + size]).hex()
+        elif spec == "ptrs":
+            rec["t"] = spec
+            rec["v"] = [enc.pointer(int.from_bytes(mem[off + k:off + k + 8], "little"), quiet=True)
+                        for k in range(0, size - 7, 8)]
+        elif spec == "otags":
+            rec["t"] = spec
+            rec["v"] = [enc.value("OTag", mem, off + k) for k in range(0, size - 7, 8)]
+        elif spec == "prims":
+            rec["t"] = spec
+            rec["v"] = encode_prims(enc, mem, off, size)
+        else:
+            rec["x"] = bytes(mem[off:off + size]).hex()
+        out.append(rec)
+    return {"first": blocks[0]["data"] - heap_lo if blocks else 0, "blocks": out}
+
+
+def decode_heap_layout(h: dict, schema: Schema, dec: "Decoder") -> None:
+    """Where each block goes in this build: in order from the same start, each live one sized by this build's
+    types (a struct array's elements may have grown), free ones as they were."""
+    heap_lo = schema.regions["heapArena"][0]
+    data = heap_lo + h["first"]
+    layout = []
+    for rec in h["blocks"]:
+        if rec.get("end"):
+            layout.append({"data": data, "size": 0, "end": True, "rec": rec}); break
+        if "free" in rec:
+            size = rec["free"]; spec = None
+        else:
+            spec = rec.get("t")
+            if isinstance(spec, dict):
+                if spec["tid"] not in schema.types:
+                    dec.warn["heap block type not in this build (kept as bytes)"] += 1
+                    spec = None; size = rec["size"]
+                else:
+                    size = rec["n"] * schema.size(spec["tid"]) + len(rec.get("x", "")) // 2
+            elif spec in ("ptrs", "otags"):
+                size = len(rec["v"]) * 8
+            else:
+                size = rec["size"]
+        layout.append({"data": data, "size": size, "spec": spec, "rec": rec})
+        data += size + HEAP_HEADER
+    dec.heap = layout
+
+
+def decode_heap(h: dict, schema: Schema, dec: "Decoder", heap_size: int) -> bytearray:
+    heap_lo = schema.regions["heapArena"][0]
+    buf = bytearray(heap_size)
+    for k, b in enumerate(dec.heap):
+        hdr = b["data"] - HEAP_HEADER - heap_lo
+        if hdr < 0 or hdr + HEAP_HEADER > heap_size:
+            dec.warn["heap block outside the arena"] += 1; continue
+        if b.get("end"):
+            rec = b.get("rec", {})
+            buf[hdr:hdr + 8] = (dec.pointer(rec.get("next")) & MASK64).to_bytes(8, "little")
+            buf[hdr + 8:hdr + 12] = rec.get("bits", 1 << 21).to_bytes(4, "little")
+            continue
+        nxt = dec.heap[k + 1]["data"] if k + 1 < len(dec.heap) else b["data"] + b["size"] + HEAP_HEADER
+        buf[hdr:hdr + 8] = nxt.to_bytes(8, "little")
+        rec = b["rec"]
+        if "free" in rec:
+            buf[hdr + 8:hdr + 12] = ((rec.get("pin", 0) << 25) | (rec.get("ty", 0) << 26)).to_bytes(4, "little")
+            continue
+        # the caller field (a code address of the saving build) is left zero: the heap's own debugging uses it
+        bits = (rec["u"] << 21) | (rec["pin"] << 25) | (rec["ty"] << 26)
+        buf[hdr + 8:hdr + 12] = bits.to_bytes(4, "little")
+        off = b["data"] - heap_lo; spec = b["spec"]
+        if isinstance(spec, dict):
+            es = schema.size(spec["tid"])
+            for i, v in enumerate(rec["v"]):
+                dec.put(spec["tid"], v, buf, off + i * es)
+            x = bytes.fromhex(rec.get("x", "")); buf[off + len(rec["v"]) * es:off + len(rec["v"]) * es + len(x)] = x
+        elif spec == "ptrs":
+            for i, v in enumerate(rec["v"]):
+                buf[off + i * 8:off + i * 8 + 8] = (dec.pointer(v) & MASK64).to_bytes(8, "little")
+        elif spec == "otags":
+            for i, v in enumerate(rec["v"]):
+                dec.put("OTag", v, buf, off + i * 8)
+        elif spec == "prims":
+            put_prims(dec, rec["v"], buf, off, b["size"])
+        else:
+            x = bytes.fromhex(rec["x"]); buf[off:off + len(x)] = x
+    return buf
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -773,9 +1222,15 @@ def main() -> int:
     d.add_argument("template", type=Path); d.add_argument("out", type=Path)
     r = sub.add_parser("roundtrip"); r.add_argument("state", type=Path); r.add_argument("build", type=Path)
     r.add_argument("--out", type=Path)
+    hp = sub.add_parser("heap"); hp.add_argument("state", type=Path); hp.add_argument("build", type=Path)
+    hp.add_argument("--other", nargs=2, type=Path, metavar=("STATE", "BUILD"))
     x = sub.add_parser("crosscheck"); x.add_argument("a_state", type=Path); x.add_argument("a_build", type=Path)
     x.add_argument("b_state", type=Path); x.add_argument("b_build", type=Path)
     a = ap.parse_args()
+    if a.cmd == "heap":
+        heap_report(a.state, Schema(a.build.resolve()),
+                    (a.other[0], Schema(a.other[1].resolve())) if a.other else None)
+        return 0
     if a.cmd == "crosscheck":
         lines, st = crosscheck(a.a_state, Schema(a.a_build.resolve()), a.b_state, Schema(a.b_build.resolve()))
         print(f"statecanon crosscheck: {st['checked']} bytes checked, {st['differing']} differ; encode {st['encode']}; "

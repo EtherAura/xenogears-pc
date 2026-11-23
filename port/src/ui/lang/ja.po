@@ -2310,6 +2310,14 @@ msgid "in a battle: battle speed 1x, 2x, 4x (Gameplay > Battle speed on)"
 msgstr "戦闘中: 戦闘速度を 1 倍、2 倍、4 倍に切り替え(ゲームプレイ > 戦闘速度がオンのとき)"
 
 #: port/src/ui/sections.cpp
+msgid "on the field and the world map: field speed 1x, 2x, 4x (Gameplay > Field speed on)"
+msgstr "フィールドとワールドマップ: フィールド速度を 1 倍、2 倍、4 倍に切り替え(ゲームプレイ > フィールド速度がオンのとき)"
+
+#: port/src/ui/sections.cpp
+msgid "the dialogue backlog: the text shown so far (Gameplay > Dialogue backlog on)"
+msgstr "会話ログ: これまでに出た文章(ゲームプレイ > 会話ログがオンのとき)"
+
+#: port/src/ui/sections.cpp
 msgid "The game is using this card; try again in a moment."
 msgstr "ゲームがこのカードを使っています。少ししてからもう一度どうぞ。"
 
@@ -7720,8 +7728,16 @@ msgid "The few rooms the game draws at 20 or 15 frames per second (with 60 Hz fi
 msgstr "ゲームが毎秒 20 か 15 フレームで描く数少ない部屋(60 Hz のフィールドのとき): これらも 60 Hz で動かすか(初期設定。本来の各フレームでオリジナルと正確に一致します)、くらべるために自分の速さのままにします。"
 
 #: port/src/ui/sections.cpp
-msgid "The field and the world map at 2x or 4x, their scenes and dialogue included: the game runs that many of its own frames per picture. Menus, movies and battles keep their own speed (Battle speed above is the battles'). Off and 1x: the original speed."
-msgstr "フィールドとワールドマップを、シーンや会話も含めて 2 倍、4 倍で進めます。1 画面ごとにゲーム自身のフレームをその数だけ進めます。メニュー、ムービー、バトルは自分の速さのままです(バトルの速さは上の「戦闘速度」で決めます)。オフと 1 倍で原作の速度になります。"
+msgid "The field and the world map at 2x or 4x, their scenes and dialogue included: the game runs that many of its own frames per picture. Menus, movies and battles keep their own speed (Battle speed above is the battles'). On the field and the world map, Tab (or Select + R2 together on a gamepad) steps 1x, 2x, 4x; while this is on, Select there does its own job (the area map, the minimap) as you let it go, and nothing when pressed with L1, R1, L2, R2 or Square. Off and 1x: the original speed; off, the control does nothing."
+msgstr "フィールドとワールドマップを、シーンや会話も含めて 2 倍、4 倍で進めます。1 画面ごとにゲーム自身のフレームをその数だけ進めます。メニュー、ムービー、バトルは自分の速さのままです(バトルの速さは上の「戦闘速度」で決めます)。フィールドとワールドマップでは Tab(ゲームパッドでは Select と R2 の同時押し)で 1 倍、2 倍、4 倍を切り替えます。オンの間、そこでの Select は押し終えたときに本来の働き(エリアマップ、ミニマップ)をし、L1、R1、L2、R2、□ と一緒に押したときは何もしません。オフと 1 倍で原作の速度になります。オフのときは切り替えも働きません。"
+
+#: port/src/ui/sections.cpp
+msgid "Keeps the text the game shows (the field's and the world map's windows, a battle's story lines and a movie's captions), so a line passed too soon can be read again: H, or Select + Square together on a gamepad, opens it over the paused game, in the game's own window and letters. Up and Down scroll, L1 and R1 a page; the cancel button, H or Select + Square closes it. While it is on, Select on the field, the world map and in battles does its own job as you let it go, and nothing when pressed with Square or a shoulder button. Off: nothing is kept."
+msgstr "ゲームに出た文章(フィールドとワールドマップのウィンドウ、戦闘中のストーリーの言葉、ムービーの字幕)を残し、読み進めてしまった言葉をもう一度読めるようにします。H(ゲームパッドでは Select と □ の同時押し)で、止めたゲームの上にゲーム本来のウィンドウと文字で開きます。上下でスクロール、L1 と R1 で 1 ページずつ動きます。キャンセルボタン、H、Select と □ で閉じます。オンの間、フィールド、ワールドマップ、戦闘での Select は押し終えたときに本来の働きをし、□ や L1、R1、L2、R2 と一緒に押したときは何もしません。オフのときは何も残しません。"
+
+#: port/src/ui/backlog.cpp
+msgid "Nothing yet: the text the game shows from now on is kept here."
+msgstr "まだありません。これからゲームに出る文章がここに残ります。"
 
 #: port/src/ui/sections.cpp
 msgid "The folder that holds your disc images (and a BIOS image), read where it is: nothing is copied. A new folder applies at the next start."
@@ -7925,6 +7941,10 @@ msgstr "ディスプレイ同期"
 #: port/src/ui/options.cpp port/src/ui/sections.cpp
 msgid "Field speed"
 msgstr "フィールド速度"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Dialogue backlog"
+msgstr "会話ログ"
 
 #: port/src/ui/options.cpp port/src/ui/sections.cpp
 msgid "GPU ordering"

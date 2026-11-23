@@ -24,6 +24,7 @@
 #include "psyq.h"
 #include "main/dialog.h"
 #include "battle/battle.h"
+#include "pc_backlog.h"
 
 s32 pcRetryAvailable(void); /* port/src/game/main/retry.c */
 void pcRetryArm(void);
@@ -101,6 +102,7 @@ void pcBattleRetryOffer(void) {
     retryWindow.m10_flags |= 2; /* no background tile: the window is the background */
     retryWindow.m68_charsPerStep = 0x20; /* a whole line a step */
     resetDialogWindow18(&retryWindow);
+    if (pcBacklogIgnore) pcBacklogIgnore(&retryWindow); /* the port's prompt: not the game's text */
     addDialogWindowsToOTSub2(&retryWindow, retryText);
     setupMultiChoiceColor(&retryWindow, 0xEF, 0x1E, 0xF0);
     setSelectedLineForMultiChoice(&retryWindow, choice);

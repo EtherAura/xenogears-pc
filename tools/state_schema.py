@@ -475,6 +475,11 @@ def main() -> int:
     # ---- the types a state's variables hold, for the canonical encoder (tools/statecanon.py) -------
     tids: dict[int, str] = {}
     table: dict[str, dict] = {}
+    complete = {}  # struct/union name -> the DIE of a complete definition (a member may name a declaration)
+    for off_, d_ in dies.items():
+        if d_["tag"] in ("DW_TAG_structure_type", "DW_TAG_union_type") and d_["children"] and \
+                "DW_AT_declaration" not in d_["attrs"] and d_["attrs"].get("DW_AT_name"):
+            complete.setdefault((d_["tag"], d_["attrs"]["DW_AT_name"]), off_)
 
     def tid(off):
         """A type's id in the schema (its DIE offset), described in `table` once; typedefs and qualifiers
@@ -490,6 +495,10 @@ def main() -> int:
         off = types.strip(off)
         if off is None or off not in dies:
             return None
+        d0 = dies[off]
+        if d0["tag"] in ("DW_TAG_structure_type", "DW_TAG_union_type") and \
+                ("DW_AT_declaration" in d0["attrs"] or not d0["children"]):
+            off = complete.get((d0["tag"], d0["attrs"].get("DW_AT_name")), off)
         key = f"{off:x}"
         if off in tids:
             return key
@@ -513,8 +522,8 @@ def main() -> int:
                 sa = dies[c]["attrs"]
                 dims.append(sa.get("DW_AT_count", sa.get("DW_AT_upper_bound", -1) + 1))
             elem = tid(a.get("DW_AT_type"))
-            for n in reversed(dims[1:]):  # int a[2][3]: an array of 2 arrays of 3
-                inner = f"{key}.{n}"
+            for depth, n in enumerate(reversed(dims[1:])):  # int a[2][3]: an array of 2 arrays of 3
+                inner = f"{key}.d{depth}"
                 table[inner] = {"k": "arr", "of": elem, "n": n, "size": n * table[elem]["size"] if elem else 0}
                 elem = inner
             n = dims[0] if dims else 0
@@ -541,6 +550,21 @@ def main() -> int:
         else:  # a function type reached by value, void, or something the encoder copies as bytes
             table[key] = {"k": "bytes", "size": types.size(off)}
         return key
+
+    # Every named struct and union of this repository's files, reachable from a static or not: the heap's
+    # blocks are typed by name (the allocation site's type; P2)
+    named_types = {}
+    for off, d in dies.items():
+        if d["tag"] in ("DW_TAG_structure_type", "DW_TAG_union_type") and d["children"] and \
+                "DW_AT_declaration" not in d["attrs"]:
+            n = d["attrs"].get("DW_AT_name")
+            if n:
+                named_types.setdefault(n, off)
+        elif d["tag"] == "DW_TAG_typedef":
+            n = d["attrs"].get("DW_AT_name"); t = types.strip(d["attrs"].get("DW_AT_type"))
+            if n and t in dies and dies[t]["tag"] in ("DW_TAG_structure_type", "DW_TAG_union_type") and dies[t]["children"]:
+                named_types.setdefault(n, d["attrs"]["DW_AT_type"])
+    type_names = {n: tid(off) for n, off in named_types.items()}
 
     for v in variables:
         if v.get("elem") is not None:
@@ -571,7 +595,7 @@ def main() -> int:
     schema = {"version": version, "exe": str(exe), "variables": [
         {k: v.get(k) for k in ("name", "addr", "size", "module", "section", "retail", "platform", "tid")}
         for v in variables if v["module"] or v["platform"]],
-        "types": table, "parts": part_files, "retyped": retyped,
+        "types": table, "type_names": type_names, "parts": part_files, "retyped": retyped,
         # where a raw state's memory chunks sit in this build (statecanon.py reads them by these)
         "sections": {f"{mod}.{kind}": [lo, hi] for lo, hi, mod, kind in modsec},
         "regions": {v["name"]: [v["addr"], v["addr"] + v["size"]] for v in variables

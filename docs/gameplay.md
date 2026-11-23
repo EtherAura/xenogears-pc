@@ -121,7 +121,8 @@ F1 > Audio > Japanese audio.
 | Setting | What it does |
 |---|---|
 | Speedup | Shorter memory card and loading waits; turns on smoothed motion |
-| Field speed | Fields and the world map at 2x or 4x, their scenes and dialogue included; menus, movies and battles keep their own speed |
+| Field speed | Fields and the world map at 2x or 4x, their scenes and dialogue included; menus, movies and battles keep their own speed. There Tab (or Select + R2) steps 1x, 2x, 4x; while it is on, Select does its own job there (the area map, the minimap) as you let it go |
+| Dialogue backlog | Keeps the text the game shows (field, world map, a battle's story lines, movie captions); H or Select + Square opens it over the paused game in the game's own window and letters, Up and Down scroll, L1 and R1 page |
 | PS1 frame rate | Heavy scenes drawn as slowly as on the PlayStation: each picture takes the time the console's CPU needed for it (a model of it); the game keeps its speed. Original engine |
 | Original-game bug fixes | Fixes a list of bugs in the original game |
 | Boss camera fix | Prevents a camera stall during one late-game boss attack |

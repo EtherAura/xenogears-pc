@@ -46,9 +46,9 @@
 //   1-3    on the quarter grid: the mean brightness of the surroundings, and
 //          the glow's two wide spreads;
 //   4      the bounce sources;
-//   5, 6   the normals softened across and down;
+//   5      the normals softened, across and down in one pass (6: none);
 //   7      top light and shade;
-//   8, 9   the shade smoothed along surfaces;
+//   8      the shade smoothed along surfaces, across and down (9: none);
 //   10, 11 on the quarter grid: the sources summed, then gathered by each
 //          quarter pixel within its reach (every one of them: no noise);
 //   12, 13 the glow's narrow spread, and the wide ones added;
@@ -125,7 +125,7 @@ layout(push_constant) uniform Light {
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
 const uint DEPTH_FIGURE = 0x40000000u;
-const int DEBUG = 1, ALL = 2;
+const int DEBUG = 1, ALL = 2, SMOOTHED = 4; // SMOOTHED: the shade is smoothed after pass 7 (which then writes tempB)
 
 // A depth code fits a 16-bit float: the view depth for scenery, its negative
 // for a figure, 0 where there is none (nothing drawn, or a kept picture).
@@ -362,29 +362,6 @@ void sources(ivec2 t) {
     imageStore(tempA, t, vec4(e, max(code, 0.0)));
 }
 
-// The normals softened along the surface (three PS1 pixels each way, only
-// across scenery of nearly the same depth), so low-poly rock reads as rock.
-void softNormals(ivec2 t, ivec2 axis, bool second) {
-    vec4 own = second ? imageLoad(tempB, t) : imageLoad(geo, t);
-    if (own.a <= 0.0) {
-        if (second) imageStore(tempC, t, own);
-        else imageStore(tempB, t, own);
-        return;
-    }
-    vec3 sum = vec3(0.0);
-    for (int d = -3; d <= 3; d++) {
-        ivec2 s = t + axis * d;
-        if (s.x < 0 || s.y < 0 || s.x >= pc.work.x || s.y >= pc.work.y) continue;
-        vec4 v = second ? imageLoad(tempB, s) : imageLoad(geo, s);
-        if (v.a <= 0.0) continue;
-        sum += v.xyz * (exp(-float(d * d) / 4.5) * exp(-abs(v.a - own.a) / (0.012 * own.a)));
-    }
-    float len = length(sum);
-    vec4 result = vec4(len > 1.0e-6 ? sum / len : own.xyz, own.a);
-    if (second) imageStore(tempC, t, result);
-    else imageStore(tempB, t, result);
-}
-
 // Top light from the softened normal; shade from the depth image around the
 // PS1 pixel's centre, sampled in the copy so a near thing's small reach
 // still finds its samples.
@@ -393,7 +370,8 @@ void topAndShade(ivec2 t) {
     vec4 raw = imageLoad(geo, t);
     float code = raw.a;
     if (code <= 0.0) {
-        imageStore(terms, t, vec4(0.0, 0.0, code, 0.0));
+        if ((pc.flags & SMOOTHED) != 0) imageStore(tempB, t, vec4(0.0, 0.0, code, 0.0));
+        else imageStore(terms, t, vec4(0.0, 0.0, code, 0.0));
         return;
     }
     float fade = backdropFade(code);
@@ -420,31 +398,155 @@ void topAndShade(ivec2 t) {
         }
         occlusion *= fade / float(SHADE_DIRS * SHADE_STEPS);
     }
-    imageStore(terms, t, vec4(top, occlusion, code, fade));
+    if ((pc.flags & SMOOTHED) != 0) imageStore(tempB, t, vec4(top, occlusion, code, fade));
+    else imageStore(terms, t, vec4(top, occlusion, code, fade));
 }
 
-// The shade smoothed along surfaces: across scenery of nearly the same depth
-// that faces the same way.
-void shadeBlur(ivec2 t, ivec2 axis, bool second) {
-    vec4 own = second ? imageLoad(tempB, t) : imageLoad(terms, t);
+// The two smoothings, each across then down in one pass: a group reads the
+// source around its 8x8 pixels into shared memory, smooths across there (the
+// rows above and below too), then down, so each takes one dispatch and no
+// image between its halves (xg-mrj.3.31: the halves were two passes, slow on
+// a phone's GPU). The halfway values are rounded to half floats, as the image
+// between the two passes held them, and every sum is the one the two passes
+// made, in the same order: the picture is the same bit for bit (below: on
+// a GPU that stores half floats rounded toward zero).
+shared vec4 tile[196];     // a pair's source around the group (14x14 or 12x12); the fog's sums
+shared uvec2 tileMid[112]; // the across half's results, half floats (14 or 12 rows of the group's 8)
+shared float tileZ[144];   // shadeBlur: the normals' z (x and y are in tile)
+
+// A float to a half float, rounded toward zero: what the image between the
+// two halves held (an Intel UHD 770 and an RTX 3070 Ti both store rgba16f
+// that way; Vulkan lets a store round either way. Measured: round-to-nearest
+// left one level of difference in a dump in seven, this none on either). On a
+// GPU whose stores round to nearest, a halfway value now differs from the two
+// passes' by the half float's last bit at most.
+uint halfRtz(float x) {
+    uint b = floatBitsToUint(x);
+    uint s = (b >> 16) & 0x8000u;
+    int e = int((b >> 23) & 0xFFu) - 112;
+    uint m = b & 0x7FFFFFu;
+    if (e >= 31) return s | 0x7BFFu; // the largest (never: depth codes stop at DEPTH_LIMIT)
+    if (e <= 0) {
+        if (e < -10) return s;
+        return s | ((m | 0x800000u) >> uint(14 - e));
+    }
+    return s | (uint(e) << 10) | (m >> 13);
+}
+uint packRtz(vec2 v) { return halfRtz(v.x) | (halfRtz(v.y) << 16); }
+uvec2 halfPack(vec4 v) { return uvec2(packRtz(v.xy), packRtz(v.zw)); }
+vec4 halfUnpack(uvec2 u) { return vec4(unpackHalf2x16(u.x), unpackHalf2x16(u.y)); }
+bool onGrid(ivec2 s) { return s.x >= 0 && s.y >= 0 && s.x < pc.work.x && s.y < pc.work.y; }
+
+// Pass 5: the normals softened along the surface (three PS1 pixels each way,
+// only across scenery of nearly the same depth), so low-poly rock reads as
+// rock; across then down, into tempC.
+void softNormalsPair() {
+    ivec2 o = ivec2(gl_WorkGroupID.xy) * 8, l = ivec2(gl_LocalInvocationID.xy);
+    uint i = gl_LocalInvocationIndex;
+    for (uint k = i; k < 196u; k += 64u) { // geo at o - 3 .. o + 10 both ways; off the grid: nothing (a = 0)
+        ivec2 s = o - 3 + ivec2(int(k % 14u), int(k / 14u));
+        tile[k] = onGrid(s) ? imageLoad(geo, s) : vec4(0.0);
+    }
+    barrier();
+    for (uint k = i; k < 112u; k += 64u) { // across, for rows o.y - 3 .. o.y + 10 of the group's columns
+        int c = int(k % 8u), r = int(k / 8u);
+        ivec2 t = ivec2(o.x + c, o.y - 3 + r);
+        vec4 own = tile[r * 14 + c + 3];
+        vec4 result = own;
+        if (onGrid(t) && own.a > 0.0) {
+            vec3 sum = vec3(0.0);
+            for (int d = -3; d <= 3; d++) {
+                ivec2 s = t + ivec2(d, 0);
+                if (s.x < 0 || s.y < 0 || s.x >= pc.work.x || s.y >= pc.work.y) continue;
+                vec4 v = tile[r * 14 + c + 3 + d];
+                if (v.a <= 0.0) continue;
+                sum += v.xyz * (exp(-float(d * d) / 4.5) * exp(-abs(v.a - own.a) / (0.012 * own.a)));
+            }
+            float len = length(sum);
+            result = vec4(len > 1.0e-6 ? sum / len : own.xyz, own.a);
+        }
+        tileMid[k] = halfPack(onGrid(t) ? result : vec4(0.0));
+    }
+    barrier();
+    ivec2 t = o + l;
+    if (!onGrid(t)) return;
+    vec4 own = halfUnpack(tileMid[(l.y + 3) * 8 + l.x]);
+    if (own.a <= 0.0) {
+        imageStore(tempC, t, own);
+        return;
+    }
+    vec3 sum = vec3(0.0);
+    for (int d = -3; d <= 3; d++) {
+        ivec2 s = t + ivec2(0, d);
+        if (s.x < 0 || s.y < 0 || s.x >= pc.work.x || s.y >= pc.work.y) continue;
+        vec4 v = halfUnpack(tileMid[(l.y + 3 + d) * 8 + l.x]);
+        if (v.a <= 0.0) continue;
+        sum += v.xyz * (exp(-float(d * d) / 4.5) * exp(-abs(v.a - own.a) / (0.012 * own.a)));
+    }
+    float len = length(sum);
+    imageStore(tempC, t, vec4(len > 1.0e-6 ? sum / len : own.xyz, own.a));
+}
+
+// Pass 8: the shade smoothed along surfaces, across scenery of nearly the
+// same depth that faces the same way; across then down, from pass 7's tempB
+// into terms.
+void shadeBlurPair() {
+    ivec2 o = ivec2(gl_WorkGroupID.xy) * 8, l = ivec2(gl_LocalInvocationID.xy);
+    uint i = gl_LocalInvocationIndex;
+    for (uint k = i; k < 144u; k += 64u) { // the shade, its depth code and the normal at o - 2 .. o + 9
+        ivec2 s = o - 2 + ivec2(int(k % 12u), int(k / 12u));
+        vec4 v = onGrid(s) ? imageLoad(tempB, s) : vec4(0.0);
+        vec3 n = onGrid(s) ? imageLoad(geo, s).xyz : vec3(0.0);
+        tile[k] = vec4(v.g, v.b, n.x, n.y);
+        tileZ[k] = n.z;
+    }
+    barrier();
+    for (uint k = i; k < 96u; k += 64u) { // across, for rows o.y - 2 .. o.y + 9 of the group's columns
+        int c = int(k % 8u), r = int(k / 8u);
+        ivec2 t = ivec2(o.x + c, o.y - 2 + r);
+        int at = r * 12 + c + 2;
+        float g = tile[at].x, b = tile[at].y;
+        if (onGrid(t) && b > 0.0) {
+            vec3 normal = vec3(tile[at].zw, tileZ[at]);
+            float sum = 0.0, total = 0.0;
+            for (int d = -2; d <= 2; d++) {
+                ivec2 s = t + ivec2(d, 0);
+                if (s.x < 0 || s.y < 0 || s.x >= pc.work.x || s.y >= pc.work.y) continue;
+                vec4 v = tile[at + d];
+                if (v.y <= 0.0) continue;
+                float facing = max(dot(vec3(v.zw, tileZ[at + d]), normal), 0.0);
+                facing *= facing; facing *= facing; facing *= facing;
+                float w = exp(-float(d * d) / 2.0) * exp(-abs(v.y - b) / (0.02 * b)) * facing;
+                sum += v.x * w;
+                total += w;
+            }
+            if (total > 0.0) g = sum / total;
+        }
+        tileMid[k] = uvec2(packRtz(vec2(g, b)), 0u);
+    }
+    barrier();
+    ivec2 t = o + l;
+    if (!onGrid(t)) return;
+    vec4 own = imageLoad(tempB, t);
+    own.g = unpackHalf2x16(tileMid[(l.y + 2) * 8 + l.x].x).x;
     if (own.b > 0.0) {
-        vec3 normal = imageLoad(geo, t).xyz;
+        int at = (l.y + 2) * 12 + l.x + 2;
+        vec3 normal = vec3(tile[at].zw, tileZ[at]);
         float sum = 0.0, total = 0.0;
         for (int d = -2; d <= 2; d++) {
-            ivec2 s = t + axis * d;
+            ivec2 s = t + ivec2(0, d);
             if (s.x < 0 || s.y < 0 || s.x >= pc.work.x || s.y >= pc.work.y) continue;
-            vec4 v = second ? imageLoad(tempB, s) : imageLoad(terms, s);
-            if (v.b <= 0.0) continue;
-            float facing = max(dot(imageLoad(geo, s).xyz, normal), 0.0);
+            vec2 v = unpackHalf2x16(tileMid[(l.y + 2 + d) * 8 + l.x].x); // x: the across shade, y: its depth code
+            if (v.y <= 0.0) continue;
+            float facing = max(dot(vec3(tile[at + d * 12].zw, tileZ[at + d * 12]), normal), 0.0);
             facing *= facing; facing *= facing; facing *= facing;
-            float w = exp(-float(d * d) / 2.0) * exp(-abs(v.b - own.b) / (0.02 * own.b)) * facing;
-            sum += v.g * w;
+            float w = exp(-float(d * d) / 2.0) * exp(-abs(v.y - own.b) / (0.02 * own.b)) * facing;
+            sum += v.x * w;
             total += w;
         }
         if (total > 0.0) own.g = sum / total;
     }
-    if (second) imageStore(terms, t, own);
-    else imageStore(tempB, t, own);
+    imageStore(terms, t, own);
 }
 
 // The sources of 4x4 PS1 pixels as one: their light summed, at the depth
@@ -712,7 +814,6 @@ vec3 brighten(vec3 c, vec3 factor) {
 // focus depth; sprites and kept pictures left out), or of all the scenery
 // when too little is that far, taken half way to a neutral scaled by its
 // brightness: a dark room gets a dim haze, a bright one a pale one.
-shared vec4 fogFar[64], fogAll[64];
 void fogColour() {
     uint i = gl_LocalInvocationIndex;
     vec4 far = vec4(0.0), every = vec4(0.0);
@@ -726,15 +827,15 @@ void fogColour() {
             far += vec4(shown * w, w);
             every += vec4(shown, 1.0);
         }
-    fogFar[i] = far;
-    fogAll[i] = every;
+    tile[i] = far;         // the far sums in tile[0, 64)
+    tile[64u + i] = every; // all of them in tile[64, 128)
     barrier();
     for (uint s = 32u; s > 0u; s >>= 1) {
-        if (i < s) { fogFar[i] += fogFar[i + s]; fogAll[i] += fogAll[i + s]; }
+        if (i < s) { tile[i] += tile[i + s]; tile[64u + i] += tile[64u + i + s]; }
         barrier();
     }
     if (i == 0u && pc.lens.w >= 0.0) {
-        vec4 f = fogFar[0], a = fogAll[0];
+        vec4 f = tile[0], a = tile[64];
         vec3 mean = f.w > 0.02 * a.w && f.w > 0.0 ? f.rgb / f.w : a.w > 0.0 ? a.rgb / a.w : FOG_NEUTRAL;
         float grey = dot(mean, vec3(0.2126, 0.7152, 0.0722));
         block[int(pc.lens.w) + FOG_SLOT] = vec4(0.5 * mean + 0.5 * FOG_NEUTRAL * clamp(grey * 1.6 + 0.2, 0.35, 1.0), 1.0);
@@ -882,6 +983,14 @@ void main() {
         fogColour();
         return;
     }
+    if (pc.pass == 5) {
+        softNormalsPair();
+        return;
+    }
+    if (pc.pass == 8) {
+        shadeBlurPair();
+        return;
+    }
     if ((pc.pass >= 1 && pc.pass <= 3) || pc.pass == 10 || pc.pass == 11) {
         ivec2 q = quarters();
         if (t.x >= q.x || t.y >= q.y) return;
@@ -897,11 +1006,7 @@ void main() {
     switch (pc.pass) {
     case 0: prepare(t); break;
     case 4: sources(t); break;
-    case 5: softNormals(t, ivec2(1, 0), false); break;
-    case 6: softNormals(t, ivec2(0, 1), true); break;
     case 7: topAndShade(t); break;
-    case 8: shadeBlur(t, ivec2(1, 0), false); break;
-    case 9: shadeBlur(t, ivec2(0, 1), true); break;
     case 12: glowAcross(t); break;
     case 13: glowDown(t); break;
     case 14: shadowMarch(t); break;

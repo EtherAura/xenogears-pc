@@ -6,6 +6,8 @@
 #include "setup.h"
 #include "system/settings.h"
 #include "../system/savestate.h"
+/* system/backlog.c (weak: programs that link this file without it). */
+extern void backlogCaption(const char* utf8) __attribute__((weak));
 #include "common.h"
 #include "main/filesystem.h"
 #include <SDL3/SDL.h>
@@ -325,7 +327,11 @@ int pcRegionalFieldMovieMusic(int field, int stream) {
     return fieldMovieRoute(field,stream,1);
 }
 void regionalMovieEnd(void) { memset(&movie,0,sizeof movie); }
-void regionalMovieFrame(int frame) { if (movie.active) movie.frame=frame; }
+void regionalMovieFrame(int frame) {
+    if (!movie.active) return;
+    movie.frame=frame;
+    if (backlogCaption) backlogCaption(regionalSubtitle()); /* the dialogue backlog keeps the captions shown */
+}
 int regionalMovieIdentity(int out[5]) {
     memset(out,0,5*sizeof out[0]);
     if (!movie.active) return 0;

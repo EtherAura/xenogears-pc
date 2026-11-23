@@ -45,6 +45,10 @@ int androidRemovePack(const char* library, const char* name);
 void androidUpdateCheck(SDL_Window* window);
 /* XgActivity's String method() into out ("" when there is none). */
 const char* androidActivityText(const char* method, char* out, size_t size);
+/* A file the activity opened is read through its descriptor's path, /proc/self/fd/FD: that
+ * path as the file's name (the loader's XG_ANDROID_NAME_<FD>, from "--image FD:NAME"), for
+ * the settings menu. Other paths, and descriptors with no name, as they are. */
+const char* androidPathName(const char* path);
 /* The BIOS image for the kanji font (system/krom.c), chosen through the activity: a file from
  * the system's picker, the disc folder's, or none (that one at once). The picker's and the
  * folder's answer comes later: androidBiosTake returns 1 when an image was read (message: its

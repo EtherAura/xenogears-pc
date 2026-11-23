@@ -21,14 +21,20 @@
  * from the vblank handler (hw.c vblankInterrupt, delivered at the game's
  * safe points), fieldSpeedMovie by the field's code, fieldSpeedStateIo with
  * the game parked in its VSync wait (savestate.h), as every xxxStateIo.
- * Nothing else reads or writes the setting's copy or the movie flag, and no
- * other thread calls fieldSpeedSetChosen (it has no caller in the game yet:
- * the menu's and the key's are later work).
+ * Nothing else reads or writes the setting's copy or the movie flag. The
+ * F1 menu and the control (fieldSpeedStep: pad.c's key events and its
+ * vblank, through battlespeed.c) call fieldSpeedSetChosen on the game thread
+ * too: the menu runs inside the vblank (uiVBlank).
  */
 
+#include <stdio.h>
+
 #include "fieldspeed.h"
+#include "netplay.h"
 #include "pc_wide.h"
 #include "settings.h"
+
+void presentShowNote(const char* text) __attribute__((weak)); /* gpu/present.c */
 
 /* ---- the setting (host) ---- */
 
@@ -50,10 +56,35 @@ int fieldSpeedChosen(void) {
 
 void fieldSpeedSetChosen(int speed) {
     settingsDescribe("field_speed", "field_speed: 0 off (default); 1, 2 or 4: the field and the world map at that speed "
-                                    "(music at its tempo); menus, movies and battles keep their own");
+                                    "(music at its tempo), stepped there with field_speed_key or the gamepad's Select+R2; "
+                                    "menus, movies and battles keep their own");
     settingsSetInt("field_speed", clampChosen(speed));
     settingsSave();
     fieldChosenValid = 0;
+}
+
+int fieldSpeedOnScreen(void) {
+    int kind = pcWideGetMode();
+    return kind == PC_WIDE_FIELD || kind == PC_WIDE_WORLDMAP;
+}
+
+int fieldSpeedStep(void) {
+    int chosen = fieldSpeedChosen();
+    if (chosen == 0 || !fieldSpeedOnScreen()) {
+        return 0;
+    }
+    if (netplayActive()) {
+        if (presentShowNote) presentShowNote("Field speed: 1x online");
+        return 1;
+    }
+    int next = chosen == 1 ? 2 : chosen == 2 ? 4 : 1;
+    fieldSpeedSetChosen(next);
+    if (presentShowNote) {
+        char text[32];
+        snprintf(text, sizeof text, "Field speed %dx", next);
+        presentShowNote(text);
+    }
+    return 1;
 }
 
 /* ---- the game's side (state) ---- */

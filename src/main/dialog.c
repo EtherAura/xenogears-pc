@@ -14,6 +14,7 @@
 #include "pc_wide.h"
 #include "pc_glyph.h"
 #include "pc_observe.h"
+#include "pc_backlog.h"
 #include "pc_gametext.h"
 #endif
 #include "psyq.h"
@@ -896,6 +897,9 @@ void updateDialogTextImage(DialogWindow18* p) {
                     if (pcObserveLine && p->m0_cursorX > was) pcObserveLine(p, p->m2C_inRamDialogTextImage,
                         p->m12_widthPadded, was, p->m0_cursorX - was, p->m2_cursorLine,
                         p->m28_perLineBuffer[p->m2_cursorLine].m5A_oddLine);
+                    if (pcBacklogLine && p->m0_cursorX > was) pcBacklogLine(p, p->m2C_inRamDialogTextImage,
+                        p->m12_widthPadded, was, p->m0_cursorX - was, p->m2_cursorLine,
+                        p->m28_perLineBuffer[p->m2_cursorLine].m5A_oddLine);
                     p->m1C_currentStringToPrint += len;
                     p->m28_perLineBuffer[p->m2_cursorLine].m58_widthDiv4 = p->m0_cursorX;
                     count--;
@@ -919,6 +923,9 @@ void updateDialogTextImage(DialogWindow18* p) {
             pcGlyphDialog(&p->m2C_inRamDialogTextImage[p->m0_cursorX], p->m12_widthPadded, w * 4,
                           p->m28_perLineBuffer[p->m2_cursorLine].m5A_oddLine);
             if (pcObserveLine) pcObserveLine(p, p->m2C_inRamDialogTextImage, p->m12_widthPadded,
+                                            p->m0_cursorX, w, p->m2_cursorLine,
+                                            p->m28_perLineBuffer[p->m2_cursorLine].m5A_oddLine);
+            if (pcBacklogLine) pcBacklogLine(p, p->m2C_inRamDialogTextImage, p->m12_widthPadded,
                                             p->m0_cursorX, w, p->m2_cursorLine,
                                             p->m28_perLineBuffer[p->m2_cursorLine].m5A_oddLine);
 #endif
@@ -1053,6 +1060,7 @@ void updateAndRenderTextForDialogWindow(DialogWindow18* w, void* ot, s32 buf) {
         w->m1C_currentStringToPrint = q->m4_dialogPointer;
 #ifdef PLATFORM_PC
         if (pcObserveText) pcObserveText(w);
+        if (pcBacklogText) pcBacklogText(w);
         pcGameplayDialogueText(w, w->m1C_currentStringToPrint, dialogFontVar0); /* timed or not */
         pcGameTextBegin(w, w->m1C_currentStringToPrint);
         pcDialogButtonsBegin(w, w->m1C_currentStringToPrint);

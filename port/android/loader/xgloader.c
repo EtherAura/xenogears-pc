@@ -14,7 +14,9 @@
  *     descriptors, read in place through /proc/self/fd/FD), reads each
  *     image's SYSTEM.CNF for its release and disc, and sets XG_DISC,
  *     XG_DISC2 and XG_BIOS (unless the options set them already;
- *     "--bios-ask", no BIOS image: XG_ANDROID_BIOS_ASK, the game asks), and the
+ *     "--bios-ask", no BIOS image: XG_ANDROID_BIOS_ASK, the game asks), each
+ *     descriptor's file name as XG_ANDROID_NAME_<FD> (the settings menu shows
+ *     it for the /proc path: port/src/system/android.c androidPathName), and the
  *     app's version, "--app-version NAME" (XG_APP_VERSION: save states
  *     record it, port/src/system/statefile.c);
  *   - picks the game library of the region (libxenogears-us.so or -jp.so:
@@ -271,6 +273,15 @@ static int imageCount;
 static char biosPath[64];
 static int biosAsk; /* "--bios-ask": the activity found no BIOS image and none was chosen */
 
+/* "FD:NAME": the file's name for its descriptor's /proc path (androidPathName). */
+static void rememberName(const char* arg) {
+    const char* name = strchr(arg, ':');
+    char key[40];
+    if (name == NULL || name[1] == '\0') return;
+    snprintf(key, sizeof key, "XG_ANDROID_NAME_%d", atoi(arg));
+    setenv(key, name + 1, 1);
+}
+
 /* "--image FD:NAME": the release and disc by the boot file. */
 static void addImage(const char* arg) {
     int fd = atoi(arg);
@@ -286,6 +297,7 @@ static void addImage(const char* arg) {
         if (strcmp(boot, known[k].boot) == 0 && imageCount < 8) {
             Image* im = &images[imageCount++];
             snprintf(im->path, sizeof im->path, "/proc/self/fd/%d", fd);
+            rememberName(arg);
             im->region = known[k].region;
             im->disc = known[k].disc;
             fprintf(stderr, "loader: %s: %s Disc %d (%s)\n", name ? name + 1 : arg, im->region ? "JP" : "US",
@@ -405,6 +417,7 @@ int SDL_main(int argc, char* argv[]) {
             if (getenv("XG_APP_VERSION") == NULL) setenv("XG_APP_VERSION", argv[i], 1);
         } else if (strcmp(argv[i], "--bios") == 0 && i + 1 < argc) {
             snprintf(biosPath, sizeof biosPath, "/proc/self/fd/%d", atoi(argv[++i]));
+            rememberName(argv[i]);
         } else if (strcmp(argv[i], "--bios-ask") == 0) {
             biosAsk = 1;
         } else {

@@ -325,6 +325,15 @@ const char* androidActivityText(const char* method, char* out, size_t size) {
     return out;
 }
 
+const char* androidPathName(const char* path) {
+    int fd, end = 0;
+    char key[40];
+    if (path == NULL || sscanf(path, "/proc/self/fd/%d%n", &fd, &end) != 1 || end == 0 || path[end] != '\0') return path;
+    snprintf(key, sizeof key, "XG_ANDROID_NAME_%d", fd);
+    const char* name = getenv(key);
+    return name != NULL && name[0] != '\0' ? name : path;
+}
+
 /* ---- the BIOS image ------------------------------------------------------------------
  *
  * The save titles on the memory card screens (their chapter names) and the text over some

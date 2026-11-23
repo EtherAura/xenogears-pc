@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Field speed (xg-mrj.6, port/src/system/fieldspeed.c): the controller, the
-shared vblank that picks the factor (battlespeed.c on hw.c's stepped clock)
-and the field's own movie calls (port/src/game/field/wide.c), CPU only.
+shared vblank that picks the factor (battlespeed.c on hw.c's stepped clock),
+the field's own movie calls (port/src/game/field/wide.c), and the control on
+the field and the world map with Select as the port's chord button there
+(battlespeed.c, selectchord.c), CPU only.
 
     python tools/test_field_speed.py --ver us|jp [--build DIR]
 
@@ -21,6 +23,10 @@ and the field's own movie calls (port/src/game/field/wide.c), CPU only.
      movie-ignored    the controller does not look at the movie flag
      any-context      every screen but the field counts as the world map
      battle-leak      a battle takes the field's factor
+     step-anywhere    the field's control acts on every screen
+     select-to-game   a Select kept for a chord reaches the game anyway
+     no-tap           a lone Select never reaches the game
+     start-kept       Select is kept with Start held (the soft reset's buttons)
 
 No disc, GPU, emulator or wall clock. Exit 0 when everything held.
 """
@@ -40,6 +46,7 @@ SYSTEM = ROOT / "port/src/system"
 WIDE = ROOT / "port/src/game/field/wide.c"
 CONTROLLER = SYSTEM / "fieldspeed.c"
 SHARED = SYSTEM / "battlespeed.c"
+CHORD = SYSTEM / "selectchord.c"
 TEST = SYSTEM / "test/fieldspeedtest.c"
 TARGET = "fieldspeedtest"
 
@@ -61,6 +68,12 @@ MUTANTS = [
      "battles"),
     ("state-dropped", SHARED, [("        fieldSpeedStateIo(s); /* the field's movie flag (fieldspeed.c) */\n",
                                 "        (void)0;\n")], "state"),
+    ("step-anywhere", CONTROLLER, [("    if (chosen == 0 || !fieldSpeedOnScreen()) {\n", "    if (chosen == 0) {\n")],
+     "control"),
+    ("select-to-game", CHORD, [("        out &= ~PAD_SELECT;\n", "        (void)0;\n")], "select chord"),
+    ("no-tap", CHORD, [("            hold.tap = hold.chord ? 0 : SELECT_TAP;\n", "            hold.tap = 0;\n")],
+     "select chord"),
+    ("start-kept", CHORD, [("    if ((live & PAD_START) || !holding()) {\n", "    if (!holding()) {\n")], "select chord"),
 ]
 
 failures = 0
@@ -205,13 +218,14 @@ def negative(build_dir: Path, cmds: list[str], name: str, path: Path, edits: lis
     rel = f"fieldspeed-controls/{name}"
     top = build_dir / rel
     shutil.rmtree(top, ignore_errors=True)
-    # The copy keeps its place beside the test (which includes ../battlespeed.c
-    # and ../hw.c); what is not copied is found in the real directories.
+    # The copy keeps its place beside the test (which includes ../battlespeed.c,
+    # ../selectchord.c and ../hw.c); what is not copied is found in the real
+    # directories.
     (top / "system/test").mkdir(parents=True)
     copy = top / "system" / path.name
     copy.write_text(text)
     swap = {str(path): str(copy)}
-    if path == SHARED:
+    if path in (SHARED, CHORD):  # (included by the test, not compiled on their own)
         shutil.copyfile(TEST, top / "system/test" / TEST.name)
         swap[str(TEST)] = str(top / "system/test" / TEST.name)
     include = f" -I{SYSTEM} -I{SYSTEM / 'test'} -I{WIDE.parent}"

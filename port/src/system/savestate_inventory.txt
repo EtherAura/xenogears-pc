@@ -347,12 +347,13 @@ system/arena.c versusConfig state
 system/arena.c versusEnvRead host environment and settings
 system/arena.c versusPending state
 system/arena.c versusTable state
+system/backlog.c * host the dialogue backlog: what the player saw, its setting and its controls (never in a state)
 system/battlespeed.c battleText state the latest battle frame's text and wait (battleSpeedStateIo)
 system/battlespeed.c battleWait state
 system/battlespeed.c cachedChosen host the battle_speed setting
 system/battlespeed.c cachedRevision host the battle_speed setting
 system/battlespeed.c cachedValid host the battle_speed setting
-system/battlespeed.c control host the battle_speed_key and battle_speed_button settings
+system/battlespeed.c control host the speed controls' settings (battle_speed_key and _button, field_speed_key and _button)
 system/battlespeed.c hidden state
 system/battlespeed.c lastBattleFrame state
 system/battlespeed.c lastButtons host the pad's buttons at the last vblank (the control's edge)
@@ -507,6 +508,7 @@ system/pad.c scriptKeys host devices, bindings, scripts (re-positioned on load)
 system/pad.c selectedProfile host devices, bindings, scripts (re-positioned on load)
 system/pad.c strings host devices, bindings, scripts (re-positioned on load)
 system/pad.c camIn host the free camera's stick and keys this frame
+system/pad.c chordHeld host the first-person look chord's edge (Enhanced builds; live input, as camIn)
 system/pad.c padLog host the pad log file
 system/pad.c padLogChecked host the pad log file
 system/pad.c padLogLast host the pad log file
@@ -518,6 +520,7 @@ system/rumble.c * host vibration devices
 system/touch.c * host live touch input and the touch pad's state (as the mouse's: never in a state)
 system/rumble_game.c * host the port's feedback
 system/savestate.c * host save states
+system/selectchord.c hold host a live Select kept from the game for a chord of the port's (the player's hands, as pad.c's edges)
 system/settings.c * host settings
 system/slowdown.c * host the slowdown replay (states refused while it runs)
 system/speedup.c * host the Speedup setting's cached value (settings)
