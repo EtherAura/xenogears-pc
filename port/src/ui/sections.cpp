@@ -1545,6 +1545,21 @@ void audioSlider(const char* id, const char* key, int def, int lo, int hi) {
     }
 }
 
+// Both Japanese audio options read the player's Japanese discs (cd/regional.c):
+// with neither image the US audio plays, so they cannot be turned on; on, a
+// missing disc is named (that disc keeps the US audio).
+void japaneseDiscsNote(bool on, bool disc1, bool disc2) {
+    if (!disc1 && !disc2 && !on) {
+        warning("Needs your Japanese disc images: choose them under Japanese Disc 1 and 2.");
+    } else if (!disc1 && !disc2) {
+        warning("No Japanese disc image found: the US audio plays. Choose them under Japanese Disc 1 and 2.");
+    } else if (on && !disc1) {
+        warning("No Japanese Disc 1 image: Disc 1 keeps the US audio.");
+    } else if (on && !disc2) {
+        warning("No Japanese Disc 2 image: Disc 2 keeps the US audio.");
+    }
+}
+
 void audioSection() {
     if (!japanesePathsLoaded) {
         for (int disc = 1; disc <= 2; ++disc)
@@ -1585,15 +1600,23 @@ void audioSection() {
     opt::group(N_("Japanese audio"));
     bool battle = settingsBool("japanese_battle_voices", 0);
     bool movies = regionalMovieEnabled();
+    bool japanese1 = regionalSourceFound(1) != 0, japanese2 = regionalSourceFound(2) != 0;
+    bool japanese = japanese1 || japanese2;
     if (row("Battle voices", "japanese_battle_voices", opt::RESTART)) {
+        ImGui::BeginDisabled(!japanese && !battle); // on already: it can still be turned off
         if (checkbox("Japanese battle voices", &battle)) regionalSetBattle(battle);
+        ImGui::EndDisabled();
         hint("Uses your Japanese discs. Restart the game after changing this option.");
+        japaneseDiscsNote(battle, japanese1, japanese2);
         if (battle != (regionalBattleEnabled() != 0)) warning("Saved for the next launch.");
         overrideNote("japanese_battle_voices");
     }
     if (row("Cutscene audio", "japanese_cutscene_audio")) {
+        ImGui::BeginDisabled(!japanese && !movies);
         if (checkbox("Japanese cutscene audio", &movies)) regionalSetMovie(movies);
+        ImGui::EndDisabled();
         hint("Applies to the next cutscene. Keeps this version's video and text.");
+        japaneseDiscsNote(movies, japanese1, japanese2);
         overrideNote("japanese_cutscene_audio");
     }
     bool captionText = regionalCaptionsAvailable() != 0;

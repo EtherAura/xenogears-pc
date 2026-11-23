@@ -1958,6 +1958,27 @@ msgid "Applies to the next cutscene. Keeps this version's video and text."
 msgstr "次のカットシーンから適用されます。この版の映像と文字はそのままです。"
 
 #: port/src/ui/sections.cpp
+msgid ""
+"Needs your Japanese disc images: choose them under Japanese Disc 1 and 2."
+msgstr "日本語版ディスクのイメージが必要です。下の「日本語版 1」「日本語版 2」で選んでください。"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"No Japanese disc image found: the US audio plays. Choose them under Japanese "
+"Disc 1 and 2."
+msgstr ""
+"日本語版ディスクのイメージが見つかりません。US版の音声のままです。下の「日本語版 1」「日本語版 "
+"2」で選んでください。"
+
+#: port/src/ui/sections.cpp
+msgid "No Japanese Disc 1 image: Disc 1 keeps the US audio."
+msgstr "日本語版 1 のイメージがありません。ディスク1はUS版の音声のままです。"
+
+#: port/src/ui/sections.cpp
+msgid "No Japanese Disc 2 image: Disc 2 keeps the US audio."
+msgstr "日本語版 2 のイメージがありません。ディスク2はUS版の音声のままです。"
+
+#: port/src/ui/sections.cpp
 msgid "Subtitles"
 msgstr "字幕"
 

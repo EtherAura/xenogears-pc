@@ -24,7 +24,7 @@ typedef struct {
     uint8_t table[32768];
     uint16_t dirs[61];
     char path[4096], status[1200];
-    int attempted;
+    int attempted, searched, found; /* found: 0 not checked, 1 verified, -1 not this disc */
 } Source;
 static Source sources[2];
 static int initialized, battle;
@@ -71,8 +71,8 @@ static void describe(void) {
     settingsDescribe("cutscene_sound_captions","cutscene_sound_captions: with subtitles, 0 no sounds, 1 voices ([screams]), 2 all sounds ([explosion] too)");
     settingsDescribe("cutscene_lyrics","cutscene_lyrics: with subtitles, 1 shows the songs' lyrics");
     settingsDescribe("cutscene_invented_language","cutscene_invented_language: lines in the game's invented language, 0 as the English script spells them, 1 as spoken (Japanese track)");
-    settingsDescribe("japanese_disc1","japanese_disc1: your Japanese Disc 1 .cue or raw .bin (read-only)");
-    settingsDescribe("japanese_disc2","japanese_disc2: your Japanese Disc 2 .cue or raw .bin (read-only)");
+    settingsDescribe("japanese_disc1","japanese_disc1: your Japanese Disc 1 .cue or raw .bin (read-only); empty: the one beside the game's discs");
+    settingsDescribe("japanese_disc2","japanese_disc2: your Japanese Disc 2 .cue or raw .bin (read-only); empty: the one beside the game's discs");
 }
 void regionalInit(void) {
     if (initialized) return;
@@ -80,17 +80,33 @@ void regionalInit(void) {
     for (int i=0;i<2;i++) {
         const char* p=settingsGet(sourceKey(i+1));
         if (p && *p) snprintf(sources[i].path,sizeof sources[i].path,"%s",p);
-#ifdef XG_ROOT
-        else snprintf(sources[i].path,sizeof sources[i].path,
-            XG_ROOT "/bin/Xenogears (Japan) (Disc %d)/Xenogears (Japan) (Disc %d).cue",i+1,i+1);
-#endif
     }
+}
+/* With no japanese_disc<n>, the Japanese disc beside the game's (its folder,
+ * the one above and the folders in that), never a path of the build tree:
+ * an executable built in another checkout would look in that one. Searched
+ * once the drive has an image, and only once. */
+static const char* sourcePath(int disc) {
+    regionalInit();
+    Source* s=&sources[disc-1];
+    const char* image=cdSwapPath(0);
+    if (!s->path[0] && !s->searched && image && *image) {
+        s->searched=1;
+        if (cdFindImageBeside(image,"JP",disc,s->path,sizeof s->path))
+            fprintf(stderr,"regional: Japanese Disc %d beside the game's: %s\n",disc,s->path);
+        else fprintf(stderr,"regional: no Japanese Disc %d beside %s\n",disc,image);
+    }
+    return s->path;
 }
 static Source* source(int disc) {
     regionalInit();
     if (disc<1 || disc>2) return NULL;
     Source* s=&sources[disc-1];
     if (!s->attempted) {
+        if (!sourcePath(disc)[0]) {
+            snprintf(s->status,sizeof s->status,"Choose Japanese Disc %d; none beside the game's discs.",disc);
+            return NULL; /* not attempted: searched once the drive has an image */
+        }
         s->attempted=1;
         CdImageInfo info;
         if (!cdVerifyImage(s->path,&info,s->status,sizeof s->status)) return NULL;
@@ -110,7 +126,19 @@ int regionalBattleEnabled(void) { regionalInit(); return battle; }
 int regionalMovieEnabled(void) { return settingsBool("japanese_cutscene_audio",0); }
 void regionalSetBattle(int on) { describe(); settingsSetInt("japanese_battle_voices",!!on); settingsSave(); }
 void regionalSetMovie(int on) { describe(); settingsSetInt("japanese_cutscene_audio",!!on); settingsSave(); }
-const char* regionalSourcePath(int disc) { regionalInit(); return disc>=1 && disc<=2 ? sources[disc-1].path : ""; }
+const char* regionalSourcePath(int disc) { return disc>=1 && disc<=2 ? sourcePath(disc) : ""; }
+int regionalSourceFound(int disc) {
+    if (disc<1 || disc>2) return 0;
+    Source* s=&sources[disc-1];
+    if (s->attempted) return s->image!=NULL;
+    if (!sourcePath(disc)[0]) return 0;
+    if (!s->found) {
+        CdImageInfo info;
+        char why[64];
+        s->found=cdVerifyImage(s->path,&info,why,sizeof why) && !strcmp(info.region,"JP") && info.disc==disc ? 1 : -1;
+    }
+    return s->found>0;
+}
 const char* regionalSourceStatus(int disc) {
     Source* s=source(disc);
     return s ? s->status : disc>=1 && disc<=2 ? sources[disc-1].status : "Invalid disc number";
@@ -122,9 +150,15 @@ int regionalSetSource(int disc, const char* path, char* why, size_t size) {
     if (strcmp(info.region,"JP") || info.disc!=disc) {
         snprintf(why,size,"Choose Japanese Disc %d; selected %s Disc %d.",disc,info.region,info.disc); return 0;
     }
-    /* Existing allocations/cache keep their source until the next launch. */
     settingsSet(sourceKey(disc),absolute); settingsSave();
-    snprintf(why,size,"Japanese Disc %d saved. Restart the game to use it.",disc); return 1;
+    regionalInit();
+    Source* s=&sources[disc-1];
+    if (s->image) { /* its files are cached and merged: they keep that image until the next launch */
+        snprintf(why,size,"Japanese Disc %d saved. Restart the game to use it.",disc); return 1;
+    }
+    snprintf(s->path,sizeof s->path,"%s",absolute);
+    s->attempted=s->found=0; s->searched=1; s->status[0]='\0';
+    snprintf(why,size,"Japanese Disc %d saved.",disc); return 1;
 }
 
 static int bundleOffsets(const uint8_t* p, int size, unsigned offsets[6]) {

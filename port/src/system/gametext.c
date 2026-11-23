@@ -272,57 +272,6 @@ static GtImage* retailImage(int d) {
     return retail.image[d - 1];
 }
 
-/* Images beside the game's: its folder, the folder above and the folders in
- * that (a folder per disc), as the menu finds a Japanese font. */
-static int searchBeside(const char* region, int d, char* out, size_t size) {
-    const char* current = cdSwapPath(0);
-    if (current == NULL || current[0] == '\0') return 0;
-    char dir[4096];
-    snprintf(dir, sizeof(dir), "%s", current);
-    char* cut = strrchr(dir, '/');
-#ifdef _WIN32
-    char* cut2 = strrchr(dir, '\\');
-    if (cut2 > cut) cut = cut2;
-#endif
-    if (cut == NULL) return 0;
-    *cut = '\0';
-    char parent[4096];
-    snprintf(parent, sizeof(parent), "%s", dir);
-    cut = strrchr(parent, '/');
-#ifdef _WIN32
-    cut2 = strrchr(parent, '\\');
-    if (cut2 > cut) cut = cut2;
-#endif
-    if (cut != NULL) *cut = '\0';
-    const char* roots[2] = {dir, parent};
-    for (int r = 0; r < 2; r++) {
-        int folders = 0;
-        char** sub = SDL_GlobDirectory(roots[r], NULL, 0, &folders);
-        for (int k = -1; k < folders; k++) {
-            char where[4096];
-            if (k < 0) snprintf(where, sizeof(where), "%s", roots[r]);
-            else if (snprintf(where, sizeof(where), "%s/%s", roots[r], sub[k]) >= (int)sizeof(where)) continue;
-            int files = 0;
-            char** list = SDL_GlobDirectory(where, "*.cue", SDL_GLOB_CASEINSENSITIVE, &files);
-            for (int f = 0; f < files; f++) {
-                char path[4096];
-                CdImageInfo info;
-                char why[64];
-                if (snprintf(path, sizeof(path), "%s/%s", where, list[f]) >= (int)sizeof(path)) continue;
-                if (cdVerifyImage(path, &info, why, sizeof(why)) && !strcmp(info.region, region) && info.disc == d) {
-                    snprintf(out, size, "%s", path);
-                    SDL_free(list);
-                    SDL_free(sub);
-                    return 1;
-                }
-            }
-            SDL_free(list);
-        }
-        SDL_free(sub);
-    }
-    return 0;
-}
-
 /* The other release's disc `d`: text_other_disc<d>, the Japanese discs of
  * F1 > Audio (the US build), or one beside the game's. */
 static GtImage* otherImage(int d) {
@@ -343,7 +292,7 @@ static GtImage* otherImage(int d) {
             gtImageClose(im);
             im = NULL;
         }
-        if (im == NULL && searchBeside(OTHER_REGION, d, path, sizeof(path))) {
+        if (im == NULL && cdFindImageBeside(cdSwapPath(0), OTHER_REGION, d, path, sizeof(path))) {
             im = gtImageOpen(path, other.why[d - 1], sizeof(other.why[d - 1]));
         }
         if (im == NULL && other.why[d - 1][0] == '\0') {

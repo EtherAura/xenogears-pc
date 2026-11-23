@@ -16,6 +16,7 @@ static int checks;
 int cdDiscIsJapanese(void) { return discIsJapanese(current); }
 int cdReadRawSector(int lba, uint8_t out[2352]) { return discRead(current,lba,out); }
 int cdSetupPath(const char* p, char* out, size_t n) { return snprintf(out,n,"%s",p)>0; }
+const char* cdSwapPath(int which) { (void)which; return NULL; } /* the Japanese discs come from the settings */
 void cdSwapBytes(void* a, void* b, size_t n) { uint8_t* x=a; uint8_t* y=b; while(n--) { uint8_t t=*x; *x++=*y; *y++=t; } }
 void spuCdSubmit(const int16_t* lr, int frames, int rate) { (void)lr; (void)frames; (void)rate; } /* xa.c's output */
 typedef struct { unsigned char disc, clip; unsigned short start, end; const char* text; } Caption;
@@ -162,6 +163,7 @@ int main(int argc, char** argv) {
    settingsUnset("cutscene_sound_captions");
    regionalSetSubtitles(1);
   }
+  CHECK(regionalSourceFound(disc)==!missing); /* the menu's check, before the image is opened */
   if (missing) {
    CHECK(pcRegionalFile(dirs[0x2d]-1+0x11,t,dirs,NULL)==0);
    CHECK(strstr(regionalSourceStatus(disc),"ready")==NULL);
@@ -170,6 +172,11 @@ int main(int argc, char** argv) {
    int begin=lbaAt(t,dirs[0x19]+2); uint8_t raw[2352], old[2352];
    regionalMovieBegin(begin);CHECK(discRead(current,begin+7,raw));memcpy(old,raw,2352);
    regionalMovieSector(begin+7,raw);CHECK(!memcmp(raw,old,2352));regionalMovieEnd();
+   /* Chosen in the menu with nothing read from a JP image yet: used at once. */
+   char why[1200];
+   CHECK(regionalSetSource(disc,argv[disc+2],why,sizeof why) && strstr(why,"saved.") && !strstr(why,"Restart"));
+   CHECK(regionalSourceFound(disc) && strstr(regionalSourceStatus(disc),"ready"));
+   CHECK(regionalSetSource(disc,argv[disc+2],why,sizeof why) && strstr(why,"Restart")); /* now open: next launch */
    discClose(current);discClose(jp);continue;
   }
   for(int f=0x12;f<=0x5c;f++) {

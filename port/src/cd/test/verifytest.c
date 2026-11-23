@@ -176,6 +176,34 @@ int main(int argc, char** argv) {
     CHECK(cdSwapSetOther("")); /* invalid automatically found images do not block one-disc use */
     CHECK(cdSwapPath(1) == NULL);
     CHECK(driveCalls == 0);
+    /* The other release's discs beside the game's (cd/regional.c's Japanese
+     * audio, system/gametext.c): the image's folder, the one above and the
+     * folders in that, whatever the build tree. */
+    static const char* const besideNames[4] = {"beside", "beside/USA (Disc 1)", "beside/Japan (Disc 1)",
+                                               "beside/Japan (Disc 2)"};
+    char beside[4][1200], found[1300];
+    for (int i = 0; i < 4; i++) {
+        snprintf(beside[i], sizeof beside[i], "%s/%s", dir, besideNames[i]);
+        CHECK(SDL_CreateDirectory(beside[i]));
+        if (i == 0) continue;
+        snprintf(found, sizeof found, "%s/game.bin", beside[i]);
+        fixture(i == 3 ? 2 : 1, i >= 2);
+        CHECK(save(found));
+        snprintf(found, sizeof found, "%s/game.cue", beside[i]);
+        f = fopen(found, "wb");
+        CHECK(f != NULL);
+        fprintf(f, "FILE \"game.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n");
+        CHECK(fclose(f) == 0);
+    }
+    char game[1300], want[1300];
+    snprintf(game, sizeof game, "%s/game.cue", beside[1]);
+    for (int d = 1; d <= 2; d++) {
+        snprintf(want, sizeof want, "%s/game.cue", beside[1 + d]);
+        CHECK(cdFindImageBeside(game, "JP", d, found, sizeof found) && !strcmp(found, want));
+    }
+    CHECK(cdFindImageBeside(game, "US", 1, found, sizeof found) && !strcmp(found, game));
+    CHECK(!cdFindImageBeside(game, "US", 2, found, sizeof found));
+    CHECK(!cdFindImageBeside("", "JP", 1, found, sizeof found) && !cdFindImageBeside(NULL, "JP", 1, found, sizeof found));
     /* Optional compatibility check with player-provided Atelier 1.1 images, and Perfect Works 0.11.4 full presets
      * given as pw:<path> (xg-g0ra.7): read as text sources, refused as game discs. */
     for (int i = 2; i < argc; i++) {

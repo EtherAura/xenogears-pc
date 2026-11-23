@@ -10,6 +10,12 @@ void regionalSetBattle(int on);
 void regionalSetMovie(int on);
 const char* regionalSourcePath(int disc);
 const char* regionalSourceStatus(int disc);
+/* Whether Japanese Disc `disc` (1, 2) is there for both options: the
+ * menu's check before either is on. Its image is verified once, not
+ * opened. */
+int regionalSourceFound(int disc);
+/* Takes effect at once while nothing has been read from the disc's
+ * previous image; otherwise at the next launch (`why` says which). */
 int regionalSetSource(int disc, const char* path, char* why, size_t size);
 /* Absolute FAT index. Return 0 for an unchanged file, else the safe allocation
  * size. copy==NULL is a size query; otherwise copies that many bytes. */

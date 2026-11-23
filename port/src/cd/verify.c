@@ -1,5 +1,6 @@
 #include "verify.h"
 #include "cd_internal.h"
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_stdinc.h>
 #include <stdio.h>
 #include <string.h>
@@ -222,4 +223,53 @@ int cdImageSibling(const char* path, char* out, size_t size) {
         }
     }
     return changed;
+}
+static int byName(const void* a, const void* b) {
+    return SDL_strcmp(*(char* const*)a, *(char* const*)b);
+}
+/* The folder `path` is in, cut at its last separator; 0 when it has none. */
+static int folderOf(char* path) {
+    char* cut = strrchr(path, '/');
+#ifdef _WIN32
+    char* cut2 = strrchr(path, '\\');
+    if (cut2 > cut) cut = cut2;
+#endif
+    if (cut == NULL) return 0;
+    *cut = '\0';
+    return 1;
+}
+int cdFindImageBeside(const char* image, const char* region, int disc, char* out, size_t size) {
+    char dir[4096], parent[4096];
+    if (image == NULL || image[0] == '\0' || snprintf(dir, sizeof dir, "%s", image) >= (int)sizeof dir || !folderOf(dir))
+        return 0;
+    snprintf(parent, sizeof parent, "%s", dir);
+    const char* roots[2] = {dir, parent};
+    int rootCount = folderOf(parent) && parent[0] ? 2 : 1;
+    for (int r = 0; r < rootCount; r++) {
+        int folders = 0;
+        char** sub = SDL_GlobDirectory(roots[r], NULL, 0, &folders);
+        if (sub) SDL_qsort(sub, (size_t)folders, sizeof *sub, byName);
+        for (int k = -1; k < folders; k++) {
+            char where[4096];
+            if (k < 0) snprintf(where, sizeof where, "%s", roots[r]);
+            else if (snprintf(where, sizeof where, "%s/%s", roots[r], sub[k]) >= (int)sizeof where) continue;
+            int files = 0;
+            char** list = SDL_GlobDirectory(where, "*.cue", SDL_GLOB_CASEINSENSITIVE, &files);
+            if (list) SDL_qsort(list, (size_t)files, sizeof *list, byName);
+            for (int f = 0; f < files; f++) {
+                char path[4096], why[64];
+                CdImageInfo info;
+                if (snprintf(path, sizeof path, "%s/%s", where, list[f]) >= (int)sizeof path) continue;
+                if (cdVerifyImage(path, &info, why, sizeof why) && !strcmp(info.region, region) && info.disc == disc) {
+                    snprintf(out, size, "%s", path);
+                    SDL_free(list);
+                    SDL_free(sub);
+                    return 1;
+                }
+            }
+            SDL_free(list);
+        }
+        SDL_free(sub);
+    }
+    return 0;
 }
