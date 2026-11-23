@@ -1,4 +1,4 @@
-"""field_texture_redraw plan(): a tile with the texels and shape of one already repainted (in this
+"""field_texture_redraw plan() and the ingest colour gate. plan(): a tile with the texels and shape of one already repainted (in this
 plan or an earlier --reuse plan) is an alias of that tile; a same-shaped tile with other texels is
 planned itself (xg-7oq). Synthetic pages and CLUTs only, written to a temporary directory."""
 import contextlib
@@ -97,6 +97,66 @@ class PlanReuseTests(unittest.TestCase):
         self.assertEqual(st['aliases'], [dict(page='c', palette=PAL, tile=[0, 16, TILE, TILE],
                                               of=dict(page='a', palette=PAL, tile=[16, 16, TILE, TILE],
                                                       plan=str(early.resolve())))])
+
+
+# the colour gate (carl xg-jqe8): a repaint keeps the original's brightness, colours and soft light;
+# blank areas stay blank
+class TextureGateTests(unittest.TestCase):
+    def plan(self, tmp, paint):
+        """One canvas, one 96x96-texel piece: a stone wall (two tones in 4-texel blocks) under a soft round light, a
+        blank white strip at the bottom. The try is the original at 8x with paint(rgb array) applied."""
+        d = Path(tmp) / 'x-redraw'; (d / 'canvases').mkdir(parents=True); (d / 'raw').mkdir()
+        S, N = ftr.S, ftr.CANVAS
+        w = h = 96; ax = ay = 16
+        yy, xx = np.mgrid[0:h, 0:w]
+        light = 40 * np.exp(-((xx - 48) ** 2 + (yy - 40) ** 2) / (2 * 22 ** 2))
+        stone = np.where(((xx // 4) + (yy // 4)) % 2, 96, 110)[..., None] * np.array([1.0, 0.95, 0.85])
+        tex = np.clip(stone + light[..., None], 0, 255)
+        tex[84:] = 255   # the blank strip
+        inp = np.full((N * S, N * S, 3), 128, np.uint8)
+        inp[ay * S:(ay + h) * S, ax * S:(ax + w) * S] = np.repeat(np.repeat(tex, S, 0), S, 1).astype(np.uint8)
+        mask = np.zeros((N * S, N * S), np.uint8); mask[ay * S:(ay + h) * S, ax * S:(ax + w) * S] = 255
+        Image.fromarray(inp).save(d / 'canvases' / '001.input.png'); Image.fromarray(mask).save(d / 'canvases' / '001.mask.png')
+        Image.fromarray(np.clip(paint(inp.astype(np.float32)), 0, 255).astype(np.uint8)).save(d / 'raw' / '001.try1.png')
+        st = dict(pieces=[dict(page='p', palette=0, box=[0, 0, w, h], at=[ax, ay])],
+                  canvases=[dict(name='001', pieces=[0], done=False)])
+        (d / 'plan.json').write_text(json.dumps(st))
+        return d, st
+
+    def check(self, paint):
+        with tempfile.TemporaryDirectory() as tmp:
+            d, st = self.plan(tmp, paint)
+            return ftr.texture_check(d, st, st['canvases'][0], d / 'raw' / '001.try1.png')
+
+    def test_the_original_passes(self):
+        self.assertTrue(self.check(lambda a: a)['ok'])
+
+    def test_a_brighter_room_is_refused(self):
+        r = self.check(lambda a: a * 1.35)
+        self.assertFalse(r['ok']); self.assertGreater(r['dL'], ftr.TEX_DL)
+        self.assertIn('lighter', '\n'.join(r['faults']))
+
+    def test_a_colour_shift_is_refused_and_described(self):
+        r = self.check(lambda a: a * np.array([0.7, 0.9, 1.3]))
+        self.assertFalse(r['ok']); self.assertGreater(r['dab'], ftr.TEX_DAB)
+        self.assertIn('was painted', '\n'.join(r['faults']))
+
+    def test_painting_the_blank_strip_is_refused(self):
+        def paint(a):
+            a = a.copy(); a[(16 + 84) * ftr.S:(16 + 96) * ftr.S, 16 * ftr.S:112 * ftr.S] = 90
+            return a
+        r = self.check(paint)
+        self.assertFalse(r['ok']); self.assertGreater(r['painted'], ftr.TEX_BLANK)
+
+    def test_one_refused_try_ingests_nothing_and_writes_the_fix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d, st = self.plan(tmp, lambda a: a * 1.35)
+            with self.assertRaises(SystemExit) as e:
+                ftr.ingest(SimpleNamespace(dir=str(d), canvas='1', accept_colours=False))
+            self.assertEqual(e.exception.code, 3)
+            self.assertTrue((d / 'canvases' / '001.colour-fix.txt').exists())
+            c = json.loads((d / 'plan.json').read_text())['canvases'][0]
+            self.assertFalse(c['done']); self.assertIn('001.try1.png', c['colour_refused'])
 
 
 if __name__ == '__main__':

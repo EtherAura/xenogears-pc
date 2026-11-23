@@ -167,8 +167,13 @@ static struct {
     float sunRoom[3];
     /* Ground points pcSceneFigure gave this frame (room space), and the vblank they belong to. */
     int figureCount;
-    uint32_t figureVblank;
+    uint32_t figureVblank; /* the last point's */
     float figureRoom[SCENE_FIGURES][3];
+    /* The points the scene pcSceneDepth registered took: those given since
+     * the registration before (a frame's sprites are drawn before its table
+     * is walked, a vblank or more apart in a 30 or 20 Hz room or a battle). */
+    int sceneFigureCount;
+    float sceneFigure[SCENE_FIGURES][3];
 
     /* The scene pcSceneDepth registered, for the next walk. */
     int armed;
@@ -234,8 +239,9 @@ static void load(void) {
     settingsDescribe("lighting_bounce", "lighting_bounce: on (default) or off: the light from bright spots, as part of lighting");
     sc.lighting = levelOf("lighting");
     sc.glow = levelOf("glow");
-    settingsDescribe("shadows", "shadows: off (default), subtle, medium or strong: shadows cast by the scenery and the "
-                                "characters in fields, from a sun set per room (the Enhanced engine)");
+    settingsDescribe("shadows", "shadows: off (default), subtle, medium or strong: shadows cast by the scenery in fields, "
+                                "battles and on the world map and by the characters in fields and battles, from a sun "
+                                "set per place (the Enhanced engine)");
     sc.shadows = levelOf("shadows");
     settingsDescribe("fog", "fog: off (default), subtle, medium or strong: haze that thickens past the characters in "
                             "fields, toward the colour of the room's farthest scenery (the Enhanced engine)");
@@ -383,17 +389,13 @@ static void params(SceneParams* p) {
     } else {
         memcpy(l->sun, sc.up, sizeof(l->sun));
     }
-    /* This frame's actors' ground points, in view space. */
-    l->figures = 0;
-    if (sc.figureVblank == hwVSyncCount()) {
-        for (int k = 0; k < sc.figureCount; k++) {
-            const float* r = sc.figureRoom[k];
-            for (int i = 0; i < 3; i++)
-                l->figure[k][i] = (sc.matrix[i][0] * r[0] + sc.matrix[i][1] * r[1] + sc.matrix[i][2] * r[2]) / 4096.0f + sc.trans[i];
-        }
-        l->figures = sc.figureCount;
+    /* This scene's actors' ground points, in view space. */
+    for (int k = 0; k < sc.sceneFigureCount; k++) {
+        const float* r = sc.sceneFigure[k];
+        for (int i = 0; i < 3; i++)
+            l->figure[k][i] = (sc.matrix[i][0] * r[0] + sc.matrix[i][1] * r[1] + sc.matrix[i][2] * r[2]) / 4096.0f + sc.trans[i];
     }
-    sc.figureCount = 0;
+    l->figures = sc.sceneFigureCount;
     memcpy(l->up, sc.up, sizeof(l->up));
     l->screenZ = sc.screenZ;
     l->centerX = sc.centerX;
@@ -411,13 +413,18 @@ void sceneFocusMeasured(float z) {
 
 void pcScenePlace(int place) { sc.placeGiven = place; }
 
+/* The longest a frame takes, in vblanks (a 15 Hz room): older points are stale. */
+#define FIGURE_STALE 4u
+
 void pcSceneFigure(int x, int y, int z) {
     uint32_t vblank = hwVSyncCount();
-    if (vblank != sc.figureVblank) {
-        sc.figureVblank = vblank;
-        sc.figureCount = 0;
-    }
+    /* Points given long before (no scene registered since: a menu, a
+     * movie) are not this frame's. */
+    if (vblank - sc.figureVblank > FIGURE_STALE) sc.figureCount = 0;
+    sc.figureVblank = vblank;
     if (sc.figureCount >= SCENE_FIGURES) return;
+    for (int k = 0; k < sc.figureCount; k++)
+        if (sc.figureRoom[k][0] == (float)x && sc.figureRoom[k][1] == (float)y && sc.figureRoom[k][2] == (float)z) return;
     sc.figureRoom[sc.figureCount][0] = (float)x;
     sc.figureRoom[sc.figureCount][1] = (float)y;
     sc.figureRoom[sc.figureCount][2] = (float)z;
@@ -471,6 +478,10 @@ void pcSceneView(const short rotation[3][3], const int translation[3], int scree
 void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int groundCount, int zPerSlot,
                   const void* uiTag, int focusZ, int pictureSlot) {
     sc.armed = 0;
+    /* The actors' points given since the last registration are this scene's. */
+    sc.sceneFigureCount = hwVSyncCount() - sc.figureVblank > FIGURE_STALE ? 0 : sc.figureCount;
+    memcpy(sc.sceneFigure, sc.figureRoom, (size_t)sc.sceneFigureCount * sizeof(sc.sceneFigure[0]));
+    sc.figureCount = 0;
     sc.place = sc.placeGiven; /* for this scene only, as the view */
     sc.placeGiven = PC_SCENE_FIELD;
     /* The view is for this scene only: a scene registered without one is not lit. */
@@ -575,9 +586,9 @@ static void finish(int reached) {
         gpuLog("scene: %u focus %d%s band %.3f radius %.2f%s", sc.scenes, sc.focusZ, sc.focusCentre ? " (centre)" : "",
                p.dof.band, p.dof.radius, reached ? "" : " (no UI tag: not blurred)");
         if (p.light.on)
-            gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f fog %.2f grade %.2f up %.3f %.3f %.3f screen %.0f",
+            gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f fog %.2f grade %.2f up %.3f %.3f %.3f screen %.0f figures %d",
                    sc.scenes, p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.fogMost, p.light.grade,
-                   p.light.up[0], p.light.up[1], p.light.up[2], p.light.screenZ);
+                   p.light.up[0], p.light.up[1], p.light.up[2], p.light.screenZ, p.light.figures);
     }
 }
 

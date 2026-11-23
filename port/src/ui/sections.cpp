@@ -912,7 +912,7 @@ void displaySection() {
         ImGui::EndDisabled();
         if (chosen != level) sceneSetShadows(chosen);
         hint("In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, "
-             "and in fields the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by "
+             "and in fields and battles the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by "
              "default.");
         if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
             hint("Not shown now: %s.", tr(sceneLightingStatus()));

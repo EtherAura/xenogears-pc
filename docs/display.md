@@ -90,7 +90,7 @@ F1 > Display > Lighting and Glow (each Off, Subtle, Medium, Strong).
 ## Shadows
 
 In fields, battles and on the world map, the scenery casts shadows from a
-sun (and in fields the characters too), which is
+sun (and in fields and battles the characters too), which is
 set from the camera a room starts with and then stays put in the room, so
 the shadows don't swing when the camera turns. Walls, furniture and props
 cast through the picture's depth; each character's sprite is laid on the

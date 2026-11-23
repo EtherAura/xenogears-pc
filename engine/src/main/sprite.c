@@ -18,6 +18,7 @@
 #include "stack.h"
 #include "pc_convert.h"
 #include "pc_interpolation.h"
+#include "pc_scene.h"
 int pcGameplaySpritePrecise(void); /* Enhanced (xg-hbc.19.3), port/src/system/gameplay.c */
 #define pcSpritePrecise pcGameplaySpritePrecise()
 s32 pcSpriteGravityScaled(s32 gravity, s32 timeScale);
@@ -812,6 +813,10 @@ void renderSpriteSquishedShadow(SpriteActorCore* actor, OTag* ot) {
     scale.vz = 0;
     ScaleMatrixL(&m, &scale);
     pos.vy = actor->m84_maxY;
+    /* Enhanced (xg-rgcf.5.6): where the game lays this shadow, for the display
+     * copy's cast shadows (battles: the party's sprites; a field's actors give
+     * theirs from renderCharShadows, and the same point twice counts once). */
+    pcSceneFigure(pos.vx, pos.vy, pos.vz);
     ApplyMatrix(&currentRenderingMatrix, &pos, &t);
     m.t[0] += t.vx;
     m.t[1] += t.vy;

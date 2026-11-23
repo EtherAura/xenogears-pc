@@ -38,6 +38,11 @@
 #               ld64 955.13 (tools/darwin_link.py; the linker from
 #               tools/build_ld64.sh), and its checks short of running it:
 #               skipped without that linker
+#   state-schema the canonical states' schema (tools/state_schema.py, xg-htn.60) of the
+#               build with debug information $XG_SCHEMA_BUILD (default build/pc/schema,
+#               cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo; read as it is, not rebuilt): its
+#               coverage, reported (P0 measures, nothing fails yet); skipped without one
+#   state-schema-tests the schema reader on a small program built here (with the tests)
 #   statevars   every writable static of the platform layer in $XG_TEST_BUILD
 #               is classified for save states (port/src/system/
 #               savestate_inventory.txt; tools/statecheck.py inventory):
@@ -93,6 +98,7 @@ mkdir -p "$OUT" "$(dirname "$LOCK")"
 NINJA=1
 TESTS=1
 TEST_BUILD="${XG_TEST_BUILD:-build/pc/gates}"
+SCHEMA_BUILD="${XG_SCHEMA_BUILD:-build/pc/schema}"
 TEST_BUILD_JP="${XG_TEST_BUILD_JP:-build/pc/gates-jp}"
 for a in "$@"; do
     case "$a" in
@@ -196,6 +202,7 @@ if [ "$TESTS" = 1 ]; then
     gate dav1d-helper "$PY" tools/check_dav1d_mingw.py --ver us
     gate port-runner "$PY" tools/test_port_tests.py
     gate state-runner "$PY" tools/test_statecheck.py
+    gate state-schema-tests "$PY" tools/test_state_schema.py
     gate art-tags "$PY" tools/test_art_tags.py
     gate chapter-row "$PY" tools/test_chapter_row.py
     gate doll-queue "$PY" tools/test_doll_queue.py
@@ -221,6 +228,11 @@ if [ -f "$TEST_BUILD/CMakeCache.txt" ]; then
 else
     record payload 0 "skipped: no configured build in $TEST_BUILD"
     record statevars 0 "skipped: no configured build in $TEST_BUILD"
+fi
+if [ -x "$SCHEMA_BUILD/xenogears" ]; then
+    gate state-schema "$PY" tools/state_schema.py "$SCHEMA_BUILD"
+else
+    record state-schema 0 "skipped: no build with debug information in $SCHEMA_BUILD (-DCMAKE_BUILD_TYPE=RelWithDebInfo)"
 fi
 
 # The JP executable: pc_link with the JP symbol files and layouts (only a JP
