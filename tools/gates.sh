@@ -43,6 +43,9 @@
 #               cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo; read as it is, not rebuilt): its
 #               coverage, reported (P0 measures, nothing fails yet); skipped without one
 #   state-schema-tests the schema reader on a small program built here (with the tests)
+#   statecanon-tests canonical states' reference converter (tools/statecanon.py) on a
+#               small program built twice 16 MiB apart: decoded across the layouts
+#               as the other build has it, and a round trip unchanged (with the tests)
 #   statevars   every writable static of the platform layer in $XG_TEST_BUILD
 #               is classified for save states (port/src/system/
 #               savestate_inventory.txt; tools/statecheck.py inventory):
@@ -203,6 +206,7 @@ if [ "$TESTS" = 1 ]; then
     gate port-runner "$PY" tools/test_port_tests.py
     gate state-runner "$PY" tools/test_statecheck.py
     gate state-schema-tests "$PY" tools/test_state_schema.py
+    gate statecanon-tests "$PY" tools/test_statecanon.py
     gate art-tags "$PY" tools/test_art_tags.py
     gate chapter-row "$PY" tools/test_chapter_row.py
     gate doll-queue "$PY" tools/test_doll_queue.py

@@ -246,6 +246,8 @@ void gvkReadWide(uint16_t* dst, int x, int y, int w, int h);
  * gvkLateWait gives (pitch w), or -1 (none: read now). gvkLateWait waits for
  * the copies if they are not done yet (normally they are long done). */
 ptrdiff_t gvkLateRead(int wide, VRect r);
+/* The copies queued so far handed to the device now, without waiting. */
+void gvkLateSubmit(void);
 const uint16_t* gvkLateWait(void);
 /* Hand recorded work to the device without waiting. */
 void gvkSubmit(void);
@@ -477,6 +479,9 @@ int gp0SceneRects(VRect* narrow, VRect* wide, int inset[2]);
  * (no copy, ordered batches, no room): nothing changes then. End: the writes
  * stop, and with `effects` the copy's two rectangles are lit and blurred. */
 int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY);
+/* The scene's pipelines still compiling on their thread (an effect turned on
+ * during play): gvkSceneBegin gives 0 until they are ready. */
+int gvkScenePreparing(void);
 void gvkSceneEnd(const SceneParams* effects);
 /* scene.c: the depth at a picture's centre, measured (vk.c reads it back a
  * few frames later, when the frame's buffers come round again). */

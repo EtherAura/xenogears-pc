@@ -850,7 +850,7 @@ void displaySection() {
     static const char* const sceneReasons[] = {
         N_("no focus point in this view"), N_("a movie-backed scene"), N_("no frame"), N_("no display copy yet"),
         N_("not available on this device, or without memory for it"),
-        N_("the game gave no view for this scene")};
+        N_("the game gave no view for this scene"), N_("being prepared (shaders compiling)")};
     (void)sceneReasons;
     if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
         // "Subtle", not "Light": the catalogs have no contexts and "Light" is the model viewer's lamp.

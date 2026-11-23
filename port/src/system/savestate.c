@@ -839,6 +839,7 @@ int stateListChunks(const StateChunkRef** chunks, int* count, int late) {
     listing.late = late;
     gp0StateFlush();
     walk(&listing);
+    if (late) gvkLateSubmit(); /* the device's copies start now, not with the frame's drawing */
     if (listedCap < listing.listCount) {
         listedCap = listing.listCount;
         listed = realloc(listed, (size_t)listedCap * sizeof(*listed));

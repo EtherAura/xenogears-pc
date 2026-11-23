@@ -1976,9 +1976,12 @@ static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32
 /* The hi-res copy's pipelines: its triangles (HiVertex; vertices 1, 2 for
  * the wide target's pass with its wide fields), or one pass of
  * hires_util.frag (vertices 0: no vertex input). */
-/* createHiPipeline for the scene depth builds: HiVertex.z as well. */
+/* createHiPipeline for the scene depth builds: HiVertex.z as well (the game
+ * thread's; the scene's own build passes `depth` to createHiPipelineDepth,
+ * as it may run on a thread of its own: sceneBuild). */
 static int hiPipelineDepth;
-static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices) {
+static VkPipeline createHiPipelineDepth(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices,
+                                        int depth) {
     /* 5: optional like 3, with the copy (R32_UINT) as its colour attachment (tileHiPass);
      * 6: the same with the scene's depth plane (R32_UINT) as a second one (tileHiDepthPass). */
     int attached = vertices == 5 ? 1 : vertices == 6 ? 2 : 0;
@@ -2018,7 +2021,7 @@ static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint
     if (vertices) {
         vi.vertexBindingDescriptionCount = 1;
         vi.pVertexBindingDescriptions = &binding;
-        vi.vertexAttributeDescriptionCount = hiPipelineDepth ? 16 : 15;
+        vi.vertexAttributeDescriptionCount = depth ? 16 : 15;
         vi.pVertexAttributeDescriptions = attrs;
     }
     VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -2070,6 +2073,9 @@ static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint
     vkDestroyShaderModule(vk.device, vm, NULL);
     vkDestroyShaderModule(vk.device, fm, NULL);
     return p;
+}
+static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices) {
+    return createHiPipelineDepth(vs, vsSize, fs, fsSize, vertices, hiPipelineDepth);
 }
 
 /* ---- swapchain ---------------------------------------------------------------- */
@@ -5744,8 +5750,97 @@ static void sceneDestroy(void) {
     vk.scene.active = 0;
 }
 
-/* The pipelines, layouts and sets, once; 0 when the device cannot. */
-static int sceneMake(void) {
+/* The scene's pipelines: the depth of field's and the lighting's compute
+ * pipelines and the copy's eight with depth. Seconds of shader compiling on
+ * some drivers (2.6 s at the world map's first scene on an RTX 3070 Ti, the
+ * game thread stopped, when an effect was turned on during play: xg-16vc).
+ * Made at the start when an effect is on (gvkInit, as before); turned on
+ * later, they are compiled on a thread of their own (sceneBuild) while the
+ * game goes on, its scenes without the effects until they are ready. That
+ * thread reads only the device, the layouts made before it starts and
+ * vk.hiLayout; Vulkan's creation calls need no external synchronisation
+ * with the game thread's. */
+typedef struct {
+    VkPipeline dof, light, draw[2][2][2];
+} ScenePipelines;
+static struct {
+    SDL_Thread* thread;
+    SDL_AtomicInt done;
+    ScenePipelines made;
+} sceneBuild;
+
+static void sceneCompile(ScenePipelines* p) {
+    VkComputePipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    ci.stage = (VkPipelineShaderStageCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                 .stage = VK_SHADER_STAGE_COMPUTE_BIT, .pName = "main"};
+    ci.stage.module = shaderModule(dofCompSpv, sizeof(dofCompSpv));
+    ci.layout = vk.scene.dofLayout;
+    if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &p->dof) != VK_SUCCESS) p->dof = VK_NULL_HANDLE;
+    vkDestroyShaderModule(vk.device, ci.stage.module, NULL);
+    /* The lighting (light.comp). */
+    ci.stage.module = shaderModule(lightCompSpv, sizeof(lightCompSpv));
+    ci.layout = vk.scene.lightLayout;
+    if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &p->light) != VK_SUCCESS) p->light = VK_NULL_HANDLE;
+    vkDestroyShaderModule(vk.device, ci.stage.module, NULL);
+    /* [wide][coarse][unordered]: as the copy's own eight pipelines (gvkInit). */
+#define SCENE_PIPELINE(w, c, u, vs, fsLocked, fsPlain) \
+    p->draw[w][c][u] = createHiPipelineDepth(vs, sizeof(vs), !(u) && vk.interlock ? fsLocked : fsPlain, \
+        !(u) && vk.interlock ? sizeof(fsLocked) : sizeof(fsPlain), (w) ? 4 : 3, 1)
+    SCENE_PIPELINE(0, 0, 0, hiresDepthVertSpv, hiresDepthInterlockFragSpv, hiresDepthFragSpv);
+    SCENE_PIPELINE(0, 0, 1, hiresDepthVertSpv, hiresDepthInterlockFragSpv, hiresDepthFragSpv);
+    SCENE_PIPELINE(1, 0, 0, hiresWideDepthVertSpv, hiresWideDepthInterlockFragSpv, hiresWideDepthFragSpv);
+    SCENE_PIPELINE(1, 0, 1, hiresWideDepthVertSpv, hiresWideDepthInterlockFragSpv, hiresWideDepthFragSpv);
+    SCENE_PIPELINE(0, 1, 0, hiresCoarseDepthVertSpv, hiresCoarseDepthInterlockFragSpv, hiresCoarseDepthFragSpv);
+    SCENE_PIPELINE(0, 1, 1, hiresCoarseDepthVertSpv, hiresCoarseDepthInterlockFragSpv, hiresCoarseDepthFragSpv);
+    SCENE_PIPELINE(1, 1, 0, hiresWideCoarseDepthVertSpv, hiresWideCoarseDepthInterlockFragSpv, hiresWideCoarseDepthFragSpv);
+    SCENE_PIPELINE(1, 1, 1, hiresWideCoarseDepthVertSpv, hiresWideCoarseDepthInterlockFragSpv, hiresWideCoarseDepthFragSpv);
+#undef SCENE_PIPELINE
+}
+
+static int SDLCALL sceneBuildRun(void* arg) {
+    (void)arg;
+    sceneCompile(&sceneBuild.made);
+    SDL_SetAtomicInt(&sceneBuild.done, 1);
+    return 0;
+}
+
+/* The compiled pipelines as the scene's (the game thread); 0 when one is
+ * missing. */
+static int sceneFinish(const ScenePipelines* p) {
+    vk.scene.dof = p->dof;
+    vk.scene.light = p->light;
+    memcpy(vk.scene.draw, p->draw, sizeof(vk.scene.draw));
+    int ok = vk.scene.dof != VK_NULL_HANDLE && vk.scene.light != VK_NULL_HANDLE;
+    for (int w = 0; w < 2; w++) for (int c = 0; c < 2; c++) for (int u = 0; u < 2; u++)
+        if (!vk.scene.draw[w][c][u]) ok = 0;
+    if (!ok) {
+        sceneDestroy();
+        vk.scene.state = -1;
+        gpuLog("scene: the depth of field and the lighting could not be set up on this device");
+        return 0;
+    }
+    vk.scene.state = 1;
+    gpuLog("scene: depth image, depth of field and lighting ready");
+    return 1;
+}
+
+/* A build on its thread taken in once done (or, wait, once it is): 0 while
+ * it still runs. */
+static int sceneBuildCollect(int wait) {
+    if (!sceneBuild.thread) return 1;
+    if (!wait && !SDL_GetAtomicInt(&sceneBuild.done)) return 0;
+    SDL_WaitThread(sceneBuild.thread, NULL);
+    sceneBuild.thread = NULL;
+    sceneFinish(&sceneBuild.made);
+    return 1;
+}
+
+int gvkScenePreparing(void) { return sceneBuild.thread != NULL; }
+
+/* The pipelines, layouts and sets, once; 0 when the device cannot, or (not
+ * now) while the pipelines compile on their thread. */
+static int sceneMakeNow(int now) {
+    if (!sceneBuildCollect(0)) return 0;
     if (vk.scene.state) return vk.scene.state > 0;
     vk.scene.state = -1;
     uint32_t families = 0;
@@ -5780,14 +5875,6 @@ static int sceneMake(void) {
     pi.setLayoutCount = 1; pi.pSetLayouts = &vk.scene.dofSetLayout;
     pi.pushConstantRangeCount = 1; pi.pPushConstantRanges = &range;
     if (vkCreatePipelineLayout(vk.device, &pi, NULL, &vk.scene.dofLayout) != VK_SUCCESS) goto fail;
-    VkShaderModule module = shaderModule(dofCompSpv, sizeof(dofCompSpv));
-    VkComputePipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-    ci.stage = (VkPipelineShaderStageCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                                                 .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = module, .pName = "main"};
-    ci.layout = vk.scene.dofLayout;
-    VkResult result = vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &vk.scene.dof);
-    vkDestroyShaderModule(vk.device, module, NULL);
-    if (result != VK_SUCCESS) goto fail;
     /* The lighting (light.comp): the colour, the depth, its working images,
      * six of those again, filtered, and the frame's span buffer. */
     VkDescriptorSetLayoutBinding lb[SCENE_LIGHT_BINDINGS];
@@ -5801,12 +5888,6 @@ static int sceneMake(void) {
     range.size = sizeof(LightConstants);
     pi.pSetLayouts = &vk.scene.lightSetLayout;
     if (vkCreatePipelineLayout(vk.device, &pi, NULL, &vk.scene.lightLayout) != VK_SUCCESS) goto fail;
-    module = shaderModule(lightCompSpv, sizeof(lightCompSpv));
-    ci.stage.module = module;
-    ci.layout = vk.scene.lightLayout;
-    result = vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &vk.scene.light);
-    vkDestroyShaderModule(vk.device, module, NULL);
-    if (result != VK_SUCCESS) goto fail;
     VkDescriptorPoolSize size[3] = {{VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, FRAMES * SCENE_TARGETS * (8 + 2 + SCENE_LIGHT_IMAGES)},
                                     {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES * SCENE_TARGETS * (2 + SCENE_LIGHT_FILTERED)},
                                     {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, FRAMES * SCENE_TARGETS}};
@@ -5825,32 +5906,24 @@ static int sceneMake(void) {
         if (vkAllocateDescriptorSets(vk.device, &ai, &vk.frames[k].sceneDepthSet[t]) != VK_SUCCESS) goto fail;
         memset(vk.frames[k].sceneViews[t], 0, sizeof(vk.frames[k].sceneViews[t]));
     }
-    /* [wide][coarse][unordered]: as the copy's own eight pipelines (gvkInit). */
-#define SCENE_PIPELINE(w, c, u, vs, fsLocked, fsPlain) \
-    vk.scene.draw[w][c][u] = createHiPipeline(vs, sizeof(vs), !(u) && vk.interlock ? fsLocked : fsPlain, \
-        !(u) && vk.interlock ? sizeof(fsLocked) : sizeof(fsPlain), (w) ? 4 : 3)
-    hiPipelineDepth = 1;
-    SCENE_PIPELINE(0, 0, 0, hiresDepthVertSpv, hiresDepthInterlockFragSpv, hiresDepthFragSpv);
-    SCENE_PIPELINE(0, 0, 1, hiresDepthVertSpv, hiresDepthInterlockFragSpv, hiresDepthFragSpv);
-    SCENE_PIPELINE(1, 0, 0, hiresWideDepthVertSpv, hiresWideDepthInterlockFragSpv, hiresWideDepthFragSpv);
-    SCENE_PIPELINE(1, 0, 1, hiresWideDepthVertSpv, hiresWideDepthInterlockFragSpv, hiresWideDepthFragSpv);
-    SCENE_PIPELINE(0, 1, 0, hiresCoarseDepthVertSpv, hiresCoarseDepthInterlockFragSpv, hiresCoarseDepthFragSpv);
-    SCENE_PIPELINE(0, 1, 1, hiresCoarseDepthVertSpv, hiresCoarseDepthInterlockFragSpv, hiresCoarseDepthFragSpv);
-    SCENE_PIPELINE(1, 1, 0, hiresWideCoarseDepthVertSpv, hiresWideCoarseDepthInterlockFragSpv, hiresWideCoarseDepthFragSpv);
-    SCENE_PIPELINE(1, 1, 1, hiresWideCoarseDepthVertSpv, hiresWideCoarseDepthInterlockFragSpv, hiresWideCoarseDepthFragSpv);
-    hiPipelineDepth = 0;
-#undef SCENE_PIPELINE
-    for (int w = 0; w < 2; w++) for (int c = 0; c < 2; c++) for (int u = 0; u < 2; u++)
-        if (!vk.scene.draw[w][c][u]) goto fail;
-    vk.scene.state = 1;
-    gpuLog("scene: depth image, depth of field and lighting ready");
-    return 1;
+    if (!now) {
+        memset(&sceneBuild.made, 0, sizeof(sceneBuild.made));
+        SDL_SetAtomicInt(&sceneBuild.done, 0);
+        sceneBuild.thread = SDL_CreateThread(sceneBuildRun, "scene pipelines", NULL);
+        if (sceneBuild.thread) {
+            gpuLog("scene: compiling the depth of field's and the lighting's pipelines on a thread of their own");
+            return 0;
+        }
+    }
+    ScenePipelines made = {0};
+    sceneCompile(&made);
+    return sceneFinish(&made);
 fail:
-    hiPipelineDepth = 0;
     sceneDestroy();
     gpuLog("scene: the depth of field and the lighting could not be set up on this device");
     return 0;
 }
+static int sceneMake(void) { return sceneMakeNow(0); }
 
 /* Target t's depth image, at least w x h hi-res pixels. */
 static int sceneDepthImage(int t, int w, int h) {
@@ -7212,8 +7285,9 @@ void gvkReadback(VRect r, uint16_t* dst, int pitch) {
 }
 
 /* Late reads (save states' rewind captures): copies queued behind the work
- * recorded so far, into a buffer of their own, without waiting; by the next
- * capture the frame that carried them has normally long been done. */
+ * recorded so far, into a buffer of their own, without waiting, and handed
+ * to the device at the list's end (gvkLateSubmit), so the next capture finds
+ * them done even one vblank on. */
 #define LATE_BYTES ((size_t)VRAM_W * VRAM_H * 2 + (size_t)WIDE_W * WIDE_VIEW_Y * 2 + (64u << 10))
 static struct {
     HostBuffer bufs[2]; /* by turns: rewind's pack worker may still be comparing the last list's */
@@ -7260,6 +7334,19 @@ ptrdiff_t gvkLateRead(int wide, VRect r) {
     ptrdiff_t at = (ptrdiff_t)(late.used / 2);
     late.used += (bytes + 15) & ~(size_t)15;
     return at;
+}
+
+/* The copies are a few microseconds of the device's time. Left in the frame
+ * being recorded they would go with it at the next present, and the capture
+ * after (one vblank on at rewind_interval 1) would wait for that whole
+ * frame's drawing: 7.6 ms a vblank in a Gear battle at 9x with the scene
+ * effects (xg-28us). Handed over now, alone, they are long done by then. */
+void gvkLateSubmit(void) {
+    if (!late.queued) return;
+    FrameCtx* f = &vk.frames[late.frame];
+    if (f->uses != late.use || !f->recording) return; /* already on its way */
+    endBatch();
+    submitFrame(NULL, NULL);
 }
 
 const uint16_t* gvkLateWait(void) {
@@ -8666,8 +8753,8 @@ int gvkInit(void* sdlWindow) {
     createFrames();
     /* The depth of field's pipelines now when the option is on, rather than
      * at the first field frame (seconds of shader compiling on some drivers);
-     * turned on later, they are made then. Off: nothing. */
-    if (sceneWantsCopy()) sceneMake();
+     * turned on later, on a thread of their own (sceneBuild). Off: nothing. */
+    if (sceneWantsCopy()) sceneMakeNow(1);
 
     /* VRAM starts out zero, like the CPU copy. */
     VkCommandBuffer cmd = recording();
@@ -8840,6 +8927,7 @@ void gvkShutdown(void) {
     vkDestroyPipeline(vk.device, vk.hiWideCoarseUnorderedPipeline, NULL);
     vkDestroyPipeline(vk.device, vk.hiUtilPipeline, NULL);
     vkDestroyPipeline(vk.device, vk.capturePipeline, NULL);
+    sceneBuildCollect(1); /* a build still compiling: done before its pipelines go */
     sceneDestroy();
     vk.scene.state = 0;
     vkDestroyPipelineLayout(vk.device, vk.hiLayout, NULL);

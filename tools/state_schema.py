@@ -35,7 +35,7 @@ KEEP_ATTRS = {
     "DW_AT_name", "DW_AT_byte_size", "DW_AT_type", "DW_AT_data_member_location", "DW_AT_location",
     "DW_AT_low_pc", "DW_AT_upper_bound", "DW_AT_count", "DW_AT_bit_size", "DW_AT_data_bit_offset",
     "DW_AT_specification", "DW_AT_abstract_origin", "DW_AT_decl_file", "DW_AT_declaration", "DW_AT_external",
-    "DW_AT_linkage_name",
+    "DW_AT_linkage_name", "DW_AT_encoding", "DW_AT_bit_offset",
 }
 TAG_RE = re.compile(r"^0x([0-9a-f]+):(\s+)(DW_TAG_\w+|NULL)")
 ATTR_RE = re.compile(r"^\s+(DW_AT_\w+)\s+\((.*)\)\s*$")
@@ -279,6 +279,49 @@ def main() -> int:
                           "module": mod, "section": kind, "file": f, "platform": rel,
                           "retail": retail_of(mod, name) if mod else None})
 
+    # The generated sources define the asm-defined data as byte arrays (gen/: u8 gameState[0x2358]); the
+    # headers declare their real types. A declaration's type of the same size is the one to encode by.
+    declared = defaultdict(list)
+    for off, d in dies.items():
+        if d["tag"] == "DW_TAG_variable" and "DW_AT_location" not in d["attrs"] and d["attrs"].get("DW_AT_name"):
+            t = d["attrs"].get("DW_AT_type")
+            if t is not None:
+                declared[d["attrs"]["DW_AT_name"]].append(t)
+
+    def is_bytes(off):
+        o = types.strip(off)
+        d = dies.get(o)
+        if d is None or d["tag"] != "DW_TAG_array_type":
+            return False
+        e = dies.get(types.strip(d["attrs"].get("DW_AT_type")))
+        # an array of scalars: the generated data's bytes (.byte) or words (.word, .half)
+        return bool(e and e["tag"] == "DW_TAG_base_type")
+
+    def open_array_elem(off):
+        """The element type of an array declared without a size (extern T name[];), else None."""
+        o = types.strip(off)
+        d = dies.get(o)
+        if d is None or d["tag"] != "DW_TAG_array_type" or types.size(o):
+            return None
+        return d["attrs"].get("DW_AT_type")
+
+    retyped = 0
+    for v in variables:
+        t = v["type"]
+        if t is not None and is_bytes(t):
+            for cand in declared.get(v["name"], []):
+                if not is_bytes(cand) and types.size(cand) == v["size"]:
+                    t = cand
+                    retyped += 1
+                    break
+                elem = open_array_elem(cand)
+                es = types.size(elem) if elem is not None else 0
+                if es and v["size"] % es == 0 and not is_bytes(elem if elem is not None else cand):
+                    v["elem"], v["count"] = elem, v["size"] // es  # completed below, in the schema's table
+                    retyped += 1
+                    break
+        v["type"] = t
+
     game = [v for v in variables if v["module"]]
     platform = [v for v in variables if not v["module"] and v["platform"] and (v["platform"], v["name"]) in inv]
 
@@ -410,8 +453,108 @@ def main() -> int:
     print("    without, by file: " + ", ".join(f"{f} {n}" for f, n in unannotated_files.most_common(args.top)))
 
     out = args.json or (build / "state_schema.json.gz")
+    # ---- the types a state's variables hold, for the canonical encoder (tools/statecanon.py) -------
+    tids: dict[int, str] = {}
+    table: dict[str, dict] = {}
+
+    def tid(off):
+        """A type's id in the schema (its DIE offset), described in `table` once; typedefs and qualifiers
+        are looked through, a struct keeps its typedef's name for messages."""
+        shown = types.name(off)
+        if shown == "OTag" and off in dies and dies[off]["tag"] == "DW_TAG_typedef":
+            # an ordering table's link (include/psyq.h): the length in the top byte, an address below it
+            key = "OTag"
+            table.setdefault(key, {"k": "otag", "size": types.size(off), "name": "OTag"})
+            return key
+        off = types.strip(off)
+        if off is None or off not in dies:
+            return None
+        key = f"{off:x}"
+        if off in tids:
+            return key
+        tids[off] = key
+        d = dies[off]; tag = d["tag"]; a = d["attrs"]
+        if tag == "DW_TAG_base_type":
+            enc = str(a.get("DW_AT_encoding", ""))
+            table[key] = {"k": "float" if "float" in enc else "int", "size": a.get("DW_AT_byte_size", 0),
+                          "signed": "signed" in enc and "unsigned" not in enc, "name": a.get("DW_AT_name", shown)}
+        elif tag == "DW_TAG_enumeration_type":
+            table[key] = {"k": "int", "size": a.get("DW_AT_byte_size", 4), "signed": False, "name": shown}
+        elif tag == "DW_TAG_pointer_type":
+            target = dies.get(types.strip(a.get("DW_AT_type")))
+            fn = bool(target and target["tag"] == "DW_TAG_subroutine_type")
+            table[key] = {"k": "ptr", "size": 8, "fn": fn}
+            if not fn:
+                table[key]["to"] = tid(a.get("DW_AT_type")) if a.get("DW_AT_type") is not None else None
+        elif tag == "DW_TAG_array_type":
+            dims = []
+            for c in d["children"]:
+                sa = dies[c]["attrs"]
+                dims.append(sa.get("DW_AT_count", sa.get("DW_AT_upper_bound", -1) + 1))
+            elem = tid(a.get("DW_AT_type"))
+            for n in reversed(dims[1:]):  # int a[2][3]: an array of 2 arrays of 3
+                inner = f"{key}.{n}"
+                table[inner] = {"k": "arr", "of": elem, "n": n, "size": n * table[elem]["size"] if elem else 0}
+                elem = inner
+            n = dims[0] if dims else 0
+            table[key] = {"k": "arr", "of": elem, "n": n, "size": types.size(off)}
+        elif tag in ("DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_class_type"):
+            table[key] = {"k": "union" if tag == "DW_TAG_union_type" else "struct", "size": a.get("DW_AT_byte_size", 0),
+                          "name": shown, "owner": owner_of(off), "fields": []}
+            fields = []
+            for c in d["children"]:
+                m = dies[c]
+                if m["tag"] != "DW_TAG_member":
+                    continue
+                ma = m["attrs"]
+                fname = ma.get("DW_AT_name", "")
+                tag_m = FIELD_TAG.match(fname)
+                f = {"name": fname, "off": ma.get("DW_AT_data_member_location", 0), "type": tid(ma.get("DW_AT_type")),
+                     "retail": int(tag_m.group(1), 16) if tag_m else None}
+                if "DW_AT_bit_size" in ma:
+                    f["bits"] = ma["DW_AT_bit_size"]
+                    f["bit"] = ma.get("DW_AT_data_bit_offset", 0)
+                    f["off"] = f["bit"] // 8 if "DW_AT_data_member_location" not in ma else f["off"]
+                fields.append(f)
+            table[key]["fields"] = fields
+        else:  # a function type reached by value, void, or something the encoder copies as bytes
+            table[key] = {"k": "bytes", "size": types.size(off)}
+        return key
+
+    for v in variables:
+        if v.get("elem") is not None:
+            e = tid(v["elem"])
+            key = f"{e}[{v['count']}]"
+            table.setdefault(key, {"k": "arr", "of": e, "n": v["count"], "size": v["size"]})
+            v["tid"] = key
+        else:
+            v["tid"] = tid(v["type"]) if v["type"] is not None else None
+
+    # The saved parts' files (savestate.c parts[]: {"gpu", gpuStateIo}): a part's tags (XG_STATE_VAR's
+    # expressions) name variables of that file.
+    part_files = {}
+    parts_src = (ROOT / "port/src/system/savestate.c").read_text()
+    io_files = {f["name"]: f for f in funcs}
+    io_decl = {}
+    for off, d in dies.items():
+        if d["tag"] == "DW_TAG_subprogram" and "DW_AT_low_pc" in d["attrs"]:
+            a = resolved(d)
+            name = str(a.get("DW_AT_name", ""))
+            f = str(d["attrs"].get("DW_AT_decl_file", "") or a.get("DW_AT_decl_file", ""))
+            if name.endswith("StateIo") and "/port/src/" in f and f.endswith((".c", ".cpp")):
+                io_decl[name] = f.split("/port/src/", 1)[1]
+    for pname, fn in re.findall(r'\{"(\w+)",\s*(\w+StateIo)\}', parts_src):
+        if fn in io_decl:
+            part_files[pname] = io_decl[fn]
+
     schema = {"version": version, "exe": str(exe), "variables": [
-        {k: v[k] for k in ("name", "addr", "size", "module", "section", "retail", "platform")} for v in game + platform],
+        {k: v.get(k) for k in ("name", "addr", "size", "module", "section", "retail", "platform", "tid")}
+        for v in variables if v["module"] or v["platform"]],
+        "types": table, "parts": part_files, "retyped": retyped,
+        # where a raw state's memory chunks sit in this build (statecanon.py reads them by these)
+        "sections": {f"{mod}.{kind}": [lo, hi] for lo, hi, mod, kind in modsec},
+        "regions": {v["name"]: [v["addr"], v["addr"] + v["size"]] for v in variables
+                    if v["name"] in ("heapArena", "gameStack", "pcScratchpad")},
         "functions": funcs, "allocation_sites": site_list}
     with gzip.open(out, "wt") as fh:
         json.dump(schema, fh)

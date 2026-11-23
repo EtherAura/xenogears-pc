@@ -554,8 +554,9 @@ static void walkStart(void) {
             if (gvkSceneBegin(narrow, rects == 2 ? &wide : NULL, inset[0], inset[1])) {
                 sc.drawing = 1;
             } else {
-                sc.status = gvkHiScale() == 0 ? "no display copy yet"
-                                              : "not available on this device, or without memory for it";
+                sc.status = gvkScenePreparing() ? "being prepared (shaders compiling)"
+                            : gvkHiScale() == 0 ? "no display copy yet"
+                                                : "not available on this device, or without memory for it";
             }
         }
     }

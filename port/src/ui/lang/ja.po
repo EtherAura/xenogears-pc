@@ -8693,3 +8693,6 @@ msgstr "このデバイスでは使えないか、メモリが足りません"
 
 msgid "the game gave no view for this scene"
 msgstr "この場面ではゲームの視点がありません"
+
+msgid "being prepared (shaders compiling)"
+msgstr "準備中です(シェーダーをコンパイルしています)"
