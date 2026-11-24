@@ -116,6 +116,10 @@ static const char* const levelNames[] = {"off", "subtle", "medium", "strong"};
 static const float levelRadius[] = {0, 1.25f, 2.5f, 4.0f};
 static const char* const focusNames[] = {"narrow", "normal", "wide"};
 static const float focusBand[] = {0.05f, 0.10f, 0.18f};
+/* The tilt-shift's radius at the frame's edges per level (PS1 pixels; the
+ * blur's sigma is half of it): carl chose Medium from the prototypes, and the
+ * blur on 10% of the frame in all (xg-rgcf.5.14). */
+static const float tiltRadius[] = {0, 6.0f, 12.0f, 20.0f};
 /* Lighting and glow by level (light.comp has the fixed shares). */
 static const float lightTop[] = {0, 0.25f, 0.45f, 0.75f};
 static const float lightShade[] = {0, 0.6f, 1.0f, 1.4f};
@@ -147,6 +151,8 @@ static struct {
     int lighting, glow, shadows, fog, grade; /* levels, 0 off */
     int particles, particleSize;             /* particles' level (0 off) and size (0 small .. 2 large) */
     int vignette;                            /* the vignette's level, 0 off */
+    int tiltShift;                           /* the tilt-shift's level, 0 off */
+    int frameRows;                           /* the scene's frame's rows (its drawing area) */
     int shadePart, bouncePart;
     int lightDebug, haveLightGain;
     float lightGain;
@@ -264,6 +270,10 @@ static void load(void) {
     settingsDescribe("vignette", "vignette: off (default), subtle, medium or strong: the frame's edges a little darker in "
                                  "fields, battles and on the world map (the Enhanced engine)");
     sc.vignette = levelOf("vignette");
+    settingsDescribe("tilt_shift", "tilt_shift: off (default), subtle, medium or strong: a thin blurred strip along "
+                                   "the top and bottom of the picture, in fields and on the world map (the Enhanced "
+                                   "engine)");
+    sc.tiltShift = levelOf("tilt_shift");
     s = settingsGet("particle_size");
     sc.particleSize = s != NULL && strcmp(s, "medium") == 0 ? 1 : s != NULL && strcmp(s, "large") == 0 ? 2 : 0;
     s = settingsGet("lighting_shade");
@@ -362,6 +372,13 @@ int sceneVignette(void) {
 
 void sceneSetVignette(int level) { setLevel("vignette", &sc.vignette, level); }
 
+int sceneTiltShift(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.tiltShift : 0;
+}
+
+void sceneSetTiltShift(int level) { setLevel("tilt_shift", &sc.tiltShift, level); }
+
 int sceneParticleSize(void) {
     load();
     return sc.particleSize;
@@ -384,7 +401,7 @@ const char* sceneLightingStatus(void) {
 
 int sceneWantsCopy(void) {
     return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0 || sceneFog() != 0 ||
-           sceneGrade() != 0 || sceneParticles() != 0 || sceneVignette() != 0;
+           sceneGrade() != 0 || sceneParticles() != 0 || sceneVignette() != 0 || sceneTiltShift() != 0;
 }
 
 static void normalize3(float v[3]) {
@@ -400,6 +417,12 @@ static void params(SceneParams* p) {
     d->radius = sceneDof() ? levelRadius[sc.level] : 0;
     d->debug = sceneDof() ? sc.debug : 0;
     d->figures = sc.figures;
+    /* The tilt-shift: fields and the world map (xg-rgcf.5.14). */
+    d->tilt = sc.place == PC_SCENE_FIELD || sc.place == PC_SCENE_WORLDMAP ? tiltRadius[sceneTiltShift()] : 0;
+    /* The display shows its rows from the top of the frame (the game's
+     * display and drawing environments start at the same row). */
+    int shown = gpuDisplay()->h;
+    d->tiltHidden = shown > 0 && sc.frameRows > shown ? sc.frameRows - shown : 0;
 
     LightParams* l = &p->light;
     memset(l, 0, sizeof(*l));
@@ -465,6 +488,8 @@ static void params(SceneParams* p) {
         l->blurBand = d->band;
         l->blurGain = d->gain;
         l->blurRadius = d->radius;
+        l->blurTilt = d->tilt;
+        l->blurTiltHidden = d->tiltHidden;
     }
     memcpy(l->up, sc.up, sizeof(l->up));
     l->screenZ = sc.screenZ;
@@ -617,6 +642,7 @@ static void walkStart(void) {
         VRect narrow, wide;
         int inset[2] = {0, 0};
         int rects = gp0SceneRects(&narrow, &wide, inset);
+        sc.frameRows = rects ? narrow.y1 - narrow.y0 + 1 : 0;
         if (rects == 0) {
             sc.status = "no frame";
         } else {
@@ -656,6 +682,7 @@ static void finish(int reached) {
     if (sc.log) {
         gpuLog("scene: %u focus %d%s band %.3f radius %.2f%s", sc.scenes, sc.focusZ, sc.focusCentre ? " (centre)" : "",
                p.dof.band, p.dof.radius, reached ? "" : " (no UI tag: not blurred)");
+        if (p.dof.tilt > 0) gpuLog("scene: %u tilt-shift %.1f, %d rows not shown", sc.scenes, p.dof.tilt, p.dof.tiltHidden);
         if (p.light.on)
             gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f fog %.2f grade %.2f up %.3f %.3f %.3f screen %.0f figures %d",
                    sc.scenes, p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.fogMost, p.light.grade,

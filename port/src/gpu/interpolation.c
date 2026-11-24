@@ -278,7 +278,7 @@ void interpolationSceneEnd(const SceneParams* effects) {
     if (ip.building < 0) return;
     InterpFrame* f = &ip.frames[ip.building];
     f->sceneEnd = f->vertexCount;
-    f->sceneBlur = effects != NULL && (effects->dof.radius > 0 || effects->dof.debug);
+    f->sceneBlur = effects != NULL && (effects->dof.radius > 0 || effects->dof.debug || effects->dof.tilt > 0);
     f->sceneLight = effects != NULL && effects->light.on;
     if (effects != NULL) f->fx = *effects;
 }

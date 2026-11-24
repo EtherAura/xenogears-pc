@@ -123,6 +123,7 @@ layout(push_constant) uniform Light {
 } pc;
 
 #include "scene_color.glsl"
+#include "tilt_shift.glsl"
 
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
@@ -923,7 +924,7 @@ void particleRecord(int i) {
     int b = int(pc.lens.w);
     int rec = b + PART_REC + 3 * i;
     vec4 setting = block[b + PART_SLOT + 3]; // the box, the time (s), the size, the level
-    vec4 lens = block[b + PART_SLOT + 4];    // the depth of field's band, gain, radius (PS1 pixels)
+    vec4 lens = block[b + PART_SLOT + 4];    // the depth of field's band, gain, radius (PS1 pixels); w: the tilt-shift's
     int level = int(setting.w);
     bool ember = i >= PARTICLE_EMBERS;
     int k = ember ? i - PARTICLE_EMBERS : i;
@@ -1010,6 +1011,14 @@ void particleRecord(int i) {
     float coc = lens.z > 0.0 ? clamp((abs(u) - lens.x) * lens.y, 0.0, lens.z) : 0.0;
     float radius = max(size, coc);
     float gain = level == 1 ? 0.7 : level == 2 ? 0.9 : 1.1;
+    // In the tilt-shift's strips a mote fades as their blur would dim it,
+    // keeping its own footprint (the blur's would bin it into many more tiles).
+    float dim = 1.0;
+    if (lens.w > 0.0) {
+        int packed = int(lens.w);
+        float most = float(packed >> 10) / 16.0;
+        dim = radius / max(radius, most * tiltRamp(at.y, float(pc.work.y - (packed & 1023))));
+    }
     vec3 colour;
     float alpha, glow = 0.0;
     if (!ember) {
@@ -1025,11 +1034,11 @@ void particleRecord(int i) {
         lit *= clamp((2.0 * focus - behind) / (0.6 * focus), 0.0, 1.0);
         vec3 tint = sqrt(max(imageLoad(base, g).rgb, 0.0));
         colour = 0.7 * DUST_COLOUR + 0.3 * tint / max(max(tint.r, max(tint.g, tint.b)), 1.0e-3);
-        alpha = gain * weight * lit * (size / radius) * (1.0 + 0.3 * sin(3.0 * time + ph.z));
+        alpha = gain * weight * lit * (size / radius) * dim * (1.0 + 0.3 * sin(3.0 * time + ph.z));
     } else {
         colour = EMBER_COLOUR;
         glow = max(radius * 2.2, 2.0 / float(pc.n));
-        alpha = gain * weight * pow(size / radius, 0.8) * (0.6 + 0.4 * pow(sin(1.7 * time * sp + ph.x), 2.0));
+        alpha = gain * weight * pow(size / radius * dim, 0.8) * (0.6 + 0.4 * pow(sin(1.7 * time * sp + ph.x), 2.0));
     }
     if (alpha < 1.0 / 512.0) return;
     block[rec] = vec4(at, v.z, radius);

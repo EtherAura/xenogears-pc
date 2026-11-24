@@ -221,6 +221,8 @@ std::vector<Spec>& table() {
     static const char* const dofRanges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
     add("depth_of_field_focus", N_("Focus range"), [](int) { return sceneDofFocus(); },
         [](int, int v) { sceneSetDofFocus(v); }, 1, dofRanges, 3);
+    add("tilt_shift", N_("Tilt-shift"), [](int) { return sceneTiltShift(); }, [](int, int v) { sceneSetTiltShift(v); }, 0,
+        dofLevels, 4);
     add("lighting", N_("Lighting"), [](int) { return sceneLighting(); }, [](int, int v) { sceneSetLighting(v); }, 0,
         dofLevels, 4);
     add("glow", N_("Glow"), [](int) { return sceneGlow(); }, [](int, int v) { sceneSetGlow(v); }, 0, dofLevels, 4);

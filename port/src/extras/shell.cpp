@@ -1335,6 +1335,12 @@ void frame() {
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2((float)pw, (float)ph);
     io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+    if (st.scripted) {
+        // A scripted run (XG_EXTRAS_SCRIPT) steps every clock by one vblank a frame, as the sprite viewer's
+        // now() does: a headless run that takes longer than a vblank a frame (a 4K capture) would otherwise
+        // play the battle scenes' and models' animations as many times too fast.
+        io.DeltaTime = (float)hwVSyncPeriod();
+    }
     feedButtons(st.frames == 0 || !st.open);
     ImGui::NewFrame();
     skin::beginFrame();

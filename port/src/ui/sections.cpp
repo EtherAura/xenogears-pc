@@ -890,6 +890,19 @@ void displaySection() {
              "behind or close to the camera.");
         overrideNote("depth_of_field_focus");
     }
+    // The tilt-shift (xg-rgcf.5.14): made with the depth of field, the larger blur of the two.
+    if (row("Tilt-shift", "tilt_shift", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneTiltShift();
+        int chosen = listChoice("##tilt_shift", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetTiltShift(chosen);
+        hint("In fields and on the world map, a thin strip along the top and the bottom of the picture blurs, most "
+             "at the edge, the miniature look. With Depth of field on too, the stronger blur of the two shows. "
+             "Dialogue, portraits and the HUD stay sharp. Off by default.");
+        overrideNote("tilt_shift");
+    }
     // Scene lighting (docs/PORT_HD2D.md section 15): Lighting is the top
     // light, the shade and the bounce light together; Glow is the glow.
     if (row("Lighting", "lighting", opt::ENHANCED)) {

@@ -5717,7 +5717,9 @@ typedef struct {
     int32_t workW, workH;
     int32_t layerX, layerY;
     float focus, band, gain, radius;
-    int32_t color, colorPad, ditherX, ditherY; /* scene_color.glsl */
+    /* scene_color.glsl; tilt: the tilt-shift's radius in 16ths of a PS1 pixel,
+     * and (<< 16) the layers' rows the display shows, from their top */
+    int32_t color, tilt, ditherX, ditherY;
 } DofConstants;
 
 /* light.comp's passes: the shadows' (14-17), and the last, the composite at
@@ -6274,6 +6276,10 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
                       p->focus * 16.0f, p->band, p->gain, p->radius};
     c.color = vk.hiColor;
     c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
+    if (p->tilt > 0) { /* the tilt-shift (xg-rgcf.5.14) */
+        int shown = h - p->tiltHidden;
+        c.tilt = (int32_t)(p->tilt * 16.0f + 0.5f) | (shown < 1 ? h : shown) << 16;
+    }
     for (int pass = 0; pass < 6; pass++) {
         c.pass = pass;
         vkCmdPushConstants(cmd, vk.scene.dofLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
@@ -6320,7 +6326,10 @@ static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
             q[4 * i + 3] = p->roomTrans[i];
         }
         q[12] = p->particleBox; q[13] = p->particleTime; q[14] = p->particleSize; q[15] = (float)p->particles;
-        q[16] = p->blurBand; q[17] = p->blurGain; q[18] = p->blurRadius; q[19] = 0;
+        q[16] = p->blurBand; q[17] = p->blurGain; q[18] = p->blurRadius;
+        /* light.comp: the tilt-shift's radius in 16ths << 10 | its rows not shown (both whole: a float holds them exactly) */
+        int hidden = p->blurTiltHidden < 0 ? 0 : p->blurTiltHidden > 1023 ? 1023 : p->blurTiltHidden;
+        q[19] = p->blurTilt > 0 ? (float)((int)(p->blurTilt * 16.0f + 0.5f) << 10 | hidden) : 0.0f;
         /* The tiles' masks start empty (pass 20 writes every record and sets the bits). */
         memset(ctx->spans.map + at + LIGHT_BLOCK_BYTES + (5 + 3 * PARTICLES_MAX) * 16, 0,
                PARTICLE_TILES * (PARTICLES_MAX / 8));
@@ -6528,7 +6537,7 @@ void gvkSceneEnd(const SceneParams* p) {
     scenePlanesFlush(recording());
     vk.scene.active = 0;
     if (p == NULL || vk.hiN == 0) return;
-    int blur = p->dof.radius > 0 || p->dof.debug, light = p->light.on;
+    int blur = p->dof.radius > 0 || p->dof.debug || p->dof.tilt > 0, light = p->light.on;
     if (!blur && !light) return;
     VRect a = vk.scene.rect[SCENE_NARROW];
     int aw = a.x1 - a.x0 + 1, ah = a.y1 - a.y0 + 1;

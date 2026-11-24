@@ -74,6 +74,15 @@ the game still works with its own. The Enhanced engine only
 F1 > Display > Depth of field (Off, Subtle, Medium, Strong) and Focus range
 (Narrow, Normal, Wide: how deep the sharp range around the party is).
 
+## Tilt-shift
+
+In fields and on the world map, a thin strip along the top and the bottom
+of the picture blurs, most at the edge, so the scene looks like a
+miniature. It adds to the depth of field: where both blur, the stronger
+shows. Dialogue,
+portraits and the HUD stay sharp. The Enhanced engine only (F1 > System >
+Engine). F1 > Display > Tilt-shift (Off, Subtle, Medium, Strong).
+
 ## Lighting and glow
 
 In fields, battles and on the world map, Lighting lights the scenery from
@@ -161,6 +170,7 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Filter | Nearest |
 | Depth of field | Off |
 | Focus range | Normal |
+| Tilt-shift | Off |
 | Lighting | Off |
 | Glow | Off |
 | Shadows | Off |

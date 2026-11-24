@@ -59,31 +59,46 @@ layout(push_constant) uniform Dof {
     float gain;    // radius per unit of relative depth beyond it (as a share of `radius`)
     float radius;  // the largest radius, PS1 pixels
     int color;     // the copy's colour mode (scene_color.glsl)
-    int colorPad;
+    int tilt;      // the tilt-shift (xg-rgcf.5.14): its radius at the edges in 16ths of a PS1 pixel | the layers' rows the display shows, from their top << 16; 0: none
     ivec2 ditherOrigin; // scene_color.glsl
 } pc;
 
 #include "scene_color.glsl"
+#include "tilt_shift.glsl"
 
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
 const uint DEPTH_FIGURE = 0x40000000u;
 const int DEBUG = 1, FIGURES = 2, INVERT = 4;
-// The largest radius (4 PS1 pixels), plus one.
-const int MAX_TAPS = 5;
+// The largest radius, plus one: the tilt-shift's 20 PS1 pixels (the depth's
+// is 4: its loops stop at their own).
+const int MAX_TAPS = 21;
+
+// The tilt-shift's radius at a row of the layers (PS1 pixels): nothing but in
+// a strip along the top and the bottom of what the display shows, growing to
+// its full radius at the edge. Both strips blur as the far layer, which stays
+// where it is made (the near layer spreads over what is sharp, so the bottom
+// strip would grow).
+float tiltMost() { return float(pc.tilt & 0xFFFF) / 16.0; }
+float tilt(float row) { return tiltMost() * tiltRamp(row, float(pc.tilt >> 16)); }
 
 // The blur radius in PS1 pixels: positive behind the focus, negative in front.
 // Behind the focus the relative depth is the thin lens's, 1 - focus / z: 0 at
 // the focus, 1 at infinity. In front the lens's own measure has no bound (a
 // figure a step nearer than the party would lose its face), so the same
-// shape is mirrored there: z / focus - 1, -1 at the eye.
-float amount(uint z) {
+// shape is mirrored there: z / focus - 1, -1 at the eye. Where the
+// tilt-shift's (at the pixel's row, PS1 pixels of the layers' frame) is
+// larger, it is that, figures kept in focus too: it goes by the row, not by
+// their depth.
+float amount(uint z, float row) {
     if (z == DEPTH_SHARP) return 0.0;
-    if (z != DEPTH_FAR && (z & DEPTH_FIGURE) != 0u && (pc.flags & FIGURES) != 0) return 0.0;
+    float s = pc.tilt != 0 ? tilt(row) : 0.0;
+    if (z != DEPTH_FAR && (z & DEPTH_FIGURE) != 0u && (pc.flags & FIGURES) != 0) return s;
     float d = float(z & ~DEPTH_FIGURE);
     float u = z == DEPTH_FAR ? 1.0 : d >= pc.focus ? 1.0 - pc.focus / d : d / pc.focus - 1.0;
     float a = clamp((abs(u) - pc.band) * pc.gain, 0.0, 1.0) * pc.radius;
-    return u < 0.0 ? -a : a;
+    a = u < 0.0 ? -a : a;
+    return s > abs(a) ? s : a;
 }
 
 vec3 light(uint word) {
@@ -101,7 +116,7 @@ void prefilter(ivec2 t) {
         ivec2 l = t * pc.n + (ivec2(x, y) * 2 + 1) * pc.n / (2 * pc.taps);
         if (l.x >= pc.size.x || l.y >= pc.size.y) continue;
         vec3 c = light(imageLoad(color, pc.origin + l).r);
-        float a = amount(imageLoad(depth, l).r);
+        float a = amount(imageLoad(depth, l).r, (float(l.y) + 0.5) / float(pc.n));
         // A sample belongs wholly to a layer once its radius is a PS1 pixel.
         float wf = clamp(a, 0.0, 1.0), wn = clamp(-a, 0.0, 1.0);
         far += vec4(c, 1.0) * wf;
@@ -163,7 +178,7 @@ void nearBlur(ivec2 t, ivec2 axis, bool second) {
 }
 
 void composite(ivec2 l) {
-    float a = amount(imageLoad(depth, l).r);
+    float a = amount(imageLoad(depth, l).r, (float(l.y) + 0.5) / float(pc.n) + float(pc.layer.y));
     // The layers at this pixel: its place on the PS1 grid, kept inside the
     // part of the images this frame made (they may be larger).
     vec2 at = (vec2(l) + 0.5) / float(pc.n) + vec2(pc.layer);
@@ -178,7 +193,7 @@ void composite(ivec2 l) {
     vec3 c = light(word);
     if ((pc.flags & DEBUG) != 0) {
         float grey = 0.04 + sqrt(dot(c, vec3(0.299, 0.587, 0.114))) * 0.45;
-        vec3 shown = vec3(grey) + vec3(max(a, 0.0), 0.0, max(-a, 0.0)) / max(pc.radius, 1.0e-3) * 0.55;
+        vec3 shown = vec3(grey) + vec3(max(a, 0.0), 0.0, max(-a, 0.0)) / max(max(pc.radius, tiltMost()), 1.0e-3) * 0.55;
         shown.g += mixNear * (a >= 0.0 ? 0.3 : 0.0); // where the near layer spreads over the rest
         // The same on white: a pixel that is the same over the dark and the
         // bright scene does not depend on the scene at all (opaque UI), where

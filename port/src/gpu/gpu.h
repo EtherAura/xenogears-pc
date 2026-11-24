@@ -254,6 +254,8 @@ int sceneParticleSize(void);     /* particle_size: 0 small (default), 1 medium, 
 void sceneSetParticleSize(int size);
 int sceneVignette(void);         /* vignette: 0 off (default) .. 3 strong */
 void sceneSetVignette(int level);
+int sceneTiltShift(void);        /* tilt_shift: 0 off (default) .. 3 strong (fields and the world map) */
+void sceneSetTiltShift(int level);
 const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class
