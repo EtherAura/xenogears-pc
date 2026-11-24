@@ -373,6 +373,25 @@ void cardImagesInit(void) {
     atexit(flushAll);
 }
 
+void cardImagesReload(void) {
+    static Card next; /* 128 KB: not on the stack */
+    cardImagesInit();
+    for (int slot = 0; slot < 2; slot++) {
+        char msg[1200];
+        if (cardBusy(slot) || !cardFlush(slot)) {
+            fprintf(stderr, "card: slot %d left as it is (in use, or not written back)\n", slot + 1);
+            continue;
+        }
+        if (!loadSlot(slot, settingsGet(slot == 0 ? "card1" : "card2"), &next, msg, sizeof(msg))) {
+            fprintf(stderr, "card: %s; slot left empty\n", msg);
+            memset(&cards[slot], 0, sizeof(cards[slot]));
+            continue;
+        }
+        cards[slot] = next;
+        fprintf(stderr, "card: %s\n", msg);
+    }
+}
+
 int cardSetSlot(int slot, const char* path, char* err, size_t errSize) {
     static Card next; /* 128 KB: not on the stack */
     if (netplayRefuses != NULL && netplayRefuses("a memory card change")) { /* the game would see it on one side */

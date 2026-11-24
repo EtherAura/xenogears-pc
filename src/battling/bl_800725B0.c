@@ -149,6 +149,9 @@ void createBattlingSparkEmitter(void);
 void setBattlingSparkBurst(s32 arg0);
 void initBattlingSoundChannels(void);
 void playBattlingSfx(s32);
+#ifdef PLATFORM_PC
+int pcArenaBattlingVictory(void); /* include/pc_arena.h: a match's Rematch / Leave (port/src/game/battling/arena.c) */
+#endif
 void playBattlingGearSound(BattlingGear* gear, s32 id, VECTOR* pos, s32 mode);
 s32 playBattlingGearHitSound(BattlingGear* gear, s32 kind, VECTOR* pos, s32 mode);
 s32 stopBattlingGearHitSound(BattlingGear* gear, s32 kind);
@@ -352,6 +355,11 @@ void updateBattlingVictoryScreen(BattlingScene* ctx) {
     if (battlingVictorySpin > 0x80) {
         battlingVictorySpin = 0x80;
     }
+#ifdef PLATFORM_PC
+    if (pcArenaBattlingVictory()) {
+        /* a Battle arena match: Rematch / Leave in place of the winner's confirm (include/pc_arena.h) */
+    } else
+#endif
     if (battlingActivePad == 1) {
         if (newPadButtonForDialogs2 & 0x20) {
             endBattlingVictoryScreen();

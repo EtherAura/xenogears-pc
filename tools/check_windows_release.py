@@ -88,7 +88,8 @@ BAD_TAGS = ["2026.11.0", "v2026.11", "v2026.13.0", "v2026.00.0", "v2026.1.0", "v
             "v2026.11.65536", "v2026.11.0.0", "v2026.11.0/../x"]
 # What cmake --install (port/CMakeLists.txt) and tools/build_windows.sh put in the folder.
 INSTALLED = ["xenogears.exe", "xenogears-enhanced.exe", "SDL3.dll", "COPYING.txt", "LICENSE-Jukebox-font.txt",
-             "LICENSE-glslang.txt", "LICENSE-dav1d.txt", "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "README.txt"]
+             "LICENSE-glslang.txt", "LICENSE-dav1d.txt", "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "README.txt",
+             "xenogears.xgschema", "xenogears-enhanced.xgschema"]  # (each executable's state schema beside it)
 SUBFOLDER = ["extra/notes/FIXTURE.txt", "extra/FIXTURE.txt"]  # exercises folders; the install has none today
 
 failures: list[str] = []
@@ -142,12 +143,14 @@ def stage_public(work: Path) -> Path:
 
 
 def make_stage(path: Path, names: list[str]) -> Path:
-    """A synthetic stage: each file a labelled line of text (not a build, not game data)."""
+    """A synthetic stage: each file a labelled line of text (not a build, not game data); a state schema's
+    after the packed form's magic and size ("XGSCHEMA", not a schema)."""
     shutil.rmtree(path, ignore_errors=True)
     for name in names:
         f = path / name
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(f"synthetic test fixture for check_windows_release.py: {name}\n")
+        label = f"synthetic test fixture for check_windows_release.py: {name}\n".encode()
+        f.write_bytes(b"XGSCHEMA" + bytes(8) + label if name.endswith(".xgschema") else label)
     return path
 
 
@@ -347,6 +350,12 @@ def refusals(public: Path, work: Path, good: Path) -> None:
     bad("no xenogears.exe", "no xenogears.exe", drop=["xenogears.exe"])
     bad("no SDL3.dll", "no SDL3.dll", drop=["SDL3.dll"])
     bad("no COPYING.txt", "no COPYING.txt", drop=["COPYING.txt"])
+    bad("no state schema beside xenogears.exe", "no xenogears.xgschema", drop=["xenogears.xgschema"])
+    bad("no state schema beside xenogears-enhanced.exe", "no xenogears-enhanced.xgschema",
+        drop=["xenogears-enhanced.xgschema"])
+    bad("a state schema without its executable", "without its executable", drop=["xenogears-enhanced.exe"])
+    bad("a state schema that is not the packed form", "packed form",
+        edit=lambda s: (s / "xenogears.xgschema").write_text('{"version": "us"}\n'))
     bad("a symbolic link to a file", "symbolic link",
         edit=lambda s: (s / "LICENSE-link.txt").symlink_to(s / "COPYING.txt"))
     bad("a symbolic link to a folder", "symbolic link", edit=lambda s: (s / "linked").symlink_to(s.parent))

@@ -8,14 +8,16 @@ The helper runs as the public tree would run it (bash packaging/build-windows-zi
 from another folder, every path with spaces in it), in a fixture public tree:
 the real packaging/windows_release.py and tools/deps.py beside DOUBLES of the
 disc extraction, configure.py, build_windows.sh (both engines and SDL3 as labelled fixture
-bytes, their link maps, seals and cmake_install.cmake strip commands), the strip
-it names, payloadcheck.py and makensis. Nothing here is a build, a disc or game
+bytes, their link maps, seals and cmake_install.cmake strip commands, each engine's
+state schema), the strip it names, payloadcheck.py, state_schema.py and makensis. Nothing here is a build, a disc or game
 data. The real proof uses a player's disc, the pinned tarballs and NSIS.
 
 Checked: the counter-zero tag and the exact asset names; a missing or corrupt
 cache refused before anything is built, with no fetch; a bad seal, a staged
 executable that is not the reproducible strip, and either engine's audit refusal
-(of the linked executable or of the installed bytes) refused; an incomplete stage
+(of the linked executable or of the installed bytes) refused; either engine's state
+schema refused by the schema check (against the audited installed bytes), or missing
+from the stage, refused; an incomplete stage
 or extraction refused; existing outputs kept; on each refusal nothing new in OUT
 and no work folder left; on success the .zip holding exactly the stage's bytes,
 its executables the audited bytes, no map or seal, and its .sha256. Installer
@@ -134,6 +136,8 @@ for target, name, build in (("original", "xenogears.exe", env["XG_WIN_BUILD"]),
             f.write(b"!")
     if target == "sdl3" and env.get("FIXTURE_NO_SDL_MAP"):
         (build / "SDL3.dll.map").unlink()
+    if target != "sdl3" and env.get("FIXTURE_NO_SCHEMA") != target:  # its state schema beside it (the install's)
+        (stage / name.replace(".exe", ".xgschema")).write_bytes(b"XGSCHEMA" + bytes(8) + b"fixture schema of " + name.encode())
 for n in ("COPYING.txt", "README.txt", "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "LICENSE-Jukebox-font.txt",
           "LICENSE-glslang.txt", "LICENSE-dav1d.txt"):
     (stage / n).write_text("fixture " + n + "\\n")
@@ -180,6 +184,22 @@ if fail == exe.name + (":installed" if exe.read_bytes().endswith(b"stripped") el
     sys.exit(1)
 print("payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; library 0/0; allowed 2/40, "
       "symbol names 0/0, src (game C's own data) 0/0")
+'''
+
+
+SCHEMA = f'''# {LABEL}: tools/state_schema.py (--verify --stripped)
+import hashlib, json, os, sys
+from pathlib import Path
+a = sys.argv
+packed, exe = Path(a[a.index("--verify") + 1]), Path(a[a.index("--image") + 1])
+assert "--stripped" in a
+with open(os.environ["FIXTURE_LOG"], "a") as log:
+    log.write(json.dumps({{"schema": packed.name, "image": exe.name, "stripped": exe.read_bytes().endswith(b"stripped"),
+                          "audited": str(exe.parent)}}) + "\\n")
+if os.environ.get("FIXTURE_SCHEMA_FAIL") == packed.name:
+    print(f"state_schema: {{packed.name}}: it was read from another image (fixture)", file=sys.stderr)
+    sys.exit(1)
+print(f"state-schema: {{packed.name}} describes {{exe.name}} (fixture), stripped")
 '''
 
 
@@ -233,7 +253,8 @@ def make_public(base: Path, region: str) -> tuple[Path, Path, Path, dict]:
                       "sha256": sha(data), "for": "fixture"}
     (tools / "deps.json").write_text(json.dumps(pins, indent=2) + "\n")
     for name, text in (("extract.py", EXTRACT), ("configure.py", CONFIGURE), ("build_windows.sh", BUILD_SH),
-                       ("fixture_build.py", BUILD_PY), ("fixture_strip.py", STRIP), ("payloadcheck.py", PAYLOAD)):
+                       ("fixture_build.py", BUILD_PY), ("fixture_strip.py", STRIP), ("payloadcheck.py", PAYLOAD),
+                       ("state_schema.py", SCHEMA)):
         (tools / name).write_text(text)
     (tools / "fixture_strip.py").chmod(0o755)
     disc_name = "Fixture Disc (Disc 1)"
@@ -252,6 +273,8 @@ def expected_stage() -> dict[str, bytes]:
     for name in ("xenogears.exe", "xenogears-enhanced.exe"):
         out[name] = b"MZ fixture linked " + name.encode() + b"\nstripped"
     out["SDL3.dll"] = b"MZ fixture linked SDL3.dll\nstripped"
+    for name in ("xenogears.exe", "xenogears-enhanced.exe"):
+        out[name.replace(".exe", ".xgschema")] = b"XGSCHEMA" + bytes(8) + b"fixture schema of " + name.encode()
     for n in ("COPYING.txt", "README.txt", "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "LICENSE-Jukebox-font.txt",
               "LICENSE-glslang.txt", "LICENSE-dav1d.txt"):
         out[n] = f"fixture {n}\n".encode()
@@ -331,6 +354,17 @@ def success(run: Run) -> None:
                      ("xenogears-enhanced.exe", False), ("xenogears-enhanced.exe", True),
                      ("SDL3.dll", False), ("SDL3.dll", True)],
           f"both engines and SDL3 audited: the linked image, then the installed bytes ({audits})")
+    order = [("audit", e["audit"], e["stripped"]) if "audit" in e else ("schema", e["schema"], e["stripped"])
+             for e in logged if "audit" in e or "schema" in e]
+    check(order == [("audit", "xenogears.exe", False), ("audit", "xenogears.exe", True),
+                    ("schema", "xenogears.xgschema", True),
+                    ("audit", "xenogears-enhanced.exe", False), ("audit", "xenogears-enhanced.exe", True),
+                    ("schema", "xenogears-enhanced.xgschema", True),
+                    ("audit", "SDL3.dll", False), ("audit", "SDL3.dll", True)],
+          f"each engine's schema checked after its installed bytes' audit, against those bytes ({order})")
+    schemas = [e for e in logged if "schema" in e]
+    check(all(Path(e["audited"]).name == "all" and e["image"] == e["schema"].replace(".xgschema", ".exe")
+              for e in schemas), f"each schema checked against its engine's audited copy ({schemas})")
     want = expected_stage()
     data = (out / ZIP).read_bytes()
     with zipfile.ZipFile(out / ZIP) as z:
@@ -431,6 +465,9 @@ def refusals(run: Run, pins: dict) -> None:
         refused(run, f"{target}: the installed bytes' audit refuses", "FAILED",
                 FIXTURE_AUDIT_FAIL=f"{name}:installed")
     refused(run, "SDL3: no linker map", "no SDL3.dll.map", FIXTURE_NO_SDL_MAP=1)
+    for target, name in (("original", "xenogears.xgschema"), ("enhanced", "xenogears-enhanced.xgschema")):
+        refused(run, f"{target}: its state schema refused", f"state schema {name} FAILED", FIXTURE_SCHEMA_FAIL=name)
+        refused(run, f"{target}: no state schema in the stage", f"no {name}", FIXTURE_NO_SCHEMA=target)
     refused(run, "a stage without the Enhanced engine", "no xenogears-enhanced.exe", FIXTURE_NO_ENHANCED=1)
     refused(run, "an unexpected executable in the stage", "unexpected executable", FIXTURE_STAGE_EXE=1)
     refused(run, "an extraction with an unexpected file", "extraction incomplete or unexpected",

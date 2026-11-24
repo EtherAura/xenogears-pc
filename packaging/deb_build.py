@@ -10,7 +10,7 @@ The build folder must already be configured as the release ships it:
   cmake -S port -B <build> -G Ninja -DCMAKE_BUILD_TYPE=Release -DXG_VERSION=US \\
       -DXG_EXTRAS=ON -DXG_PACKAGE_VERSION=<the tag without its v>
 
-Its CMakeCache.txt must say Release, US, XG_EXTRAS ON and the tag's version,
+Its CMakeCache.txt must say Release, US, XG_EXTRAS ON, XG_STATE_SCHEMA ON and the tag's version,
 and its CPackConfig.cmake the DEB generator, the package xenogears-pc of that
 version, amd64, the file name xenogears-pc_<version>_amd64.deb, the /usr
 prefix, Depends from dpkg-shlibdeps and libvulkan1. Anything else is refused
@@ -31,12 +31,18 @@ The steps, each named in the failure message when it fails:
              xenogears-enhanced for XG_ENGINE=enhanced; mode 0755, owned by
              root), the licences in /usr/share/doc/xenogears-pc (COPYING,
              LICENSE-Jukebox-font.txt, LICENSE-imgui.txt, and LICENSE-glslang.txt
-             and LICENSE-dav1d.txt when the cache links them) and
+             and LICENSE-dav1d.txt when the cache links them),
              /usr/share/xenogears-pc/release.txt, exactly "version=<version>"
-             and "kind=deb" (what the in-app updater reads), nothing else
+             and "kind=deb" (what the in-app updater reads), and the
+             executable's state schema, /usr/share/xenogears-pc/xenogears.xgschema
+             (xenogears-enhanced.xgschema), in its packed form ("XGSCHEMA"),
+             nothing else
   payload    with --audit-source, check the executable bytes taken from the .deb
              against the extracted retail modules with tools/payloadcheck.py
-             --dist before making any release assets
+             --dist, and its state schema against them with
+             tools/state_schema.py --verify --stripped (read from that image,
+             no path of the build machine, the executable stripped), before
+             making any release assets
   companions python -I packaging/deb_assets.py --deb <it> --tag <tag>
              --build-dir <build> --require-deps, into the temporary folder: it
              must write exactly <deb>.sha256 (the package's hash) and
@@ -85,12 +91,13 @@ ASSETS = HERE / "deb_assets.py"
 DOC = "usr/share/doc/xenogears-pc"
 LICENCES = ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt")
 RELEASE = "usr/share/xenogears-pc/release.txt"  # port/cmake/deb.cmake: what the in-app updater reads
+SCHEMA_DIR = "usr/share/xenogears-pc"  # port/cmake/deb.cmake: the executable's state schema, <name>.xgschema
 
 
 def release_text(version: str) -> bytes:
     """The .deb's release.txt (port/src/system/release.h)."""
     return f"version={version}\nkind=deb\n".encode()
-CACHE_WANT = {"CMAKE_BUILD_TYPE": "Release", "XG_VERSION": "US", "XG_EXTRAS": "ON"}
+CACHE_WANT = {"CMAKE_BUILD_TYPE": "Release", "XG_VERSION": "US", "XG_EXTRAS": "ON", "XG_STATE_SCHEMA": "ON"}
 TOOLS = ("cmake", "cpack", "dpkg-deb", "dpkg")
 
 
@@ -141,10 +148,15 @@ def check_build(build: Path, version: str, package: str, arch: str) -> tuple[dic
     return cache, deb
 
 
+def schema_of(exe: str) -> str:
+    """The package's path of an executable's state schema (port/cmake/deb.cmake)."""
+    return f"{SCHEMA_DIR}/{Path(exe).name}.xgschema"
+
+
 def expected_files(cache: dict[str, str]) -> tuple[str, set[str]]:
     """The executable's path and every file the package must hold (port/cmake/deb.cmake's install rules)."""
     exe = "usr/bin/xenogears-enhanced" if cache.get("XG_ENGINE") == "enhanced" else "usr/bin/xenogears"
-    need = {exe, RELEASE} | {f"{DOC}/{name}" for name in LICENCES}
+    need = {exe, RELEASE, schema_of(exe)} | {f"{DOC}/{name}" for name in LICENCES}
     if not cache.get("glslang_DIR", "NOTFOUND").endswith("NOTFOUND") and cache.get("XG_GLSLANG", "ON") == "ON":
         need.add(f"{DOC}/LICENSE-glslang.txt")
     if not cache.get("XG_DAV1D_LIBRARY", "NOTFOUND").endswith("NOTFOUND") and cache.get("XG_DAV1D", "ON") == "ON":
@@ -171,7 +183,8 @@ def dpkg_deb(dpkg_deb_tool: str, *args) -> bytes:
     return result.stdout
 
 
-def check_package(tool: str, deb: Path, package: str, version: str, arch: str, exe: str, need: set[str]) -> bytes:
+def check_package(tool: str, deb: Path, package: str, version: str, arch: str, exe: str,
+                  need: set[str]) -> tuple[bytes, bytes]:
     fields = {}
     for line in dpkg_deb(tool, "-f", deb).decode(errors="replace").splitlines():
         if ":" in line and line[:1] not in (" ", "\t"):
@@ -181,7 +194,7 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
         if fields.get(field) != want:
             raise StepError("package", f"{deb.name}: {field} is {fields.get(field)!r}, not {want!r}")
     members = {}
-    payload = release = b""
+    payload = release = schema = b""
     try:
         with tarfile.open(fileobj=io.BytesIO(dpkg_deb(tool, "--fsys-tarfile", deb)), mode="r:") as tar:
             for member in tar:
@@ -194,6 +207,8 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
                         payload = tar.extractfile(member).read()
                     if path == RELEASE and member.isfile():
                         release = tar.extractfile(member).read()
+                    if path == schema_of(exe) and member.isfile():
+                        schema = tar.extractfile(member).read()
     except tarfile.TarError as error:
         raise StepError("package", f"{deb.name}: its file archive cannot be read ({error})") from error
     problems = [f"missing {path}" for path in sorted(need - set(members))]
@@ -204,10 +219,12 @@ def check_package(tool: str, deb: Path, package: str, version: str, arch: str, e
         problems.append(f"{exe} is mode {binary.mode & 0o7777:04o} owner {binary.uid}:{binary.gid}, not 0755 root")
     if RELEASE in members and members[RELEASE].isfile() and release != release_text(version):
         problems.append(f"{RELEASE} is {release[:80]!r}, not {release_text(version)!r}")
+    if schema_of(exe) in members and members[schema_of(exe)].isfile() and schema[:8] != b"XGSCHEMA":
+        problems.append(f"{schema_of(exe)} is not a state schema in its packed form (XGSCHEMA)")
     if problems:
-        raise StepError("package", f"{deb.name} does not hold the executable, licences and release file alone: "
-                        + "; ".join(problems))
-    return payload
+        raise StepError("package", f"{deb.name} does not hold the executable, licences, release file and state "
+                        "schema alone: " + "; ".join(problems))
+    return payload, schema
 
 
 def audit_executable(source: Path, work: Path, build: Path, exe: str, payload: bytes) -> None:
@@ -237,6 +254,31 @@ def audit_executable(source: Path, work: Path, build: Path, exe: str, payload: b
         raise StepError("payload", f"packaged {Path(exe).name} did not pass payloadcheck --dist (exit "
                                   f"{checked.returncode}){detail}")
     print(f"{Path(exe).name} in the .deb: {lines[1]}", flush=True)
+
+
+def check_schema(source: Path, work: Path, exe: str, payload: bytes, schema: bytes) -> None:
+    """The packaged state schema against the packaged executable: tools/state_schema.py --verify --stripped."""
+    tool = source / "tools" / "state_schema.py"
+    if not tool.is_file():
+        raise StepError("payload", "the source tree lacks tools/state_schema.py")
+    folder = work / "schema"
+    folder.mkdir()
+    image, packed = folder / Path(exe).name, folder / Path(schema_of(exe)).name
+    image.write_bytes(payload)
+    packed.write_bytes(schema)
+    try:
+        checked = subprocess.run([sys.executable, "-E", "-s", "-B", str(tool), "--verify", str(packed), "--image",
+                                  str(image), "--stripped"], capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                 timeout=600)
+    except OSError as error:
+        raise StepError("payload", "could not start tools/state_schema.py") from error
+    except subprocess.TimeoutExpired as error:
+        raise StepError("payload", "state_schema.py --verify timed out") from error
+    said = (checked.stdout + checked.stderr).replace(str(folder) + "/", "").strip()
+    if checked.returncode or image.read_bytes() != payload or packed.read_bytes() != schema:
+        raise StepError("payload", f"the packaged state schema did not pass state_schema.py --verify --stripped "
+                                   f"(exit {checked.returncode}): {said[-600:]}")
+    print(f"{packed.name} in the .deb: {said.splitlines()[-1] if said else 'verified'}", flush=True)
 
 
 def companions(work: Path, deb: Path, tag: str, build: Path) -> list[Path]:
@@ -312,9 +354,10 @@ def build_package(build: Path, tag: str, out_dir: Path, private_dirs: list[Path]
         if not deb.is_file() or deb.is_symlink():
             made = sorted(p.name for p in (work / "cpack").glob("*.deb")) if (work / "cpack").is_dir() else []
             raise StepError("cpack", f"cpack did not make {name} (it made {made or 'no package'})")
-        payload = check_package(tools["dpkg-deb"], deb, assets.PACKAGE, version, assets.ARCH, exe, need)
+        payload, schema = check_package(tools["dpkg-deb"], deb, assets.PACKAGE, version, assets.ARCH, exe, need)
         if audit_source is not None:
             audit_executable(audit_source, work, build, exe, payload)
+            check_schema(audit_source, work, exe, payload, schema)
         files = companions(work, deb, tag, build) + [deb]
         stage(files, out_dir)
     return [out_dir / path.name for path in files]

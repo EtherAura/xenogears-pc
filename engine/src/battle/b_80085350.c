@@ -483,7 +483,7 @@ u8 handleMenuSelectEnemySub(u8 button, u8 entity) {
         case 11:
             j++;
         case 12:
-            if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[0],
+            if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[0],
                               DEATHBLOW_IDS(battleEntities.m0_entities[entity].m0_base.m56_battleCommandLoadout)[12 - j]) != 0) {
                 result = 1;
             }
@@ -501,7 +501,7 @@ s32 addDeathblowNamePoly(u8 slot, s32 index, s32 x, u8 textIdx, u16** image, u8 
     s32 width;
     s32 col;
     battleInitPoly4(&pBattleRenderStruct2->m5550_commandNames[index * 2], odd, 3);
-    width = renderString(getDeathblowName(battleCharacters[slot], textIdx), *image, 0x1B, odd);
+    width = renderString(getDeathblowName(BATTLE_CHARACTER(slot), textIdx), *image, 0x1B, odd);
     rect.x = half * 30 + 0x3C0;
     rect.y = 0x1A;
     rect.w = 0x1E;
@@ -614,7 +614,7 @@ void updateDeathblowComboInput(u8 combo, u8 entity) {
     case 11:
         k++;
     case 12:
-        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[0],
+        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[0],
                           DEATHBLOW_IDS(battleEntities.m0_entities[entity].m0_base.m56_battleCommandLoadout)[0xC - k]) &&
             battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[2] == 0) {
             if (battleVar2->m2E4_deathblowCompleted == 0) {
@@ -660,7 +660,7 @@ void updateDeathblowComboInput(u8 combo, u8 entity) {
     case 5:
         k++;
     case 8:
-        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[0],
+        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[0],
                           DEATHBLOW_IDS(battleEntities.m0_entities[entity].m0_base.m56_battleCommandLoadout)[0x13 - k]) &&
             battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[0] == 0 && battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[2] == 0) {
             pBattleRenderStruct2->m5D70_count[0x11] += battleSetupStringInPolyFT4Large(8, &pBattleRenderStruct2->m5640_comboInputIcons[pBattleRenderStruct2->m5D70_count[0x11] * 2], i * 16 + 0x54, 0xD0 - n * 16);
@@ -677,7 +677,7 @@ void updateDeathblowComboInput(u8 combo, u8 entity) {
     case 1:
         k++;
     case 3:
-        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[0],
+        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[0],
                           DEATHBLOW_IDS(battleEntities.m0_entities[entity].m0_base.m56_battleCommandLoadout)[0x16 - k]) &&
             battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[1] == 0 && battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[2] == 0) {
             pBattleRenderStruct2->m5D70_count[0x11] += battleSetupStringInPolyFT4Large(9, &pBattleRenderStruct2->m5640_comboInputIcons[pBattleRenderStruct2->m5D70_count[0x11] * 2], i * 16 + 0x58, 0xD0 - n * 16);
@@ -955,7 +955,7 @@ s32 initJumpData(u8 entity, u8 target) {
         battleBssBlock.mA3C_jumpPoints[i].m2_z = ((sBattleJumpPointView*)battleMechaInitData)->m0[((sJumpView*)((u8*)battleMechaInitData + (battleVisualEntities[entity].m0_positionSlot << 6)))->m140[battleVisualEntities[target].m0_positionSlot][i] & 7].m0_party[0].vy;
         battleBssBlock.mA3C_jumpPoints[i].m4_flags = ((sJumpView*)((u8*)battleMechaInitData + (battleVisualEntities[entity].m0_positionSlot << 6)))->m140[battleVisualEntities[target].m0_positionSlot][i] & 0x80;
     }
-    if (battleCharacters[entity] == 4) {
+    if (BATTLE_CHARACTER(entity) == 4) {
         result = 1;
     }
     return result;
@@ -991,7 +991,7 @@ s32 performAttack(u8 entity, u8 arg1) {
 
     if (startCharacterJumpToEnemyVar1 == 0) {
         if (apConfigArray[entity].m1_gearState == 0) {
-            if (battleCharacters[entity] != 4) {
+            if (BATTLE_CHARACTER(entity) != 4) {
                 moveEntityToOtherEntity(entity, battleVar2->m0_entityMenus[entity].m3C_currentTarget);
             }
         } else {
@@ -1004,7 +1004,7 @@ s32 performAttack(u8 entity, u8 arg1) {
         if (battleVar2->m2DC_attackIndex < 8) {
             s32 column = arg1; /* an int copy: retail masks arg1 before the row index */
             battleVar2->m2DC_attackIndex = perApTable[battleVar2->m2DC_attackIndex][column];
-        } else if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[0], battleVar2->m2DC_attackIndex - 8)) {
+        } else if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[0], battleVar2->m2DC_attackIndex - 8)) {
             result = 1;
         } else {
             battleVar2->m2DC_attackIndex = 7;

@@ -178,8 +178,12 @@ typedef struct {
 
 struct StateSchema {
     Chunk* arena;
+    uint64_t bias;    /* added to every address the JSON gives (stateSchemaParseAt) */
     const char* version;
+    int portable;            /* whether states may convert to or from this build ("portable"; absent: 1) */
+    const char* portableWhy; /* why not ("portable_why"), "" otherwise */
     const char* exe;
+    const char* imageId; /* "image": {"id"}: the image's identity in hex, "" if none */
     StType* types;
     int32_t typeCount;
     Map typeByTid;
@@ -364,13 +368,14 @@ static int loadVars(StateSchema* s, const JsonDoc* d, JsonRef vars) {
         }
         StVar v = {0};
         v.name = stringOr(&s->arena, d, r, "name");
-        v.addr = (uint64_t)intOr(d, r, "addr", 0);
+        v.addr = (uint64_t)intOr(d, r, "addr", 0) + s->bias;
         v.size = intOr(d, r, "size", 0);
         v.module = stringOr(&s->arena, d, r, "module");
         v.section = stringOr(&s->arena, d, r, "section");
         v.retail = intOr(d, r, "retail", ST_NO_RETAIL);
         v.platform = stringOr(&s->arena, d, r, "platform");
         v.type = getName(&s->typeByTid, jsonString(d, tid));
+        v.isConst = jsonType(d, jsonGet(d, r, "const")) == JSON_TRUE;
         if (!v.name) v.name = "";
         int32_t at = mapGet(&seen, v.addr, NULL);
         if (at == ST_NONE) {
@@ -476,7 +481,7 @@ static int loadFuncs(StateSchema* s, const JsonDoc* d, JsonRef funcs) {
         StFunc* f = &s->funcs[i];
         const char* name = stringOr(&s->arena, d, r, "name");
         f->name = name ? name : "";
-        f->addr = (uint64_t)intOr(d, r, "addr", 0);
+        f->addr = (uint64_t)intOr(d, r, "addr", 0) + s->bias;
         f->retail = intOr(d, r, "retail", ST_NO_RETAIL);
         funcIdentity(f->name, f->retail, buf, sizeof buf);
         f->id = arenaString(&s->arena, buf);
@@ -542,7 +547,7 @@ static int loadSymbols(StateSchema* s, const JsonDoc* d, JsonRef syms) {
         JsonRef e = jsonFirst(d, r);
         y->name = arenaString(&s->arena, jsonString(d, e));
         e = jsonNext(d, e);
-        y->addr = (uint64_t)jsonInt(d, e);
+        y->addr = (uint64_t)jsonInt(d, e) + s->bias;
         e = jsonNext(d, e);
         y->size = (uint64_t)jsonInt(d, e);
         e = jsonNext(d, e);
@@ -623,8 +628,8 @@ static int loadRanges(StateSchema* s, const JsonDoc* d, JsonRef obj, StRange** o
     for (JsonRef r = jsonFirst(d, obj); r != JSON_NONE; r = jsonNext(d, r), i++) {
         JsonRef e = jsonFirst(d, r);
         (*out)[i].name = arenaString(&s->arena, jsonKey(d, r));
-        (*out)[i].lo = (uint64_t)jsonInt(d, e);
-        (*out)[i].hi = (uint64_t)jsonInt(d, jsonNext(d, e));
+        (*out)[i].lo = (uint64_t)jsonInt(d, e) + s->bias;
+        (*out)[i].hi = (uint64_t)jsonInt(d, jsonNext(d, e)) + s->bias;
         if (!(*out)[i].name) return 0;
     }
     *count = n;
@@ -709,7 +714,7 @@ static int loadUnions(StateSchema* s, const JsonDoc* d, JsonRef obj) {
     return 1;
 }
 
-StateSchema* stateSchemaParse(const char* json, size_t n, char* err, size_t errSize) {
+StateSchema* stateSchemaParseAt(const char* json, size_t n, uint64_t bias, char* err, size_t errSize) {
     JsonDoc* d = jsonParse(json, n, err, errSize);
     if (!d) {
         return NULL;
@@ -718,10 +723,17 @@ StateSchema* stateSchemaParse(const char* json, size_t n, char* err, size_t errS
     JsonRef root = jsonRoot(d);
     int ok = s && jsonType(d, root) == JSON_OBJECT;
     if (ok) {
+        s->bias = bias; /* before anything is indexed by address: the indexes are those of the rebased addresses */
         const char* v = stringOr(&s->arena, d, root, "version");
         s->version = v ? v : "";
+        JsonRef portable = jsonGet(d, root, "portable");
+        s->portable = jsonType(d, portable) != JSON_FALSE;
+        const char* why = stringOr(&s->arena, d, root, "portable_why");
+        s->portableWhy = why ? why : "";
         const char* exe = stringOr(&s->arena, d, root, "exe");
         s->exe = exe ? exe : "";
+        const char* image = stringOr(&s->arena, d, jsonGet(d, root, "image"), "id");
+        s->imageId = image ? image : "";
         ok = loadTypes(s, d, jsonGet(d, root, "types")) && loadTypeNames(s, d, jsonGet(d, root, "type_names")) &&
              loadVars(s, d, jsonGet(d, root, "variables")) && loadFuncs(s, d, jsonGet(d, root, "functions")) &&
              loadSymbols(s, d, jsonGet(d, root, "symbols")) &&
@@ -739,7 +751,7 @@ StateSchema* stateSchemaParse(const char* json, size_t n, char* err, size_t errS
         for (JsonRef r = jsonFirst(d, ro); ok && r != JSON_NONE; r = jsonNext(d, r), i++) {
             JsonRef e = jsonFirst(d, r);
             for (int k = 0; k < 3; k++, e = jsonNext(d, e)) {
-                s->ro[i][k] = (uint64_t)jsonInt(d, e);
+                s->ro[i][k] = (uint64_t)jsonInt(d, e) + (k < 2 ? s->bias : 0); /* (the file offset as it is) */
             }
         }
         JsonRef parts = jsonGet(d, root, "parts");
@@ -764,9 +776,13 @@ StateSchema* stateSchemaParse(const char* json, size_t n, char* err, size_t errS
     return s;
 }
 
+StateSchema* stateSchemaParse(const char* json, size_t n, char* err, size_t errSize) {
+    return stateSchemaParseAt(json, n, 0, err, errSize);
+}
+
 #define PACKED_MAGIC "XGSCHEMA"
 
-StateSchema* stateSchemaLoad(const char* path, char* err, size_t errSize) {
+StateSchema* stateSchemaLoadAt(const char* path, uint64_t bias, char* err, size_t errSize) {
     FILE* f = fopen(path, "rb");
     if (!f) {
         if (err && errSize) snprintf(err, errSize, "cannot open %s", path);
@@ -789,16 +805,20 @@ StateSchema* stateSchemaLoad(const char* path, char* err, size_t errSize) {
         memcpy(&raw, data + 8, 8);
         char* text = raw < ((uint64_t)1 << 32) ? malloc((size_t)raw + 1) : NULL;
         if (text && stateUnpack((const uint8_t*)data + 16, (size_t)size - 16, (uint8_t*)text, (size_t)raw)) {
-            s = stateSchemaParse(text, (size_t)raw, err, errSize);
+            s = stateSchemaParseAt(text, (size_t)raw, bias, err, errSize);
         } else if (err && errSize) {
             snprintf(err, errSize, "damaged packed schema %s", path);
         }
         free(text);
     } else {
-        s = stateSchemaParse(data, (size_t)size, err, errSize);
+        s = stateSchemaParseAt(data, (size_t)size, bias, err, errSize);
     }
     free(data);
     return s;
+}
+
+StateSchema* stateSchemaLoad(const char* path, char* err, size_t errSize) {
+    return stateSchemaLoadAt(path, 0, err, errSize);
 }
 
 void stateSchemaFree(StateSchema* s) {
@@ -820,6 +840,12 @@ void stateSchemaFree(StateSchema* s) {
 /* ---- queries ------------------------------------------------------------------------------------ */
 
 const char* stateSchemaVersion(const StateSchema* s) { return s->version; }
+int stateSchemaPortable(const StateSchema* s, const char** why) {
+    if (why) *why = s->portableWhy;
+    return s->portable;
+}
+uint64_t stateSchemaBias(const StateSchema* s) { return s->bias; }
+const char* stateSchemaImageId(const StateSchema* s) { return s->imageId; }
 int32_t stateSchemaTypeCount(const StateSchema* s) { return s->typeCount; }
 const StType* stateSchemaTypeAt(const StateSchema* s, int32_t i) {
     return i >= 0 && i < s->typeCount ? &s->types[i] : NULL;

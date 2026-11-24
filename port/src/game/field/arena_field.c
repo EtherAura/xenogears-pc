@@ -18,7 +18,8 @@
  *   - back from Battling: the field's own music again, as op 0x75 would
  *     play it (OP_PLAY_MUSIC: loaded again even when it is the same song,
  *     since Battling changed its tempo), and the session's bytes back.
- * A versus battle starts here too (startVersusBattle).
+ * A versus battle starts here too (startVersusBattle). Both start the battle
+ * music the players chose, if they chose one (pcArenaMusic, xg-htn.35.146).
  * Without a request this returns at once: the game is as it was.
  */
 #include "common.h"
@@ -28,7 +29,12 @@
 
 #define ARENA_SONG 0x0B /* Battling's music (fields 221-223 load it before op 0xBF) */
 
-extern u8 battlingEntryParams[];
+extern u8 battlingEntryParams; /* main: Battling's entry bytes, each its own object on the PC */
+extern u8 battlingEntryMatchType;
+extern u8 battlingEntryGear1;
+extern u8 battlingEntryGear2;
+extern u8 battlingEntryWinsNeeded;
+extern u8 battlingEntryComLevel;
 extern s32 fieldBattleRequested;
 extern s32 battlingModeReady;
 extern s32 bBattleSequenceInitialized;
@@ -76,9 +82,10 @@ static void startSong(s32 music, s32 volume0) {
 
 /* A versus battle (include/pc_arena.h): the field starts it as it starts a
  * random battle (f_80078B5C.c checkForRandomEncounter), with the regular
- * battle theme; the battle puts the formation in (versus.c). */
+ * battle theme or the players' song (the field loads it as a battle's
+ * music: f_800775C0.c); the battle puts the formation in (versus.c). */
 static void startVersusBattle(s32 config) {
-    op9DVar1.m10C_battleMusicId = 0x1D;
+    op9DVar1.m10C_battleMusicId = pcArenaMusic(0x1D);
     requestedBattleConfig = config;
     battleInitVar1 = 0;
     if (mechaOverlayLoadingMode == 0) {
@@ -90,6 +97,7 @@ static void startVersusBattle(s32 config) {
 
 void pcArenaFieldTick(void) {
     s32 music;
+    s32 song;
     int table, config;
 
     switch (pcArenaSession()) {
@@ -109,15 +117,16 @@ void pcArenaFieldTick(void) {
         }
         pcArenaTaken();
         pcArenaBegin(currentlyPlayingMusic, fieldMapNumber);
-        startSong(ARENA_SONG, 1);
+        startSong(pcArenaMusic(ARENA_SONG), 1);
         return;
     case PC_ARENA_STARTING:
         if (fieldMapNumber != pcArenaStartField()) {
             /* the player left the field while the song loaded: the next
              * field's script may have played its own music, else the song
              * would go on there */
+            song = pcArenaMusic(ARENA_SONG);
             music = pcArenaAbort();
-            if (currentlyPlayingMusic == ARENA_SONG && music != ARENA_SONG) {
+            if (currentlyPlayingMusic == song && music != song) {
                 startSong(music, 0);
             }
             return;
@@ -129,13 +138,13 @@ void pcArenaFieldTick(void) {
             playBattleMusic(pMusic, 0x7F, 0xF0);
         }
         setBattlingMainTaskIndex(0);
-        if (!pcArenaDirectEntry(battlingEntryParams)) { /* XG_ARENA=2,...: straight into a match (the oracle's runs) */
-            battlingEntryParams[0] = 1; /* Battling's main menu */
-            battlingEntryParams[1] = 0;
-            battlingEntryParams[2] = 0;
-            battlingEntryParams[3] = 0;
-            battlingEntryParams[4] = 0;
-            battlingEntryParams[5] = 0;
+        if (!pcArenaDirectEntry()) { /* XG_ARENA=2,...: straight into a match (the oracle's runs) */
+            battlingEntryParams = 1; /* Battling's main menu */
+            battlingEntryMatchType = 0;
+            battlingEntryGear1 = 0;
+            battlingEntryGear2 = 0;
+            battlingEntryWinsNeeded = 0;
+            battlingEntryComLevel = 0;
         }
         fieldBattleRequested = 1;
         battlingModeReady = 0;

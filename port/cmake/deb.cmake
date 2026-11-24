@@ -6,8 +6,9 @@
 #       -DXG_PACKAGE_VERSION=<release version without the v>
 #   cmake --build <build> && (cd <build> && cpack -G DEB)
 # gives xenogears-pc_<version>_amd64.deb: the executable in /usr/bin, the
-# licences in /usr/share/doc/xenogears-pc and the release file in
-# /usr/share/xenogears-pc (tools/check_deb_package.py checks it).
+# licences in /usr/share/doc/xenogears-pc, and the release file and the
+# executable's state schema in /usr/share/xenogears-pc (tools/check_deb_package.py
+# checks it).
 # SDL3, glslang and dav1d come from the system's packages, with their licences;
 # Depends is worked out by dpkg-shlibdeps from what the executable links. The
 # release's Depends must come from building in an Ubuntu 26.04 container (its
@@ -46,6 +47,11 @@ if(XG_PACKAGE_VERSION MATCHES "^20[0-9][0-9]\\.(0[1-9]|1[0-2])\\.(0|[1-9][0-9]*)
 endif()
 
 install(TARGETS xenogears RUNTIME DESTINATION bin)
+# The executable's state schema (port/CMakeLists.txt XG_STATE_SCHEMA): <prefix>/bin's executable
+# reads it from <prefix>/share/xenogears-pc (port/src/system/stateportable.c), one file per engine.
+if(XG_STATE_SCHEMA)
+    install(FILES "${CMAKE_BINARY_DIR}/${XG_STATE_SCHEMA_FILE}" DESTINATION share/xenogears-pc)
+endif()
 set(XG_DOC_DIR share/doc/xenogears-pc)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/COPYING" DESTINATION ${XG_DOC_DIR})
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/jukebox-font/LICENSE.txt"

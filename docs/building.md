@@ -11,6 +11,9 @@ be the release the build was made for.
 - Linux x86-64 with bash, curl, tar, git, make, gcc and cpp, Python 3, Ninja
   and CMake 3.25 or newer.
 - A C and C++ compiler, SDL 3, the Vulkan headers and `glslc`.
+- LLVM's `llvm-dwarfdump`, which writes each build's state schema: with it,
+  a save state slot loads in other versions of the port too
+  (`-DXG_STATE_SCHEMA=OFF` builds without it).
 - A GPU and driver with Vulkan 1.3.
 - Optional: Khronos glslang (shader presets) and dav1d (AV1 movie packs).
 - Your discs as Redump `.cue`/`.bin` images: US (SLUS-00664) or Japanese

@@ -1024,6 +1024,15 @@ top:
             battlingGameMode = 5;
             initBattlingTutorial();
             break;
+#ifdef PLATFORM_PC
+        case 3: /* a Battle arena rematch (include/pc_arena.h, port/src/game/battling/arena.c): PLAYER1 VS
+                 * PLAYER2 with the two Gears given, as the menu starts it */
+            battlingSettings.m6_p2Com = 0;
+            setBattlingSceneMode(1);
+            battlingGameMode = 2;
+            loadBattlingPortraitPair(battlingStoryGear1, battlingStoryGear2);
+            break;
+#endif
         }
         loadBattlingGearFile(0, battlingStoryGear1);
         state = 1;

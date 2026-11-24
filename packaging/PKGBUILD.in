@@ -7,7 +7,9 @@
 #
 # The package has no game data: the port reads the player's own disc. Like
 # the Ubuntu package (port/cmake/deb.cmake) it holds the US executable, built
-# Release with the extras, in /usr/bin and its licences in /usr/share/doc.
+# Release with the extras, in /usr/bin, its state schema in /usr/share/xenogears-pc
+# and its licences in /usr/share/doc. makepkg strips the executable's debug
+# information (its default options), which the schema is read from first.
 #
 # The source cannot build the port by itself yet: the PC link step reads the
 # split PS1 assembly and link facts that only come from the player's own
@@ -27,7 +29,9 @@ license=('GPL-3.0-or-later' 'MIT' 'OFL-1.1')
 depends=('glibc' 'gcc-libs' 'sdl3' 'vulkan-icd-loader' 'glslang' 'dav1d')
 # python-yaml: the PC source list is read from the splat configurations.
 # shaderc: glslc, which compiles the renderer's shaders at build time.
-makedepends=('cmake' 'ninja' 'python' 'python-yaml' 'vulkan-headers' 'shaderc')
+# llvm: llvm-dwarfdump, which reads the executable's debug information for the
+# state schema the package installs (port/CMakeLists.txt XG_STATE_SCHEMA).
+makedepends=('cmake' 'ninja' 'python' 'python-yaml' 'vulkan-headers' 'shaderc' 'llvm')
 # The game C must stay ordinary objects (the per-module partial link reads and
 # localises their symbols); the platform layer has its own link-time
 # optimisation (XG_LTO), so makepkg's is off.

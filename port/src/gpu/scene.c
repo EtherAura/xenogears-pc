@@ -104,6 +104,7 @@
 
 #include "gpu_internal.h"
 #include "interpolation.h"
+#include "outdoor_fields.h"
 #include "pc_scene.h"
 #include "pc_wide.h"
 #include "system/engine.h"
@@ -116,6 +117,11 @@ static const char* const levelNames[] = {"off", "subtle", "medium", "strong"};
 static const float levelRadius[] = {0, 1.25f, 2.5f, 4.0f};
 static const char* const focusNames[] = {"narrow", "normal", "wide"};
 static const float focusBand[] = {0.05f, 0.10f, 0.18f};
+/* Dialogue focus (xg-rgcf.5.18, carl's picks): while someone speaks the focus
+ * moves to the speaker and the sharp range narrows to this share, easing over
+ * DIALOGUE_EASE vblanks (half a second) each way. */
+#define DIALOGUE_BAND 0.5f
+#define DIALOGUE_EASE 30.0f
 /* The tilt-shift's radius at the frame's edges per level (PS1 pixels; the
  * blur's sigma is half of it): carl chose Medium from the prototypes
  * (xg-rgcf.5.14; its shape: tilt_shift.glsl). */
@@ -138,6 +144,21 @@ static const float vignetteAmount[] = {0, 0.12f, 0.22f, 0.35f};
 /* Light shafts: their strength per level (xg-rgcf.5.16; Medium is the
  * prototype carl chose, light.comp's shares). */
 static const float shaftAmount[] = {0, 0.6f, 1.0f, 1.5f};
+/* Cloud shadows (xg-rgcf.5.17): how much of the sun a cloud takes per level
+ * (Medium the prototype carl chose, work/hd2d/light/proto18.py), a cloud's
+ * size (the width of a 16:9 picture, CLOUD_PICTURE PS1 pixels, at the focus
+ * distance when the room starts: "Large"), and their drift in cloud sizes a
+ * second; it wraps after CLOUD_PERIOD of them, where light.comp's cover
+ * repeats. */
+static const float cloudDark[] = {0, 0.24f, 0.38f, 0.52f};
+#define CLOUD_PICTURE 432.0f
+#define CLOUD_DRIFT_ALONG 0.016
+#define CLOUD_DRIFT_ACROSS 0.012
+#define CLOUD_PERIOD 512.0
+/* The focus a room starts with is not yet its own (a field's first frame
+ * carries a default): a cloud's size follows the focus for this many vblanks
+ * of a room (its fade-in), then stays. */
+#define CLOUD_SETTLE 90u
 /* The sun: this far above the ground, from the camera's left and a little
  * from beyond the scene, when the room starts. */
 #define SUN_ELEVATION 55.0f
@@ -148,6 +169,13 @@ static struct {
     int loaded;
     int level, focus;
     int figures; /* sprites stay in focus */
+    int dialogue; /* dialogue focus on (depth_of_field_dialogue) */
+    /* The speaker's depth given for the next scene, the scene's, the last
+     * one seen (for the ease back), how far the focus is eased toward it
+     * (0..1) and the vblank that was measured at. */
+    int speakerGiven, speakerZ, speakerLast;
+    float speakerBlend;
+    uint32_t speakerVblank;
     int debug, log;
     float bandOverride;
     int haveBand;
@@ -156,8 +184,10 @@ static struct {
     int vignette;                            /* the vignette's level, 0 off */
     int tiltShift;                           /* the tilt-shift's level, 0 off */
     int shafts;                              /* light shafts' level, 0 off */
+    int clouds;                              /* cloud shadows' level, 0 off */
     int frameRows;                           /* the scene's frame's rows (its drawing area) */
     int shadePart, bouncePart;
+    int characterPart; /* lighting_characters: the sprites take the lighting too */
     int lightDebug, haveLightGain;
     float lightGain;
 
@@ -182,6 +212,10 @@ static struct {
     /* The particles' box (view units), set from the focus when the room changes. */
     int particleRoomId, particleBoxSet;
     float particleBox;
+    /* A cloud's size (view units), from the focus as the room starts. */
+    int cloudRoomId, cloudSizeSet;
+    uint32_t cloudRoomStart; /* the vblank the room started */
+    float cloudSize;
     /* Ground points pcSceneFigure gave this frame (room space), and the vblank they belong to. */
     int figureCount;
     uint32_t figureVblank; /* the last point's */
@@ -234,10 +268,15 @@ static void load(void) {
     s = settingsGet("depth_of_field_focus");
     sc.focus = 1;
     for (int i = 0; s != NULL && i < 3; i++) if (strcmp(s, focusNames[i]) == 0) sc.focus = i;
-    settingsDescribe("depth_of_field_sprites", "depth_of_field_sprites: sharp (default): sprites stay in focus; "
-                                               "depth: a sprite blurs by where it stands");
+    /* Sprites blur by where they stand by default (carl, xg-rgcf.5.18). */
+    settingsDescribe("depth_of_field_sprites", "depth_of_field_sprites: depth (default): a sprite blurs by where it "
+                                               "stands; sharp: sprites stay in focus");
     s = settingsGet("depth_of_field_sprites");
-    sc.figures = !(s != NULL && strcmp(s, "depth") == 0);
+    sc.figures = s != NULL && strcmp(s, "sharp") == 0;
+    settingsDescribe("depth_of_field_dialogue", "depth_of_field_dialogue: on (default) or off: while someone speaks, "
+                                                "the depth of field focuses on the speaker and softens the room a little more");
+    s = settingsGet("depth_of_field_dialogue");
+    sc.dialogue = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     const char* e = getenv("XG_DOF_DEBUG");
     sc.debug = e != NULL && e[0] == '1' ? 1 : e != NULL && e[0] == '2' ? 2 : 0;
     e = getenv("XG_DOF_LOG");
@@ -281,12 +320,20 @@ static void load(void) {
                                      "from windows, openings and the sky, and soft sunbeams, in fields and on the "
                                      "world map (the Enhanced engine)");
     sc.shafts = levelOf("light_shafts");
+    settingsDescribe("cloud_shadows", "cloud_shadows: off (default), subtle, medium or strong: the soft shadows of "
+                                      "clouds drifting over the ground, on the world map and in fields outdoors (the "
+                                      "Enhanced engine)");
+    sc.clouds = levelOf("cloud_shadows");
     s = settingsGet("particle_size");
     sc.particleSize = s != NULL && strcmp(s, "medium") == 0 ? 1 : s != NULL && strcmp(s, "large") == 0 ? 2 : 0;
     s = settingsGet("lighting_shade");
     sc.shadePart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     s = settingsGet("lighting_bounce");
     sc.bouncePart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
+    settingsDescribe("lighting_characters", "lighting_characters: on (default) or off: the characters take the lighting "
+                                            "too (the sun on their sunward side, shade at their feet, glow), as part of lighting");
+    s = settingsGet("lighting_characters");
+    sc.characterPart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     e = getenv("XG_LIGHT_DEBUG");
     sc.lightDebug = e != NULL && e[0] == '1';
     e = getenv("XG_LIGHT_GAIN");
@@ -321,6 +368,18 @@ void sceneSetDofFocus(int range) {
     settingsSave();
 }
 
+int sceneDofDialogue(void) {
+    load();
+    return sc.dialogue;
+}
+
+void sceneSetDofDialogue(int on) {
+    load();
+    sc.dialogue = on != 0;
+    settingsSet("depth_of_field_dialogue", sc.dialogue ? "on" : "off");
+    settingsSave();
+}
+
 const char* sceneDofStatus(void) {
     return sceneDof() ? sc.status : NULL;
 }
@@ -349,6 +408,18 @@ int sceneShadows(void) {
 }
 
 void sceneSetLighting(int level) { setLevel("lighting", &sc.lighting, level); }
+
+int sceneLightCharacters(void) {
+    load();
+    return sc.characterPart;
+}
+
+void sceneSetLightCharacters(int on) {
+    load();
+    sc.characterPart = on != 0;
+    settingsSet("lighting_characters", sc.characterPart ? "on" : "off");
+    settingsSave();
+}
 void sceneSetGlow(int level) { setLevel("glow", &sc.glow, level); }
 void sceneSetShadows(int level) { setLevel("shadows", &sc.shadows, level); }
 
@@ -393,6 +464,13 @@ int sceneLightShafts(void) {
 
 void sceneSetLightShafts(int level) { setLevel("light_shafts", &sc.shafts, level); }
 
+int sceneCloudShadows(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.clouds : 0;
+}
+
+void sceneSetCloudShadows(int level) { setLevel("cloud_shadows", &sc.clouds, level); }
+
 int sceneParticleSize(void) {
     load();
     return sc.particleSize;
@@ -416,7 +494,7 @@ const char* sceneLightingStatus(void) {
 int sceneWantsCopy(void) {
     return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0 || sceneFog() != 0 ||
            sceneGrade() != 0 || sceneParticles() != 0 || sceneVignette() != 0 || sceneTiltShift() != 0 ||
-           sceneLightShafts() != 0;
+           sceneLightShafts() != 0 || sceneCloudShadows() != 0;
 }
 
 static void normalize3(float v[3]) {
@@ -428,6 +506,13 @@ static void params(SceneParams* p) {
     DofParams* d = &p->dof;
     d->focus = (float)sc.focusZ;
     d->band = sc.haveBand ? sc.bandOverride : focusBand[sc.focus];
+    /* Dialogue focus: toward the speaker's depth, the sharp range narrowed,
+     * eased (the lighting keeps the camera's focus: only the blur moves). */
+    if (sc.speakerBlend > 0 && sc.speakerLast > 0 && !sc.focusCentre) {
+        float k = sc.speakerBlend * sc.speakerBlend * (3.0f - 2.0f * sc.speakerBlend);
+        d->focus += k * ((float)sc.speakerLast - d->focus);
+        d->band *= 1.0f + k * (DIALOGUE_BAND - 1.0f);
+    }
     d->gain = DOF_GAIN;
     d->radius = sceneDof() ? levelRadius[sc.level] : 0;
     d->debug = sceneDof() ? sc.debug : 0;
@@ -447,8 +532,12 @@ static void params(SceneParams* p) {
     int particles = sc.place == PC_SCENE_BATTLING ? 0 : sceneParticles();
     /* Light shafts: fields and the world map (xg-rgcf.5.16). */
     int shafts = sc.place == PC_SCENE_FIELD || sc.place == PC_SCENE_WORLDMAP ? sceneLightShafts() : 0;
+    /* Cloud shadows: the world map, and the fields outdoors (xg-rgcf.5.17;
+     * a field's room is its number, pcSceneView). */
+    int outdoors = sc.place == PC_SCENE_WORLDMAP || (sc.place == PC_SCENE_FIELD && fieldOutdoors(sc.sunRoomId));
+    int clouds = outdoors ? sceneCloudShadows() : 0;
     sc.lightStatus = NULL;
-    if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette && !shafts) return;
+    if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette && !shafts && !clouds) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
         return;
@@ -459,6 +548,7 @@ static void params(SceneParams* p) {
     l->top = lightTop[lighting] * gain;
     l->shade = sc.shadePart ? lightShade[lighting] * gain : 0;
     l->bounce = sc.bouncePart ? lightBounce[lighting] * gain : 0;
+    l->figureLight = lighting && sc.characterPart && l->top > 0;
     l->glow = glowGain[glow] * gain;
     l->shadow = shadowDark[shadows] * gain;
     l->fogMost = fogMost[fog] * gain;
@@ -473,6 +563,25 @@ static void params(SceneParams* p) {
     l->vignette = vignetteAmount[vignette];
     l->shafts = shaftAmount[shafts];
     l->shaftTime = (float)(hwVSyncCount() % 216000u) / 60.0f; /* seconds, over an hour that repeats */
+    if (clouds) {
+        /* A cloud's size from the focus as the room starts (CLOUD_SETTLE),
+         * then kept, so a moving camera does not change it. */
+        uint32_t now = hwVSyncCount();
+        if (!sc.cloudSizeSet || sc.cloudRoomId != sc.sunRoomId) {
+            sc.cloudRoomId = sc.sunRoomId;
+            sc.cloudSizeSet = 1;
+            sc.cloudRoomStart = now;
+        }
+        if (now - sc.cloudRoomStart < CLOUD_SETTLE)
+            sc.cloudSize = CLOUD_PICTURE * (float)(sc.focusZ > 0 ? sc.focusZ : 3000) / sc.screenZ;
+        double seconds = (double)now / 60.0;
+        l->clouds = cloudDark[clouds] * gain;
+        l->cloudSize = sc.cloudSize;
+        l->cloudDrift[0] = (float)fmod(seconds * CLOUD_DRIFT_ALONG, CLOUD_PERIOD);
+        l->cloudDrift[1] = (float)fmod(seconds * CLOUD_DRIFT_ACROSS, CLOUD_PERIOD);
+        l->cloudFar = sc.place == PC_SCENE_FIELD; /* a field's far backdrop is a painting */
+        memcpy(l->roomTrans, sc.trans, sizeof(l->roomTrans));
+    }
     if (sc.sunSet) {
         /* The room's sun in this frame's view. */
         for (int i = 0; i < 3; i++)
@@ -526,6 +635,23 @@ void sceneFocusMeasured(float z) {
 }
 
 void pcScenePlace(int place) { sc.placeGiven = place; }
+
+void pcSceneSpeaker(int focusZ) { sc.speakerGiven = focusZ > 0 ? focusZ : 0; }
+
+/* The dialogue's ease toward the speaker, measured once per scene: toward 1
+ * while someone speaks (and dialogue focus is on), back toward 0 after, by
+ * the vblanks passed (a smoothstep of it is used). */
+static void speakerEase(void) {
+    uint32_t now = hwVSyncCount();
+    float passed = (float)(now - sc.speakerVblank);
+    sc.speakerVblank = now;
+    if (passed > DIALOGUE_EASE || passed < 0) passed = DIALOGUE_EASE; /* a scene after a pause starts settled */
+    int on = sc.dialogue && sc.speakerZ > 0 && sc.place == PC_SCENE_FIELD;
+    if (on) sc.speakerLast = sc.speakerZ;
+    float step = passed / DIALOGUE_EASE;
+    sc.speakerBlend = on ? fminf(sc.speakerBlend + step, 1.0f) : fmaxf(sc.speakerBlend - step, 0.0f);
+    if (sc.speakerLast <= 0) sc.speakerBlend = 0;
+}
 
 /* The longest a frame takes, in vblanks (a 15 Hz room): older points are stale. */
 #define FIGURE_STALE 4u
@@ -598,6 +724,8 @@ void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int g
     sc.figureCount = 0;
     sc.place = sc.placeGiven; /* for this scene only, as the view */
     sc.placeGiven = PC_SCENE_FIELD;
+    sc.speakerZ = sc.speakerGiven; /* for this scene only too */
+    sc.speakerGiven = 0;
     /* The view is for this scene only: a scene registered without one is not lit. */
     sc.viewArmed = sc.viewGiven;
     sc.viewGiven = 0;
@@ -620,6 +748,7 @@ void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int g
     sc.zPerSlot = zPerSlot;
     sc.uiTag = uiTag;
     sc.focusZ = focusZ;
+    speakerEase();
     sc.pictureSlot = pictureSlot;
     sc.armed = 1;
     sceneWalkOn = 1;
@@ -701,12 +830,17 @@ static void finish(int reached) {
     if (sc.log) {
         gpuLog("scene: %u focus %d%s band %.3f radius %.2f%s", sc.scenes, sc.focusZ, sc.focusCentre ? " (centre)" : "",
                p.dof.band, p.dof.radius, reached ? "" : " (no UI tag: not blurred)");
+        if (sc.speakerBlend > 0)
+            gpuLog("scene: %u speaker %d blend %.2f focus %.0f", sc.scenes, sc.speakerLast, sc.speakerBlend, p.dof.focus);
         if (p.dof.tilt > 0) gpuLog("scene: %u tilt-shift %.1f, %d rows not shown", sc.scenes, p.dof.tilt, p.dof.tiltHidden);
         if (p.light.on)
             gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f fog %.2f grade %.2f up %.3f %.3f %.3f screen %.0f figures %d",
                    sc.scenes, p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.fogMost, p.light.grade,
                    p.light.up[0], p.light.up[1], p.light.up[2], p.light.screenZ, p.light.figures);
         if (p.light.shafts > 0) gpuLog("scene: %u light shafts %.2f time %.2f", sc.scenes, p.light.shafts, p.light.shaftTime);
+        if (p.light.clouds > 0)
+            gpuLog("scene: %u cloud shadows %.2f size %.0f drift %.3f %.3f", sc.scenes, p.light.clouds, p.light.cloudSize,
+                   p.light.cloudDrift[0], p.light.cloudDrift[1]);
         if (p.light.particles > 0)
             gpuLog("scene: %u particles %d size %.2f time %.2f box %.0f blur %.3f %.2f %.2f", sc.scenes, p.light.particles,
                    p.light.particleSize, p.light.particleTime, p.light.particleBox, p.light.blurBand, p.light.blurGain,

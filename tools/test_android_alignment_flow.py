@@ -33,7 +33,7 @@ import test_android_alignment as base  # noqa: E402  (link_so, make_apk, synthet
 
 SCRIPT = ROOT / "tools/build_android.sh"
 TIMEOUT = 120
-APK_GLOB = '"$OUT"/gradle/app/outputs/apk/"$VARIANT"/*.apk'
+APK_GLOB = '"$apks"/*.apk'  # (apks="$OUT/gradle/app/outputs/apk/$VARIANT": Gradle runs once per ABI)
 ARM64_GLOB = '"$OUT"/gradle/app/outputs/apk/"$VARIANT"/*arm64-v8a*.apk'
 STALE_RM = 'rm -f ' + APK_GLOB
 ABI_TEST = 'case " ${ABIS[*]} " in *" arm64-v8a "*) HAS_ARM64=1 ;; *) HAS_ARM64=0 ;; esac'
@@ -50,10 +50,11 @@ PRESERVED = [
     '[ ${#ABIS[@]} -gt 0 ] || ABIS=(x86_64 arm64-v8a)',
     '[ ${#REGIONS[@]} -gt 0 ] || REGIONS=(us jp)',
     'for name in XG_ANDROID_KEYSTORE XG_ANDROID_KEY_ALIAS XG_ANDROID_KEYSTORE_PASSWORD XG_ANDROID_KEY_PASSWORD; do',
-    '"$PY" tools/payloadcheck.py --dist --build "$b" --exe "$b/$lib"',
+    '"$PY" tools/payloadcheck.py $DIST_CHECK --build "$b" --exe "$b/$lib"',
     '[ "$NATIVE_ONLY" = 1 ] && exit 0',
     'task=assemble${VARIANT^}',
-    '-Pxg.sdlSource="$SDL3_SOURCE" -Pxg.jniLibs="$OUT/jniLibs" -Pxg.abis="$abilist" -Pxg.buildRoot="$OUT/gradle" \\',
+    'apks="$OUT/gradle/app/outputs/apk/$VARIANT"',
+    '-Pxg.sdlSource="$SDL3_SOURCE" -Pxg.jniLibs="$OUT/jniLibs" -Pxg.abis="$abi" -Pxg.buildRoot="$OUT/gradle" \\',
     'ls -l ' + APK_GLOB,
     'for apk in "$OUT"/gradle/app/outputs/apk/release/*.apk; do',
     'certs=$("$ANDROID_HOME/build-tools/36.1.0/apksigner" verify --verbose --print-certs "$apk")',

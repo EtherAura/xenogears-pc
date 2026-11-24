@@ -26,6 +26,14 @@ Three kinds of test, kept apart:
     the same count, in process and through the command), a missing image is
     refused, entries of another form are refused.
 
+Each staged executable has its state schema (share/xenogears-pc/<name>.xgschema,
+port/CMakeLists.txt XG_STATE_SCHEMA). With the stub auditor the layout's
+tools/state_schema.py is a STUB SCHEMA CHECK too (it logs how it was run and
+answers as told); with the real auditor it is the repository's, and each
+compiled executable gets a schema made here naming its image (its identity, as
+the port computes it): one of another image, one naming an absolute path and an
+executable that keeps debug information are refused.
+
 None of this is a REAL build audited against a REAL disc: that needs a
 player's disc and is not a gate. No game bytes are read or written here.
 
@@ -64,6 +72,8 @@ HELPER = ROOT / "tools/publish/repo-port/packaging/linux_release.py"
 AUDITOR_FILES = ("payloadcheck.py", "payload_pe.py", "payload_elf.py", "payload_allow.txt")
 DOC = "share/doc/xenogears-pc"
 RELEASE = "share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
+SCHEMA_DIR = "share/xenogears-pc"  # each executable's state schema, <name>.xgschema (port/cmake/deb.cmake)
+SCHEMA_FILES = ("state_schema.py", "statecheck.py", "statecanon.py")  # the schema check and the modules it imports
 LICENCES = ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt", "LICENSE-glslang.txt", "LICENSE-dav1d.txt")
 ENV = {"PATH": "/usr/bin:/bin", "LC_ALL": "C"}  # main() adds a private TMPDIR
 FAILURES: list[str] = []
@@ -131,6 +141,44 @@ print("payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; library 0/0; a
 '''
 
 
+SCHEMA_STUB = r'''#!/usr/bin/env python3
+"""STUB SCHEMA CHECK: test plumbing only, not tools/state_schema.py. Logs how it was run, answers as told."""
+import hashlib, json, os, sys
+from pathlib import Path
+CONTROL = Path(@CONTROL@)
+a = sys.argv[1:]
+packed, image = a[a.index("--verify") + 1], a[a.index("--image") + 1]
+mode = json.loads((CONTROL / "mode.json").read_text())
+with (CONTROL / "schema.jsonl").open("a") as f:
+    f.write(json.dumps({"argv": sys.argv, "cwd": os.getcwd(), "stdin": sys.stdin.read(),
+                        "flags": [sys.flags.ignore_environment, sys.flags.no_user_site, sys.flags.dont_write_bytecode],
+                        "image": hashlib.sha256(Path(image).read_bytes()).hexdigest(),
+                        "schema": hashlib.sha256(Path(packed).read_bytes()).hexdigest()}) + "\n")
+if mode.get("schema") == os.path.basename(image):
+    print(f"state_schema: {os.path.basename(packed)}: it was read from another image (fixture)", file=sys.stderr)
+    sys.exit(1)
+print(f"state-schema: {os.path.basename(packed)} describes {os.path.basename(image)} (STUB), stripped")
+'''
+
+
+def fixture_schema(exe: str) -> bytes:
+    """SYNTHETIC FIXTURE: a state schema's packed form ("XGSCHEMA", a size) holding no schema."""
+    return b"XGSCHEMA" + bytes(8) + b"SYNTHETIC FIXTURE, not a state schema: " + exe.encode() + b"\n"
+
+
+def real_schema(exe: Path) -> bytes:
+    """A packed state schema naming exe's image (tools/state_schema.py image_identity, statecheck.schema_file):
+    what tools/state_schema.py --verify reads of it."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    try:
+        import state_schema
+        import statecheck
+    finally:
+        sys.path.remove(str(ROOT / "tools"))
+    text = json.dumps({"version": "us", "exe": exe.name, "image": state_schema.image_identity(exe), "variables": []})
+    return statecheck.schema_file(text.encode())
+
+
 def check(ok: bool, what: str) -> bool:
     if not ok:
         FAILURES.append(what)
@@ -156,9 +204,12 @@ def make_stage(path: Path, enhanced: bool = True, optional: bool = True, release
         (path / RELEASE).write_text(f"version={release}\nkind=deb\n", encoding="utf-8")
         os.chmod(path / RELEASE, 0o644)
     exes = ["xenogears"] + (["xenogears-enhanced"] if enhanced else [])
+    (path / SCHEMA_DIR).mkdir(parents=True, exist_ok=True)
     for exe in exes:
         (path / "bin" / exe).write_bytes(fake_elf(exe.encode()))
         os.chmod(path / "bin" / exe, 0o755)
+        (path / SCHEMA_DIR / f"{exe}.xgschema").write_bytes(fixture_schema(exe))
+        os.chmod(path / SCHEMA_DIR / f"{exe}.xgschema", 0o644)
     for name in LICENCES if optional else LICENCES[:3]:
         (path / DOC / name).write_text(f"SYNTHETIC FIXTURE licence text: {name}\n", encoding="utf-8")
         os.chmod(path / DOC / name, 0o644)
@@ -197,8 +248,11 @@ def make_layout(path: Path, auditor: str, control: Path | None = None, ver: str 
         (path / "tools" / "payload_pe.py").write_text("# STUB AUDITOR's module: plumbing only\n")
         (path / "tools" / "payload_elf.py").write_text("# STUB AUDITOR's module: plumbing only\n")
         (path / "tools" / "payload_allow.txt").write_text("# STUB AUDITOR's allowance file: plumbing only\n")
+        (path / "tools" / "state_schema.py").write_text(SCHEMA_STUB.replace("@CONTROL@", repr(str(control))))
+        (path / "tools" / "statecheck.py").write_text("# STUB SCHEMA CHECK's module: plumbing only\n")
+        (path / "tools" / "statecanon.py").write_text("# STUB SCHEMA CHECK's module: plumbing only\n")
     else:
-        for name in AUDITOR_FILES:
+        for name in AUDITOR_FILES + SCHEMA_FILES:
             shutil.copy2(ROOT / "tools" / name, path / "tools" / name)
     (path / "config" / ver).mkdir(parents=True)
     (path / "config" / ver / "disc.yaml").write_text(listing)
@@ -220,9 +274,15 @@ class Stub:
         (self.control / "mode.json").write_text(json.dumps({k.replace("_enh", "-enhanced"): v
                                                             for k, v in mode.items()}))
         (self.control / "log.jsonl").write_text("")
+        (self.control / "schema.jsonl").write_text("")
 
     def log(self) -> list[dict]:
         return [json.loads(line) for line in (self.control / "log.jsonl").read_text().splitlines()]
+
+    def schema_log(self) -> list[dict]:
+        """The STUB SCHEMA CHECK's runs since the last set()."""
+        p = self.control / "schema.jsonl"
+        return [json.loads(line) for line in p.read_text().splitlines()] if p.exists() else []
 
 
 def snapshot(path: Path, root: bool = True) -> dict | None:
@@ -505,6 +565,24 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
         check(len(lines) == 2 and "bin/xenogears (US" in lines[0] and "bin/xenogears-enhanced (US" in lines[1]
               and all("all 3 module images read; payload ok:" in line for line in lines),
               f"the audits are not reported: {lines}")
+        # Each state schema checked once against its executable's bytes, after the audits, exactly so.
+        checker = layout / "tools" / "state_schema.py"
+        runs = stub.schema_log()
+        check([Path(e["argv"][2]).name for e in runs] == ["xenogears.xgschema", "xenogears-enhanced.xgschema"],
+              f"both schemas: checked {[e['argv'] for e in runs]}")
+        for e, exe in zip(runs, ("xenogears", "xenogears-enhanced")):
+            packed, image = Path(e["argv"][2]), Path(e["argv"][4])
+            check(e["argv"] == [str(checker), "--verify", str(packed), "--image", str(image), "--stripped"]
+                  and image.name == exe, f"{exe}: schema check argv {e['argv']}")
+            check(packed.parent == image.parent and image.parent.parent == Path(ENV["TMPDIR"]) and not image.exists(),
+                  f"{exe}: the checked copies are not in a private temporary folder, or are left")
+            check(e["image"] == hashlib.sha256((stage / "bin" / exe).read_bytes()).hexdigest()
+                  and e["schema"] == hashlib.sha256((stage / SCHEMA_DIR / f"{exe}.xgschema").read_bytes()).hexdigest(),
+                  f"{exe}: the checked bytes are not the stage's")
+            check(e["flags"] == [1, 1, 1] and e["cwd"] == str(layout) and e["stdin"] == "",
+                  f"{exe}: the schema check ran with {e['flags']} in {e['cwd']}, input {e['stdin']!r}")
+        lines = [line for line in r.stdout.splitlines() if line.startswith("schema=")]
+        check(len(lines) == 2 and all("describes" in line for line in lines), f"the schema checks are not reported: {lines}")
     check(snapshot(stage) == stage_before, "the stage changed while it was packaged")
 
     # Repeatable: same content, other times and another folder give the same bytes.
@@ -585,6 +663,15 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
             refused(v, f"auditor {how} for {exe}", ["package", "--tag", "v2026.11.0", "--stage", stage, "--out-dir", o,
                                                     *both], [stage, old], needle)
             check(not os.path.lexists(o), f"auditor {how} for {exe}: --out-dir made")
+    for exe in ("xenogears", "xenogears-enhanced"):
+        stub.set(schema=exe)
+        o = base / "out-schema"
+        err = refused(cli, f"{exe}'s schema refused", ["package", "--tag", "v2026.11.0", "--stage", stage,
+                                                        "--out-dir", o, *both], [stage, old], "did not all pass")
+        check(not os.path.lexists(o) and len(stub.log()) == 2 and len(stub.schema_log()) == 2,
+              f"{exe}'s schema refused: --out-dir made, or not every engine and schema checked")
+        check(f"share/xenogears-pc/{exe}.xgschema FAILED against bin/{exe}" in err and "another image" in err
+              and str(Path(ENV["TMPDIR"])) not in err, f"{exe}'s schema refused: {err!r}")
     victim = make_stage(base / "stage-victim")
     stub.set(xenogears_enh="mutate-stage", stage_exe=str(victim / "bin" / "xenogears"))
     refused(cli, "stage changed during the audit", ["package", "--tag", "v2026.11.0", "--stage", victim, "--out-dir",
@@ -680,6 +767,13 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
         return change
 
     bad("no-exe", lambda st: (st / "bin/xenogears").unlink(), "bin/xenogears")
+    bad("no-schema", lambda st: (st / SCHEMA_DIR / "xenogears.xgschema").unlink(), "with its state schema")
+    bad("no-enhanced-schema", lambda st: (st / SCHEMA_DIR / "xenogears-enhanced.xgschema").unlink(),
+        "xenogears-enhanced.xgschema")
+    bad("schema-alone", lambda st: (st / "bin/xenogears-enhanced").unlink(), "without its executable")
+    bad("plain-schema", put(f"{SCHEMA_DIR}/xenogears.xgschema", b'{"version": "us"}\n'), "packed form")
+    bad("schema-elsewhere", put("share/xenogears-pc/xenogears-debug.xgschema", fixture_schema("xenogears-debug")),
+        "not a file the port's install makes")
     bad("no-copying", lambda st: (st / DOC / "COPYING").unlink(), "COPYING")
     bad("no-imgui", lambda st: (st / DOC / "LICENSE-imgui.txt").unlink(), "LICENSE-imgui.txt")
     bad("script-exe", put("bin/xenogears", b"#!/bin/sh\necho fixture\n", 0o755), "not a 64-bit")
@@ -815,6 +909,9 @@ def packaging_tests(base: Path, layout: Path, stub: Stub) -> None:
     stub.set(xenogears_enh="mutate-stage", stage_exe=str(victim / "bin" / "xenogears"))
     r = m("package", "--tag", "v2026.11.0", "--stage", victim, "--out-dir", base / "mutant-reread-out", *both)
     check("after its payload audit" not in r.stderr, "the re-read after the audit disabled: its test would not notice")
+    r = disabled("no-schema-check", "    schemas = check_schemas(files)", "    schemas = []", schema="xenogears")
+    check(r.returncode == 0 and stub.schema_log() == [],
+          "the schema check removed: the refused-schema test would not notice")
     r = disabled("images", "    if gone:", "    if False:", xenogears="partial")
     check(r.returncode == 1 and "not all 3" in r.stderr, "a short count is not refused once the files are there")
     stub.set()
@@ -832,8 +929,10 @@ def compile_exe(cc: str, folder: Path, name: str, payload: bytes | None, text: s
     value = "c" if payload is None and text is None else "table[c]" if text is None else "path[c]"
     body = "int main(int c, char **v) { (void)v; return " + value + "; }\n"
     (folder / f"{name}.c").write_text("/* SYNTHETIC FIXTURE, not the port */\n" + table + body)
-    r = subprocess.run([cc, "-O1", "-o", str(folder / name), str(folder / f"{name}.c")], capture_output=True,
-                       text=True)
+    # (a name ending in -g: with debug information, which names no folder of this machine)
+    debug = ["-g", f"-ffile-prefix-map={folder}=."] if name.endswith("-g") else []
+    r = subprocess.run([cc, "-O1", *debug, "-o", str(folder / name), str(folder / f"{name}.c")], capture_output=True,
+                       text=True, cwd=folder)
     check(r.returncode == 0, f"compiling the fixture {name}: {r.stderr}")
     return (folder / name).read_bytes() if r.returncode == 0 else b""
 
@@ -843,6 +942,9 @@ def real_stage(path: Path, original: bytes, enhanced: bytes | None) -> Path:
     (path / "bin" / "xenogears").write_bytes(original)
     if enhanced is not None:
         (path / "bin" / "xenogears-enhanced").write_bytes(enhanced)
+    for exe in ("xenogears", "xenogears-enhanced"):
+        if (path / "bin" / exe).exists():
+            (path / SCHEMA_DIR / f"{exe}.xgschema").write_bytes(real_schema(path / "bin" / exe))
     return path
 
 
@@ -875,10 +977,36 @@ def real_auditor_tests(base: Path, cc: str) -> None:
         lines = [line for line in r.stdout.splitlines() if line.startswith("audit=")]
         check(len(lines) == 2 and all("all 3 module images read; payload ok: generated 0 runs/0 bytes" in line
                                       for line in lines), f"real auditor, clean stage: {lines}")
+        lines = [line for line in r.stdout.splitlines() if line.startswith("schema=")]
+        check(len(lines) == 2 and all("describes xenogears" in line and "stripped" in line for line in lines),
+              f"real schema check, clean stage: {lines}")
     solo = real_stage(base / "real stage solo", clean, None)
     r = cli("package", "--tag", "v2026.12.7", "--stage", solo, "--out-dir", base / "real out solo", "--ver", "us",
             "--build", b1)
     check(r.returncode == 0 and r.stdout.count("audit=") == 1, f"real auditor, original only: {r.stderr}")
+
+    # The real schema check: a schema of another image, one naming a path of the build machine, and an
+    # executable that keeps its debug information are refused, after the audits, with nothing written.
+    debug = compile_exe(cc, base / "real-c", "clean-g", None)
+    other = real_stage(base / "real stage other schema", clean, clean)
+    (other / SCHEMA_DIR / "xenogears-enhanced.xgschema").write_bytes(real_schema(base / "real-c" / "dirty"))
+    pathy = real_stage(base / "real stage schema path", clean, clean)
+    sys.path.insert(0, str(ROOT / "tools"))
+    import statecheck
+    sys.path.remove(str(ROOT / "tools"))
+    text = json.loads(statecheck.schema_text((pathy / SCHEMA_DIR / "xenogears.xgschema").read_bytes()))
+    text["exe"] = "/synthetic-builder/build/xenogears"
+    (pathy / SCHEMA_DIR / "xenogears.xgschema").write_bytes(statecheck.schema_file(json.dumps(text).encode()))
+    unstripped = real_stage(base / "real stage unstripped", debug, clean) if debug else None
+    for label, st, needle in (("a schema of another image", other, "another image"),
+                              ("a schema naming the build machine's path", pathy, "absolute paths"),
+                              ("an executable with debug information", unstripped, "debug information")):
+        if st is None:
+            continue
+        o = base / f"real out {label}"
+        err = refused(cli, f"real schema check, {label}", ["package", "--tag", "v2026.11.0", "--stage", st,
+                                                            "--out-dir", o, *both], [st], needle)
+        check(not os.path.lexists(o) and "did not all pass" in err, f"real schema check, {label}: {err!r}")
 
     for label, original, enhanced in (("enhanced", clean, dirty), ("original", dirty, clean)):
         st = real_stage(base / f"real stage dirty {label}", original, enhanced)
@@ -971,6 +1099,8 @@ def real_auditor_tests(base: Path, cc: str) -> None:
     check(not list(layout.rglob("__pycache__")), "real auditor: bytecode was written into the checkout")
     check((layout / "tools" / "payloadcheck.py").read_bytes() == (ROOT / "tools" / "payloadcheck.py").read_bytes(),
           "real auditor: the auditor changed")
+    check(all((layout / "tools" / n).read_bytes() == (ROOT / "tools" / n).read_bytes() for n in SCHEMA_FILES),
+          "real schema check: tools/state_schema.py or its modules changed")
 
 
 def auditor_images(layout: Path, ver: str) -> list[str]:

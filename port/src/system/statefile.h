@@ -97,14 +97,25 @@ const char* stateBuildText(void); /* the same in hex, for messages */
  * refuses can say which version made it. */
 const char* stateAppVersion(void);
 /* Where this build's image sits against its link addresses (its ELF load
- * bias: 0 for a non-PIE executable and on Windows), as states record it for
- * tools (statecheck.py turns symbol addresses into a state's addresses). */
+ * bias: 0 for a non-PIE executable; on Windows its base against the preferred
+ * one, 0 without ASLR), as states record it (the header's imageBias): tools
+ * turn symbol addresses into a state's addresses by it (statecheck.py), and
+ * a schema is rebased by it (stateschema.h stateSchemaParseAt). */
 uintptr_t stateImageBias(void);
-/* Whether [lo, hi), link addresses, is in a loaded readable segment of this
- * image (0 where that cannot be told: not ELF). */
+/* This image's identity as a file: its build id at its link addresses, over
+ * what loads (ELF: every allocated section and the code; PE: the preferred
+ * base, the sections that stay loaded and the code, not the discardable debug
+ * sections), which tools/state_schema.py computes from the file the same way
+ * and records in a schema ("image"). Neither the load address nor stripping
+ * the debug information changes it. NULL (and "" in text) when the image's
+ * sections cannot be read. */
+const uint8_t* stateImageId(void);
+const char* stateImageIdText(void); /* 32 hex digits */
+/* Whether [lo, hi), addresses of this process, is in a loaded readable
+ * segment (ELF) or section (PE) of this image. */
 int stateImageReadable(uint64_t lo, uint64_t hi);
-/* The file this image was loaded from ("/proc/self/exe" for the executable;
- * NULL where unknown). */
+/* The file this image was loaded from ("/proc/self/exe" for the executable,
+ * a library's path; Windows: the executable's, UTF-8; NULL where unknown). */
 const char* stateImagePath(void);
 
 /* Packs and writes a state atomically (a .tmp file renamed over path).

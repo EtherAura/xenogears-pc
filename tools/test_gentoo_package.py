@@ -75,7 +75,8 @@ BAD_TAGS = ["2026.11.0", "v2026.11", "v2026.13.0", "v2026.00.0", "v2026.1.0", "v
             "v2026.11.1234567890", "v2026.11.0\"", "v1999.11.0"]
 RDEPEND = {"media-libs/libsdl3", "media-libs/vulkan-loader", "dev-util/glslang", "media-libs/dav1d"}
 DEPEND = RDEPEND | {"dev-util/vulkan-headers"}
-BDEPEND = {"fixture-python-deps", "any-of(dev-python/pyyaml[${PYTHON_USEDEP}])", "media-libs/shaderc"}
+BDEPEND = {"fixture-python-deps", "any-of(dev-python/pyyaml[${PYTHON_USEDEP}])", "media-libs/shaderc",
+           "llvm-core/llvm"}
 USER_FLAGS = {"CFLAGS": "-O1 -DXG_FIXTURE_USER_FLAG", "CXXFLAGS": "-O1 -DXG_FIXTURE_USER_FLAG",
               "CPPFLAGS": "-DXG_FIXTURE_USER_FLAG", "LDFLAGS": "-Wl,--as-needed"}
 FLAG_NAMES = tuple(USER_FLAGS)
@@ -641,6 +642,7 @@ def port_rules(text: str) -> None:
         ("find_package(Vulkan REQUIRED COMPONENTS glslc)" in gpu, "media-libs/shaderc", "BDEPEND"),
         ("find_package(Python3 REQUIRED" in cmake, "${PYTHON_DEPS}", "BDEPEND"),
         (re.search(r"^import yaml$", pc_sources, re.M) is not None, "dev-python/pyyaml", "BDEPEND"),
+        ("find_program(XG_DWARFDUMP NAMES llvm-dwarfdump" in cmake, "llvm-core/llvm", "BDEPEND"),
     ]
     for present, package, variable in rules:
         block = re.search(rf'^{variable}="\n(.*?)^"$', text, re.M | re.S)

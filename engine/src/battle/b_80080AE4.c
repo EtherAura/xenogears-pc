@@ -254,7 +254,7 @@ void performAutoPartyMemberTurn(u8 arg0) {
     switch (cmd[0]) {
     case 1:
         startCharacterJumpToEnemyVar1 = 0;
-        if (battleCharacters[arg0] != 4) {
+        if (BATTLE_CHARACTER(arg0) != 4) {
             battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m23_battleEntityIndex = arg0;
             battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m47_battleAnimationToPlay = 0xFD;
             battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m3A_animationParam = 0;
@@ -551,7 +551,7 @@ void removeBattleCursorDuringAttack(u8 arg0) {
         freeBattleVar1_96();
         removeTargetSelectionCursors();
         setCameraVisibleEntities(characterIdToTargetBitmask(arg0) | characterIdToTargetBitmask(battleVar2->m0_entityMenus[arg0].m3C_currentTarget));
-        if (battleCharacters[arg0] != 4) {
+        if (BATTLE_CHARACTER(arg0) != 4) {
             battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m23_battleEntityIndex = arg0;
             battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m47_battleAnimationToPlay = 0xFD;
             battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m3A_animationParam = 0;

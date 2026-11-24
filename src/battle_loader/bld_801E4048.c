@@ -420,6 +420,29 @@ void batteLoaderPhase2_2(void) {
     }
 }
 
+#ifdef PLATFORM_PC
+/* Retail copies a whole stats array from a file that holds fewer entries: a
+ * gear's file 41 of its 42 (Noah: "the last one would be garbage data") and
+ * the enemies' 98 of 200. The rest comes from the heap after the decompressed
+ * block: on the PC the next block's header and the relocation table of the
+ * battle character config (pcRelocTable: native pointers into a file freed
+ * below), then whatever block follows; on the PS1 its own heap's bytes.
+ * The game reads a gear's commands 0 to 40 and an enemy's attack by the id its
+ * script names. The PC clears the rest after the copy, so the battle's BSS
+ * keeps no heap address or allocating caller where its type says stats: a
+ * state carried them into another layout as numbers (xg-htn.60.7). Clearing
+ * them changed nothing the game does in the battles compared (engine_diff:
+ * the battle scene, selector battles 3:0:1, 10:2 and 25:0, frames, logs and
+ * audio). */
+static void pcClearPastFile(void* dst, u8* packed, u32 size) {
+    u32 n = *(u32*)packed; /* LZSS: the decompressed size first */
+
+    if (n < size) {
+        bzero((u8*)dst + n, size - n);
+    }
+}
+#endif
+
 void loadPartyMembers(void) {
     u16 mask;
     s32 i;
@@ -472,11 +495,17 @@ void loadPartyMembers(void) {
             freeHeap(p);
             p = mallocAndDecompress(reloc[gear + 17], 1);
             memmove(battleEntities.m2228_mechaBattleStats[i], p, sizeof(battleEntities.m2228_mechaBattleStats[i]));
+#ifdef PLATFORM_PC
+            pcClearPastFile(battleEntities.m2228_mechaBattleStats[i], reloc[gear + 17], sizeof(battleEntities.m2228_mechaBattleStats[i]));
+#endif
             freeHeap(p);
         }
     }
     p = mallocAndDecompress(reloc[4], 1);
     memmove(battleEntities.m35D8_enemiesBattleStats, p, sizeof(battleEntities.m35D8_enemiesBattleStats));
+#ifdef PLATFORM_PC
+    pcClearPastFile(battleEntities.m35D8_enemiesBattleStats, reloc[4], sizeof(battleEntities.m35D8_enemiesBattleStats));
+#endif
     freeHeap(p);
     p = mallocAndDecompress(reloc[3], 1);
     memmove(battleEntities.m5518_items, p, 0x300);
@@ -523,7 +552,7 @@ void battleLoaderTick(u8 step) {
         initBattleInventory();
         batteLoaderPhase2_1();
         batteLoaderPhase2_2();
-        battleG3 = allocateBattleHeap(sizeof(sBattle800c3e24), 0);
+        battleG3 = allocateBattleHeap(PC_HEAP_OF(sBattle800c3e24, sizeof(sBattle800c3e24)), 0);
         bzero(battleG3, sizeof(sBattle800c3e24));
         break;
     case 3:

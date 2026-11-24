@@ -167,6 +167,10 @@ void freeBattleRenderStruct2(u8);
 void setDamageDone(u8);
 void applyChangeToHpOrMp(u8);
 
+#ifdef PLATFORM_PC
+int pcVersusMirrorSlot(s32 entity); /* port/src/game/battle/mirror.c: player 2's copy of the party */
+#endif
+
 u8 isTargetValid(u8 attacker, u8 target) {
     u8 result;
 
@@ -346,6 +350,12 @@ u8 abilityTargetSelectionInitSub1(u8 arg0) {
     numValidTarget = 0;
     abilityTargetBitmask = 0;
     i = 3;
+#ifdef PLATFORM_PC
+    if (pcVersusMirrorSlot(arg0)) {
+        i = 0; /* a mirror match's player 2: player 1's party (mirror.c) */
+        n = 3;
+    }
+#endif
     while (--n >= 0) {
         if (isTargetValid(arg0, i) != 0) {
             u16 mask;
@@ -526,7 +536,12 @@ u16 abilityTargetSelectionInit(u16 flags, u16 flags2, u8 self, u8 mode, u8 useSe
     if (flags & 0x8000) {
         includeKO = 1;
     }
+#ifdef PLATFORM_PC
+    /* a mirror match's player 2 (entities 3-5): its own side is the enemies' slots (mirror.c) */
+    if (((flags & 0x1000) != 0) != (pcVersusMirrorSlot(self) != 0)) {
+#else
     if (flags & 0x1000) {
+#endif
         partyFirst = 0;
         targetMode = 0;
         mask = 0xFFF8;

@@ -337,16 +337,23 @@ spu/cdin.c taken state
 spu/core.c spu state
 spu/menusfx.c * host the menu's sound effects
 spu/output.c * host audio output and dump (flushed on load: spuOutputStateLoaded)
+system/arena.c M host the Battle arena's match from anywhere: it outlives the kept game's return (savestate.c keeps the game)
+system/arena.c at host environment (XG_ARENA_MATCH)
 system/arena.c directAsked host environment (XG_ARENA=2,...: the oracle's direct match), taken once
 system/arena.c directParams host environment (XG_ARENA=2,...)
 system/arena.c envRead host environment and settings
+system/arena.c gameSeen host whether a game was loaded since the boot (the match's party picker); a match's own leaves it
+system/arena.c keptState host the kept game's gameState for a match's start (its members, Battling's records)
 system/arena.c keyboardOn derived set from the restored session on load
 system/arena.c on host environment and settings
+system/arena.c parsed host environment (XG_ARENA_MATCH)
 system/arena.c pending state
 system/arena.c versusConfig state
 system/arena.c versusEnvRead host environment and settings
+system/arena.c versusMirror state
 system/arena.c versusPending state
 system/arena.c versusTable state
+system/arena.c what host environment (XG_ARENA_MATCH), taken once
 system/backlog.c * host the dialogue backlog: what the player saw, its setting and its controls (never in a state)
 system/battlespeed.c battleText state the latest battle frame's text and wait (battleSpeedStateIo)
 system/battlespeed.c battleWait state

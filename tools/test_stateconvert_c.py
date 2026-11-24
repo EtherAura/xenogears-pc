@@ -3,27 +3,35 @@
 pair of states, the writer's a.xgs and the reader's template t.xgs, both convert, and the written files must be the
 same byte for byte, with the same warnings.
 
-    test_stateconvert_c.py [PAIR_DIR ...] [--a BUILD] [--b BUILD] [--reverse] [--mutate] [--cross] [--all]
+    test_stateconvert_c.py [PAIR_DIR ...] [--a BUILD] [--b BUILD] [--converter BUILD] [--reverse] [--mutate]
+                           [--cross] [--bias] [--all]
 
 A PAIR_DIR holds a.xgs and t.xgs, or run/a.xgs and run/t.xgs (work/canon/resume_e2e.py's output): layout A's state
 saved at a safe point, and layout B's at the same one. Default: every pair under $XG_CONVERT_PAIRS
 (/mnt/Games/scratch/xg-convert, which work/canon/convert_pairs.sh fills). A and B (default build/pc/schema and
-build/pc/schema2, linked 16 MiB apart) hold state_schema.json and its .gz; A's build holds stateconverttest. Each pair
+build/pc/schema2, linked 16 MiB apart) hold state_schema.json and its .gz; the converter's build (default A's, a Linux
+one: it converts Windows builds' states too) holds stateconverttest. Each state is read with its build's schema
+rebased by the load bias its header records (a position-independent build's: statecanon state_bias). Each pair
 converts stackless (statecanon convert) and with its stack (statecanon decode without --stackless). More cases:
   --reverse   B's state into A's layout (a.xgs the template)
   --mutate    into a copy of B's schema with field keys, variables' identities, union views, heap type names,
-              functions and constants changed or dropped (the decoder's warnings and fallbacks)
+              functions and constants changed or dropped, and the unnamed struct a host part's pointer points
+              at renumbered (the decoder's warnings and fallbacks)
   --cross     each pair's state with the next pair's template (other chunk sizes and host parts)
-  --all       all three
+  --bias      load biases on both sides: A's schema linked BIAS_W below where its state ran (the state's header
+              saying so, a PIE's case), B's linked BIAS_R above (a negative bias, modulo 2^64); besides being
+              identical to the reference, the body must be the one the unbiased conversion writes
+  --all       all four
 Skips (exit 0) when a build, a schema or the pairs are missing. On a difference it names the first differing chunk
 and offset, and the variable and field, or the heap block and part, there."""
-import argparse, copy, gzip, json, os, re, subprocess, sys, tempfile, time
+import argparse, copy, gzip, json, os, re, struct, subprocess, sys, tempfile, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import statecanon as cn  # noqa: E402
 import statecheck as sc  # noqa: E402
+import state_schema as ss  # noqa: E402 (build_image)
 
 PAIRS = Path(os.environ.get("XG_CONVERT_PAIRS", "/mnt/Games/scratch/xg-convert"))
 
@@ -136,6 +144,32 @@ def mutate(raw: dict) -> dict:
                 if mt and mt.get("fields"):
                     mt["fields"][-1]["name"] += "_renamed"
                 break
+    # the unnamed struct a host part's pointer variable points at (hw.c's queue: Pending) at another DWARF offset and
+    # without its typedef, as MinGW's LTO leaves it: the array is the reader's own type's, not the writer's
+    for v in s["variables"]:
+        t = types.get(v.get("tid") or "", {})
+        old = t.get("to") if v.get("platform") and t.get("k") == "ptr" and not t.get("fn") else None
+        if old not in types or "<anon>" not in types[old].get("name", "") or old.endswith(".renumbered"):
+            continue
+        new = f"{old}.renumbered"
+        types[new] = types.pop(old)
+        for u in types.values():
+            for key in ("to", "of"):
+                if u.get(key) == old:
+                    u[key] = new
+            for f in u.get("fields", []):
+                if f["type"] == old:
+                    f["type"] = new
+        for w in s["variables"]:
+            if w.get("tid") == old:
+                w["tid"] = new
+        for h in s.get("heap_types", {}).values():
+            if isinstance(h.get("spec"), dict) and h["spec"].get("tid") == old:
+                h["spec"]["tid"] = new
+        for key in ("counted", "unions"):
+            if old in s.get(key, {}):
+                s[key][new] = s[key].pop(old)
+        s["type_names"] = {n: tid for n, tid in s.get("type_names", {}).items() if tid != old}
     for k, v in enumerate(s["variables"]):
         if v.get("module") and v.get("retail") is not None and k % 11 == 0 and v["name"] != "safePointId":
             v["retail"] += 0x100000  # another identity: left zero, and pointers to it lost
@@ -154,6 +188,21 @@ def mutate(raw: dict) -> dict:
     return s
 
 
+BIAS_W, BIAS_R = 0x100000, 0x7F00_0000_0000  # --bias: the writer's load bias, the reader's (below 0)
+
+
+def with_bias(state: Path, delta: int, out: Path) -> Path:
+    """A copy of a state whose header says its process ran delta further from its link addresses."""
+    data = bytearray(state.read_bytes())
+    struct.pack_into("<Q", data, 232, (struct.unpack_from("<Q", data, 232)[0] + delta) & cn.MASK64)
+    out.write_bytes(bytes(data))
+    return out
+
+
+def body_of(path: Path) -> bytes:
+    return sc.read_state(path)[1]
+
+
 def write_schema(d: Path, s: dict) -> None:
     d.mkdir(parents=True, exist_ok=True)
     text = json.dumps(s)
@@ -167,15 +216,17 @@ def main() -> int:
     ap.add_argument("pairs", nargs="*", type=Path)
     ap.add_argument("--a", type=Path, default=ROOT / "build/pc/schema")
     ap.add_argument("--b", type=Path, default=ROOT / "build/pc/schema2")
-    for flag in ("reverse", "mutate", "cross", "all"):
+    ap.add_argument("--converter", type=Path, help="the build holding stateconverttest (default A's)")
+    for flag in ("reverse", "mutate", "cross", "bias", "all"):
         ap.add_argument(f"--{flag}", action="store_true")
     args = ap.parse_args()
     if args.all:
-        args.reverse = args.mutate = args.cross = True
+        args.reverse = args.mutate = args.cross = args.bias = True
     A, B = args.a.resolve(), args.b.resolve()
-    exe = A / "stateconverttest"
-    if (A / "CMakeCache.txt").exists():  # the test program, current
-        r = subprocess.run(["cmake", "--build", str(A), "--target", "stateconverttest"], capture_output=True, text=True)
+    C = (args.converter or args.a).resolve()
+    exe = C / "stateconverttest"
+    if (C / "CMakeCache.txt").exists():  # the test program, current
+        r = subprocess.run(["cmake", "--build", str(C), "--target", "stateconverttest"], capture_output=True, text=True)
         if r.returncode:
             print(f"test_stateconvert_c: building stateconverttest failed:\n{r.stdout[-2000:]}{r.stderr[-2000:]}")
             return 1
@@ -191,14 +242,22 @@ def main() -> int:
     if args.pairs:  # named pairs are compared even when stale; the default set must be the builds' own
         stale = []
     else:
-        stale = [n for n, (a, t) in pairs if a.stat().st_mtime < (A / "xenogears").stat().st_mtime or
-                 t.stat().st_mtime < (B / "xenogears").stat().st_mtime]
+        ia, ib = ss.build_image(A), ss.build_image(B)  # (a shared-library build's: the game library)
+        stale = [n for n, (a, t) in pairs if a.stat().st_mtime < ia.stat().st_mtime or t.stat().st_mtime < ib.stat().st_mtime]
     if stale:
         print(f"test_stateconvert_c: skipped: pairs older than the builds ({', '.join(stale)}): "
               f"work/canon/convert_pairs.sh makes new ones")
         return 0
-    sa, sb = cn.Schema(A), cn.Schema(B)
-    cases = []  # (name, writer state, writer schema dir, template, reader schema dir)
+    loaded = {}
+
+    def schema(d: Path, state: Path) -> cn.Schema:
+        """d's schema at the addresses state's process had (its header's load bias); one per (d, bias)."""
+        key = (d, cn.state_bias(state))
+        if key not in loaded:
+            loaded[key] = cn.Schema(d, key[1])
+        return loaded[key]
+
+    cases = []  # (name, writer state, writer schema dir, template, reader schema dir[, the plain case's output])
     for name, (a, t) in pairs:
         cases.append((name, a, A, t, B))
     if args.reverse:
@@ -207,23 +266,39 @@ def main() -> int:
         cases += [(f"{pairs[k][0]} with {pairs[(k + 1) % len(pairs)][0]}'s template", pairs[k][1][0], A,
                    pairs[(k + 1) % len(pairs)][1][1], B) for k in range(len(pairs))]
     tmp = Path(tempfile.mkdtemp(prefix="test_stateconvert_c."))
-    schemas = {A: sa, B: sb}
     if args.mutate:
         M = tmp / "mutated"
         write_schema(M, mutate(json.load(gzip.open(B / "state_schema.json.gz", "rt"))))
-        schemas[M] = cn.Schema(M)
         cases += [(f"{name} into a mutated B", a, A, t, M) for name, (a, t) in pairs]
+    if args.bias:
+        AW, BR = tmp / "a-linked-lower", tmp / "b-linked-higher"
+        for d, src, delta in ((AW, A, -BIAS_W), (BR, B, BIAS_R)):
+            raw = json.load(gzip.open(src / "state_schema.json.gz", "rt"))
+            low = min([v["addr"] for v in raw["variables"]] + [f["addr"] for f in raw["functions"]] +
+                      [r[1] for r in raw.get("symbols", [])] + [r[0] for r in raw.get("ro", [])] +
+                      [lo for lo, _ in list(raw["sections"].values()) + list(raw["regions"].values())])
+            if low + delta < 0:
+                print(f"test_stateconvert_c: --bias: {src}'s lowest address {low:#x} is below {-delta:#x}")
+                return 1
+            cn.rebase(raw, delta & cn.MASK64)
+            write_schema(d, raw)
+        (tmp / "states").mkdir()
+        for k, (name, (a, t)) in enumerate(pairs):
+            wa = with_bias(a, BIAS_W, tmp / "states" / f"{k}a.xgs")
+            wt = with_bias(t, -BIAS_R, tmp / "states" / f"{k}t.xgs")
+            cases.append((f"{name} at load biases {BIAS_W:#x} and {-BIAS_R & cn.MASK64:#x}", wa, AW, wt, BR, (a, t)))
     bad = compared = 0
     total = 0
     cache = {}
-    for name, a_state, wa, t_state, wb in cases:
+    for name, a_state, wa, t_state, wb, *plain in cases:
         for stackless in (True, False):
             label = f"{name}, {'stackless' if stackless else 'with the stack'}"
             ref, got = tmp / "ref.xgs", tmp / "c.xgs"
             for p in (ref, got):
                 p.unlink(missing_ok=True)
             try:
-                body, ew, dw, dec, doc = reference(a_state, schemas[wa], t_state, schemas[wb], stackless, ref, cache)
+                body, ew, dw, dec, doc = reference(a_state, schema(wa, a_state), t_state, schema(wb, t_state), stackless,
+                                                   ref, cache)
                 why = None
             except (Exception, SystemExit) as e:  # noqa: BLE001 (the reference's own failure is a result too)
                 why = f"{type(e).__name__}: {e}"
@@ -244,6 +319,16 @@ def main() -> int:
             same = ref.read_bytes() == got.read_bytes()
             total += len(body)
             line = f"  {label}: {len(body)} bytes {'identical' if same else 'DIFFER'}; C {took:.2f} s"
+            if plain:  # the same conversion without the biases (C, fast): the same body
+                unbiased = tmp / "plain.xgs"
+                rp, *_ = c_convert(exe, plain[0][0], A / "state_schema.json", plain[0][1], B / "state_schema.json",
+                                   stackless, unbiased)
+                if rp.returncode or body_of(unbiased) != body:
+                    bad += 1
+                    line += "; NOT the unbiased conversion's body" + (f" (it failed: {rp.stderr.strip()[:200]})"
+                                                                       if rp.returncode else "")
+                else:
+                    line += "; the unbiased conversion's body"
             if (ew, dw) != (cew, cdw):
                 line += f"; warnings differ: reference encode {ew} decode {dw}, C encode {cew} decode {cdw}"
                 bad += 1
@@ -252,7 +337,7 @@ def main() -> int:
             print(line, flush=True)
             if not same:
                 bad += 1
-                print(f"    {first_difference(ref, got, schemas[wb], dec, doc)}")
+                print(f"    {first_difference(ref, got, schema(wb, t_state), dec, doc)}")
     for p in tmp.rglob("*"):
         if p.is_file():
             p.unlink()

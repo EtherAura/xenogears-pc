@@ -47,6 +47,19 @@ void stateLateFinish(void);
 int stateRestoreChunks(const StateChunkRef* chunks, int count, int disc, uint64_t dumpFrames, char* why,
                        size_t whySize);
 
+/* The Battle arena's matches (system/arena.c; xg-htn.35.144): at the next
+ * park the game starts again from entry, on a fresh game stack (a soft reset:
+ * the game's softReboot), with keep first the whole game kept in memory (a
+ * state as a save takes it; save states are then off: stateAvailable); at a
+ * later park the kept game is put back (stateRequestReturn: it goes on where
+ * it was parked, on the disc it was on). stateRestartAvailable: 0 with why
+ * where it cannot (the slowdown replay, XG_OVERLAY_CD, no game stack). */
+int stateRestartAvailable(const char** why);
+void stateRequestRestart(int keep, void (*entry)(void));
+void stateRequestReturn(void);
+int stateKept(void);
+void stateKeptDrop(void);
+
 /* rewind.c, from savestate.c */
 void rewindReset(void);                 /* a load or a reset: the history is another timeline's */
 int rewindWanted(uint32_t vblank);      /* at a park point: REWIND_CAPTURE, REWIND_BACK or 0 */

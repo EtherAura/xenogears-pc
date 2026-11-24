@@ -447,9 +447,25 @@ void OPX_D0(void) {
     pCurrentFieldScriptActor->mCC_scriptPC += 5;
 }
 
+#ifdef PLATFORM_PC
+/* On the PC the entry block's seven bytes are seven objects (pc_link names
+ * each: battlingEntryParams is byte 0 alone), so the field ops take them by
+ * name, as Battling does (xg-htn.35.151). */
+extern u8 battlingEntryMatchType;  /* battlingEntryParams[1] */
+extern u8 battlingEntryGear1;      /* battlingEntryParams[2] */
+extern u8 battlingEntryGear2;      /* battlingEntryParams[3] */
+extern u8 battlingEntryWinsNeeded; /* battlingEntryParams[4] */
+extern u8 battlingEntryComLevel;   /* battlingEntryParams[5] */
+extern u8 battlingResult;          /* battlingEntryParams[6] */
+#endif
+
 /* Opcode EX 0xC0 */
 void OPX_C0(void) {
+#ifdef PLATFORM_PC
+    setVar(readU16FromScript(1), battlingResult);
+#else
     setVar(readU16FromScript(1), battlingEntryParams[6]);
+#endif
     pCurrentFieldScriptActor->mCC_scriptPC += 3;
 }
 
@@ -461,11 +477,19 @@ void OPX_BF(void) {
     } else {
         setBattlingMainTaskIndex(0);
         battlingEntryParams[0] = getImmediateOrVariableUnsigned(1);
+#ifdef PLATFORM_PC
+        battlingEntryMatchType = getImmediateOrVariableUnsigned(3);
+        battlingEntryGear1 = getImmediateOrVariableUnsigned(5);
+        battlingEntryGear2 = getImmediateOrVariableUnsigned(7);
+        battlingEntryWinsNeeded = getImmediateOrVariableUnsigned(9);
+        battlingEntryComLevel = getImmediateOrVariableUnsigned(0xB);
+#else
         battlingEntryParams[1] = getImmediateOrVariableUnsigned(3);
         battlingEntryParams[2] = getImmediateOrVariableUnsigned(5);
         battlingEntryParams[3] = getImmediateOrVariableUnsigned(7);
         battlingEntryParams[4] = getImmediateOrVariableUnsigned(9);
         battlingEntryParams[5] = getImmediateOrVariableUnsigned(0xB);
+#endif
         fieldBattleRequested = 1;
         battlingModeReady = 0;
         pCurrentFieldScriptActor->mCC_scriptPC += 0xD;

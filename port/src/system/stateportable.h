@@ -7,14 +7,20 @@
  * and its build's schema is filed in the save folder, so another build of the
  * same engine and region loads it by converting (stateconvert.h).
  *
- * This build's schema is tools/state_schema.py's state_schema.json beside the
- * executable (XG_STATE_SCHEMA names another file, or "none"). Without one
- * (Release builds today) portable saving is off: slots save as before and load
+ * This build's schema is the one tools/state_schema.py wrote from its image
+ * (port/CMakeLists.txt XG_STATE_SCHEMA): state_schema.json beside the image in
+ * its build folder, or the packed <image>.xgschema a package installs
+ * (stateportable.c ownPath has where; XG_STATE_SCHEMA names another file, or
+ * "none"). Without one portable saving is off: slots save as before and load
  * only in this build. It is read at the first portable save or conversion
- * (about 50 ms) and kept, after checking that it describes this executable
- * (its sections, regions and a few functions where they are now, and not older
- * than the executable). Addresses in a schema are link addresses: both builds
- * must run at them (no load bias; position-independent builds are refused).
+ * (about 50 ms) and kept, after checking that it describes this executable:
+ * the identity of the image it was read from (statefile.h stateImageId, the
+ * same before and after the debug information is stripped), and its sections,
+ * regions and a few functions where they are now. Addresses in a schema are
+ * link addresses; a process's image sits at them plus its load bias (a
+ * position-independent build's, Android's library's), so each schema is
+ * rebased by its process's: this build's own by stateImageBias, the writer's
+ * by the bias its state's header records.
  */
 
 #include <stddef.h>
@@ -28,8 +34,8 @@ extern "C" {
 #endif
 
 /* Whether a slot save waits for a safe point to be portable: this build has
- * a schema file and no load bias. A file's presence only (cheap); call it
- * on the main thread before a save's worker runs. */
+ * a schema file. A file's presence only, looked for once; call it on the main
+ * thread before a save's worker runs. */
 int statePortableOn(void);
 
 /* A slot's trailer, made from its body (on the save's worker thread): the
@@ -41,8 +47,8 @@ int statePortableMake(const uint8_t* body, size_t size, StatePortable* out, char
 
 /* Whether another build's state (h, in the file at path) can be converted
  * here, without reading its body: its trailer, the writer's schema filed in
- * the save folder, this build's schema, no load bias. 0 with why (a
- * sentence part: "saved by ..."). */
+ * the save folder, this build's schema. 0 with why (a sentence part: "saved
+ * by ..."). */
 int statePortableCanLoad(const StateHeader* h, const char* path, char* why, size_t whySize);
 
 /* The conversion: another build's state (h, body, from path) as this

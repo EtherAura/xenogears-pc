@@ -13,6 +13,14 @@ if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     list(APPEND XG_GAME_OPTIONS -fpermissive -w)
 else()
     list(APPEND XG_GAME_OPTIONS -Wno-everything)
+    # The state schema finds the types of the game C's extern declarations by name in the
+    # image's own debug information (tools/state_schema.py clang_declared), and clang leaves a
+    # type out when nothing it describes uses it: one the C reaches only through such a
+    # declaration (extern BattlingSideState battlingSideStates[2]). So every type the game C
+    # defines goes in; the code is the same.
+    if(XG_STATE_SCHEMA)
+        list(APPEND XG_GAME_OPTIONS -fno-eliminate-unused-debug-types)
+    endif()
 endif()
 
 # Windows (MinGW, port/cmake/mingw-w64-x86_64.cmake): bitfields laid out as

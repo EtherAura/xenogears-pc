@@ -72,9 +72,86 @@ if(XG_DIST)
         list(APPEND XG_DIST_MAPS "-ffile-prefix-map=${XG_ROOT_REAL}/=")
     endif()
     list(APPEND XG_DIST_MAPS "-ffile-prefix-map=${XG_ROOT_ABS}/=" "-ffile-prefix-map=${CMAKE_BINARY_DIR}/=build/")
+    # The build folder itself too, with no separator after it: the compiler's working folder,
+    # the compilation folder of the debug information (XG_STATE_SCHEMA's -g), which the maps
+    # above only reach inside the repository or the home. As spelled and resolved (a build
+    # folder reached through a symbolic link: the working folder is the resolved one).
+    get_filename_component(XG_BINARY_REAL "${CMAKE_BINARY_DIR}" REALPATH)
+    list(APPEND XG_DIST_MAPS "-ffile-prefix-map=${CMAKE_BINARY_DIR}=build")
+    if(NOT XG_BINARY_REAL STREQUAL CMAKE_BINARY_DIR)
+        list(APPEND XG_DIST_MAPS "-ffile-prefix-map=${XG_BINARY_REAL}=build")
+    endif()
     foreach(map IN LISTS XG_DIST_MAPS)
         add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:${map}>")
+        # and at GCC's link: its link-time optimisation compiles again there, and that debug
+        # information names the link's folder (the build folder) otherwise
+        if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+            add_link_options("${map}")
+        endif()
     endforeach()
+endif()
+
+# XG_STATE_SCHEMA: the image's state schema (tools/state_schema.py,
+# port/src/system/stateportable.h), with which a slot this build saves loads
+# in another build of the port and another build's slot loads here. It is read
+# from the image's debug information, so every configuration compiles and
+# links with -g (GCC and Clang generate the same code with it; what ships is
+# stripped: cmake --install --strip, CPack, the Android packaging), and each
+# link writes the image's schema beside it: state_schema.json (and .gz, for
+# tools/statecanon.py) and <image>.xgschema, packed, with no path of this
+# machine, which the install rules ship (XG_STATE_SCHEMA_FILE below). About
+# 10 seconds per link of the game, nothing when it is not relinked. Needs
+# llvm-dwarfdump (LLVM, or the Android NDK's): without it a development build
+# writes no schema (its slots then load in it alone) and a build to hand out
+# stops. A clang build (Android) also needs the host's GCC (below). Off on
+# macOS (the schema tool reads ELF and PE images).
+if(APPLE)
+    set(xg_state_schema_default OFF)
+else()
+    set(xg_state_schema_default ON)
+endif()
+option(XG_STATE_SCHEMA "compile with debug information and write the state schema beside the image"
+    ${xg_state_schema_default})
+if(XG_STATE_SCHEMA)
+    # llvm-dwarfdump: beside the compiler (the NDK's clang), on PATH, or a distribution's versioned LLVM.
+    get_filename_component(xg_compiler_bin "${CMAKE_C_COMPILER}" DIRECTORY)
+    file(GLOB xg_llvm_bins LIST_DIRECTORIES true "/usr/lib/llvm-*/bin" "/usr/lib/llvm/*/bin")
+    list(SORT xg_llvm_bins COMPARE NATURAL ORDER DESCENDING)
+    find_program(XG_DWARFDUMP NAMES llvm-dwarfdump HINTS "${xg_compiler_bin}" PATHS ${xg_llvm_bins}
+        NO_CMAKE_FIND_ROOT_PATH DOC "llvm-dwarfdump, which tools/state_schema.py reads the image's DWARF with")
+    if(NOT XG_DWARFDUMP)
+        if(XG_DIST)
+            message(FATAL_ERROR "XG_STATE_SCHEMA: no llvm-dwarfdump. A build to hand out ships its state schema: "
+                "install LLVM (llvm-dwarfdump), or configure with -DXG_STATE_SCHEMA=OFF for one whose slots load "
+                "in it alone.")
+        endif()
+        message(WARNING "XG_STATE_SCHEMA: no llvm-dwarfdump (LLVM): this build writes no state schema, so the "
+            "slots it saves load in it alone. Install LLVM, or -DXG_STATE_SCHEMA=OFF to silence this.")
+        set(XG_STATE_SCHEMA OFF)
+    else()
+        add_compile_options("$<$<COMPILE_LANGUAGE:C,CXX>:-g>")
+        add_link_options(-g)
+        if(CMAKE_C_COMPILER_ID MATCHES "Clang")
+            # Clang writes no debug information for extern declarations, which the generated
+            # data's types come from (gen/: u8 arrays): the schema tool reads the game C's with the
+            # host's GCC, by the build's compile commands, and finds each type by its name in the
+            # image's own debug information (tools/state_schema.py clang_declared;
+            # cmake/game-modules.cmake keeps every type the game C defines there). Without GCC
+            # the schema says its states cannot convert, and the slots load in this build alone.
+            set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+            find_program(XG_SCHEMA_GCC NAMES gcc NO_CMAKE_FIND_ROOT_PATH
+                DOC "the host's GCC, with which tools/state_schema.py reads a clang build's declarations")
+            if(NOT XG_SCHEMA_GCC)
+                if(XG_DIST)
+                    message(FATAL_ERROR "XG_STATE_SCHEMA: no gcc. A clang build to hand out reads its game C's "
+                        "declarations with the host's GCC for its state schema: install GCC, or configure with "
+                        "-DXG_STATE_SCHEMA=OFF for one whose slots load in it alone.")
+                endif()
+                message(WARNING "XG_STATE_SCHEMA: no gcc: this clang build's state schema cannot read the game "
+                    "C's declarations, so the slots it saves load in it alone. Install GCC.")
+            endif()
+        endif()
+    endif()
 endif()
 
 # Which game C the executable runs (docs/ENGINE_PLAN.md). "original" compiles
@@ -869,6 +946,47 @@ elseif(XG_ENGINE STREQUAL "enhanced")
     endif()
 elseif(XG_SHARED)
     set_target_properties(xenogears_game PROPERTIES OUTPUT_NAME xenogears)
+endif()
+# The image's state schema (XG_STATE_SCHEMA above), written after each link of the game. The file
+# to ship is named after the image (XG_STATE_SCHEMA_FILE: xenogears.xgschema,
+# xenogears-enhanced.xgschema, Android's libxenogears-us.xgschema ...), as the game looks for it
+# (port/src/system/stateportable.c XG_STATE_SCHEMA_NAME); the install rules put it where that
+# says (Windows: beside the executable; Linux: port/cmake/deb.cmake).
+if(XG_STATE_SCHEMA)
+    get_target_property(xg_image_name ${XG_GAME_TARGET} OUTPUT_NAME)
+    if(NOT xg_image_name)
+        set(xg_image_name ${XG_GAME_TARGET})
+    endif()
+    if(XG_SHARED)
+        set(xg_image_name "lib${xg_image_name}")
+    endif()
+    set(XG_STATE_SCHEMA_FILE "${xg_image_name}.xgschema")
+    set(xg_schema_lookup "${XG_STATE_SCHEMA_FILE}")
+    if(ANDROID)
+        # in the APK's assets, a folder per ABI (tools/build_android.sh puts each library's there)
+        set(xg_schema_lookup "schemas/${ANDROID_ABI}/${XG_STATE_SCHEMA_FILE}")
+    endif()
+    set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/system/stateportable.c" APPEND PROPERTY
+        COMPILE_DEFINITIONS "XG_STATE_SCHEMA_NAME=\"${xg_schema_lookup}\"")
+    set(xg_schema_gcc)
+    if(XG_SCHEMA_GCC)
+        set(xg_schema_gcc --gcc "${XG_SCHEMA_GCC}")
+    endif()
+    add_custom_command(TARGET ${XG_GAME_TARGET} POST_BUILD
+        COMMAND Python3::Interpreter "${XG_ROOT}/tools/state_schema.py" "${CMAKE_BINARY_DIR}"
+                --image $<TARGET_FILE:${XG_GAME_TARGET}> --dwarfdump "${XG_DWARFDUMP}" ${xg_schema_gcc}
+                --ship "${CMAKE_BINARY_DIR}/${XG_STATE_SCHEMA_FILE}" --quiet
+        BYPRODUCTS "${CMAKE_BINARY_DIR}/state_schema.json" "${CMAKE_BINARY_DIR}/state_schema.json.gz"
+                   "${CMAKE_BINARY_DIR}/${XG_STATE_SCHEMA_FILE}"
+        WORKING_DIRECTORY "${XG_ROOT}"
+        COMMENT "Writing the state schema of ${xg_image_name} (tools/state_schema.py)"
+        VERBATIM)
+    # A change to what the schema is made of writes it again (the link, then the step above).
+    set_property(TARGET ${XG_GAME_TARGET} APPEND PROPERTY LINK_DEPENDS "${XG_ROOT}/tools/state_schema.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/system/savestate_inventory.txt")
+    if(WIN32)
+        install(FILES "${CMAKE_BINARY_DIR}/${XG_STATE_SCHEMA_FILE}" DESTINATION .)
+    endif()
 endif()
 target_link_libraries(${XG_GAME_TARGET} PRIVATE SDL3::SDL3 m ${XG_GLSLANG_LIBS} ${XG_DAV1D_LIBS})
 set(XG_ELF_PAYLOAD_MAP OFF CACHE INTERNAL "Use archive provenance in the ELF payload audit" FORCE)

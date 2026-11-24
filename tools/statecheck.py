@@ -107,6 +107,99 @@ def unpack(data: bytes, raw_size: int) -> bytes:
     return bytes(out)
 
 
+PACK_BLOCK = 1 << 20  # statecodec.h STATE_PACK_BLOCK
+
+
+def pack_block(data: bytes, cap: int) -> bytes | None:
+    """statecodec.c packBlock, step for step (the same bytes): greedy LZ77, each position's first four bytes
+    looked up in a table of the positions seen, a hit within 64 KB extended as far as it goes, long stretches
+    without a hit crossed in growing steps; None when it does not get under cap bytes."""
+    n = len(data)
+    if n < 16:  # MIN_PACK
+        return None
+    local = [0] * (1 << 14)  # HASH_BITS: position + 1, 0 empty
+    out = bytearray()
+    u32 = struct.Struct("<I").unpack_from
+    ip = anchor = misses = 0
+    limit = n - 5 - 4  # TAIL, MIN_MATCH
+
+    def length(v: int) -> None:
+        while v >= 255:
+            out.append(255)
+            v -= 255
+        out.append(v)
+
+    def sequence(nlit: int, distance: int, ln: int) -> None:
+        m = ln - 4 if ln else 0
+        out.append(min(nlit, 15) << 4 | min(m, 15))
+        if nlit >= 15:
+            length(nlit - 15)
+        out.extend(data[anchor:anchor + nlit])
+        if ln:
+            out.append(distance & 255)
+            out.append(distance >> 8)
+            if m >= 15:
+                length(m - 15)
+
+    while ip < limit:
+        v = u32(data, ip)[0]
+        h = (v * 2654435761 & 0xFFFFFFFF) >> 18
+        cand = local[h]
+        local[h] = ip + 1
+        if cand and ip - (cand - 1) <= 65535 and data[cand - 1:cand + 3] == data[ip:ip + 4]:
+            ref = cand - 1
+            while ip > anchor and ref > 0 and data[ip - 1] == data[ref - 1]:
+                ip -= 1
+                ref -= 1
+            most = n - 5 - ip
+            ln = 4
+            while ln + 8 <= most and data[ip + ln:ip + ln + 8] == data[ref + ln:ref + ln + 8]:
+                ln += 8
+            while ln < most and data[ip + ln] == data[ref + ln]:
+                ln += 1
+            sequence(ip - anchor, ip - ref, ln)
+            if len(out) > cap:
+                return None
+            ip += ln
+            anchor = ip
+            if ip >= 2 and ip - 2 < limit:
+                local[(u32(data, ip - 2)[0] * 2654435761 & 0xFFFFFFFF) >> 18] = ip - 1
+            misses = 0
+        else:
+            ip += 1 + (misses >> 6)
+            misses += 1
+    sequence(n - anchor, 0, 0)
+    return None if len(out) > cap else bytes(out)
+
+
+def pack(data: bytes) -> bytes:
+    """statecodec.c statePack: blocks of u32 raw size, u32 packed size and the bytes (stored when they do not
+    pack). The same bytes as the C."""
+    out = bytearray()
+    for at in range(0, max(len(data), 1), PACK_BLOCK):
+        raw = data[at:at + PACK_BLOCK]
+        packed = (pack_block(raw, len(raw) - 1) if raw else None) or raw
+        out += struct.pack("<II", len(raw), len(packed)) + packed
+    return bytes(out)
+
+
+SCHEMA_MAGIC = b"XGSCHEMA"  # statefile.c stateSchemaFileWrite, stateschema.c stateSchemaLoad
+
+
+def schema_file(text: bytes) -> bytes:
+    """A state schema in its packed form: "XGSCHEMA", u64 the JSON's size, the JSON packed (statePack)."""
+    return SCHEMA_MAGIC + struct.pack("<Q", len(text)) + pack(text)
+
+
+def schema_text(data: bytes) -> bytes:
+    """A state schema's JSON from either form (the packed one unpacked): the bytes the game hashes."""
+    if data[:8] != SCHEMA_MAGIC:
+        return data
+    if len(data) < 16:
+        raise ValueError("damaged packed schema")
+    return unpack(data[16:], struct.unpack_from("<Q", data, 8)[0])
+
+
 def read_state(path: Path) -> tuple[dict, bytes]:
     data = path.read_bytes()
     if data[:8] != b"XGSTATE\0":

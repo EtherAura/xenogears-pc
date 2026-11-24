@@ -21,6 +21,14 @@
 #define SCHEMA_VERSION "us"
 #endif
 
+/* The file a package ships this image's schema in: the image's name and .xgschema (port/CMakeLists.txt
+ * XG_STATE_SCHEMA: xenogears.xgschema, xenogears-enhanced.xgschema ...), so that images side by side (both
+ * engines in one folder, Android's four libraries) each find their own; on Android its path in the APK's
+ * assets, which has a folder per ABI (schemas/arm64-v8a/libxenogears-us.xgschema). */
+#ifndef XG_STATE_SCHEMA_NAME
+#define XG_STATE_SCHEMA_NAME "xenogears.xgschema"
+#endif
+
 /* gen/modules.c (savestate.c has the same view). */
 typedef struct {
     const char* name;
@@ -41,7 +49,8 @@ void pcResumeGame(void);             /* port/src/game/main/statetypes.c */
  * before a conversion), so never by two at once. */
 static struct {
     int known;           /* path worked out (statePortableOn, on the main thread) */
-    char path[1100];     /* "": none (XG_STATE_SCHEMA=none, no base path) */
+    char path[1100];     /* "": none (none there, XG_STATE_SCHEMA=none, no base path) */
+    char looked[1100];   /* where it was looked for (the messages) */
     int tried;
     StateSchema* schema; /* NULL: none or unusable (why) */
     uint64_t hash;       /* stateHash of the file's bytes */
@@ -49,16 +58,42 @@ static struct {
     char why[300];
 } own;
 
+/* Where this build's schema is: XG_STATE_SCHEMA (a file, or "none"), else the first of these that is there
+ *   <base>state_schema.json            a build's folder: tools/state_schema.py writes it beside the image
+ *   <base>NAME                         beside the executable: the Windows packages
+ *   <base>../share/xenogears-pc/NAME   an install's: <prefix>/bin's executable (the Linux packages)
+ *   NAME                               Android: the APK's assets (SDL's file API reads them)
+ * (<base> the executable's folder, NAME XG_STATE_SCHEMA_NAME), looked for once. */
 static const char* ownPath(void) {
     if (!own.known) {
         own.known = 1;
         const char* env = getenv("XG_STATE_SCHEMA");
         if (env != NULL && env[0] != '\0') {
-            snprintf(own.path, sizeof own.path, "%s", strcmp(env, "none") == 0 ? "" : env);
-        } else {
-            const char* base = SDL_GetBasePath(); /* the executable's folder, with its separator */
-            if (base != NULL) {
-                snprintf(own.path, sizeof own.path, "%sstate_schema.json", base);
+            int none = strcmp(env, "none") == 0;
+            snprintf(own.looked, sizeof own.looked, "%s", none ? "XG_STATE_SCHEMA=none" : env);
+            if (!none && SDL_GetPathInfo(env, NULL)) {
+                snprintf(own.path, sizeof own.path, "%s", env);
+            }
+            return own.path;
+        }
+        char where[3][1100];
+        int n = 0;
+#ifdef __ANDROID__
+        snprintf(where[n++], sizeof where[0], "%s", XG_STATE_SCHEMA_NAME);
+#else
+        const char* base = SDL_GetBasePath(); /* the executable's folder, with its separator */
+        if (base != NULL) {
+            snprintf(where[n++], sizeof where[0], "%sstate_schema.json", base);
+            snprintf(where[n++], sizeof where[0], "%s%s", base, XG_STATE_SCHEMA_NAME);
+#ifndef _WIN32
+            snprintf(where[n++], sizeof where[0], "%s../share/xenogears-pc/%s", base, XG_STATE_SCHEMA_NAME);
+#endif
+        }
+#endif
+        snprintf(own.looked, sizeof own.looked, "%s", n ? where[n - 1] : "no folder for this executable");
+        for (int i = 0; i < n && own.path[0] == '\0'; i++) {
+            if (SDL_GetPathInfo(where[i], NULL)) {
+                snprintf(own.path, sizeof own.path, "%s", where[i]);
             }
         }
     }
@@ -66,39 +101,62 @@ static const char* ownPath(void) {
 }
 
 int statePortableOn(void) {
-    const char* path = ownPath();
-    return stateImageBias() == 0 && path[0] != '\0' && SDL_GetPathInfo(path, NULL);
+    return ownPath()[0] != '\0';
 }
 
-static uint8_t* readAll(const char* path, size_t* n) {
+/* A schema file's JSON (NUL-terminated): the file's bytes, or the packed form's ("XGSCHEMA", u64 the JSON's
+ * size, the JSON packed by statePack: what a package ships, as the save folder keeps it) unpacked. Its hash
+ * (stateHash of the JSON) names the schema in either form. */
+static uint8_t* readSchema(const char* path, size_t* n) {
     size_t size = 0;
-    void* data = SDL_LoadFile(path, &size);
+    uint8_t* data = SDL_LoadFile(path, &size); /* (SDL's file API: on Android also the APK's assets) */
     if (data == NULL) {
         return NULL;
     }
-    uint8_t* copy = malloc(size + 1); /* (SDL's memory freed by SDL: a copy of ours) */
-    if (copy != NULL) {
-        memcpy(copy, data, size);
-        copy[size] = 0;
+    uint8_t* text = NULL;
+    if (size >= 16 && memcmp(data, "XGSCHEMA", 8) == 0) {
+        uint64_t raw = 0;
+        for (int i = 7; i >= 0; i--) raw = raw << 8 | data[8 + i];
+        text = raw < (1ull << 31) ? malloc((size_t)raw + 1) : NULL;
+        if (text != NULL && stateUnpack(data + 16, size - 16, text, (size_t)raw)) {
+            size = (size_t)raw;
+        } else {
+            free(text);
+            text = NULL;
+        }
+    } else if ((text = malloc(size + 1)) != NULL) { /* (SDL's memory freed by SDL: a copy of ours) */
+        memcpy(text, data, size);
     }
     SDL_free(data);
-    *n = size;
-    return copy;
+    if (text != NULL) {
+        text[size] = 0;
+        *n = size;
+    }
+    return text;
 }
 
-/* Whether the schema describes this executable as it runs: its version, its read-only ranges in this
- * image, every game module's sections, the heap, the game stack and the scratchpad where they are,
- * two functions (a game module's, the platform's) where they are; not older than the executable (a
- * rebuild moves what it describes). 0 with why. */
-static int describesThis(const StateSchema* s, const char* path, char* why, size_t size) {
+/* Whether the schema (rebased by this process's load bias) describes this executable as it runs: its
+ * version, the image it was read from (its identity: this image's, which a rebuild changes and stripping
+ * the debug information or another load address does not), its read-only ranges in this image, every
+ * game module's sections, the heap, the game stack and the scratchpad where they are, two functions (a
+ * game module's, the platform's) where they are. 0 with why. */
+static int describesThis(const StateSchema* s, char* why, size_t size) {
     if (strcmp(stateSchemaVersion(s), SCHEMA_VERSION) != 0) {
         snprintf(why, size, "it is the %s version's", stateSchemaVersion(s));
         return 0;
     }
-    SDL_PathInfo si, ei;
-    const char* exe = stateImagePath();
-    if (exe != NULL && SDL_GetPathInfo(path, &si) && SDL_GetPathInfo(exe, &ei) && si.modify_time < ei.modify_time) {
-        snprintf(why, size, "it is older than the executable (tools/state_schema.py writes it again after a build)");
+    const char* image = stateImageIdText();
+    if (image[0] == '\0') {
+        snprintf(why, size, "this executable's sections cannot be read, so its identity is not known");
+        return 0;
+    }
+    if (stateSchemaImageId(s)[0] == '\0') {
+        snprintf(why, size, "it names no image (an older schema: tools/state_schema.py writes it again)");
+        return 0;
+    }
+    if (strcmp(stateSchemaImageId(s), image) != 0) {
+        snprintf(why, size, "it was read from another image (%.32s; this one is %s: tools/state_schema.py "
+                 "writes it again after a build)", stateSchemaImageId(s), image);
         return 0;
     }
     for (int32_t i = 0; i < stateSchemaReadOnlyCount(s); i++) {
@@ -150,28 +208,34 @@ static const StateSchema* ownSchema(char* why, size_t size) {
         own.tried = 1;
         const char* path = ownPath();
         size_t n = 0;
-        uint8_t* json = path[0] != '\0' ? readAll(path, &n) : NULL;
+        uint8_t* json = path[0] != '\0' ? readSchema(path, &n) : NULL;
         char err[300] = "";
-        if (stateImageBias() != 0) {
-            snprintf(own.why, sizeof own.why,
-                     "this build runs away from its link addresses (position-independent): its schema's addresses "
-                     "do not apply");
-        } else if (json == NULL) {
-            snprintf(own.why, sizeof own.why, "this build has no state schema (%.200s)",
-                     path[0] != '\0' ? path : "XG_STATE_SCHEMA=none");
+        const char* notPortable = "";
+        if (json == NULL) {
+            snprintf(own.why, sizeof own.why, "this build has no state schema (%.200s%s)",
+                     path[0] != '\0' ? path : own.looked, path[0] != '\0' ? ": unreadable or damaged" : "");
         } else {
             uint64_t t0 = SDL_GetTicksNS();
             own.hash = stateHash(json, n, 0);
-            own.schema = stateSchemaParse((const char*)json, n, err, sizeof err);
+            /* at this process's addresses: its link addresses plus its load bias (a position-independent
+             * build's, Android's library's; 0 at the link addresses) */
+            own.schema = stateSchemaParseAt((const char*)json, n, (uint64_t)stateImageBias(), err, sizeof err);
             if (own.schema == NULL) {
                 snprintf(own.why, sizeof own.why, "this build's state schema cannot be read: %s", err);
-            } else if (!describesThis(own.schema, path, err, sizeof err)) {
+            } else if (!describesThis(own.schema, err, sizeof err)) {
                 snprintf(own.why, sizeof own.why, "this build's state schema (%.100s) does not describe it: %.140s",
                          path, err);
                 stateSchemaFree(own.schema);
                 own.schema = NULL;
+            } else if (!stateSchemaPortable(own.schema, &notPortable)) {
+                /* its states would convert wrongly, both ways: its slots stay in this build */
+                snprintf(own.why, sizeof own.why, "this build's states cannot convert to other builds: %.200s",
+                         notPortable);
+                stateSchemaFree(own.schema);
+                own.schema = NULL;
             } else {
-                fprintf(stderr, "state: schema %016llx (%s) read in %.0f ms\n", (unsigned long long)own.hash, path,
+                fprintf(stderr, "state: schema %016llx (%s, image %s, load bias %llx) read in %.0f ms\n",
+                        (unsigned long long)own.hash, path, stateImageIdText(), (unsigned long long)stateImageBias(),
                         (double)(SDL_GetTicksNS() - t0) * 1e-6);
             }
         }
@@ -186,7 +250,7 @@ static const StateSchema* ownSchema(char* why, size_t size) {
     return own.schema;
 }
 
-/* The read-only ranges as this process has them (link addresses: no bias). */
+/* The read-only ranges as this process has them (the schema rebased by its load bias: its own addresses). */
 static StateRoStrings* liveStrings(const StateSchema* s, StateRoSegment** segments) {
     int32_t n = stateSchemaReadOnlyCount(s);
     StateRoSegment* seg = calloc((size_t)n + 1, sizeof(*seg));
@@ -244,7 +308,7 @@ static int fileSchema(char* why, size_t size) {
         return 1;
     }
     size_t n = 0;
-    uint8_t* json = readAll(ownPath(), &n);
+    uint8_t* json = readSchema(ownPath(), &n);
     int ok = json != NULL && stateHash(json, n, 0) == own.hash;
     if (!ok) {
         snprintf(why, size, "%s changed since it was read", ownPath());
@@ -338,11 +402,6 @@ int statePortableCanLoad(const StateHeader* h, const char* path, char* why, size
     }
     uint64_t hash = p.schemaHash;
     statePortableFree(&p);
-    if (h->imageBias != 0 || stateImageBias() != 0) {
-        snprintf(why, whySize, "saved by %s: converting needs both builds at their link addresses (a "
-                 "position-independent build cannot convert yet)", writer);
-        return 0;
-    }
     if (!statePortableOn()) {
         snprintf(why, whySize, "saved by %s: this build has no state schema, so it cannot convert states", writer);
         return 0;
@@ -378,7 +437,8 @@ int statePortableConvert(const StateHeader* h, const uint8_t* body, const char* 
     StatePortable p;
     uint8_t* json = NULL;
     size_t n = 0;
-    StateSchema* theirs = NULL;
+    StateSchema* theirs = NULL; /* at the writer's addresses: its link addresses plus the bias its header records */
+    const char* notPortable = "";
     if (!stateFileReadPortable(path, &p, err, sizeof err)) {
         snprintf(why, whySize, "saved by %s, which this one cannot read: %s", writer, err);
         return 0;
@@ -386,10 +446,14 @@ int statePortableConvert(const StateHeader* h, const uint8_t* body, const char* 
     stateSchemaFilePath(p.schemaHash, schemaPath, sizeof schemaPath);
     if (!stateSchemaFileRead(schemaPath, &json, &n, err, sizeof err) || stateHash(json, n, 0) != p.schemaHash) {
         snprintf(why, whySize, "saved by %s: its schema in the save folder (%s) is damaged", writer, schemaPath);
-    } else if ((theirs = stateSchemaParse((const char*)json, n, err, sizeof err)) == NULL) {
+    } else if ((theirs = stateSchemaParseAt((const char*)json, n, h->imageBias, err, sizeof err)) == NULL) {
         snprintf(why, whySize, "saved by %s: its schema cannot be read: %s", writer, err);
     } else if (strcmp(stateSchemaVersion(theirs), SCHEMA_VERSION) != 0) {
         snprintf(why, whySize, "saved by %s: its schema is the %s version's", writer, stateSchemaVersion(theirs));
+        stateSchemaFree(theirs);
+        theirs = NULL;
+    } else if (!stateSchemaPortable(theirs, &notPortable)) {
+        snprintf(why, whySize, "saved by %s, whose states cannot convert to other builds: %.200s", writer, notPortable);
         stateSchemaFree(theirs);
         theirs = NULL;
     }

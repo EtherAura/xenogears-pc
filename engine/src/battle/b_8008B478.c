@@ -53,6 +53,11 @@ extern void updateItemMenuCursor(u8 x, u8 row, u8 mode);
 extern void drawItemMenuScrollBar(s32 row);
 extern void scrollItemMenuList(s32 offset);
 extern u8 battlePartyCharacterIds[]; /* main: party slot -> character */
+/* The combo list's character (drawCircleMenuCombo): a mirror match's copy of
+ * the party (entities 3-5, port/src/game/battle/mirror.c) is its member, past
+ * this array's party (BATTLE_CHARACTER, include/battle/battle.h). */
+int pcVersusMirrorSlot(s32 entity);
+#define COMBO_CHARACTER(entity) (pcVersusMirrorSlot(entity) ? BATTLE_CHARACTER(entity) : battlePartyCharacterIds[entity])
 extern u8 comboSelectedSlots[7];
 extern sBattle800cdd40 partyBattleStats[3] PORT_ALIAS; /* partyBattleStats */
 extern void setupComboMenu(u8 entity, u8* moves, u8* costs);
@@ -605,7 +610,7 @@ u8 drawCircleMenuComboSelect(u8 entity) {
     }
     n = 0;
     for (i = 0; i < 7; i++) {
-        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battlePartyCharacterIds[entity]].m0_unlockedAbilitiesBitField[0], i) != 0) {
+        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[COMBO_CHARACTER(entity)].m0_unlockedAbilitiesBitField[0], i) != 0) {
             moves[n] = i;
             costs[n] = partyBattleStats[entity].m0_commands[i + 7].m17_apCost;
             n++;
@@ -1563,7 +1568,7 @@ void drawCircleMenuChi_updateSub0(u8 entity) {
     loadImageSync(&rectBlank, blankTextImage);
     if (apConfigArray[entity].m1_gearState == 0) {
         for (i = 0; i < 16; i++) {
-            if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[1], i) != 0) {
+            if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[1], i) != 0) {
                 unlocked[i] = 1;
                 costs[i] = partyBattleStats[entity].m0_commands[i + 22].m13_cost;
             } else {
@@ -1573,7 +1578,7 @@ void drawCircleMenuChi_updateSub0(u8 entity) {
         }
     } else {
         for (i = 0; i < 16; i++) {
-            if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[3], i) != 0) {
+            if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[3], i) != 0) {
                 unlocked[i] = 1;
                 costs[i] = mechaBattleStats[entity].m0_commands[i + 21].m13_cost;
             } else {
@@ -1670,7 +1675,7 @@ void setChiMenuHighlight(u8 x, u8 row, u8 entity) {
     idx = row * 2 + x;
     setupMenuPolyFT4(&battleVar0->mA230_menuPanel->m0_polys[4][D_800CCB04.m30_battleOddOrEven], 0x20, 0xA4, (idx % 2) * 0x78, (idx / 2) * 16, 0x60, 0x10);
     battleVar0->mA230_menuPanel->m66E_costDigitCount = 0;
-    if (battleCharacters[entity] == 1) {
+    if (BATTLE_CHARACTER(entity) == 1) {
         printIntegerToStringBattle(getAbilityHitChance(entity, idx + 0x16));
         for (i = 0, px = 0x8C; i < 3; i++) {
             if (printIntegerToStringBattleBuffer[i + 6] != 0xFF) {
@@ -1733,9 +1738,9 @@ void renderChiMenuDescription(u8 entity, u8 x, u8 row) {
     u8 w1;
 
     if (apConfigArray[entity].m1_gearState == 0) {
-        v = battleCharacters[entity] * 32 + (row * 2 + x) * 2;
+        v = BATTLE_CHARACTER(entity) * 32 + (row * 2 + x) * 2;
     } else {
-        v = gameState.m26C_party[battleCharacters[entity]].mA0_gearNum * 32 + (row * 2 + x) * 2;
+        v = gameState.m26C_party[BATTLE_CHARACTER(entity)].mA0_gearNum * 32 + (row * 2 + x) * 2;
     }
     image = allocateTextureRamForText(0x39);
     bzero(image, 0x618);
@@ -1758,8 +1763,8 @@ void drawCircleMenuChi_updateSub1(u8 entity, u8 x, u8 row) {
 
     enabled = 0;
     if (apConfigArray[entity].m1_gearState == 0) {
-        enabled = bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[1], x + row * 2) != 0;
-    } else if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[3], x + row * 2) != 0) {
+        enabled = bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[1], x + row * 2) != 0;
+    } else if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[3], x + row * 2) != 0) {
         enabled = 1;
     }
     if (enabled) {
@@ -1894,7 +1899,7 @@ void setupComboMenu(u8 entity, u8* moves, u8* costs) {
         loadImageSync(&rectClear, blankTextImage);
         if (i != 7) {
             if (moves[i] != 0xFF) {
-                renderString(getDeathblowName(battleCharacters[entity], moves[i]), *p, 0x1B, 0);
+                renderString(getDeathblowName(BATTLE_CHARACTER(entity), moves[i]), *p, 0x1B, 0);
                 rectName.x = (i % 2) * 30 + 0x380;
                 rectName.y = (i / 2) * 16 + 0x102;
                 rectName.w = nameW;
@@ -2195,17 +2200,17 @@ void updateTargetSelectionMarkerSub1(u8 entity) {
     s32 off;
     u16* img;
 
-    if (battleCharacters[entity] == 4 && battleVar1->mB7_openMenuType == 0) {
+    if (BATTLE_CHARACTER(entity) == 4 && battleVar1->mB7_openMenuType == 0) {
         div[0] = 100;
         div[1] = 10;
         if (apConfigArray[entity].m1_gearState == 0) {
-            ids[0] = gameState.m26C_party[battleCharacters[entity]].m6F_equipment[0];
-            ids[1] = gameState.m26C_party[battleCharacters[entity]].m6F_equipment[3];
+            ids[0] = gameState.m26C_party[BATTLE_CHARACTER(entity)].m6F_equipment[0];
+            ids[1] = gameState.m26C_party[BATTLE_CHARACTER(entity)].m6F_equipment[3];
             counts[0] = gameStateAmmoByWeaponItem[ids[0]];
             counts[1] = gameStateAmmoByWeaponItem[ids[1]];
         } else {
-            ids[0] = gameState.m978_gears[gameState.m26C_party[battleCharacters[entity]].mA0_gearNum].m4_slotItem[0];
-            ids[1] = gameState.m978_gears[gameState.m26C_party[battleCharacters[entity]].mA0_gearNum].m4_slotItem[3];
+            ids[0] = gameState.m978_gears[gameState.m26C_party[BATTLE_CHARACTER(entity)].mA0_gearNum].m4_slotItem[0];
+            ids[1] = gameState.m978_gears[gameState.m26C_party[BATTLE_CHARACTER(entity)].mA0_gearNum].m4_slotItem[3];
             counts[0] = gameStateAmmoByGearItem[ids[0]];
             counts[1] = gameStateAmmoByGearItem[ids[1]];
         }
@@ -2278,7 +2283,7 @@ void updateTargetSelectionMarkerSub1(u8 entity) {
 }
 
 void removeBillyWindow(u8 entity, u8 arg1) {
-    if (battleCharacters[entity] == 4) {
+    if (BATTLE_CHARACTER(entity) == 4) {
         battleVar1->mB7_openMenuType = 0;
         battleVar1->mB0_isDialogWindowInitialized[0] = 0;
         if (arg1 != 0) {

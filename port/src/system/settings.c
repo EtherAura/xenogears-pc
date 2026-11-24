@@ -244,6 +244,16 @@ int settingsPinned(const char* key) {
     return pinned(key) != NULL;
 }
 
+void settingsUnpinAll(void) {
+    if (st.pinCount == 0) return;
+    st.revision++;
+    for (int i = 0; i < st.pinCount; i++) {
+        free(st.pins[i].key);
+        free(st.pins[i].value);
+    }
+    st.pinCount = 0;
+}
+
 int settingsInt(const char* key, int def) {
     const char* v = settingsGet(key);
     if (v == NULL) {

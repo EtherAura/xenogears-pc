@@ -65,14 +65,18 @@ Shader takes a RetroArch `.slangp` or `.slang` preset for the whole picture.
 
 ## Depth of field
 
-In fields, battles and on the world map, scenery behind and in front of
-the party softens, while the
-characters, dialogue, portraits and the HUD stay sharp. It is the first
-piece of an HD-2D-style look, and it changes only how the picture is shown:
-the game still works with its own. The Enhanced engine only
-(F1 > System > Engine).
+In fields, battles and on the world map, scenery and characters behind
+and in front of the party soften, while dialogue, portraits and the HUD
+stay sharp. It is the first piece of an HD-2D-style look, and it changes
+only how the picture is shown: the game still works with its own. The
+Enhanced engine only (F1 > System > Engine).
 F1 > Display > Depth of field (Off, Subtle, Medium, Strong) and Focus range
 (Narrow, Normal, Wide: how deep the sharp range around the party is).
+
+In fields, while someone speaks, the focus moves to them and the sharp
+range narrows a little, so the room around them softens; it eases in and
+back out over half a second. F1 > Display > Dialogue focus (On by default)
+turns it off.
 
 ## Tilt-shift
 
@@ -95,6 +99,12 @@ their own, so the light comes from above in every room. Dialogue, portraits
 and the HUD are not touched, and the game still works with its own picture.
 The Enhanced engine only (F1 > System > Engine).
 F1 > Display > Lighting and Glow (each Off, Subtle, Medium, Strong).
+
+With Lighting on, the characters take it too: each is lit as if it were
+round, brighter on the side toward the sun with a thin warm edge there and
+darker on the far side, gets shade at its feet in a corner, and what is near
+white on it glows. F1 > Display > Light on characters (On by default) turns
+it off.
 
 ## Shadows
 
@@ -148,6 +158,16 @@ top of the picture over the scenery. Dialogue, portraits and the HUD are
 not touched. The Enhanced engine only (F1 > System > Engine). F1 > Display
 > Light shafts (Off, Subtle, Medium, Strong).
 
+## Cloud shadows
+
+On the world map and in fields outdoors by day, the soft shadows of large
+clouds drift slowly over the ground, from the same sun as the shadows. They
+keep their places on the ground as the camera moves and slant across walls;
+where a cloud and a cast shadow meet, the darker of the two shows. Rooms,
+caves and scenes at night get none. Dialogue, portraits and the HUD are not
+touched. The Enhanced engine only (F1 > System > Engine). F1 > Display >
+Cloud shadows (Off, Subtle, Medium, Strong).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -179,8 +199,10 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Filter | Nearest |
 | Depth of field | Off |
 | Focus range | Normal |
+| Dialogue focus | On |
 | Tilt-shift | Off |
 | Lighting | Off |
+| Light on characters | On |
 | Glow | Off |
 | Shadows | Off |
 | Fog | Off |
@@ -189,6 +211,7 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Particle size | Small |
 | Vignette | Off |
 | Light shafts | Off |
+| Cloud shadows | Off |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

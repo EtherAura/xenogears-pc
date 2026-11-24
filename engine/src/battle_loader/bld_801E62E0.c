@@ -76,6 +76,9 @@ void createBattleSpriteActor(u32 entity, s32 visualBufferIndex, s32 animationId)
 void setupPlayerSpriteLoadingCommands(LoadingBatchCommand* commands);
 void startPlayableCharactersJumpToPosition(void);
 void createBattlePlayerSpriteActors(void);
+/* a mirror match: player 2's copy of the party (port/src/game/battle/mirror.c) */
+int pcVersusMirrorSlot(s32 entity);
+void pcVersusMirrorSprites(void);
 void mainBattleSpriteCallback_phase6(TaskHeader* task);
 void mainBattleSpriteCallback_phase5(TaskHeader* task);
 void mainBattleSpriteCallback_phase4(TaskHeader* task);
@@ -206,6 +209,9 @@ void createEnemiesBattleSprites(void* config) {
 
     for (i = 3; i != 11; i++) {
         s32 index = battleBssBlock.m4_visualEntities[i].m2_characterId;
+        if (pcVersusMirrorSlot(i)) {
+            continue; /* a mirror match: a party member's sprite (pcVersusMirrorSprites) */
+        }
         if (index < 8) {
             index += 3;
             if (battleBssBlock.m8D24_visualBuffers[index].m0_spriteData != NULL) {
@@ -295,6 +301,7 @@ void createBattlePlayerSpriteActors(void) {
             core->m20_object->m2C_subSpriteBuffer = allocateHeap(0x300, 0);
         }
     }
+    pcVersusMirrorSprites(); /* a mirror match: player 2's members, as these (mirror.c) */
     if (currentBattleLoaderTransitionEffect == 0) {
         for (i = 0; i != 3; i++) {
             core = battleBssBlock.m8C8C_spriteActorCores[i];

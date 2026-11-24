@@ -22,8 +22,12 @@ updater reads (port/src/system/release.h): "version=<version>" and
 and its uninstaller deletes it.
 
 The stage is a folder `cmake --install` filled (the executables, the runtime
-DLLs, the licences, a README). It must hold xenogears.exe, SDL3.dll and
-COPYING.txt; it is refused if it holds release.txt (each asset's own), a symbolic link, an empty folder, a name
+DLLs, the licences, a README, each executable's state schema). It must hold
+xenogears.exe, SDL3.dll and COPYING.txt, and beside each executable of the game
+its state schema, <name>.xgschema in its packed form (port/CMakeLists.txt
+XG_STATE_SCHEMA: what lets a slot saved by one version load in another; the
+game reads it from beside itself); it is refused if it holds release.txt (each
+asset's own), a symbolic link, an empty folder, a name
 Windows or NSIS cannot take as it is, two names that differ only in case, or
 anything that looks like the game's data or a player's files (disc images, PS-X
 EXE headers, CD sectors, memory cards, settings.ini). Nothing of the game is
@@ -77,6 +81,9 @@ TAG = re.compile(r"v(20\d\d)\.(0[1-9]|1[0-2])\.(0|[1-9]\d*)")
 NSIS_PART_MAX = 0xFFFF  # each part of VIProductVersion is a 16-bit number
 TEMPLATE = Path(__file__).resolve().parent / "xenogears-pc-installer.nsi.in"
 REQUIRED = ("xenogears.exe", "SDL3.dll", "COPYING.txt")
+# The game's executables, each with its state schema beside it (port/src/system/stateportable.c).
+SCHEMAS = {"xenogears.exe": "xenogears.xgschema", "xenogears-enhanced.exe": "xenogears-enhanced.xgschema"}
+SCHEMA_MAGIC = b"XGSCHEMA"
 RELEASE_FILE = "release.txt"  # beside xenogears.exe: what the in-app updater reads (port/src/system/release.h)
 
 
@@ -179,6 +186,18 @@ def read_stage(stage: Path) -> list[dict]:
     missing = [n for n in REQUIRED if n not in present]
     if missing:
         raise ReleaseError(f"stage: no {', '.join(missing)} (not a cmake --install of the port)")
+    schemas = [schema for exe, schema in SCHEMAS.items() if exe in present and schema not in present]
+    if schemas:
+        raise ReleaseError(f"stage: no {', '.join(schemas)} (the state schema beside its executable: a cmake --install "
+                           "of a build with -DXG_STATE_SCHEMA=ON)")
+    alone = [schema for exe, schema in SCHEMAS.items() if schema in present and exe not in present]
+    if alone:
+        raise ReleaseError(f"stage: {', '.join(alone)} without its executable")
+    for f in files:
+        if f["rel"].as_posix() in SCHEMAS.values():
+            with f["path"].open("rb") as stream:
+                if stream.read(8) != SCHEMA_MAGIC:
+                    raise ReleaseError(f"stage: {f['rel']} is not a state schema in its packed form (XGSCHEMA)")
     return sorted(files, key=lambda f: f["rel"].as_posix())
 
 

@@ -874,8 +874,9 @@ void displaySection() {
         int chosen = listChoice("##depth_of_field", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetDof(chosen);
-        hint("In fields, battles and on the world map, scenery behind and in front of the party softens. Characters, "
-             "dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by default.");
+        hint("In fields, battles and on the world map, scenery and characters behind and in front of the party "
+             "soften. Dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by "
+             "default.");
         if (sceneDofStatus() != nullptr) hint("Not shown now: %s.", tr(sceneDofStatus()));
         overrideNote("depth_of_field");
     }
@@ -889,6 +890,16 @@ void displaySection() {
         hint("How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far "
              "behind or close to the camera.");
         overrideNote("depth_of_field_focus");
+    }
+    // Dialogue focus (xg-rgcf.5.18): part of the depth of field.
+    if (row("Dialogue focus", "depth_of_field_dialogue", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneDof() == 0);
+        bool on = sceneDofDialogue() != 0;
+        if (offOnList("##depth_of_field_dialogue", &on)) sceneSetDofDialogue(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("In fields, while someone speaks the focus moves to them and the room around them softens a little "
+             "more, easing in and back out over half a second. On by default, with Depth of field.");
+        overrideNote("depth_of_field_dialogue");
     }
     // The tilt-shift (xg-rgcf.5.14): made with the depth of field, the larger blur of the two.
     if (row("Tilt-shift", "tilt_shift", opt::ENHANCED)) {
@@ -918,6 +929,17 @@ void displaySection() {
         if ((sceneLighting() || sceneGlow()) && sceneLightingStatus() != nullptr)
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("lighting");
+    }
+    // The characters in the light (xg-rgcf.5.19): part of Lighting.
+    if (row("Light on characters", "lighting_characters", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneLighting() == 0);
+        bool on = sceneLightCharacters() != 0;
+        if (offOnList("##lighting_characters", &on)) sceneSetLightCharacters(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("The characters take the lighting too: brighter on the side toward the sun with a thin warm edge there, "
+             "darker on the far side, shade at their feet in corners, and a glow from what is near white. On by "
+             "default, with Lighting.");
+        overrideNote("lighting_characters");
     }
     if (row("Glow", "glow", opt::ENHANCED)) {
         static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
@@ -1018,6 +1040,18 @@ void displaySection() {
         hint("In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft "
              "sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default.");
         overrideNote("light_shafts");
+    }
+    // Cloud shadows (xg-rgcf.5.17), with the cast shadows in the composite.
+    if (row("Cloud shadows", "cloud_shadows", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneCloudShadows();
+        int chosen = listChoice("##cloud_shadows", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetCloudShadows(chosen);
+        hint("On the world map and in fields outdoors, the soft shadows of clouds drift slowly over the ground. "
+             "Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("cloud_shadows");
     }
 
     if (row("Filter", "present_filter")) {

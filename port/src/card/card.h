@@ -58,6 +58,11 @@ extern int cardQuiet; /* no slot messages (the command line) */
 
 /* image.c */
 void cardImagesInit(void);                 /* once: find and load both images */
+/* Both slots again from card1/card2 as the settings have them now (an
+ * online session's end: it held them at none), each reading as newly
+ * inserted; a slot the game is using, or whose image cannot be written
+ * back, is left as it is. */
+void cardImagesReload(void);
 void cardFormatImage(uint8_t* data);       /* a freshly formatted card, as emulators create it */
 int cardIsFormatted(const uint8_t* data);  /* "MC" in the header frame */
 void cardSetFrameChecksum(uint8_t* frame); /* byte 7Fh = XOR of 00h..7Eh */

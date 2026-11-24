@@ -234,12 +234,16 @@ int sceneDof(void);              /* 0 off (default), 1 subtle, 2 medium, 3 stron
 void sceneSetDof(int level);
 int sceneDofFocus(void);         /* 0 narrow, 1 normal (default), 2 wide */
 void sceneSetDofFocus(int range);
+int sceneDofDialogue(void);      /* depth_of_field_dialogue: 1 on (default), 0 off: focus on whoever speaks */
+void sceneSetDofDialogue(int on);
 const char* sceneDofStatus(void);
 /* Scene lighting in fields (the Enhanced engine; settings lighting and glow,
  * each off|subtle|medium|strong). sceneLightingStatus: why neither is
  * showing, or NULL. */
 int sceneLighting(void);         /* 0 off (default), 1 subtle, 2 medium, 3 strong */
 void sceneSetLighting(int level);
+int sceneLightCharacters(void);  /* lighting_characters: 1 on (default), 0 off: the characters take the lighting too */
+void sceneSetLightCharacters(int on);
 int sceneGlow(void);
 void sceneSetGlow(int level);
 int sceneShadows(void);          /* shadows: 0 off (default) .. 3 strong */
@@ -258,6 +262,8 @@ int sceneTiltShift(void);        /* tilt_shift: 0 off (default) .. 3 strong (fie
 void sceneSetTiltShift(int level);
 int sceneLightShafts(void);      /* light_shafts: 0 off (default) .. 3 strong (fields and the world map) */
 void sceneSetLightShafts(int level);
+int sceneCloudShadows(void);     /* cloud_shadows: 0 off (default) .. 3 strong (the world map, fields outdoors) */
+void sceneSetCloudShadows(int level);
 const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class

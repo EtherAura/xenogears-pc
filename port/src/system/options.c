@@ -41,6 +41,10 @@
  * kernelMain: the first one after `xenogears --extras`, or the soft reset
  * the game does for it at its next checkSoftReboot (kernel.c), as for
  * Start+Select+L1+R1; the disc it wants is put in first (portStartPrepare).
+ *
+ * A Battle arena match (system/arena.c pcArenaBootMode, pcArenaStartState)
+ * arms its own start the same way, for the soft resets of the match: its
+ * mode and game state then take the place of these options.
  */
 
 #include <stdio.h>
@@ -132,9 +136,17 @@ void portStartPrepare(void) {
     cdBootTablesReload(); /* kernelMain takes the file tables of the disc in the drive */
 }
 
+/* system/arena.c (weak: tests link this file without it): a Battle arena
+ * match's start, armed for this boot (its mode; then its game state). */
+int pcArenaBootMode(void) __attribute__((weak));
+int pcArenaStartState(void) __attribute__((weak));
+
 int portBootMode(void) {
     if (start.pending || start.active) {
         return 1;
+    }
+    if (pcArenaBootMode != NULL && pcArenaBootMode() >= 0) {
+        return pcArenaBootMode();
     }
     const char* s = getenv("XG_BOOT_MODE");
     if (s == NULL || s[0] == '\0') {
@@ -211,6 +223,9 @@ void portStartState(void) {
         return;
     }
     start.music = 0;
+    if (pcArenaStartState != NULL && pcArenaStartState()) {
+        return; /* a Battle arena match's own start: the environment's presets left out */
+    }
     const char* s = getenv("XG_MUSIC");
     if (s != NULL && s[0] != '\0') {
         char* end;

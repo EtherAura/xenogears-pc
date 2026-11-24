@@ -205,6 +205,15 @@ if (flag, ver_flag, ver, build_flag, exe_flag) != ("--dist", "--ver", "us", "--b
 print(f"retail module data in {{exe}} (US): 1 module images, runs of >= 16 bytes")
 print("payload ok: fixture bytes supplied to the stub auditor")
 '''
+SCHEMA_STUB = f'''# FIXTURE schema check: checks only argv and the bytes of the packaged fixture.
+from pathlib import Path
+import sys
+verify, packed, image_flag, image, stripped = sys.argv[1:]
+if (verify, image_flag, stripped) != ("--verify", "--image", "--stripped") or \
+        Path(image).read_bytes() != {FIXTURE_ELF.encode()!r} or not Path(packed).read_bytes().startswith(b"XGSCHEMA"):
+    sys.exit(14)
+print(f"state-schema: {{Path(packed).name}} describes {{Path(image).name}} (fixture), stripped")
+'''
 # Options that pick a CPU above baseline x86-64 (or name one: native, x86-64-v2..v4).
 CPU_OPTION = re.compile(r"-m(arch|tune|cpu)\b|-m(avx|sse|fma|bmi|f16c|popcnt|lzcnt|movbe|pclmul|aes)\w*|"
                         r"x86-64-v[234]|\bnative\b", re.I)
@@ -306,6 +315,7 @@ def make_source(work: Path, label: str, layout: str = "public") -> tuple[Path, P
     (src / "tools/fixture_nested.py").write_text(NESTED)
     (src / "tools/fixture_nested_mod.py").write_text(NESTED_MOD)
     (src / "tools/payloadcheck.py").write_text(AUDIT_STUB)
+    (src / "tools/state_schema.py").write_text(SCHEMA_STUB)
     (src / "src").mkdir()
     (src / "src/fixture.c").write_text("/* fixture source, not game code */\n")
     (src / "NOTES.txt").write_text("unrelated fixture file\n")

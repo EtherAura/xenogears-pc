@@ -26,6 +26,8 @@ exactly these files, and the folders they are in, nothing else:
 
   bin/xenogears                                    required, the original engine
   bin/xenogears-enhanced                           optional, the enhanced engine
+  share/xenogears-pc/xenogears.xgschema            required, the original engine's state schema
+  share/xenogears-pc/xenogears-enhanced.xgschema   with bin/xenogears-enhanced, its state schema
   share/doc/xenogears-pc/COPYING                   required
   share/doc/xenogears-pc/LICENSE-Jukebox-font.txt  required
   share/doc/xenogears-pc/LICENSE-imgui.txt         required
@@ -39,7 +41,13 @@ reads (port/src/system/release.h). The stage's, if it has one (the .deb's,
 kind=deb), must be such a file of the same version and is left out.
 
 Each executable must be an x86-64 ELF executable (not a shared library or an
-object) with its owner's execute bit set; each licence must be UTF-8 text. The
+object) with its owner's execute bit set; each licence must be UTF-8 text.
+Each state schema (port/CMakeLists.txt XG_STATE_SCHEMA: what lets a slot saved
+by one version of the port load in another) must be in the packed form the
+game reads ("XGSCHEMA") and pass this checkout's tools/state_schema.py
+--verify --stripped against its executable's bytes: read from that image (its
+identity), no path of the build machine in it, and the executable without
+debug information (the install's --strip). The
 install makes no symbolic links, so the stage may hold none (inside or out of
 it), nor any other kind of special file, nor anything that looks like the
 game's data or a player's files (disc images, PS-X EXE headers, CD sectors,
@@ -151,6 +159,11 @@ EXECUTABLES = {"bin/xenogears": True, "bin/xenogears-enhanced": False}  # name: 
 LICENCES = {f"{DOC}/COPYING": True, f"{DOC}/LICENSE-Jukebox-font.txt": True, f"{DOC}/LICENSE-imgui.txt": True,
             f"{DOC}/LICENSE-glslang.txt": False, f"{DOC}/LICENSE-dav1d.txt": False}
 RELEASE = "share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
+# Each executable's state schema (port/CMakeLists.txt XG_STATE_SCHEMA), where the installed game reads it
+# (port/src/system/stateportable.c: <prefix>/share/xenogears-pc/<executable>.xgschema).
+SCHEMAS = {"share/xenogears-pc/xenogears.xgschema": "bin/xenogears",
+           "share/xenogears-pc/xenogears-enhanced.xgschema": "bin/xenogears-enhanced"}
+SCHEMA_MAGIC = b"XGSCHEMA"
 RELEASE_MAX = 4096  # bytes: the port reads no longer file
 FOLDERS = ("bin", "share", "share/doc", DOC, "share/xenogears-pc")
 EXE_MODE, FILE_MODE, DIR_MODE = 0o755, 0o644, 0o755
@@ -173,6 +186,9 @@ AUDITOR_FILES = (AUDITOR, CHECKOUT / "tools" / "payload_pe.py", CHECKOUT / "tool
 VERSIONS = ("us", "jp")
 ENGINES = {"bin/xenogears": "original", "bin/xenogears-enhanced": "enhanced"}  # the build's XG_ENGINE
 AUDIT_TIMEOUT = 3600  # seconds, each executable
+SCHEMA_TOOL = CHECKOUT / "tools" / "state_schema.py"  # its --verify (with statecheck.py and statecanon.py beside it)
+SCHEMA_TOOL_FILES = (SCHEMA_TOOL, CHECKOUT / "tools" / "statecheck.py", CHECKOUT / "tools" / "statecanon.py")
+SCHEMA_TIMEOUT = 600  # seconds, each schema
 AUDIT_MIN_RUN = 16    # the auditor's shortest run (its default; no other is asked for)
 IMAGE_ENTRY = re.compile(r"\{name:\s*(\w+),([^}]*)\}")  # a module of disc.yaml, as the auditor reads it
 NAME_KEY = re.compile(r"\bname\s*:")                    # a module entry of any form
@@ -280,9 +296,9 @@ def read_stage(stage: Path) -> list[dict]:
                 continue
             if not stat.S_ISREG(mode):
                 raise ReleaseError(f"stage: {rel} is not a regular file")
-            if rel not in EXECUTABLES and rel not in LICENCES and rel != RELEASE:
+            if rel not in EXECUTABLES and rel not in LICENCES and rel != RELEASE and rel not in SCHEMAS:
                 raise ReleaseError(f"stage: {rel} is not a file the port's install makes (only {', '.join(EXECUTABLES)}, "
-                                   f"the licences in {DOC} and {RELEASE})")
+                                   f"the licences in {DOC}, {RELEASE} and the executables' state schemas)")
             data = path.read_bytes()
             check_game_data(data, rel)
             if rel in EXECUTABLES:
@@ -291,14 +307,22 @@ def read_stage(stage: Path) -> list[dict]:
                     raise ReleaseError(f"stage: {rel} is not executable")
             elif rel == RELEASE:
                 check_release_file(data, rel)
+            elif rel in SCHEMAS:
+                if data[:8] != SCHEMA_MAGIC or len(data) < 16:
+                    raise ReleaseError(f"stage: {rel} is not a state schema in its packed form (XGSCHEMA)")
             else:
                 check_licence(data, rel)
             files.append({"rel": rel, "data": data, "sha256": hashlib.sha256(data).hexdigest(),
                           "mode": EXE_MODE if rel in EXECUTABLES else FILE_MODE})
     present = {f["rel"] for f in files}
     missing = [n for n, need in {**EXECUTABLES, **LICENCES}.items() if need and n not in present]
+    missing += [schema for schema, exe in SCHEMAS.items() if exe in present and schema not in present]
     if missing:
-        raise ReleaseError(f"stage: no {', '.join(missing)} (not a cmake --install of the port's Linux build)")
+        raise ReleaseError(f"stage: no {', '.join(missing)} (not a cmake --install of the port's Linux build"
+                           f"{' with its state schema' if any(n in SCHEMAS for n in missing) else ''})")
+    alone = [schema for schema, exe in SCHEMAS.items() if schema in present and exe not in present]
+    if alone:
+        raise ReleaseError(f"stage: {', '.join(alone)} without its executable")
     return sorted(files, key=lambda f: f["rel"])
 
 
@@ -431,6 +455,47 @@ def audit_executable(f: dict, build: Path, ver: str, images: int, scratch: Path)
         return f"{rel} ({ver.upper()}, sha256 {f['sha256']}): all {images} module images read; {lines[1]}"
     said = [redact(line, copy, rel, build) for line in lines[-30:] + err.decode("utf-8", "replace").splitlines()[-5:]]
     raise ReleaseError(f"payload audit of {rel} FAILED: {why}" + "".join(f"\n    | {line}" for line in said))
+
+
+def check_schemas(files: list[dict]) -> list[str]:
+    """Every staged state schema against its executable's bytes (tools/state_schema.py --verify --stripped): its
+    verdict lines, or ReleaseError if any failed."""
+    absent = [str(p) for p in SCHEMA_TOOL_FILES if not p.is_file()]
+    if absent:
+        raise ReleaseError(f"state schemas: no {', '.join(absent)}: run packaging/linux_release.py from a checkout "
+                           "of the port; nothing written")
+    by_rel = {f["rel"]: f for f in files}
+    passed, failed = [], []
+    scratch = Path(tempfile.mkdtemp(prefix="xenogears-pc-schema-"))
+    try:
+        for schema, exe in SCHEMAS.items():
+            if schema not in by_rel:
+                continue
+            copies = []
+            for rel in (exe, schema):
+                copy = scratch / PurePosixPath(rel).name
+                copy.write_bytes(by_rel[rel]["data"])
+                os.chmod(copy, 0o400)
+                copies.append(copy)
+            argv = [sys.executable, "-E", "-s", "-B", str(SCHEMA_TOOL), "--verify", str(copies[1]), "--image",
+                    str(copies[0]), "--stripped"]
+            try:
+                done = subprocess.run(argv, cwd=CHECKOUT, stdin=subprocess.DEVNULL, capture_output=True,
+                                      timeout=SCHEMA_TIMEOUT)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                failed.append(f"state schema {schema}: tools/state_schema.py --verify did not finish ({error})")
+                continue
+            said = (done.stdout + done.stderr).decode("utf-8", "replace").replace(str(scratch) + "/", "").strip()
+            if done.returncode != 0 or any(hashlib.sha256(c.read_bytes()).hexdigest() != by_rel[r]["sha256"]
+                                           for c, r in zip(copies, (exe, schema))):
+                failed.append(f"state schema {schema} FAILED against {exe}: {said[-600:]}")
+            else:
+                passed.append(f"{schema}: {said.splitlines()[-1] if said else 'verified'}")
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    if failed:
+        raise ReleaseError("\n".join(failed + ["the state schemas did not all pass; nothing written"]))
+    return passed
 
 
 def audit(files: list[dict], builds: dict[str, Path], ver: str) -> list[str]:
@@ -566,6 +631,7 @@ def package(tag: str, stage: Path, out_dir: Path, ver: str, build: Path,
         raise ReleaseError(f"--out-dir {out_dir} already holds {', '.join(taken)}; nothing is overwritten "
                            "(move them, or choose another folder); nothing written")
     audits = audit(files, builds, ver)
+    schemas = check_schemas(files)
     try:
         unchanged(stage, files)
     except ReleaseError as error:
@@ -599,7 +665,7 @@ def package(tag: str, stage: Path, out_dir: Path, ver: str, build: Path,
             raise ReleaseError(f"{final[0].name}: its bytes or its sum changed after they were written")
     except (ReleaseError, OSError) as error:
         raise ReleaseError(f"{error}; {undo(written, temps, made, out_dir)}") from error
-    return {"audit": audits, "tarball": str(final[0]), "sha256": str(final[1]), "digest": digest}
+    return {"audit": audits, "schema": schemas, "tarball": str(final[0]), "sha256": str(final[1]), "digest": digest}
 
 
 PACKAGE_SCOPE = ("the packaging step only: the Linux tarball and its .sha256 from a final installed stage, written "
@@ -618,7 +684,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("package", help="the tarball and its .sha256 (" + PACKAGE_SCOPE + ")",
                        description="package: " + PACKAGE_SCOPE + ". The stage is what cmake --install --prefix "
                        "<stage> writes for the port's Linux Release build: bin/xenogears (required), "
-                       "bin/xenogears-enhanced (optional) and the licences in " + DOC + ". The two assets are "
+                       "bin/xenogears-enhanced (optional), each executable's state schema in share/xenogears-pc "
+                       "and the licences in " + DOC + ". The two assets are "
                        "written into --out-dir as new files; it refuses a folder already holding either.")
     p.add_argument("--tag", required=True, help="the release tag, vYYYY.MM.N (N from 0)")
     p.add_argument("--stage", type=Path, required=True, help="the installed prefix, final (only read)")

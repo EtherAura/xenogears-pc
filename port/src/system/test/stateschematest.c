@@ -1,9 +1,10 @@
 /* The JSON reader (json.h) and the state schema in C (stateschema.h).
  *
  *   stateschematest              the checks
- *   stateschematest SCHEMA       a build's schema's indexes, one per line, as
+ *   stateschematest SCHEMA [BIAS]  a build's schema's indexes, one per line, as
  *                                tools/test_stateschema_c.py prints the same
- *                                from tools/statecanon.py's Schema to compare */
+ *                                from tools/statecanon.py's Schema to compare;
+ *                                BIAS (hex): the schema rebased by it */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -104,6 +105,8 @@ static void schemaChecks(void) {
         return;
     }
     check(strcmp(stateSchemaVersion(s), "us") == 0, "its version");
+    const char* notPortable = NULL;
+    check(stateSchemaPortable(s, &notPortable) && notPortable && !notPortable[0], "portable when the schema does not say");
     int32_t pair = stateSchemaType(s, "10");
     const StType* t = stateSchemaTypeAt(s, pair);
     check(t && t->kind == ST_STRUCT && t->size == 8 && t->fieldCount == 2, "a struct");
@@ -159,7 +162,37 @@ static void schemaChecks(void) {
     check(k && strcmp(k->array, "m4_b") == 0 && k->extra == 1 && stateSchemaCountedNamed(s, "Pair") == k, "counted arrays");
     const StUnion* u = stateSchemaUnion(s, pair);
     check(u && u->viewCount == 2 && strcmp(u->views[1], "y") == 0 && stateSchemaUnionNamed(s, "Pair") == u, "union rules");
+    check(stateSchemaBias(s) == 0 && strcmp(stateSchemaImageId(s), "") == 0, "no bias, no image named");
     stateSchemaFree(s);
+
+    /* rebased by a load bias: every address plus it, modulo 2^64 (here below 0: the schema of an image
+     * linked above where it runs), the file offsets as they are; the image it names */
+    {
+        const uint64_t bias = (uint64_t)0 - 0x800;
+        size_t n = strlen(SCHEMA);
+        char* text = malloc(n + 100);
+        memcpy(text, SCHEMA, n - 1);
+        snprintf(text + n - 1, 100, ", \"image\": {\"format\": \"elf\", \"id\": \"00112233445566778899aabbccddeeff\"}}");
+        s = stateSchemaParseAt(text, strlen(text), bias, err, sizeof err);
+        free(text);
+        check(s != NULL, "a rebased schema parses");
+        if (s) {
+            uint64_t lo, hi, fo, at;
+            stateSchemaReadOnlyAt(s, 0, &lo, &hi, &fo);
+            check(stateSchemaBias(s) == bias && stateSchemaVarAt(s, 0)->addr == 4096 - 0x800 &&
+                      stateSchemaFnAddress(s, "fn:80002000:tick") == 65536 - 0x800 && lo == 131072 - 0x800 &&
+                      hi == 135168 - 0x800 && fo == 4096 && stateSchemaSection(s, "main.data").lo == 8192 - 0x800 &&
+                      stateSchemaRegion(s, "heapArena").hi == 2097152 - 0x800 &&
+                      stateSchemaSymbolFind(s, "table", &at) && at == 131072 - 0x800,
+                  "a rebased schema's addresses (variables, functions, read-only ranges but not their file offsets, "
+                  "sections, regions, symbols)");
+            check(stateSchemaFnIdentity(s, 65536 - 0x800, id, sizeof id) && strcmp(id, "fn:80002000:tick") == 0 &&
+                      stateSchemaVarHolding(s, 4100 - 0x800) == 0 && stateSchemaNamedConstant(s, 131100 - 0x800) != NULL,
+                  "a rebased schema's indexes by address");
+            check(strcmp(stateSchemaImageId(s), "00112233445566778899aabbccddeeff") == 0, "the image a schema names");
+        }
+        stateSchemaFree(s);
+    }
 
     /* the save folder's form: "XGSCHEMA", the JSON's size, the JSON packed by statePack */
     size_t len = strlen(SCHEMA);
@@ -187,18 +220,26 @@ static void schemaChecks(void) {
     remove(path);
     free(packed);
     check(stateSchemaLoad("no/such/schema.json", err, sizeof err) == NULL && strstr(err, "cannot open"), "a missing file");
+    const char* clang = "{\"version\": \"us\", \"portable\": false, \"portable_why\": \"compiled by clang\", \"types\": {},"
+                        " \"type_names\": {}, \"variables\": [], \"functions\": [], \"symbols\": [], \"ro\": [],"
+                        " \"sections\": {}, \"regions\": {}, \"parts\": {}, \"heap_types\": {}, \"counted\": {}, \"unions\": {}}";
+    s = stateSchemaParse(clang, strlen(clang), err, sizeof err);
+    check(s && !stateSchemaPortable(s, &notPortable) && strcmp(notPortable, "compiled by clang") == 0,
+          "a schema that says its states cannot convert, and why");
+    stateSchemaFree(s);
 }
 
 /* ---- the indexes of a real schema, for tools/test_stateschema_c.py ---------------------------------- */
 
-static void dump(const char* path) {
+static void dump(const char* path, uint64_t bias) {
     char err[300];
-    StateSchema* s = stateSchemaLoad(path, err, sizeof err);
+    StateSchema* s = stateSchemaLoadAt(path, bias, err, sizeof err);
     if (!s) {
         fprintf(stderr, "stateschematest: %s\n", err);
         exit(2);
     }
     printf("version %s\n", stateSchemaVersion(s));
+    printf("image %s\n", stateSchemaImageId(s));
     printf("counts %d %d %d %d %d\n", stateSchemaTypeCount(s), stateSchemaVarCount(s), stateSchemaFuncCount(s),
            stateSchemaSymbolCount(s), stateSchemaScratchCount(s));
     for (int32_t i = 0; i < stateSchemaTypeCount(s); i++) {
@@ -242,7 +283,7 @@ static void dump(const char* path) {
 
 int main(int argc, char** argv) {
     if (argc > 1) {
-        dump(argv[1]);
+        dump(argv[1], argc > 2 ? strtoull(argv[2], NULL, 16) : 0);
         return 0;
     }
     jsonChecks();

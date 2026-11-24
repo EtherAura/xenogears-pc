@@ -629,7 +629,14 @@ public class XgActivity extends SDLActivity {
     private boolean updateReceiving;
 
     private void readUpdateAllowed() {
-        updateAllowed = getPackageManager().canRequestPackageInstalls();
+        try {
+            updateAllowed = getPackageManager().canRequestPackageInstalls();
+        } catch (SecurityException e) {
+            // A build without the updater does not declare REQUEST_INSTALL_PACKAGES, and Android
+            // throws here for an app that targets 26 or later (measured on the Android 16
+            // emulator: the activity died in onCreate). No updater: installs are not allowed.
+            updateAllowed = false;
+        }
     }
 
     @Override

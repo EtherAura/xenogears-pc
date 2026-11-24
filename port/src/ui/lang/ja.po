@@ -3888,6 +3888,31 @@ msgid "Fight"
 msgstr "戦う"
 
 #: port/src/ui/arena.cpp
+msgid "An enemy formation"
+msgstr "敵の編成"
+
+#: port/src/ui/arena.cpp
+msgid "Mirror match"
+msgstr "ミラーマッチ"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"Player 2 commands a copy of your party, on foot: on each of its members' "
+"turns pad 2 has that member's own command ring, with everything the member "
+"has (attacks and combos within its AP, the deathblows it knows, its Ether, "
+"Defend, Items from its own copy of your inventory). Its Escape gives up the "
+"battle. Its members look like yours: their name with (P2) shows whose turn "
+"it is. At its end both players choose Rematch or Leave, and Leave brings "
+"your game back as it was."
+msgstr ""
+"プレイヤー 2 があなたのパーティのコピーを生身で操ります: そのメンバーの番ごとに、パッド 2 "
+"にはそのメンバー自身のコマンドリングが出て、メンバーの持つものがすべて使えます(AP "
+"の範囲の攻撃とコンボ、覚えている必殺技、エーテル、防御、あなたの持ち物のコピーのアイテム)。"
+"その「逃げる」はバトルの降参です。見た目はあなたのメンバーと同じで、名前に付く (P2) "
+"でどのメンバーの番かがわかります。終わると両方のプレイヤーが「再戦」か「やめる」を選び、「やめる」"
+"であなたのゲームが元どおりに戻ります。"
+
+#: port/src/ui/arena.cpp
 #, c-format
 msgid "Battle table %d, config %d."
 msgstr "バトル表 %d、設定 %d。"
@@ -3895,6 +3920,28 @@ msgstr "バトル表 %d、設定 %d。"
 #: port/src/ui/arena.cpp
 msgid "Every Gear"
 msgstr "すべてのギア"
+
+#: port/src/ui/arena.cpp
+msgid "Battle music"
+msgstr "戦闘曲"
+
+#: port/src/ui/arena.cpp
+msgid "Game's default"
+msgstr "ゲーム本来の曲"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Music %d"
+msgstr "曲 %d"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"The battle music of Battling and versus battles: the game's own (Battling's "
+"theme, the regular battle theme), or any of the jukebox's songs. Online, the "
+"host's choice plays for both players."
+msgstr ""
+"バトリングと対戦バトルの戦闘曲: ゲーム本来の曲(バトリングのテーマ、通常の戦闘曲)か、"
+"ジュークボックスのどの曲でも。オンラインではホストの選んだ曲が両方のプレイヤーに流れます。"
 
 #: port/src/ui/movies.cpp
 #, c-format
@@ -7532,8 +7579,8 @@ msgstr "中"
 msgid "Strong"
 msgstr "強"
 
-msgid "In fields, battles and on the world map, scenery behind and in front of the party softens. Characters, dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by default."
-msgstr "フィールド、戦闘、ワールドマップで、パーティーより奥と手前の背景がやわらかくぼけます。キャラクター、会話、顔グラフィック、HUDはくっきりしたままで、PS1の画像そのものは変わりません。初期設定はオフです。"
+msgid "In fields, battles and on the world map, scenery and characters behind and in front of the party soften. Dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by default."
+msgstr "フィールド、戦闘、ワールドマップで、パーティーより奥と手前の背景やキャラクターがやわらかくぼけます。会話、顔グラフィック、HUDはくっきりしたままで、PS1の画像そのものは変わりません。初期設定はオフです。"
 
 msgid "Not shown now: %s."
 msgstr "現在は表示されていません: %s。"
@@ -7550,8 +7597,20 @@ msgstr "広い"
 msgid "How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far behind or close to the camera."
 msgstr "パーティーの周りでピントが合う奥行きの広さです。「せまい」ほど多くの背景がぼけ、「広い」ではずっと奥かカメラのすぐ近くだけがぼけます。"
 
+msgid "Dialogue focus"
+msgstr "会話のピント"
+
+msgid "In fields, while someone speaks the focus moves to them and the room around them softens a little more, easing in and back out over half a second. On by default, with Depth of field."
+msgstr "フィールドで、だれかが話しているあいだ、ピントがその人に移り、まわりが少しだけ強くぼけます。0.5秒かけてなめらかに移り、話し終わると戻ります。ピントの奥行きと合わせて、初期設定はオンです。"
+
 msgid "Lighting"
 msgstr "ライティング"
+
+msgid "Light on characters"
+msgstr "キャラクターへの光"
+
+msgid "The characters take the lighting too: brighter on the side toward the sun with a thin warm edge there, darker on the far side, shade at their feet in corners, and a glow from what is near white. On by default, with Lighting."
+msgstr "キャラクターにもライティングが当たります。太陽側が明るく、そのふちにうっすら暖かい光が入り、反対側は少し暗くなります。すみでは足もとに陰がつき、白に近い部分は光ります。ライティングと合わせて、初期設定はオンです。"
 
 msgid "In fields, battles and on the world map, the scenery gets light from above, shade in corners and under overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not touched, and the PS1 picture itself is not changed. Off by default."
 msgstr "フィールド、戦闘、ワールドマップで、背景に上からの光、すみや張り出しの下の陰、ランプや火など明るい部分からの光が加わります。会話、顔グラフィック、HUDは変わらず、PS1の画像そのものも変わりません。初期設定はオフです。"
@@ -7609,6 +7668,12 @@ msgstr "光の筋"
 
 msgid "In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default."
 msgstr "フィールドとワールドマップで、窓や開口部、空から光の筋がこぼれ、上からやわらかな日差しが斜めに差し込みます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
+
+msgid "Cloud shadows"
+msgstr "雲の影"
+
+msgid "On the world map and in fields outdoors, the soft shadows of clouds drift slowly over the ground. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "ワールドマップと屋外のフィールドで、雲のやわらかな影が地面の上をゆっくり流れていきます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
 msgid "In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the middle. Dialogue, portraits and the HUD are not touched. Off by default."
 msgstr "フィールド、戦闘、ワールドマップで、画面のふちを少し暗くして、目を中央へ向けます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"

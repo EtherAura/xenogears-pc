@@ -261,11 +261,11 @@ u8 useAbility(u8 entity, u8 cmd, u8 page) {
     if (apConfigArray[entity].m1_gearState == 0) {
         flags = partyBattleStats[entity].m0_commands[page * 2 + cmd + 0x16].m0_flags;
         cost = partyBattleStats[entity].m0_commands[page * 2 + cmd + 0x16].m13_cost;
-        ok = bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[1], cmd + page * 2) != 0;
+        ok = bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[1], cmd + page * 2) != 0;
     } else {
         flags = mechaBattleStats[entity].m0_commands[page * 2 + cmd + 0x15].m0_flags;
         cost = mechaBattleStats[entity].m0_commands[page * 2 + cmd + 0x15].m13_cost;
-        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[battleCharacters[entity]].m0_unlockedAbilitiesBitField[3], cmd + page * 2)) {
+        if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[3], cmd + page * 2)) {
             ok = 1;
         }
     }

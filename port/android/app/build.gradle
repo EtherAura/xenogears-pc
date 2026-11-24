@@ -14,6 +14,9 @@ def jniLibsDir = providers.gradleProperty('xg.jniLibs').getOrElse("${rootDir}/..
 def abis = providers.gradleProperty('xg.abis').getOrElse('x86_64,arm64-v8a').split(',')
 // The licence files the APK carries (assets/licenses: tools/build_android.sh puts them there).
 def assetsDir = providers.gradleProperty('xg.assets').getOrElse("${rootDir}/../../build/android/assets")
+// Assets of the one ABI built (tools/build_android.sh, a run per ABI): its game libraries' state
+// schemas (assets/schemas/<abi>/, port/src/system/stateportable.c), which the other ABI's APK has no use for.
+def abiAssetsDir = providers.gradleProperty('xg.abiAssets').orNull
 // A suffix for the package name (tools/build_android.sh --id-suffix .dev): a test build installed
 // beside the app instead of over it, with its own data. Empty by default.
 def idSuffix = providers.gradleProperty('xg.idSuffix').getOrElse('')
@@ -22,6 +25,9 @@ def idSuffix = providers.gradleProperty('xg.idSuffix').getOrElse('')
 def updater = providers.gradleProperty('xg.updater').getOrElse('off')
 if (!(updater in ['on', 'off'])) {
     throw new GradleException("xg.updater is on or off, not ${updater}")
+}
+if (abiAssetsDir != null && abis.size() != 1) {
+    throw new GradleException("xg.abiAssets is one ABI's: build one ABI per run (xg.abis), not ${abis.join(',')}")
 }
 
 // The version from git (the user's decision): versionCode the commit count, versionName the
@@ -95,7 +101,7 @@ android {
         main {
             java.srcDirs += ["${sdlSource}/android-project/app/src/main/java"]
             jniLibs.srcDirs = [jniLibsDir]
-            assets.srcDirs = [assetsDir]
+            assets.srcDirs = abiAssetsDir != null ? [assetsDir, abiAssetsDir] : [assetsDir]
         }
         if (updater == 'on') {
             // A build type's manifest is merged over main's: the one permission it adds.

@@ -69,7 +69,7 @@ BAD_TAGS = ["2026.11.0", "v2026.11", "v2026.13.0", "v2026.00.0", "v2026.1.0", "v
             "v2026.11.0/../x", "v2026.11.0;touch PWNED", "v2026.11.0$(touch PWNED)", "v2026.11.0'", "v2026.11.0`id`",
             "v2026.11.0 x", "v٢026.11.0", "v2026.11.1٢"]
 DEPENDS = {"glibc", "gcc-libs", "sdl3", "vulkan-icd-loader", "glslang", "dav1d"}
-MAKEDEPENDS = {"cmake", "ninja", "python", "python-yaml", "vulkan-headers", "shaderc"}
+MAKEDEPENDS = {"cmake", "ninja", "python", "python-yaml", "vulkan-headers", "shaderc", "llvm"}
 
 failures: list[str] = []
 
@@ -232,6 +232,7 @@ def port_rules(text: str) -> None:
         (re.search(r"^import yaml$", pc_sources, re.M) is not None, "python-yaml", "makedepends"),
         ("-G Ninja" in deb, "ninja", "makedepends"),
         ("cmake_minimum_required" in cmake, "cmake", "makedepends"),
+        ("find_program(XG_DWARFDUMP NAMES llvm-dwarfdump" in cmake, "llvm", "makedepends"),
     ]
     for present, package, array in rules:
         line = field_line(text, array)

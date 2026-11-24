@@ -70,6 +70,14 @@
 #   statevars-updater, payload-updater  those gates on that executable (the
 #               updater's statics are classified, no retail data came with it);
 #               its unit tests (updatechecktest) run with the port tests
+#   enhanced    the US executable with the Enhanced engine (-DXG_ENGINE=enhanced:
+#               engine/ and engine/include, hand-edited copies of src/ and
+#               include/ that no other gate compiles, so a header changed in
+#               include/ alone broke it unseen, xg-htn.35.153), in
+#               $XG_ENHANCED_BUILD (default build/pc/gates-enhanced, configured
+#               on first use like the US one): it links; skipped when an
+#               explicit one is missing
+#   payload-enhanced  the payload gate on that executable
 #   payload-android  the payload gate on each Android game library built in
 #               build/android (tools/build_android.sh); skipped when none is
 #   beetle-capture frame-boundary capture regressions, without a core or discs
@@ -115,6 +123,7 @@ TEST_BUILD="${XG_TEST_BUILD:-build/pc/gates}"
 SCHEMA_BUILD="${XG_SCHEMA_BUILD:-build/pc/schema}"
 TEST_BUILD_JP="${XG_TEST_BUILD_JP:-build/pc/gates-jp}"
 UPDATER_BUILD="${XG_UPDATER_BUILD:-build/pc/gates-updater}"
+ENHANCED_BUILD="${XG_ENHANCED_BUILD:-build/pc/gates-enhanced}"
 for a in "$@"; do
     case "$a" in
     --no-ninja) NINJA=0 ;;
@@ -306,6 +315,28 @@ if [ "$TESTS" = 1 ] && [ -f "$UPDATER_BUILD/CMakeCache.txt" ]; then
     fi
 elif [ "$TESTS" = 1 ]; then
     record updater 0 "skipped: no configured build in $UPDATER_BUILD"
+fi
+
+# The Enhanced engine (engine/, docs/ENGINE_PLAN.md): the game C the other builds never
+# compile, with its own copies of the headers. It links, then the payload gate on it.
+if [ "$TESTS" = 1 ] && [ -z "${XG_ENHANCED_BUILD:-}" ] && [ ! -f "$ENHANCED_BUILD/CMakeCache.txt" ]; then
+    "$PY" tools/pc_sources.py > /dev/null &&
+        cmake -S port -B "$ENHANCED_BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DXG_VERSION=US -DXG_EXTRAS=ON \
+            -DXG_ENGINE=enhanced > "$OUT/configure-enhanced.txt" 2>&1
+fi
+if [ "$TESTS" = 1 ] && [ -f "$ENHANCED_BUILD/CMakeCache.txt" ]; then
+    if ! grep -q '^XG_ENGINE:STRING=enhanced$' "$ENHANCED_BUILD/CMakeCache.txt"; then
+        record enhanced 1 "$ENHANCED_BUILD is not configured with -DXG_ENGINE=enhanced"
+    elif cmake --build "$ENHANCED_BUILD" --target xenogears > "$OUT/enhanced.txt" 2>&1; then
+        record enhanced 0 "Enhanced US executable linked in ${ENHANCED_BUILD#"$ROOT"/}"
+        gate payload-enhanced "$PY" tools/payloadcheck.py --build "$ENHANCED_BUILD" --exe "$ENHANCED_BUILD/xenogears-enhanced"
+    else
+        line=$(grep -m1 'error:' "$OUT/enhanced.txt" || grep -m1 '^pc_link:' "$OUT/enhanced.txt" ||
+            grep -m1 'FAILED' "$OUT/enhanced.txt")
+        record enhanced 1 "$(cut -c1-200 <<< "$line")"
+    fi
+elif [ "$TESTS" = 1 ]; then
+    record enhanced 0 "skipped: no configured build in $ENHANCED_BUILD"
 fi
 
 # The Android game libraries (tools/build_android.sh), when built in this tree: what an APK

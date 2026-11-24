@@ -69,8 +69,9 @@ static void put32(uint8_t* p, uint32_t v) {
 #define SHIFT 0x1000000ull /* B is linked 16 MiB above A, as build/pc/schema2 is */
 #define PAIR_HASH 0x1234abcdu
 
-/* The schema of layout A (shift 0) or B (shift SHIFT). A has "gone", B "fresh" in its place. */
-static char* schemaText(uint64_t shift) {
+/* The schema of layout A (shift 0) or B (shift SHIFT, layoutB). A has "gone", B "fresh" in its place.
+ * Another shift moves every address by it (modulo 2^64): the same layout linked elsewhere. */
+static char* schemaText(uint64_t shift, int layoutB) {
     static const char* const vars[][4] = {
         /* name, offset in main.data, type, retail */
         {"counter", "0", "20", "2147549184"},  {"ptr", "8", "30", "2147549192"},      {"pair", "16", "10", "2147549200"},
@@ -89,9 +90,15 @@ static char* schemaText(uint64_t shift) {
         "  \"40\": {\"k\": \"ptr\", \"size\": 8, \"fn\": true},"
         "  \"50\": {\"k\": \"ptr\", \"size\": 8, \"fn\": false, \"to\": \"60\"},"
         "  \"60\": {\"k\": \"int\", \"size\": 1, \"signed\": true, \"name\": \"char\"},"
-        "  \"80\": {\"k\": \"ptr\", \"size\": 8, \"fn\": false}},"
+        "  \"80\": {\"k\": \"ptr\", \"size\": 8, \"fn\": false},"
+        "  \"70\": {\"k\": \"ptr\", \"size\": 8, \"fn\": false, \"to\": \"%s\"},"
+        "  \"%s\": {\"k\": \"struct\", \"size\": 16, \"name\": \"struct <anon>\", \"owner\": \"port\", \"fields\": ["
+        "    {\"name\": \"at\", \"off\": 0, \"type\": \"20\", \"retail\": null},"
+        "    {\"name\": \"arg\", \"off\": 8, \"type\": \"30\", \"retail\": null}]}},"
         " \"type_names\": {\"Pair\": \"10\", \"s32\": \"20\"},"
-        " \"variables\": [");
+        " \"variables\": [",
+        /* hw.queue's element: an unnamed struct (MinGW's LTO drops its typedef), at another DWARF offset in B */
+        layoutB ? "91" : "90", layoutB ? "91" : "90");
     for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++) {
         n += (size_t)snprintf(out + n, 16384 - n,
             "{\"name\": \"%s\", \"addr\": %llu, \"size\": %s, \"module\": \"main\", \"section\": \"data\", \"retail\": %s,"
@@ -102,8 +109,12 @@ static char* schemaText(uint64_t shift) {
     n += (size_t)snprintf(out + n, 16384 - n,
         "{\"name\": \"%s\", \"addr\": %llu, \"size\": 4, \"module\": \"main\", \"section\": \"data\", \"retail\": %s,"
         " \"platform\": null, \"tid\": \"20\"},"
+        "  {\"name\": \"konst\", \"addr\": %llu, \"size\": 4, \"module\": \"main\", \"section\": \"data\", \"retail\": null,"
+        "   \"platform\": null, \"tid\": \"20\", \"const\": true},"
         "  {\"name\": \"thing\", \"addr\": %llu, \"size\": 4, \"module\": null, \"section\": null, \"retail\": null,"
-        "   \"platform\": \"system/hw.c\", \"tid\": \"20\"}],"
+        "   \"platform\": \"system/hw.c\", \"tid\": \"20\"},"
+        "  {\"name\": \"queue\", \"addr\": %llu, \"size\": 8, \"module\": null, \"section\": null, \"retail\": null,"
+        "   \"platform\": \"system/hw.c\", \"tid\": \"70\"}],"
         " \"functions\": [{\"name\": \"func_a\", \"addr\": %llu, \"side\": \"game\", \"retail\": 2147614720}],"
         " \"symbols\": [[\"func_a\", %llu, 16, \"T\"], [\"text_hello\", %llu, 0, \"r\"]],"
         " \"ro\": [[%llu, %llu, 0]],"
@@ -112,7 +123,8 @@ static char* schemaText(uint64_t shift) {
         " \"parts\": {\"hw\": \"system/hw.c\"},"
         " \"heap_types\": {\"%08x\": {\"name\": \"Pair\", \"spec\": {\"tid\": \"10\"}}},"
         " \"counted\": {}, \"unions\": {}}",
-        shift ? "fresh" : "gone", (unsigned long long)(0x1048 + shift), shift ? "2147549296" : "2147549256",
+        layoutB ? "fresh" : "gone", (unsigned long long)(0x1048 + shift), layoutB ? "2147549296" : "2147549256",
+        (unsigned long long)(0x1058 + shift), (unsigned long long)(0x1060 + shift),
         (unsigned long long)(0x5000 + shift), (unsigned long long)(0x400000 + shift), (unsigned long long)(0x400000 + shift),
         (unsigned long long)(0x2000 + shift), (unsigned long long)(0x2000 + shift), (unsigned long long)(0x2100 + shift),
         (unsigned long long)(0x1000 + shift), (unsigned long long)(0x1100 + shift), (unsigned long long)(0x10000 + shift),
@@ -137,7 +149,8 @@ static void stateBody(Bytes* b, int template, uint32_t safePoint) {
         put64(data + 64, 0x10018);                        /* heapPtr: the heap Pair's m8_p */
         put64(data + 80, 0xDEAD0000);                     /* wild: nothing known */
         put32(data + 72, 0x99);                           /* gone */
-        data[0x80] = 0x5A;                                /* outside every variable */
+        put32(data + 88, 0x77777777);                     /* konst: the writer's own constant, not carried */
+        data[0x80] = 0x5A;                                /* outside every variable: not carried */
         put64(heap + 0, 0x10030);                         /* block 0: next */
         put32(heap + 8, (2u << 21) | 0x123);              /* owner 2, a caller */
         put32(heap + 12, PAIR_HASH);                      /* the type the allocation named: Pair */
@@ -151,6 +164,14 @@ static void stateBody(Bytes* b, int template, uint32_t safePoint) {
     }
     uint8_t sp[8] = {1, 2, 3, 4, 5, 6, 7, 8}, stack[16] = {9, 9, 9, 9}, thing[4] = {0x0D, 0x0C, 0x0B, 0x0A};
     uint8_t raw[5] = {'a', 'b', 'c', 'd', 'e'};
+    uint8_t queue[32];
+    memset(queue, 0xEE, sizeof queue);
+    if (!template) { /* the array hw.c's queue points at: {at, arg} twice */
+        memset(queue, 0, sizeof queue);
+        put32(queue + 0, 3);
+        put64(queue + 8, 0x1000); /* &counter */
+        put32(queue + 16, 0xFFFFFFFFu);
+    }
     if (template) {
         chunk(b, "zz.raw", raw, 5);
         chunk(b, "mem.main.data", data, sizeof data);
@@ -158,12 +179,14 @@ static void stateBody(Bytes* b, int template, uint32_t safePoint) {
         chunk(b, "mem.stack.sp", sp, 8);
         chunk(b, "mem.stack", stack, 16);
         chunk(b, "hw.thing", raw, 4);
+        chunk(b, "hw.queue", queue, sizeof queue);
     } else {
         chunk(b, "mem.main.data", data, sizeof data);
         chunk(b, "mem.heap", heap, sizeof heap);
         chunk(b, "mem.stack.sp", sp, 8);
         chunk(b, "mem.stack", stack, 16);
         chunk(b, "hw.thing", thing, 4);
+        chunk(b, "hw.queue", queue, sizeof queue);
         chunk(b, "zz.raw", raw, 3);
     }
 }
@@ -181,7 +204,12 @@ static void expectedBody(Bytes* b, int stackless) {
     put64(data + 56, 0x10010 + SHIFT);
     put64(data + 64, 0x10018 + SHIFT);
     put64(data + 80, 0xDEAD0000); /* a number after all: same build only */
-    data[0x80] = 0x5A;           /* fresh at 72 left zero */
+    /* fresh at 72 left zero; outside every variable (the writer's 0x5A at 0x80 among them) and konst: the
+     * reader's own bytes, as its template has them (a jump table follows its build's code) */
+    memset(data + 4, 0xEE, 4);
+    memset(data + 52, 0xEE, 4);
+    memset(data + 76, 0xEE, 4);
+    memset(data + 88, 0xEE, 0x100 - 88);
     put64(heap + 0, 0x10030 + SHIFT);
     put32(heap + 8, 2u << 21); /* the caller left zero */
     put32(heap + 12, PAIR_HASH);
@@ -189,7 +217,10 @@ static void expectedBody(Bytes* b, int stackless) {
     put64(heap + 24, 0x1000 + SHIFT);
     put32(heap + 40, 1u << 21);
     uint8_t raw[5] = {'a', 'b', 'c', 0, 0}, thing[4] = {0x0D, 0x0C, 0x0B, 0x0A}, zero[8] = {0};
-    uint8_t sp[8] = {1, 2, 3, 4, 5, 6, 7, 8}, stack[16] = {9, 9, 9, 9};
+    uint8_t sp[8] = {1, 2, 3, 4, 5, 6, 7, 8}, stack[16] = {9, 9, 9, 9}, queue[32] = {0};
+    put32(queue + 0, 3);
+    put64(queue + 8, 0x1000 + SHIFT); /* the element of B's own type: its pointer moved */
+    put32(queue + 16, 0xFFFFFFFFu);
     chunk(b, "zz.raw", raw, 5);
     chunk(b, "mem.main.data", data, sizeof data);
     chunk(b, "mem.heap", heap, sizeof heap);
@@ -201,6 +232,7 @@ static void expectedBody(Bytes* b, int stackless) {
         chunk(b, "mem.stack", stack, 16);
     }
     chunk(b, "hw.thing", thing, 4);
+    chunk(b, "hw.queue", queue, sizeof queue);
 }
 
 static int64_t warningCount(const StateConvertWarning* w, int32_t n, const char* text) {
@@ -226,8 +258,8 @@ static int askedAt(void* user, uint64_t addr, const uint8_t** text, size_t* len)
 
 static void convertChecks(void) {
     char err[300];
-    char* ta = schemaText(0);
-    char* tb = schemaText(SHIFT);
+    char* ta = schemaText(0, 0);
+    char* tb = schemaText(SHIFT, 1);
     StateSchema* sa = stateSchemaParse(ta, strlen(ta), err, sizeof err);
     StateSchema* sb = stateSchemaParse(tb, strlen(tb), err, sizeof err);
     check(sa && sb, "the two layouts' schemas parse");
@@ -266,7 +298,8 @@ static void convertChecks(void) {
         if (!ok) printf("  %s\n", err);
         check(ok && r.size == want.n && memcmp(r.body, want.p, want.n) == 0,
               "the reader's body: variables, pointers to variables, the heap, functions and strings moved; raw "
-              "chunks and host parts kept; the template's order");
+              "chunks and host parts kept, a pointed-at array of an unnamed struct in the reader's type; a module "
+              "section's bytes outside every variable the reader's own; the template's order");
         if (ok && (r.size != want.n || memcmp(r.body, want.p, want.n) != 0)) {
             for (size_t i = 0; i < r.size && i < want.n; i++) {
                 if (r.body[i] != want.p[i]) {
@@ -286,6 +319,44 @@ static void convertChecks(void) {
         free(a.p);
         free(t.p);
         free(want.p);
+    }
+
+    /* load biases: A linked 0x800 below where it ran and B at A's addresses, each schema rebased by its
+     * process's bias (stateSchemaParseAt), convert as the schemas of the addresses they ran at do */
+    {
+        char* tal = schemaText((uint64_t)0 - 0x800, 0);
+        char* tbl = schemaText(0, 1);
+        StateSchema* sal = stateSchemaParseAt(tal, strlen(tal), 0x800, err, sizeof err);
+        StateSchema* sbl = stateSchemaParseAt(tbl, strlen(tbl), SHIFT, err, sizeof err);
+        free(tal);
+        free(tbl);
+        check(sal && sbl && stateSchemaBias(sbl) == SHIFT, "rebased schemas parse");
+        uint64_t lo, hi, fo;
+        if (sal && sbl) {
+            stateSchemaReadOnlyAt(sbl, 0, &lo, &hi, &fo);
+            check(lo == 0x2000 + SHIFT && fo == 0 && stateSchemaVarAt(sal, 0)->addr == 0x1000 &&
+                      stateSchemaFnAddress(sbl, "fn:80010000:func_a") == 0x400000 + SHIFT &&
+                      stateSchemaSection(sbl, "main.data").lo == 0x1000 + SHIFT &&
+                      stateSchemaRegion(sal, "heapArena").lo == 0x10000,
+                  "a rebased schema's addresses: variables, functions, sections, regions, read-only ranges (not "
+                  "their file offsets)");
+        }
+        Bytes a = {0}, t = {0}, want = {0};
+        stateBody(&a, 0, 5);
+        stateBody(&t, 1, 0);
+        expectedBody(&want, 1);
+        StateConvertSide wa = {a.p, a.n, sal, stateRoStrings(stra)};
+        StateConvertSide wb = {t.p, t.n, sbl, stateRoStrings(strb)};
+        StateConvertResult r;
+        int ok = sal && sbl && stateConvert(&wa, &wb, 1, &r, err, sizeof err);
+        check(ok && r.size == want.n && memcmp(r.body, want.p, want.n) == 0,
+              "a conversion between rebased schemas: as between the schemas of where the builds ran");
+        if (ok) stateConvertResultFree(&r);
+        free(a.p);
+        free(t.p);
+        free(want.p);
+        stateSchemaFree(sal);
+        stateSchemaFree(sbl);
     }
 
     /* the encoding alone (a portable slot's strings table): the strings the writer's pointers reach */
@@ -330,6 +401,33 @@ static void convertChecks(void) {
         free(a.p);
         free(t.p);
         free(want.p);
+    }
+
+    /* a reader whose queue points at no struct: the array left empty, warned */
+    {
+        char* tq = schemaText(SHIFT, 1);
+        char* to = strstr(tq, "\"to\": \"91\"");
+        if (to) memcpy(to + 7, "20", 2); /* a pointer to s32 */
+        StateSchema* sq = to ? stateSchemaParse(tq, strlen(tq), err, sizeof err) : NULL;
+        free(tq);
+        Bytes a = {0}, t = {0}, want = {0};
+        stateBody(&a, 0, 5);
+        stateBody(&t, 1, 0);
+        expectedBody(&want, 1);
+        StateConvertSide wa = {a.p, a.n, sa, stateRoStrings(stra)};
+        StateConvertSide wb = {t.p, t.n, sq, stateRoStrings(strb)};
+        StateConvertResult r;
+        int ok = sq && stateConvert(&wa, &wb, 1, &r, err, sizeof err);
+        check(ok && r.size == want.n - 32 && memcmp(r.body, want.p, want.n - 36) == 0 && /* (up to its size: 0) */
+                  memcmp(r.body + r.size - 4, "\0\0\0\0", 4) == 0 &&
+                  warningCount(r.decodeWarnings, r.decodeWarningCount,
+                               "array part not a struct pointer in this build (left empty)") == 1,
+              "a pointed-at array the reader's variable types otherwise: left empty, warned");
+        if (ok) stateConvertResultFree(&r);
+        free(a.p);
+        free(t.p);
+        free(want.p);
+        stateSchemaFree(sq);
     }
 
     /* a stackless state must be at a safe point */
@@ -482,18 +580,21 @@ static int convertFiles(int argc, char** argv) {
     }
     char err[400];
     clock_t t0 = clock();
-    StateSchema* sa = stateSchemaLoad(argv[3], err, sizeof err);
-    StateSchema* sb = sa ? stateSchemaLoad(argv[5], err, sizeof err) : NULL;
-    if (!sa || !sb) {
-        fprintf(stderr, "stateconverttest: %s\n", err);
-        return 1;
-    }
     uint8_t *fa, *ft;
     size_t na, nt, ba, bt;
     uint8_t* bodyA = readState(argv[2], &fa, &na, &ba);
     uint8_t* bodyT = bodyA ? readState(argv[4], &ft, &nt, &bt) : NULL;
+    if (!bodyA || !bodyT) return 1;
+    /* each schema at the addresses its state's process had: rebased by the load bias its header records
+     * (statecanon state_bias: H_IMAGE, at 232) */
+    StateSchema* sa = stateSchemaLoadAt(argv[3], get64(fa + 232), err, sizeof err);
+    StateSchema* sb = sa ? stateSchemaLoadAt(argv[5], get64(ft + 232), err, sizeof err) : NULL;
+    if (!sa || !sb) {
+        fprintf(stderr, "stateconverttest: %s\n", err);
+        return 1;
+    }
     ExeStrings ea = {0}, eb = {0};
-    if (!bodyA || !bodyT || !exeStrings(sa, &ea) || !exeStrings(sb, &eb)) return 1;
+    if (!exeStrings(sa, &ea) || !exeStrings(sb, &eb)) return 1;
     if (moment) {
         uint8_t* adjusted;
         size_t n;

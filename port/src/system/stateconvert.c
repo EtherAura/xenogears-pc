@@ -288,7 +288,6 @@ typedef struct {
     int64_t off;
     int32_t tid;      /* R_PART: the part's type; R_PARTARR: the element's */
     int64_t n, es;    /* R_PARTARR */
-    const char* arr;  /* R_PARTARR: stable_name or the writer's tid */
 } ARec;
 
 /* A raw entry of encode's document: the chunk's bytes, or a section's bytes outside its variables. */
@@ -2718,6 +2717,15 @@ static int partTarget(const Side* s, const uint8_t* tag, int n, PartTarget* out)
     return 1;
 }
 
+/* pointed_struct: the struct or union a data pointer type points at (the element of the array it points
+ * at), or ST_NONE. */
+static int32_t pointedStruct(const Side* s, int32_t tid) {
+    const StType* t = ty(s, tid);
+    if (!t || t->kind != ST_PTR || t->fn || t->to == ST_NONE) return ST_NONE;
+    const StType* et = ty(s, t->to);
+    return tsize(s, t->to) && (et->kind == ST_STRUCT || et->kind == ST_UNION) ? t->to : ST_NONE;
+}
+
 static ARec* addRec(Ctx* c) {
     if (c->nrec == c->recCap) {
         int32_t cap = c->recCap ? c->recCap * 2 : 1024;
@@ -2784,6 +2792,7 @@ static void encodeRecords(Ctx* c) {
             for (int32_t i = 0; i < stateSchemaVarCount(s) && !c->failed; i++) {
                 const StVar* v = stateSchemaVarAt(s, i);
                 if (!v->module || strcmp(v->module, module) != 0 || v->addr < sec.lo || v->addr >= sec.hi) continue;
+                if (v->isConst) continue; /* the build's own constant: not carried (gapBytes leaves it out too) */
                 ARec* r = addRec(c);
                 if (!r) return;
                 r->var = i;
@@ -2831,28 +2840,23 @@ static void encodeRecords(Ctx* c) {
                 continue;
             }
             /* part_array: the array a pointer variable points at (hw.queue), element by element */
-            const StType* t = ty(&c->a, pt.tid);
-            if (t && t->kind == ST_PTR && !t->fn && t->to != ST_NONE) {
-                int64_t es = tsize(&c->a, t->to);
-                const StType* et = ty(&c->a, t->to);
-                if (es && k->size % es == 0 && (et->kind == ST_STRUCT || et->kind == ST_UNION)) {
-                    ARec* r = addRec(c);
-                    if (!r) return;
-                    r->kind = R_PARTARR;
-                    r->var = pt.var;
-                    r->chunk = ci;
-                    r->tid = t->to;
-                    r->es = es;
-                    r->n = k->size / es;
-                    r->arr = stableName(&c->a, t->to);
-                    if (!r->arr) r->arr = et->tid;
-                    for (int64_t q = 0; q < r->n && !c->failed; q++) {
-                        AVal val;
-                        makeVal(c, t->to, data, q * es, 1, &val);
-                        walk(c, &val);
-                    }
-                    continue;
+            int32_t et = pointedStruct(&c->a, pt.tid);
+            int64_t es = tsize(&c->a, et);
+            if (et != ST_NONE && k->size % es == 0) {
+                ARec* r = addRec(c);
+                if (!r) return;
+                r->kind = R_PARTARR;
+                r->var = pt.var;
+                r->chunk = ci;
+                r->tid = et;
+                r->es = es;
+                r->n = k->size / es;
+                for (int64_t q = 0; q < r->n && !c->failed; q++) {
+                    AVal val;
+                    makeVal(c, et, data, q * es, 1, &val);
+                    walk(c, &val);
                 }
+                continue;
             }
         }
         addRaw(c, ci, 0, NULL, 0, 0);
@@ -3009,11 +3013,31 @@ static void decodeBody(Ctx* c, const uint8_t* tbody, size_t tsize_, int stackles
         const ARec* part;
         const ARaw* raw;
         if (sec.name) {
-            raw = lastRaw(c, k->tag, k->tagLen);
-            if (raw) applyRaw(c, raw, &buf, &scratch);
+            if (strcmp(kind, "data") == 0) {
+                /* its bytes outside every variable are this build's own, as the template has them: constants
+                 * no variable names, which follow the code (a switch's jump table: the module link moves a game
+                 * file's read-only data here, tools/pc_srcdata.py; MinGW keeps the tables there), not the
+                 * writer's */
+                bufSet(c, &buf, 0, k->size, tbody + k->off, k->size);
+                for (int32_t i = 0; i < stateSchemaVarCount(s); i++) {
+                    const StVar* v = stateSchemaVarAt(s, i);
+                    if (!v->module || strcmp(v->module, module) != 0 || v->addr < sec.lo || v->addr >= sec.hi) continue;
+                    int64_t o = (int64_t)(v->addr - sec.lo), e = o + v->size;
+                    if (e > k->size) e = k->size;
+                    if (e > o) bufSet(c, &buf, o, e, NULL, e - o);
+                }
+            } else if ((raw = lastRaw(c, k->tag, k->tagLen)) != NULL) {
+                applyRaw(c, raw, &buf, &scratch);
+            }
             for (int32_t i = 0; i < stateSchemaVarCount(s) && !c->failed; i++) {
                 const StVar* v = stateSchemaVarAt(s, i);
                 if (!v->module || strcmp(v->module, module) != 0 || v->addr < sec.lo || v->addr >= sec.hi) continue;
+                if (v->isConst) { /* this build's own constant, as the template has it */
+                    int64_t o = (int64_t)(v->addr - sec.lo), e = o + v->size;
+                    if (e > k->size) e = k->size;
+                    if (e > o) bufSet(c, &buf, o, e, tbody + k->off + o, e - o);
+                    continue;
+                }
                 int32_t ai = stateSchemaVarById(c->a.s, v->id);
                 int32_t ri = ai != ST_NONE ? c->byVar[ai] : -1;
                 if (ri < 0) {
@@ -3034,11 +3058,13 @@ static void decodeBody(Ctx* c, const uint8_t* tbody, size_t tsize_, int stackles
             int has = partTarget(&c->b, k->tag, k->tagLen, &pt);
             const Mem* data = &c->acMem[part->chunk];
             if (has && part->kind == R_PARTARR) { /* (a pointed-at array: the state's count) */
-                int32_t et = stateSchemaTypeNamed(s, part->arr);
-                if (et == ST_NONE) et = stateSchemaType(s, part->arr);
+                /* of the element this build's variable points at (statecanon: not the record's "arr", the
+                 * writer's, named by its DWARF offset when it has no name, which only the same build has) */
+                int32_t et = pointedStruct(&c->b, pt.tid);
                 int64_t es = tsize(&c->b, et);
+                if (et == ST_NONE) warn(c, &c->dec, "array part not a struct pointer in this build (left empty)");
                 if (!bufZero(c, &buf, part->n * es)) break;
-                for (int64_t q = 0; q < part->n && !c->failed; q++) {
+                for (int64_t q = 0; et != ST_NONE && q < part->n && !c->failed; q++) {
                     AVal val;
                     makeVal(c, part->tid, data, q * part->es, 0, &val);
                     put(c, et, &val, &buf, q * es);

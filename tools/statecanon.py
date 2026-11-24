@@ -19,7 +19,13 @@ Identities (docs/CANONICAL_STATES.md section 2):
 P1 keeps the heap, the stack, the scratchpad, the stack protector and the hardware chunks raw ("same
 build only"): the round trip checks the encoding of everything else, which a later version can then load.
 
-The canonical file (.xgc) is gzipped JSON: {"format", "header", "records": [...], "raw": [...]}."""
+The canonical file (.xgc) is gzipped JSON: {"format", "header", "records": [...], "raw": [...]}.
+
+A schema holds its build's link addresses; a state holds the addresses of the process that saved it, which
+sit at link address + that process's load bias (a position-independent executable or library: the header's
+image field, statefile.c H_IMAGE; 0 for a build at its link addresses). Each state is read with its build's
+schema rebased by its own bias (Schema(build, bias)), the template's for a decode: every address in the
+schema plus the bias, file offsets unchanged."""
 import argparse, base64, bisect, gzip, json, re, struct, subprocess, sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -63,12 +69,44 @@ def state_hash(data: bytes, seed: int = 0) -> int:
 
 # ---- the schema -----------------------------------------------------------------------------------
 
+def state_bias(state: Path) -> int:
+    """The load bias of the process that saved a state (its header's image field, statefile.c H_IMAGE)."""
+    with state.open("rb") as f:
+        head = f.read(sc.HEADER_SIZE)
+    return struct.unpack_from("<Q", head, 232)[0] if len(head) >= 240 else 0
+
+
+def rebase(s: dict, bias: int) -> None:
+    """A schema's JSON with every address plus bias (modulo 2^64, as the C reader's uint64_t addresses):
+    variables, functions, symbols, sections, regions and the read-only ranges (not their file offsets)."""
+    if not bias:
+        return
+    for v in s["variables"]:
+        v["addr"] = (v["addr"] + bias) & MASK64
+    for f in s["functions"]:
+        f["addr"] = (f["addr"] + bias) & MASK64
+    for key in ("sections", "regions"):
+        s[key] = {k: [(lo + bias) & MASK64, (hi + bias) & MASK64] for k, (lo, hi) in s[key].items()}
+    if s.get("symbols"):
+        s["symbols"] = [[n, (a + bias) & MASK64, size, kind] for n, a, size, kind in s["symbols"]]
+    if s.get("ro"):
+        s["ro"] = [[(lo + bias) & MASK64, (hi + bias) & MASK64, fo] for lo, hi, fo in s["ro"]]
+
+
 class Schema:
-    def __init__(self, build: Path):
+    def __init__(self, build: Path, bias: int = 0):
+        """build's schema (state_schema.json.gz), its addresses rebased by bias: as a process whose image sits
+        bias above its link addresses has them (state_bias of a state it saved)."""
         path = build / "state_schema.json.gz"
         if not path.exists():
             raise SystemExit(f"statecanon: no schema in {build} (tools/state_schema.py {build})")
         s = json.load(gzip.open(path, "rt"))
+        self.bias = bias
+        self.exe = Path(s["exe"])
+        if bias and (not s.get("symbols") or not s.get("ro")):  # (an older schema: read from the executable here)
+            s["symbols"] = s.get("symbols") or list(self.nm_symbols())
+            s["ro"] = s.get("ro") or [list(r) for r in self.readelf_ro()]
+        rebase(s, bias)
         self.types = s["types"]
         self.type_names = s.get("type_names", {})
         # what heap blocks and recorded ranges hold, by the hash of the type's name (include/pc_state.h)
@@ -127,7 +165,6 @@ class Schema:
         self.by_name = {}
         for v in self.vars:
             self.by_name.setdefault(v["name"], v)
-        self.exe = Path(s["exe"])
         retail = {f["name"]: f.get("retail") for f in s["functions"]}
         self.text_syms = {}   # address -> [names]: static functions and identical bodies folded into one
         self.sym_addr = {}    # name -> address
@@ -768,21 +805,31 @@ def part_target(schema: Schema, tag: str):
     return var, path, tid, off
 
 
+def pointed_struct(schema: Schema, tid):
+    """The struct or union a data pointer type points at (the element of the array it points at), or None."""
+    t = schema.types.get(tid, {})
+    if t.get("k") != "ptr" or t.get("fn") or t.get("to") not in schema.types:
+        return None
+    return t["to"] if schema.size(t["to"]) and schema.types[t["to"]].get("k") in ("struct", "union") else None
+
+
 def part_array(schema: Schema, tag: str, size: int):
     """A host part's chunk that holds the array a pointer variable points at (hw.queue: xgStateIo(s, "queue",
     queue, count * sizeof(*queue))): the element type, or None."""
     pt = part_target(schema, tag)
-    if pt is None:
-        return None
-    t = schema.types.get(pt[2], {})
-    if t.get("k") != "ptr" or t.get("fn") or t.get("to") not in schema.types:
-        return None
-    es = schema.size(t["to"])
-    return t["to"] if es and size % es == 0 and schema.types[t["to"]].get("k") in ("struct", "union") else None
+    et = pointed_struct(schema, pt[2]) if pt is not None else None
+    return et if et is not None and size % schema.size(et) == 0 else None
+
+
+def same_bias(state: Path, h: dict, schema: Schema) -> None:
+    if h.get("image", 0) != schema.bias:
+        raise SystemExit(f"statecanon: {state} was saved at load bias {h.get('image', 0):#x}; its schema is rebased by "
+                         f"{schema.bias:#x} (Schema(build, state_bias(state)))")
 
 
 def encode(state: Path, schema: Schema, heap: bool = True, infer: bool = False) -> tuple[dict, Encoder]:
     h, body = sc.read_state(state)
+    same_bias(state, h, schema)
     enc = Encoder(schema)
     records, raw = [], []
     covered = Counter(); total = Counter()
@@ -804,6 +851,10 @@ def encode(state: Path, schema: Schema, heap: bool = True, infer: bool = False) 
             for v in schema.vars:
                 if v.get("module") == m.group(1) and lo <= v["addr"] < hi:
                     o = v["addr"] - lo
+                    if v.get("const"):  # the build's own constant: not carried (a reader keeps its own)
+                        for i in range(o, min(o + v["size"], size)):
+                            mask[i] = 1
+                        continue
                     enc.current = v["name"]
                     if enc.arena is not None and v is enc.arena["var"]:
                         records.append({"id": v["id"], "arena": encode_arena(enc, data, o)})
@@ -855,7 +906,8 @@ def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -
     there, include/pc_state.h)."""
     if stackless and not safe_point_of(doc):
         raise SystemExit("statecanon: a stackless state needs one saved at a safe point (XG_STATE_SAVE_SAFE)")
-    _, tbody = sc.read_state(template)
+    th, tbody = sc.read_state(template)
+    same_bias(template, th, schema)
     dec = Decoder(schema)
     by_id = {r["id"]: r for r in doc["records"] if "part" not in r}
     by_part = {r["part"]: r for r in doc["records"] if "part" in r}
@@ -881,10 +933,23 @@ def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -
         m = re.fullmatch(r"mem\.(\w+)\.(data|bss)", tag)
         if m and f"{m.group(1)}.{m.group(2)}" in schema.sections:
             lo, hi = schema.sections[f"{m.group(1)}.{m.group(2)}"]
-            if tag in raws:
+            if m.group(2) == "data":
+                # its bytes outside every variable are this build's own, as the template has them: constants no
+                # variable names, which follow the code (a switch's jump table: the module link moves a game
+                # file's read-only data here, tools/pc_srcdata.py; MinGW keeps the tables there), not the writer's
+                buf[:] = tbody[at:at + size]
+                for v in schema.vars:
+                    if v.get("module") == m.group(1) and lo <= v["addr"] < hi:
+                        o = v["addr"] - lo; n = max(0, min(o + v["size"], size) - o)
+                        buf[o:o + n] = bytes(n)
+            elif tag in raws:
                 b = base64.b64decode(raws[tag]["b64"]); buf[:len(b)] = b[:size]
             for v in schema.vars:
                 if v.get("module") == m.group(1) and lo <= v["addr"] < hi:
+                    if v.get("const"):  # this build's own constant, as the template has it
+                        o = v["addr"] - lo
+                        buf[o:o + v["size"]] = tbody[at + o:at + min(o + v["size"], size)]
+                        continue
                     r = by_id.get(v["id"])
                     if r is None:
                         dec.warn["variable not in the state (left zero)"] += 1
@@ -897,10 +962,17 @@ def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -
             r = by_part[tag]
             pt = part_target(schema, tag)
             if pt is not None and "arr" in r:
-                et = schema.type_names.get(r["arr"], r["arr"]); es = schema.size(et)
-                buf = bytearray(len(r["v"]) * es)
-                for k, v in enumerate(r["v"]):
-                    dec.put(et, v, buf, k * es)
+                # of the element this build's variable points at: "arr" names the writer's, by its DWARF offset when
+                # it has no name (hw.c's Pending: MinGW's LTO drops the typedef), which only the same build has
+                et = pointed_struct(schema, pt[2])
+                if et is None:
+                    dec.warn["array part not a struct pointer in this build (left empty)"] += 1
+                    buf = bytearray()
+                else:
+                    es = schema.size(et)
+                    buf = bytearray(len(r["v"]) * es)
+                    for k, v in enumerate(r["v"]):
+                        dec.put(et, v, buf, k * es)
             elif pt is not None:
                 dec.put(pt[2], r["v"], buf, 0)
         elif tag in raws:
@@ -1828,30 +1900,32 @@ def main() -> int:
     u.add_argument("b_state", type=Path); u.add_argument("b_build", type=Path)
     a = ap.parse_args()
     if a.cmd == "convert":
-        doc, enc = encode(a.state, Schema(a.from_build.resolve()))
+        doc, enc = encode(a.state, Schema(a.from_build.resolve(), state_bias(a.state)))
         doc = json.loads(json.dumps(doc))
-        body, dec = decode(doc, Schema(a.to_build.resolve()), a.template, stackless=True)
+        body, dec = decode(doc, Schema(a.to_build.resolve(), state_bias(a.template)), a.template, stackless=True)
         write_state(a.template, body, a.out)
         print(f"statecanon convert: safe point {safe_point_of(doc)}; wrote {a.out} ({len(body)} bytes); "
               f"encode {dict(enc.warn)}; decode {dict(dec.warn)}")
         return 0
     if a.cmd == "untyped":
-        found = untyped(a.a_state, Schema(a.a_build.resolve()), a.b_state, Schema(a.b_build.resolve()))
+        found = untyped(a.a_state, Schema(a.a_build.resolve(), state_bias(a.a_state)), a.b_state,
+                        Schema(a.b_build.resolve(), state_bias(a.b_state)))
         print(f"statecanon untyped: {sum(found.values())} pointer words in untyped heap bytes, {len(found)} places")
         for k, n in found.most_common():
             print(f"  {n:6d} {k}")
         return 1 if found else 0
     if a.cmd == "heap":
-        heap_report(a.state, Schema(a.build.resolve()),
-                    (a.other[0], Schema(a.other[1].resolve())) if a.other else None)
+        heap_report(a.state, Schema(a.build.resolve(), state_bias(a.state)),
+                    (a.other[0], Schema(a.other[1].resolve(), state_bias(a.other[0]))) if a.other else None)
         return 0
     if a.cmd == "crosscheck":
-        lines, st = crosscheck(a.a_state, Schema(a.a_build.resolve()), a.b_state, Schema(a.b_build.resolve()))
+        lines, st = crosscheck(a.a_state, Schema(a.a_build.resolve(), state_bias(a.a_state)), a.b_state,
+                               Schema(a.b_build.resolve(), state_bias(a.b_state)))
         print(f"statecanon crosscheck: {st['checked']} bytes checked, {st['differing']} differ; encode {st['encode']}; "
               f"decode {st['decode']}")
         print("\n".join(lines) if lines else "  every encoded byte as the other build has it")
         return 1 if lines else 0
-    schema = Schema(a.build.resolve())
+    schema = Schema(a.build.resolve(), state_bias(a.state if a.cmd != "decode" else a.template))
     if a.cmd == "encode":
         doc, enc = encode(a.state, schema)
         with gzip.open(a.out, "wt") as fh:

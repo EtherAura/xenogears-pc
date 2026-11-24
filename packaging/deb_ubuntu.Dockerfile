@@ -65,7 +65,9 @@ FROM --platform=linux/amd64 ubuntu:26.04@sha256:d66b366dac61b575bee2aef07e9c26e8
 # CPack's shlibdeps), python3, libvulkan-dev. Universe: ninja-build,
 # libsdl3-dev, glslc, glslang-dev, glslang-tools, spirv-tools-dev, libdav1d-dev.
 # PyYAML supports the combined release build's audits. NSIS provides its
-# cached makensis compiler for the Windows installer.
+# cached makensis compiler for the Windows installer. llvm: llvm-dwarfdump, which
+# tools/state_schema.py reads the executables' debug information with (the state
+# schema each package ships: port/CMakeLists.txt XG_STATE_SCHEMA).
 # glslang-dev's CMake targets require the glslang executable from glslang-tools.
 # The base image's sources are checked, never edited: without main and
 # universe the image build fails.
@@ -78,7 +80,7 @@ RUN set -eu; \
     apt-get update --snapshot=20261120T000000Z -o APT::Update::Error-Mode=any; \
     DEBIAN_FRONTEND=noninteractive apt-get install --snapshot=20261120T000000Z -y --no-install-recommends \
         build-essential cmake ninja-build dpkg-dev binutils file python3 python3-yaml \
-        libsdl3-dev libvulkan-dev glslc glslang-dev glslang-tools spirv-tools-dev libdav1d-dev nsis; \
+        libsdl3-dev libvulkan-dev glslc glslang-dev glslang-tools spirv-tools-dev libdav1d-dev nsis llvm; \
     rm -rf /var/lib/apt/lists/*; \
     useradd --no-log-init --create-home --uid 10001 --user-group xgbuild; \
     mkdir -p /work/source /work/build /work/out

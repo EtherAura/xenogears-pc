@@ -57,11 +57,17 @@
  * the targets, Up and Down, confirm.
  *
  * The end: whoever wins, a line in the same window says so ("Player 1 wins",
- * "Player 2 wins"), then the battle ends the way that gives nothing and costs
- * nothing: battleRunningVar1 0x21 for a party that won (the victory without
- * rewards: finishBattle skips processBattleRewards, battle_boot returns to
- * the field), 0x40 for a wiped party (an escape's end, never the game over);
- * then the checkpoint goes back (pcVersusBattleEnd, battleMain's end).
+ * "Player 2 wins"); in a match (one started from the menu, which kept the
+ * game it came from, or an online session: include/pc_arena.h) both players
+ * then choose Rematch or Leave (port/src/game/main/arena.c) while the battle
+ * goes on drawing, the line still up: a rematch is the game's soft reset
+ * into the match's start again, Leave the platform's (the kept game back, or
+ * the session's end). Otherwise the battle ends the way that gives nothing
+ * and costs nothing: battleRunningVar1 0x21 for a party that won (the
+ * victory without rewards: finishBattle skips processBattleRewards,
+ * battle_boot returns to the field), 0x40 for a wiped party (an escape's
+ * end, never the game over); then the checkpoint goes back
+ * (pcVersusBattleEnd, battleMain's end).
  *
  * Gear against Gear (xg-htn.35.16 R-C): with the setting arena_versus_gears
  * the party's members who have a Gear fight in it (gameState.m22B1_isOnGear,
@@ -86,6 +92,7 @@
 #include "battle/battle.h"
 #include "pc_arena.h"
 #include "pc_backlog.h"
+#include "versus.h"
 
 s32 battleRenderDebugAndMain(void);
 u8 executeMonsterScriptLower(sBattleScriptExecutionContext* ctx, u8 entity, u8 index);
@@ -548,8 +555,6 @@ static void numberSame(u8 (*l)[LABEL], s32 count) {
 
 #define WINDOW 0
 #define TEXT_UNITS 0x26 /* 152 pixels */
-#define WINDOW_W (TEXT_UNITS * 4 + 0x18)
-#define WINDOW_X ((0x140 - WINDOW_W) / 2)
 #define WINDOW_Y 0x34
 
 static DialogWindow18 window;
@@ -563,18 +568,22 @@ void pcVersusDraw(void) {
     }
 }
 
-static int openWindow(const u8* lines, s32 count, s32 selected) {
+/* The window, `count` lines of `units` 4-pixel units, centred; the text
+ * `lines` in it (fewer lines than the window may have). */
+static int openWindowSized(const u8* lines, s32 count, s32 units, s32 selected) {
     s32 h = count * 16 + 12;
+    s32 w = units * 4 + 0x18;
+    s32 x = (0x140 - w) / 2;
 
     if (battleVar1 == NULL || battleVar1->mB0_isDialogWindowInitialized[WINDOW] ||
         battleVar1->mB8_isDialogWindowInitialized2[WINDOW]) {
         return 0;
     }
-    allocateAndSetupBattleDialogWindow(WINDOW, WINDOW_X, WINDOW_Y, WINDOW_W, h, 1, 0);
+    allocateAndSetupBattleDialogWindow(WINDOW, x, WINDOW_Y, w, h, 1, 0);
     while (!battleVar1->mBF_isDialogWindowInitialized3[WINDOW]) {
         battleRenderDebugAndMain();
     }
-    setupWindowSize2(&window, 0x380, 0x100, WINDOW_X + 0xC, WINDOW_Y + 8, TEXT_UNITS, count);
+    setupWindowSize2(&window, 0x380, 0x100, x + 0xC, WINDOW_Y + 8, units, count);
     window.m10_flags |= 2; /* no background tile: the window is the background */
     window.m68_charsPerStep = 0x20;
     resetDialogWindow18(&window);
@@ -586,6 +595,10 @@ static int openWindow(const u8* lines, s32 count, s32 selected) {
     }
     shown = 1;
     return 1;
+}
+
+static int openWindow(const u8* lines, s32 count, s32 selected) {
+    return openWindowSized(lines, count, TEXT_UNITS, selected);
 }
 
 static void closeWindow(void) {
@@ -726,7 +739,7 @@ static struct {
 /* 1 while player 2 picks in the ring: the mouse's targeting (mouse_battle.c)
  * stays out of it (the arrows are up, but the choice is pad 2's). */
 int pcVersusChoosing(void) {
-    return choosing;
+    return choosing || pcVersusMirrorPad2(); /* or a mirror match's player 2 in the party's menus (mirror.c) */
 }
 
 /* The label: the game centres it on NAME_CENTER (drawMonsterNames); one
@@ -1154,6 +1167,7 @@ void pcVersusBattleSetup(void) {
     u8* buf;
 
     if (!pcVersusCheckpoint()) {
+        pcVersusMirrorSetup(); /* not a versus battle: no mirror match either */
         return;
     }
     getCurrentDirectory(&dir, &sub);
@@ -1167,7 +1181,8 @@ void pcVersusBattleSetup(void) {
     freeHeap(buf);
     setCurrentDirectory(dir, sub);
     requestedBattleConfig = pcVersusConfig();
-    if (pcVersusGears() && !(battleConfigs[requestedBattleConfig * 0x20 + 1] & 0x40)) {
+    pcVersusMirrorSetup(); /* a mirror match: the copy's places in the formation (mirror.c) */
+    if (pcVersusGears() && !pcVersusMirror() && !(battleConfigs[requestedBattleConfig * 0x20 + 1] & 0x40)) {
         /* Gear against Gear: the members with a Gear ride it (the battle loader
          * takes m22B1_isOnGear; config flag 0x40 is a battle without Gears) */
         for (i = 0; i < 3; i++) {
@@ -1191,15 +1206,140 @@ int pcVersusLastResult(void) {
     return lastResult;
 }
 
+void softReboot(void); /* src/main/kernel.c */
+
+/* A match's end's Rematch / Leave (port/src/game/main/arena.c), in the
+ * result's window (xg-htn.35.150): under the result, a line for each player,
+ * their pick between the two in brackets (the narrow font is 8 pixels to a
+ * character, so nothing moves), and OK once they are ready:
+ *   Player 1 wins
+ *   Player 1  [Rematch]  Leave
+ *   Player 2   Rematch  [Leave]  OK
+ * (JP, whose narrow font lacks some letters: 1P, 2P, RETRY, EXIT, READY).
+ * The lines are printed again when a pick or a ready changes, at once: the
+ * printer takes a line a step (a new line ends its step) and clears the
+ * window first, so its steps are run here, where the change is seen, into
+ * an ordering table nothing draws (the frame's own draw, pcVersusDraw, then
+ * shows the whole text), not one line a frame after a blank one. */
+#if VERSION_JP
+#define PROMPT_REMATCH "RETRY"
+#define PROMPT_LEAVE "EXIT"
+#define PROMPT_READY "  READY"
+#define PROMPT_P1 "1P" /* the result above already reads PLAYER 1 */
+#define PROMPT_P2 "2P"
+#define PROMPT_CHARS 25 /* the widest line, ready: 2 + 11 + 5 + 7 */
+#else
+#define PROMPT_REMATCH "Rematch"
+#define PROMPT_LEAVE "Leave"
+#define PROMPT_READY "  OK"
+#define PROMPT_P1 "Player 1"
+#define PROMPT_P2 "Player 2"
+#define PROMPT_CHARS 31 /* the widest line, ready: 8 + 13 + 6 + 4 */
+#endif
+#define PROMPT_UNITS (PROMPT_CHARS * 2 + 1) /* narrow characters are 2 units (getDialogFontCharacterWidth) */
+
+static u8 promptText[3 * (PROMPT_CHARS + 1) + LABEL + 2];
+static s32 promptShownPick[2];
+static s32 promptShownReady[2];
+
+/* One piece of a line, in the font's codes. */
+static s32 promptPiece(s32 at, const char* s) {
+    u8 piece[LABEL];
+    s32 i;
+
+    word(piece, s);
+    for (i = 0; piece[i] != 0 && at < (s32)sizeof(promptText) - 2; i++) {
+        promptText[at++] = piece[i];
+    }
+    return at;
+}
+
+/* The window's text: the result, then each player's line. */
+static void promptBuild(const u8* result, const s32* pick, const s32* ready, s32 players) {
+    s32 at = 0;
+    s32 p;
+
+    while (result[at] != 0 && at < LABEL) {
+        promptText[at] = result[at];
+        at++;
+    }
+    for (p = 0; p < players; p++) {
+        promptText[at++] = 1; /* a new line */
+        at = promptPiece(at, p == 0 ? PROMPT_P1 : PROMPT_P2);
+        at = promptPiece(at, pick[p] == 0 ? "  [" PROMPT_REMATCH "]  " : "   " PROMPT_REMATCH "  [");
+        at = promptPiece(at, pick[p] == 1 ? PROMPT_LEAVE "]" : PROMPT_LEAVE " ");
+        if (ready[p]) {
+            at = promptPiece(at, PROMPT_READY);
+        }
+        promptShownPick[p] = pick[p];
+        promptShownReady[p] = ready[p];
+    }
+    promptText[at] = 0;
+}
+
+/* The window again with the lines as they are now, when they changed and
+ * the last text is printed. */
+static void promptUpdate(const u8* result) {
+    OTag scratch = 0; /* the steps' sprites go here; the frame's draw links them again */
+    s32 pick[2];
+    s32 ready[2];
+    s32 players;
+    s32 p;
+    s32 changed = 0;
+
+    if (!shown || pcArenaPromptState(pick, ready, &players) != 1 || !(window.m10_flags & 8)) {
+        return;
+    }
+    for (p = 0; p < players; p++) {
+        changed |= pick[p] != promptShownPick[p] || ready[p] != promptShownReady[p];
+    }
+    if (!changed) {
+        return;
+    }
+    promptBuild(result, pick, ready, players);
+    resetDialogWindow18(&window);
+    addDialogWindowsToOTSub2(&window, promptText);
+    for (p = 0; p < 8 && !(window.m10_flags & 8); p++) {
+        updateAndRenderTextForDialogWindow(&window, &scratch, D_800CCB04.m30_battleOddOrEven);
+    }
+}
+
+/* A match's end (the header): Rematch or Leave, the battle drawn meanwhile;
+ * it leaves only by the soft reset or the platform's (never returns). */
+static void matchPrompt(const u8* result) {
+    s32 sound;
+    s32 d;
+
+    pcArenaPromptBegin();
+    promptShownPick[0] = promptShownPick[1] = -1; /* printed at once */
+    for (;;) {
+        promptUpdate(result);
+        battleRenderDebugAndMain();
+        d = pcArenaPromptStep(&sound);
+        if (sound == PC_PROMPT_SOUND_CONFIRM) {
+            battleSoundEffect2(0x4D);
+        } else if (sound != PC_PROMPT_SOUND_NONE) {
+            battleSoundEffect2(0x4C);
+        }
+        if (d == PC_PROMPT_REMATCH) {
+            pcArenaMatchRematch();
+            softReboot();
+        } else if (d == PC_PROMPT_LEAVE) {
+            pcArenaMatchLeave(); /* the game is taken back at a vblank: the battle draws on until then */
+        }
+    }
+}
+
 /* battleMain, when its loop ends: who won, then the end that gives nothing
  * (0x21, a won battle without rewards) or costs nothing (0x40, an escape's
- * end, never the game over). */
+ * end, never the game over); in a match, Rematch / Leave first. */
 void pcVersusBattleOver(void) {
     u8 r;
     u8 line[LABEL];
     s32 frames;
     s32 previous;
     s32 held;
+    s32 opened;
 
     if (pcVersusSession() != PC_VERSUS_IN) {
         return;
@@ -1214,7 +1354,16 @@ void pcVersusBattleOver(void) {
     line[LABEL - 1] = 0;
     pcArenaLog("versus battle over: window 0 %s", battleVar1 != NULL && !battleVar1->mB0_isDialogWindowInitialized[WINDOW] &&
                                                      !battleVar1->mB8_isDialogWindowInitialized2[WINDOW] ? "free" : "busy");
-    if (openWindow(line, 1, -1)) {
+    if (pcArenaMatchOn()) {
+        /* the window for the prompt's lines too (matchPrompt); a whole line a step */
+        opened = openWindowSized(line, 1 + (pcArenaMatchOn() == 2 || isControllerConnected(1) ? 2 : 1), PROMPT_UNITS, -1);
+        if (opened) {
+            window.m68_charsPerStep = 0xFF;
+        }
+    } else {
+        opened = openWindow(line, 1, -1);
+    }
+    if (opened) {
         previous = pcPadHeldRemappedPort(0) | pcPadHeldRemappedPort(1);
         for (frames = 0; frames < 180; frames++) {
             battleRenderDebugAndMain();
@@ -1224,6 +1373,12 @@ void pcVersusBattleOver(void) {
             }
             previous = held;
         }
+    }
+    if (pcArenaMatchOn()) {
+        pcArenaLog("versus battle over: %s", r == 0x81 ? "player 2 won" : (r & 0x40) ? "player 1 escaped" : "player 1 won");
+        matchPrompt(line); /* the result stays up above it */
+    }
+    if (opened) {
         closeWindow();
     }
     performAttackSub3_var0.m2_battleRunningVar1 = r == 0x81 || (r & 0x40) ? 0x40 : 0x21;
@@ -1235,5 +1390,24 @@ void pcVersusBattleEnd(void) {
     if (pcVersusSession() == PC_VERSUS_IN) {
         pcArenaLog("versus battle: everything back");
     }
+    pcVersusMirrorEnd();
     pcVersusRestore();
+}
+
+/* ---- for the mirror match (mirror.c, versus.h) ---- */
+
+void pcVersusWord(u8* out, const char* s) {
+    word(out, s);
+}
+
+void pcVersusGameText(u8* out, const u8* s, s32 max) {
+    gameText(out, s, max);
+}
+
+void pcVersusShowLabel(const u8* s) {
+    showLabel(s);
+}
+
+void pcVersusHideLabel(void) {
+    hideLabel();
 }

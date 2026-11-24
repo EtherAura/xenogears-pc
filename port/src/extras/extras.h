@@ -65,6 +65,15 @@ int extrasIsOpen(void);
  * End before resuming the game's SPU, or shutting down the audio device. */
 void extrasJukeboxTick(void);
 void extrasJukeboxEnd(void);
+/* The jukebox's scores for a picker elsewhere (the Battle arena's battle
+ * music): how many (the library made from the discs at the first call);
+ * each one's title (the chosen OST title language's, else the score's own
+ * name) and first music ID; the player playing one quietly while it is
+ * highlighted (extrasJukeboxPreview, -1: stop that). Pumped and ended as
+ * above. */
+int extrasJukeboxSongCount(void);
+const char* extrasJukeboxSongTitle(int i, int* musicId);
+void extrasJukeboxPreview(int musicId);
 /* After extrasOpenFromMenu: 1 once when they were left into the game (the
  * menu then closes too). */
 int extrasLeftIntoGame(void);

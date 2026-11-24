@@ -120,7 +120,7 @@ loop:
 #ifndef PLATFORM_PC
         pushU24OnAnimationStack(actor, (s32)(actor->m64_spriteByteCode + 3));
 #else
-        pushU24OnAnimationStack(actor, (s32)(uptr)(actor->m64_spriteByteCode + 3));
+        pushU24OnAnimationStack(actor, pcU24Of(actor->m64_spriteByteCode + 3));
 #endif
         actor->m64_spriteByteCode += off;
         goto loop;

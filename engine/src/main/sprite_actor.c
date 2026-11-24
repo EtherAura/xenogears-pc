@@ -470,7 +470,7 @@ loop:
     }
     case 0xE2: {
         s16 off = p[1] + (((s8*)next)[1] << 8);
-        pushU24OnAnimationStack(actor, (s32)(uptr)(p + 3));
+        pushU24OnAnimationStack(actor, pcU24Of(p + 3));
         actor->m64_spriteByteCode += off;
         goto loop;
     }

@@ -105,6 +105,7 @@ using namespace extras;
 #define MAX_EXPORT (20 * 60) // seconds: a score's export never runs longer
 #define MAX_EFFECT 30      // seconds: an effect's export at most
 #define BUDGET_NS 12000000 // a frame's share for timing and exports
+#define PREVIEW_GAIN 0.25f // a picker's preview: quietly (extrasJukeboxPreview)
 
 // A place on the discs: disc (index into S->discs), directory, file, and
 // the member of an offset bundle (-1: the whole file).
@@ -212,6 +213,7 @@ struct State {
     // Once, next until the list ends, repeat this score, repeat the list.
     int playback = 2;
     bool keepMenu = false, musicRun = false, fadingOnce = false;
+    bool preview = false; // a picker elsewhere plays this score quietly (extrasJukeboxPreview)
     int volume = 80;
     uint32_t mute = 0, solo = 0;
     XgJbStatus st = {};
@@ -722,6 +724,7 @@ void setGain() {
         int v = settingsInt("volume", 100);
         v = v < 0 ? 0 : v > 100 ? 100 : v;
         float g = (float)(v * v) / 10000.0f * (float)(S->volume * S->volume) / 10000.0f;
+        if (S->preview) g *= PREVIEW_GAIN;
         SDL_SetAudioStreamGain(S->stream, g);
     }
 }
@@ -745,6 +748,7 @@ bool playSong(int i) {
         return false;
     }
     xgJbStop(S->player);
+    S->preview = false;
     if (!loadSongBanks(S->player, s)) {
         error("%s: a sample bank it uses is not on the discs", s.name.c_str());
         return false;
@@ -875,7 +879,8 @@ void pump() {
     }
     setGain();
     xgJbStatus(S->player, &S->st);
-    if (S->active && S->musicRun && S->song >= 0 && S->st.music && S->playback != 2 && !S->fadingOnce && S->st.loops >= 1) {
+    if (S->active && S->musicRun && S->song >= 0 && S->st.music && S->playback != 2 && !S->preview && !S->fadingOnce &&
+        S->st.loops >= 1) {
         xgJbFade(S->player, FADE_ONCE);
         S->fadingOnce = true;
     }
@@ -889,7 +894,7 @@ void pump() {
             int next = S->song + 1;
             if (S->playback == 2) next = S->song; // a non-looping score
             if (S->playback == 3 && next == (int)S->songs.size()) next = 0;
-            if (S->playback != 0 && next < (int)S->songs.size()) playSong(next);
+            if (S->playback != 0 && !S->preview && next < (int)S->songs.size()) playSong(next);
         }
     }
 }
@@ -2164,6 +2169,45 @@ XG_EXTRAS_VIEWER(viewer);
 
 extern "C" void extrasJukeboxTick(void) {
     if (S) { pump(); runJobs(); }
+}
+
+// The scores for a picker elsewhere (the Battle arena's battle music,
+// port/src/ui/arena.cpp; extras.h): the library is made at the first call, as
+// the jukebox makes it, and kept until the menu closes (extrasJukeboxEnd).
+extern "C" int extrasJukeboxSongCount(void) {
+    if (!S) {
+        S = new State;
+        loadPlayback();
+        buildLibrary(nullptr);
+    }
+    return (int)S->songs.size();
+}
+
+extern "C" const char* extrasJukeboxSongTitle(int i, int* musicId) {
+    if (!S || i < 0 || i >= (int)S->songs.size()) return nullptr;
+    const Song& song = S->songs[(size_t)i];
+    if (musicId != nullptr) *musicId = song.ids.empty() ? -1 : song.ids[0];
+    return songTitle(song);
+}
+
+extern "C" void extrasJukeboxPreview(int musicId) {
+    if (!S) return;
+    if (musicId < 0) {
+        if (S->preview) {
+            stop();
+            fprintf(stderr, "extras: jukebox: the preview stops\n");
+        }
+        S->preview = false;
+        return;
+    }
+    char ref[16];
+    snprintf(ref, sizeof ref, "#%d", musicId);
+    int i = findSong(ref);
+    if (i < 0 || (S->preview && S->song == i && S->musicRun)) return;
+    if (playSong(i)) {
+        S->preview = true;
+        setGain();
+    }
 }
 extern "C" void extrasJukeboxEnd(void) {
     if (!S) return;

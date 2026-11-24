@@ -1400,6 +1400,12 @@ extern sBattleDialogWindow2* battleDialogWindows2[7];
 extern sBattleRenderStruct2* pBattleRenderStruct2;
 extern sMonsterTurnDisplay previousEntityTurn;
 extern u8 battleCharacters[4];
+/* A party slot's character id, as the party's own code reads it. A mirror
+ * match (port/src/game/battle/mirror.c) runs that code for player 2's copy of
+ * the party in entities 3-5 too, past battleCharacters' end: their ids come
+ * from the mirror then. */
+u8 pcBattleCharacter(u32 entity);
+#define BATTLE_CHARACTER(entity) pcBattleCharacter(entity)
 extern u16 allPlayerCharacterBitmask;
 extern BattleCamera_800D309C battleCameraBlock;
 extern BattleBss_800C3EB0 battleBssBlock;

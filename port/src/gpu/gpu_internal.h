@@ -455,6 +455,15 @@ typedef struct {
     /* Light shafts (xg-rgcf.5.16): their strength (0: none) and the time
      * their bands drift by (seconds). */
     float shafts, shaftTime;
+    /* Cloud shadows (xg-rgcf.5.17): how much of the sun a cloud takes (0:
+     * none), a cloud's size (view units), the drift (cloud sizes, wrapped
+     * every scene.c CLOUD_PERIOD), and whether the far backdrop is a painting
+     * that takes none (fields); the room's origin is roomTrans. */
+    float clouds, cloudSize, cloudDrift[2];
+    int cloudFar;
+    /* The sprites take the lighting too (xg-rgcf.5.19): their own sun, rim,
+     * shade at their feet and glow (light.comp pass 24, CHARACTERS). */
+    int figureLight;
     /* Ambient particles (xg-rgcf.5.10): their level (0: none) and size scale,
      * the time they drift by (seconds), the room's frame they keep their
      * places in (view = roomRot * room + roomTrans, the room in view units),

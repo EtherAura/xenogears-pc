@@ -7,6 +7,11 @@
  * address and size (identical code at the same address reaches every object
  * at the same address). A rebuild that changes neither keeps its states; any
  * other refuses them, with a message.
+ *
+ * The image id: the same at the image's link addresses, over what loads (no
+ * debug sections), so that tools/state_schema.py gets it from the file, before
+ * or after the debug information is stripped, and a state schema can say
+ * which image it describes wherever that image is loaded.
  */
 
 #ifndef _WIN32
@@ -40,6 +45,9 @@ static uint8_t buildId[16];
 static char buildText[33];
 static int buildKnown;
 static uintptr_t imageBias;
+static uint8_t imageId[16];
+static char imageText[33];
+static int imageKnown; /* 1 known, -1 unknown (the sections could not be read) */
 
 static void idMix(uint64_t* a, uint64_t* b, const void* data, size_t n) {
     *a = stateHash(data, n, *a);
@@ -47,10 +55,15 @@ static void idMix(uint64_t* a, uint64_t* b, const void* data, size_t n) {
 }
 
 #ifdef _WIN32
+static const IMAGE_NT_HEADERS* peHeaders(const unsigned char** base) {
+    *base = (const unsigned char*)GetModuleHandleW(NULL);
+    const IMAGE_DOS_HEADER* dos = (const IMAGE_DOS_HEADER*)*base;
+    return (const IMAGE_NT_HEADERS*)(*base + dos->e_lfanew);
+}
+
 static int computeId(uint64_t* a, uint64_t* b) {
-    const unsigned char* base = (const unsigned char*)GetModuleHandleW(NULL);
-    const IMAGE_DOS_HEADER* dos = (const IMAGE_DOS_HEADER*)base;
-    const IMAGE_NT_HEADERS* nt = (const IMAGE_NT_HEADERS*)(base + dos->e_lfanew);
+    const unsigned char* base;
+    const IMAGE_NT_HEADERS* nt = peHeaders(&base);
     const IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
     uint64_t imageBase = (uint64_t)(uintptr_t)base;
     idMix(a, b, &imageBase, sizeof(imageBase));
@@ -65,15 +78,64 @@ static int computeId(uint64_t* a, uint64_t* b) {
     return 1;
 }
 
-/* (The state schema is read from ELF executables only: portable slots are off here.) */
+/* The image id (tools/state_schema.py pe_identity): the preferred image base and every section that
+ * stays loaded, its place, size and flags (not its name: a long one is an offset into the symbols'
+ * string table, which stripping rewrites), and the code. Debug sections are discardable and go
+ * with the debug information. */
+static int computeImageId(uint64_t* a, uint64_t* b) {
+    const unsigned char* base;
+    const IMAGE_NT_HEADERS* nt = peHeaders(&base);
+    const IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+    uint64_t preferred = (uint64_t)nt->OptionalHeader.ImageBase;
+    idMix(a, b, &preferred, sizeof(preferred));
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        if (sec[i].Characteristics & IMAGE_SCN_MEM_DISCARDABLE) {
+            continue;
+        }
+        uint32_t where[3] = {sec[i].VirtualAddress, sec[i].Misc.VirtualSize, sec[i].Characteristics};
+        idMix(a, b, where, sizeof(where));
+        if (sec[i].Characteristics & IMAGE_SCN_CNT_CODE) {
+            idMix(a, b, base + sec[i].VirtualAddress, sec[i].Misc.VirtualSize);
+        }
+    }
+    return 1;
+}
+
+/* The bias, before main as on ELF (states record it while the game is parked on its own stacks): where
+ * the executable sits against its preferred base (0: linked with --disable-dynamicbase, never moved). */
+__attribute__((constructor)) static void imageBiasInit(void) {
+    const unsigned char* base;
+    const IMAGE_NT_HEADERS* nt = peHeaders(&base);
+    imageBias = (uintptr_t)base - (uintptr_t)nt->OptionalHeader.ImageBase;
+}
+
+/* Whether [lo, hi) lies in one readable section of this executable as loaded. */
 int stateImageReadable(uint64_t lo, uint64_t hi) {
-    (void)lo;
-    (void)hi;
+    const unsigned char* base;
+    const IMAGE_NT_HEADERS* nt = peHeaders(&base);
+    const IMAGE_SECTION_HEADER* sec = IMAGE_FIRST_SECTION(nt);
+    if (hi < lo) return 0;
+    for (int i = 0; i < nt->FileHeader.NumberOfSections; i++) {
+        uint64_t at = (uint64_t)(uintptr_t)base + sec[i].VirtualAddress;
+        if ((sec[i].Characteristics & IMAGE_SCN_MEM_READ) && lo >= at && hi <= at + sec[i].Misc.VirtualSize) {
+            return 1;
+        }
+    }
     return 0;
 }
 
 const char* stateImagePath(void) {
-    return NULL;
+    static char path[1100];
+    static int known;
+    if (!known) {
+        wchar_t wide[1024];
+        DWORD n = GetModuleFileNameW(NULL, wide, (DWORD)(sizeof wide / sizeof wide[0]));
+        known = n > 0 && n < sizeof wide / sizeof wide[0] &&
+                        WideCharToMultiByte(CP_UTF8, 0, wide, -1, path, (int)sizeof path, NULL, NULL) > 0
+                    ? 1
+                    : -1;
+    }
+    return known == 1 ? path : NULL;
 }
 #else
 /* The ELF object this code is in (the executable, or the library an Android
@@ -138,8 +200,7 @@ static int findReadable(struct dl_phdr_info* info, size_t size, void* data) {
 }
 
 int stateImageReadable(uint64_t lo, uint64_t hi) {
-    ReadableQuery q = {.inside = (uintptr_t)&findReadable, .lo = (uintptr_t)(lo + imageBias),
-                       .hi = (uintptr_t)(hi + imageBias)};
+    ReadableQuery q = {.inside = (uintptr_t)&findReadable, .lo = (uintptr_t)lo, .hi = (uintptr_t)hi};
     if (hi < lo) return 0;
     dl_iterate_phdr(findReadable, &q);
     return q.readable;
@@ -149,16 +210,16 @@ const char* stateImagePath(void) {
     return imagePath;
 }
 
-static int computeId(uint64_t* a, uint64_t* b) {
-    SelfObject self = {.inside = (uintptr_t)&computeId};
+/* The id of this image loaded at bias (its own: the build id; 0: the image id, as at its link addresses). */
+static int elfId(uint64_t bias, uint64_t* a, uint64_t* b) {
+    SelfObject self = {.inside = (uintptr_t)&elfId};
     dl_iterate_phdr(findSelf, &self);
     if (!self.found) {
         return 0;
     }
     /* Position-independent code at another address holds other addresses: a
      * non-zero load bias is part of the id (as the image base is on Windows). */
-    if (self.bias != 0) {
-        uint64_t bias = self.bias;
+    if (bias != 0) {
         idMix(a, b, &bias, sizeof(bias));
     }
     FILE* f = fopen(self.path, "rb");
@@ -189,7 +250,7 @@ static int computeId(uint64_t* a, uint64_t* b) {
         idMix(a, b, name, strlen(name));
         idMix(a, b, where, sizeof(where));
         if ((sh[i].sh_flags & SHF_EXECINSTR) && sh[i].sh_type == SHT_PROGBITS) {
-            /* The code as loaded. */
+            /* The code as loaded (position-independent: the file's bytes wherever it is). */
             idMix(a, b, (const void*)(uintptr_t)(self.bias + sh[i].sh_addr), sh[i].sh_size);
         }
     }
@@ -197,6 +258,16 @@ static int computeId(uint64_t* a, uint64_t* b) {
     free(sh);
     fclose(f);
     return ok;
+}
+
+static int computeId(uint64_t* a, uint64_t* b) {
+    return elfId(imageBias, a, b);
+}
+
+/* The image id (tools/state_schema.py elf_identity): the build id at the link addresses. Stripping
+ * keeps every allocated section's name, place, size, type and flags, and the code. */
+static int computeImageId(uint64_t* a, uint64_t* b) {
+    return elfId(0, a, b);
 }
 #endif
 
@@ -242,6 +313,29 @@ const uint8_t* stateBuildId(void) {
 
 uintptr_t stateImageBias(void) {
     return imageBias;
+}
+
+const uint8_t* stateImageId(void) {
+    if (!imageKnown) {
+        uint64_t a = 0x243F6A8885A308D3ull, b = 0x13198A2E03707344ull; /* the build id's seeds */
+        imageKnown = computeImageId(&a, &b) ? 1 : -1;
+        for (int i = 0; i < 8; i++) {
+            imageId[i] = (uint8_t)(a >> (8 * i));
+            imageId[8 + i] = (uint8_t)(b >> (8 * i));
+        }
+        for (int i = 0; i < 16; i++) {
+            snprintf(imageText + 2 * i, 3, "%02x", imageId[i]);
+        }
+        if (imageKnown < 0) {
+            imageText[0] = '\0';
+        }
+    }
+    return imageKnown > 0 ? imageId : NULL;
+}
+
+const char* stateImageIdText(void) {
+    stateImageId();
+    return imageText;
 }
 
 const char* stateBuildText(void) {

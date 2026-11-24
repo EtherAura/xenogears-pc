@@ -319,7 +319,7 @@ sBattleHorizon* createBattleHorizon(s16 tpX, s16 tpY, s16 arg2, s16 arg3, s16 te
     s32 i, j, k;
 
     resetMemoryAllocStats(4, 0);
-    p = allocateHeap(sizeof(sBattleHorizon), 0);
+    p = allocateHeap(PC_HEAP_OF(sBattleHorizon, sizeof(sBattleHorizon)), 0);
     if (p != NULL) {
         GetDrawEnv(&env);
         p->m0_u = 0;

@@ -20,6 +20,7 @@
 
 void portClearModuleBss(const char* name);
 void portStartPrepare(void); /* options.c: a start the extras asked for (its disc) */
+void pcArenaSoftReset(void) __attribute__((weak)); /* arena.c: a Battle arena match starts again (its disc) */
 
 void portSoftReset(void) {
     regionalMovieEnd();
@@ -27,4 +28,7 @@ void portSoftReset(void) {
     portClearModuleBss("main");
     etcSoftReset();
     portStartPrepare();
+    if (pcArenaSoftReset != NULL) {
+        pcArenaSoftReset();
+    }
 }

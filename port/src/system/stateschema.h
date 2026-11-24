@@ -56,6 +56,7 @@ typedef struct {
     const char* platform; /* the platform file, NULL for game data */
     int32_t type;
     const char* id;       /* its identity (statecanon Schema.identity, collisions get ":name") */
+    uint8_t isConst;      /* "const": the build's own constant, which no state carries (the reader keeps its own) */
 } StVar;
 
 typedef struct {
@@ -110,9 +111,23 @@ typedef struct StateSchema StateSchema;
 StateSchema* stateSchemaParse(const char* json, size_t n, char* err, size_t errSize);
 /* A schema file: state_schema.json as the build writes it, or packed by statePack ("XGSCHEMA" + sizes). */
 StateSchema* stateSchemaLoad(const char* path, char* err, size_t errSize);
+/* The same, rebased: every address the schema gives (variables, functions, symbols, sections, regions,
+ * the read-only ranges; not their file offsets) plus bias, modulo 2^64, before anything is indexed. A
+ * schema holds link addresses; a process's image sits at link address + its load bias (statefile.h
+ * stateImageBias, a state's header): rebased by it, the schema describes that process's memory, as
+ * statecanon.py Schema(build, bias) does. */
+StateSchema* stateSchemaParseAt(const char* json, size_t n, uint64_t bias, char* err, size_t errSize);
+StateSchema* stateSchemaLoadAt(const char* path, uint64_t bias, char* err, size_t errSize);
 void stateSchemaFree(StateSchema* s);
 
 const char* stateSchemaVersion(const StateSchema* s); /* "us" or "jp" */
+/* Whether a state may convert to or from this build: 0 for a schema whose build left the data's types
+ * unknown (clang: no debug information for extern declarations, xg-htn.60.8), with why; absent: 1. */
+int stateSchemaPortable(const StateSchema* s, const char** why);
+uint64_t stateSchemaBias(const StateSchema* s);       /* what its addresses were rebased by */
+/* The identity of the image the schema was read from (its "image": statefile.h stateImageIdText, which
+ * neither the load address nor stripped debug information changes); "" in a schema without one. */
+const char* stateSchemaImageId(const StateSchema* s);
 
 int32_t stateSchemaTypeCount(const StateSchema* s);
 const StType* stateSchemaTypeAt(const StateSchema* s, int32_t i);

@@ -45,6 +45,13 @@ void pcSceneView(const short rotation[3][3], const int translation[3], int scree
  * there. Call it for each such actor in the frame, before pcSceneDepth. */
 void pcSceneFigure(int x, int y, int z);
 
+/* While a dialogue is open, the view depth of the actor it belongs to (the
+ * speaker): the depth of field moves its focus there and narrows its sharp
+ * range, easing in and out (xg-rgcf.5.18). 0 or less: no speaker. Call it
+ * before pcSceneDepth, each frame the scene is drawn; a scene registered
+ * without it has none. */
+void pcSceneSpeaker(int focusZ);
+
 #endif /* PLATFORM_PC */
 
 #endif /* PC_SCENE_H */

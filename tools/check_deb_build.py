@@ -20,8 +20,9 @@
    as it was, no command run when the inputs are wrong): bad tags, a tag of
    another version, incompatible caches and CPack settings, an output folder
    already holding the set, missing commands, a build failure, a cpack
-   failure, no, wrong-named or stale package, a package without the executable
-   or a licence, with a wrong mode, an extra file or another version, strict
+   failure, no, wrong-named or stale package, a package without the executable,
+   a licence or the executable's state schema (or one not in its packed form),
+   with a wrong mode, an extra file or another version, strict
    Depends refusal (Depends libvulkan1 alone) and companion failures. Paths
    with spaces and shell metacharacters run inertly.
 3. The real build: this check's own build/pc/deb-build-<ver>/real-build,
@@ -59,11 +60,12 @@ DEB = f"xenogears-pc_{VERSION}_amd64.deb"
 SET = [DEB, f"{DEB}.sha256", f"{DEB}.cdx.json"]
 DOC = "usr/share/doc/xenogears-pc"
 RELEASE = "usr/share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
+SCHEMA = "usr/share/xenogears-pc/xenogears.xgschema"  # the executable's state schema (port/cmake/deb.cmake)
 FV = "1.0~fixture"  # fixture Depends versions: arbitrary, not any distribution's
 GOOD_DEPENDS = f"libc6 (>= {FV}), libsdl3-0 (>= {FV}), libvulkan1"
 REAL_TOOLS = ("dpkg-deb", "dpkg", "tar", "gtar", "xz", "zstd", "gzip")
 CACHE = {"CMAKE_BUILD_TYPE:STRING": "Release", "XG_VERSION:STRING": "US", "XG_EXTRAS:BOOL": "ON",
-         "XG_ENGINE:STRING": "original", "XG_PACKAGE_VERSION:STRING": VERSION,
+         "XG_STATE_SCHEMA:BOOL": "ON", "XG_ENGINE:STRING": "original", "XG_PACKAGE_VERSION:STRING": VERSION,
          "glslang_DIR:PATH": "glslang_DIR-NOTFOUND", "XG_DAV1D_LIBRARY:FILEPATH": "XG_DAV1D_LIBRARY-NOTFOUND"}
 CPACK = {"CPACK_GENERATOR": "DEB", "CPACK_PACKAGE_NAME": "xenogears-pc", "CPACK_DEBIAN_PACKAGE_VERSION": VERSION,
          "CPACK_DEBIAN_PACKAGE_ARCHITECTURE": "amd64", "CPACK_DEBIAN_FILE_NAME": DEB,
@@ -196,6 +198,7 @@ def good_files(**changes) -> dict[str, tuple[str, int]]:
     for name in ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt"):
         files[f"{DOC}/{name}"] = (f"fixture licence text ({name})\n", 0o644)
     files[RELEASE] = (f"version={VERSION}\nkind=deb\n", 0o644)
+    files[SCHEMA] = ("XGSCHEMA fixture: the packed form's magic, not a state schema\n", 0o644)
     for path, value in changes.items():
         path = path.replace("__", "/")
         if value is None:
@@ -340,6 +343,7 @@ def check_fixtures(work: Path) -> None:
             ("no build type", {"CMAKE_BUILD_TYPE:STRING": None}, None, "CMAKE_BUILD_TYPE is None"),
             ("JP build", {"XG_VERSION:STRING": "JP"}, None, "XG_VERSION is 'JP'"),
             ("extras off", {"XG_EXTRAS:BOOL": "OFF"}, None, "XG_EXTRAS is 'OFF'"),
+            ("no state schema", {"XG_STATE_SCHEMA:BOOL": "OFF"}, None, "XG_STATE_SCHEMA is 'OFF'"),
             ("cache of another version", {"XG_PACKAGE_VERSION:STRING": "0~dev"}, None, "XG_PACKAGE_VERSION is '0~dev'"),
             ("TGZ generator", None, {"CPACK_GENERATOR": "TGZ"}, "CPACK_GENERATOR is 'TGZ'"),
             ("CPack of another version", None, {"CPACK_DEBIAN_PACKAGE_VERSION": "2026.11.1"}, "CPACK_DEBIAN_PACKAGE_VERSION"),
@@ -392,6 +396,9 @@ def check_fixtures(work: Path) -> None:
             ("no imgui licence", good_files(**{f"{DOC}/LICENSE-imgui.txt".replace("/", "__"): None}), VERSION,
              "missing usr/share/doc/xenogears-pc/LICENSE-imgui.txt"),
             ("no release file", good_files(**{RELEASE.replace("/", "__"): None}), VERSION, f"missing {RELEASE}"),
+            ("no state schema", good_files(**{SCHEMA.replace("/", "__"): None}), VERSION, f"missing {SCHEMA}"),
+            ("a state schema not in its packed form", good_files(**{SCHEMA.replace("/", "__"): (
+                '{"version": "us"}\n', 0o644)}), VERSION, "not a state schema in its packed form"),
             ("a release file of the tarball", good_files(**{RELEASE.replace("/", "__"): (
                 f"version={VERSION}\nkind=tarball\n", 0o644)}), VERSION, f"{RELEASE} is b'version={VERSION}\\nkind=tarball"),
             ("a release file of another version", good_files(**{RELEASE.replace("/", "__"): (
@@ -408,7 +415,8 @@ def check_fixtures(work: Path) -> None:
             ("missing usr/share/doc/xenogears-pc/LICENSE-dav1d.txt",), bin_dir=full, commands=["cmake", "cpack"])
     b = make_build(work, "pkg-enhanced", deb=good, cache={"XG_ENGINE:STRING": "enhanced"})
     refused(public, work, "package of the original engine for an enhanced build", b, "package",
-            ("missing usr/bin/xenogears-enhanced", "unexpected usr/bin/xenogears"), bin_dir=full,
+            ("missing usr/bin/xenogears-enhanced", "unexpected usr/bin/xenogears",
+             "missing usr/share/xenogears-pc/xenogears-enhanced.xgschema"), bin_dir=full,
             commands=["cmake", "cpack"])
 
     # Strict Depends and the companions.

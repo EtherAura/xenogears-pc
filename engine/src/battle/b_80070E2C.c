@@ -19,6 +19,10 @@ void pcVersusBattleSetup(void);
 void pcVersusMonsterTurn(u8 entity, s32 status);
 void pcVersusBattleOver(void);
 void pcVersusBattleEnd(void);
+/* a mirror match: player 2 commands a copy of the party (port/src/game/battle/mirror.c) */
+void pcVersusBattleLoaded(void);
+int pcVersusMirrorTurn(u8 entity);
+int pcVersusMirror(void);
 
 /* Globals (splat names; Noah names in comments) */
 extern u8 needBattleEventOverlay;                /* battle event overlay loaded (Noah: needBattleEventOverlay) */
@@ -224,7 +228,7 @@ static void pcBestiaryBattle(s32 end) {
     s32 down;
     s32 type;
 
-    if (pcBestiaryNote == NULL) {
+    if (pcBestiaryNote == NULL || pcVersusMirror()) { /* a mirror match's copy is no enemy of the set */
         return;
     }
     for (i = 3; i < 11; i++) {
@@ -320,6 +324,7 @@ void battleMain(void) {
     pcGameplayBattleStart(requestedBattleConfig, pcChained); /* random or scripted, for rewards */
     memmove(currentBattleConfig, battleConfigs[requestedBattleConfig], 0x20);
     startBattleLoader(battleTransitionEffect);
+    pcVersusBattleLoaded(); /* a mirror match: player 2's copy of the party into entities 3-5 (mirror.c) */
     checkWinConditions();
     currentBattleMode = 2;
     initBattleGraphics(battleConfigFile3);
@@ -585,6 +590,9 @@ void battleTickMain(u8 arg0) {
     entitiesHitInCurrentAttackBF = 0;
     updateBattleEntityStatus(battleVar2->m2D3_currentEntityTurn);
     if (battleVar2->m2D3_currentEntityTurn >= 3) {
+        if (arg0 == 0 && pcVersusMirrorTurn(battleVar2->m2D3_currentEntityTurn)) {
+            goto mirrorTurnDone; /* a mirror match: player 2's member had a party member's turn (mirror.c) */
+        }
         if (arg0 == 0) {
             /* a versus battle: player 2 makes the script's choices (versus.c); else as below */
             pcVersusMonsterTurn(battleVar2->m2D3_currentEntityTurn, battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m7C_statusFlags[2] & 0x2000);
@@ -607,6 +615,7 @@ void battleTickMain(u8 arg0) {
         }
         removeCurrentMonsterNameString();
         updateBattleEventOverlay(0);
+    mirrorTurnDone:;
     
     } else {
         for (i = 0; i < 8; i++) {

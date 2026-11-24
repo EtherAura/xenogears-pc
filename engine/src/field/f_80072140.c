@@ -2134,6 +2134,28 @@ static void pcFieldPictureLog(void) {
  * from the picture's depth at its centre. */
 static MATRIX pcEyeProjection; /* the eye-level view a first-person picture was drawn with */
 
+/* Enhanced (xg-rgcf.5.18): while a dialogue window is open, the view depth of
+ * the actor it belongs to (the one on top when several are open), a little
+ * above its feet, where the game points the window; 0 when none is open, its
+ * actor is not drawn as a sprite, or it is behind the camera. */
+static s32 pcDialogSpeakerDepth(MATRIX* m) {
+    extern DialogWindow gDialogWindows[4];
+    extern s32 g_totalActors;
+    s32 i, pick = -1, actor, x, y, z, depth;
+    for (i = 0; i < 4; i++) {
+        if (gDialogWindows[i].m40E_state != 0 || gDialogWindows[i].m418_actorId >= g_totalActors) continue;
+        if (pick < 0 || gDialogWindows[i].m412_onTop != 0) pick = i;
+    }
+    if (pick < 0) return 0;
+    actor = gDialogWindows[pick].m418_actorId;
+    if (fieldSceneState.m290_actorArray[actor].m4_pVramSpriteSheet == NULL) return 0;
+    x = fieldSceneState.m290_actorArray[actor].mC_matrix.t[0];
+    y = fieldSceneState.m290_actorArray[actor].mC_matrix.t[1] - 0x40;
+    z = fieldSceneState.m290_actorArray[actor].mC_matrix.t[2];
+    depth = ((m->m[2][0] * x + m->m[2][1] * y + m->m[2][2] * z) >> 12) + m->t[2];
+    return depth > 0 ? depth : 0;
+}
+
 static void pcFieldSceneDepth(int looking) {
     MATRIX* m = &fieldSceneState.m1E4_projectionMatrix;
     s32 x = fieldSceneState.m10_cameraAt.vx >> 16;
@@ -2151,6 +2173,8 @@ static void pcFieldSceneDepth(int looking) {
     /* The scenery's rotation and projection, for the scene lighting (xg-rgcf.5.1):
      * the frame's centre and distance are the ones the field sets for its
      * scene (SetGeomOffset(0xA0, 0x70), SetGeomScreen(sceneSCRZ)). */
+    /* The speaker's depth in the game's view (an eye-level look keeps its own focus). */
+    pcSceneSpeaker(looking ? 0 : pcDialogSpeakerDepth(m));
     if (looking) m = &pcEyeProjection; /* the picture's own view, not the game's restored one */
     pcSceneView(m->m, m->t, fieldSceneState.m178_sceneSCRZ, 0xA0, 0x70, fieldMapNumber & 0xFFF);
     pcSceneDepth(pCurrentFieldRenderingContext->mCC_OT, 0x1000,

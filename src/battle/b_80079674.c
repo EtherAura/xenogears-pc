@@ -2115,7 +2115,7 @@ u8 executeMonsterScriptUpper(sBattleScriptExecutionContext* ctx, u8 entity) {
 }
 
 void freeBillyBattleStructs(u8 entity) {
-    if (battleCharacters[entity] == 4 && battleVar1->m8E_isBillyWindowOpen != 0) {
+    if (BATTLE_CHARACTER(entity) == 4 && battleVar1->m8E_isBillyWindowOpen != 0) {
         clearBattleDialogWindow(0);
         freeBattleVar0_A230();
         battleVar1->m8E_isBillyWindowOpen = 0;

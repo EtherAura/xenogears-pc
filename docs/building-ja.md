@@ -8,6 +8,7 @@
 
 - bash、curl、tar、git、make、gcc、cpp、Python 3、Ninja、CMake 3.25 以降が入った Linux x86-64。
 - C と C++ のコンパイラー、SDL 3、Vulkan のヘッダー、`glslc`。
+- LLVM の `llvm-dwarfdump`。ビルドごとのステートスキーマを書き出すのに使い、これがあるとスロットのセーブステートを移植版の別のバージョンでも読み込めます（`-DXG_STATE_SCHEMA=OFF` を付けると、これなしでビルドできます）。
 - Vulkan 1.3 に対応した GPU とドライバー。
 - 任意: Khronos glslang（シェーダープリセット用）と dav1d（AV1 のムービーパック用）。
 - Redump 形式の `.cue`/`.bin` イメージにしたお手持ちのディスク: 北米版（SLUS-00664）または日本版（SLPS-01160）。

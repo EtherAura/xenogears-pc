@@ -47,9 +47,9 @@
 #    engines into a stage, with SOURCE_DATE_EPOCH=0 throughout (the linker's and
 #    strip's PE time stamps), so the install's strip can be reproduced. The
 #    libraries are built into the private copy from the checked cache;
-# 5. the stage: exactly the files the install makes (both engines, SDL3.dll,
-#    the licences of every library, glslang's and dav1d's included), and no
-#    other executable;
+# 5. the stage: exactly the files the install makes (both engines, each with its
+#    state schema, SDL3.dll, the licences of every library, glslang's and
+#    dav1d's included), and no other executable;
 # 6. per engine and SDL3: its Release CMake build and the
 #    linked executable against the seal of its link map (<exe>.payload.json:
 #    the executable's and the map's SHA-256); tools/payloadcheck.py --dist on it;
@@ -59,7 +59,10 @@
 #    copy, sealed for it by payloadcheck.py --record-map, and payloadcheck.py
 #    --dist on the copy: the installed bytes' audit. An audit passes only on
 #    exit 0, a heading naming the copy, the region and every module image, and
-#    one clean "payload ok" line;
+#    one clean "payload ok" line; for an engine, its staged state schema
+#    against the installed bytes (tools/state_schema.py --verify --stripped:
+#    read from that image, no path of the build machine, no debug information
+#    left in the executable);
 # 7. package the audited stage in the work folder. Check that the .zip holds
 #    the stage's files and its executables match the audited copies. Check the
 #    asset checksums and the installer compiler record when requested;
@@ -144,7 +147,7 @@ OK = re.compile(r"payload ok: generated 0 runs/0 bytes, port 0/0, other 0/0; lib
 STRIP = re.compile(r'execute_process\(COMMAND ("[^"]*"(?: "[^"]*")*)\)')
 STAGE_FILES = {"xenogears.exe", "xenogears-enhanced.exe", "SDL3.dll", "COPYING.txt", "README.txt",
                "LICENSE-SDL3.txt", "LICENSE-imgui.txt", "LICENSE-Jukebox-font.txt", "LICENSE-glslang.txt",
-               "LICENSE-dav1d.txt"}
+               "LICENSE-dav1d.txt", "xenogears.xgschema", "xenogears-enhanced.xgschema"}
 EXECUTABLES = set(AUDIT_TARGETS.values())
 
 def names(root, tag, installer):
@@ -287,6 +290,22 @@ def audit(tree, exe, build, region, count):
     said = "".join(f"\n    | {l[:200]}" for l in (lines[-20:] + proc.stderr.splitlines()[-5:]))
     fail(f"payload audit of {exe} FAILED: {why}{said}")
 
+def schema(tree, packed, exe):
+    """A staged state schema against the audited installed executable (tools/state_schema.py --verify --stripped)."""
+    tree, packed, exe = Path(tree), Path(packed), Path(exe)
+    before = (sha(packed), sha(exe))
+    argv = [sys.executable, "-E", "-s", "-B", str(tree / "tools" / "state_schema.py"), "--verify", str(packed),
+            "--image", str(exe), "--stripped"]
+    try:
+        proc = subprocess.run(argv, cwd=tree, stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                              errors="replace", timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        fail(f"state schema {packed.name}: {e}")
+    said = (proc.stdout + proc.stderr).strip()
+    if proc.returncode != 0 or (sha(packed), sha(exe)) != before:
+        fail(f"state schema {packed.name} FAILED against {exe.name} (exit {proc.returncode}): {said[-600:]}")
+    print(said.splitlines()[-1] if said else f"state schema {packed.name}: verified")
+
 def same_seal(build, target, want):
     build = Path(build)
     name = AUDIT_TARGETS[target]
@@ -412,7 +431,7 @@ try:
     {"names": names, "compiler": compiler, "free": free, "outside": outside, "cache": cache,
      "copy-tree": copy_tree, "image": image,
      "modules": modules, "linked": linked, "strip-argv": strip_argv, "audit": audit, "same-seal": same_seal,
-     "map-is": map_is, "stage": stage, "zipcheck": zipcheck, "installercheck": installercheck,
+     "map-is": map_is, "stage": stage, "zipcheck": zipcheck, "schema": schema, "installercheck": installercheck,
      "only": only, "promote": promote}[cmd](*args)
 except release_inputs.InputError as e:
     fail(str(e))
@@ -527,6 +546,10 @@ for target in original enhanced sdl3; do
     log "$target: the installed bytes"
     bpy audit "$(inpath "$TREE")" "$(inpath "$copy")" "$(inpath "$build")" "$REGION" "$COUNT"
     cmp "$copy" "$STAGE/$name" || die "$target: the staged $name changed after its audit"
+    if [ "$target" != sdl3 ]; then
+        log "$target: its state schema against the installed bytes"
+        py schema "$TREE" "$STAGE/${name%.exe}.xgschema" "$copy"
+    fi
 done
 
 if [ -n "$TABLES_OUT" ]; then

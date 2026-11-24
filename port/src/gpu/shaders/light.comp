@@ -32,8 +32,9 @@
 //              on the ground from where the game lays its own shadow, each
 //              sprite as if it turned to face the sun (docs/PORT_HD2D.md
 //              section 20).
-// Figures (sprites) get no top light and no occlusion shade, cast none, and
-// are no source of bounce or glow; bounce, glow and the scenery's cast
+// Figures (sprites) get no top light and no occlusion shade (but see pass 24:
+// with CHARACTERS they take a light of their own, and their near-white pixels
+// glow), cast none, and are no source of bounce; bounce, glow and the scenery's cast
 // shadows fall on them, and they cast their own shadows as silhouettes. A
 // distant backdrop (far behind the focus, by the depth of field's measure) is
 // a painting: neither lit, shaded nor a source.
@@ -55,6 +56,8 @@
 //   14     the scenery's cast shadows, marched toward the sun;
 //   15     the characters' shadows, laid on the ground;
 //   16, 17 the shadows smoothed along surfaces;
+//   24     with the sprites in the light (CHARACTERS), after 9: each sprite
+//          pixel's sun, rim and shade at its feet, into `terms`;
 //   18     the fog's colour: one group sums the grid into the frame's block;
 //   22, 23 light shafts, on the quarter grid: their sources, then each
 //          quarter pixel gathers them back toward the sun;
@@ -65,6 +68,10 @@
 //          pixel's, so they stop at an object's outline. The same passes'
 //          results serve both copies of a frame drawn wide (the copy of VRAM
 //          reads them at `layer`).
+// Cloud shadows (xg-rgcf.5.17) are made in the composite, with the cast
+// shadows: each pixel's place in the room, carried up along the sun to a
+// cloud layer of drifting noise fixed to the room; the cloud and the cast
+// shadow keep the same sun off, so the darker of the two counts.
 // Fog and the colour grade (docs/PORT_HD2D.md section 27) come last, on the
 // shown colour: fog thickens past the focus by depth toward a colour from
 // the room's own farthest scenery; the grade cools the shadows and warms the
@@ -104,7 +111,8 @@ layout(set = 0, binding = 21) uniform sampler2D castLayer;   // shadowImg
 // The frame's span buffer: at block (pc.lens.w, in vec4s) the sun and the
 // shadow's darkness, the count of ground points, then the ground points
 // (vk.c lightBlock).
-// The fog's colour is written there too (FOG_SLOT), by pass 18.
+// The fog's colour is written there too (FOG_SLOT), by pass 18; after it the
+// light shafts' settings (SHAFT_SLOT) and the clouds' (CLOUD_SLOT, two).
 layout(std430, set = 0, binding = 22) buffer Spans { vec4 block[]; };
 // The same buffer as words: the particles' tile masks, set with atomicOr.
 layout(std430, set = 0, binding = 22) buffer SpanWords { uint words[]; };
@@ -134,7 +142,7 @@ layout(push_constant) uniform Light {
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
 const uint DEPTH_FIGURE = 0x40000000u;
-const int DEBUG = 1, ALL = 2;
+const int DEBUG = 1, ALL = 2, CHARACTERS = 4; // CHARACTERS: the sprites take the lighting too (xg-rgcf.5.19)
 
 // A depth code fits a 16-bit float: the view depth for scenery, its negative
 // for a figure, 0 where there is none (nothing drawn, or a kept picture).
@@ -201,12 +209,37 @@ const float SHAFT_FAR_FROM = 0.44, SHAFT_FAR_TO = 0.50;
 const int SHAFT_STEPS = 16;
 const float SHAFT_FADE = 2.5, SHAFT_BEAMS = 1.1, SHAFT_SUN = 0.16, SHAFT_REACH = 0.55;
 const vec3 SUN_COLOUR = vec3(1.0, 0.94, 0.80);
+// Cloud shadows (xg-rgcf.5.17, carl chose the large soft clouds from the
+// prototypes, work/hd2d/light/proto18.py): their settings' place in the block
+// (x: how much of the sun a cloud takes, 0 none; y: a cloud's size, view
+// units; zw: the drift, in cloud sizes; then xyz: the room's origin in view
+// space, w: 1 where the far backdrop is a painting, vk.c lightBlock). The
+// cover is a noise of four octaves whose spread is CLOUD_SPREAD about its
+// mean of 0.5: a cloud stands where it is CLOUD_EDGE spreads above the mean
+// (40% of the ground under cloud), its edge CLOUD_SOFT spreads each way; the
+// sun's height is taken as at least CLOUD_LOW_SUN when a point is carried up
+// to the clouds.
+const int CLOUD_SLOT = 4 + MAX_FIGURES;
+const float CLOUD_SPREAD = 0.132, CLOUD_EDGE = 0.253, CLOUD_SOFT = 0.6, CLOUD_LOW_SUN = 0.2;
 const float FOG_FAR_FROM = 1.2, FOG_FAR_TO = 3.0;
 const vec3 FOG_NEUTRAL = vec3(0.66, 0.70, 0.76);
 // The vignette starts darkening this far from the middle (of the way to the corners).
 const float VIGNETTE_FROM = 0.45;
 const float FIGURE_HEIGHT = 96.0, FIGURE_WIDTH = 32.0, FIGURE_DEPTH = 0.15, GROUND_DEPTH = 0.05;
 const float FIGURE_FADE = 0.8 * FIGURE_HEIGHT, FIGURE_FADE_TO = 0.15;
+// The sprites in the lighting (xg-rgcf.5.19, carl chose "rounded + rim" from
+// the prototypes, work/hd2d/light/proto19.py): each row of a sprite lit by the
+// sun as a cylinder facing the camera, with a soft wrap, relative to the row's
+// mean (FIGURE_ROUND at Medium); a thin edge toward the sun (FIGURE_RIM steps
+// of a PS1 pixel, FIGURE_RIM_GAIN of the sprite's own colour in the sun's);
+// the scenery's shade at the sprite's feet, fading up it as the shadows do
+// (FIGURE_SHADE of it, at most FIGURE_SHADE_MOST); the farthest a row is
+// scanned each way (PS1 pixels); the glow from what is near white only, at a
+// share of the scenery's.
+const float FIGURE_WRAP = 0.6, FIGURE_ROUND = 0.55, FIGURE_RIM_GAIN = 0.9, FIGURE_SHADE = 0.6, FIGURE_SHADE_MOST = 0.6;
+const int FIGURE_RIM = 2, FIGURE_SCAN = 24;
+const float FIGURE_GLOW_FROM = 0.86, FIGURE_GLOW = 0.5;
+const float TOP_MEDIUM = 0.45; // scene.c lightTop[2]: the sprites' light is scaled by the top light's strength over it
 
 vec3 light(uint word) {
     vec3 c = vec3(float(word & 255u), float((word >> 8) & 255u), float((word >> 16) & 255u)) / 255.0;
@@ -273,6 +306,11 @@ void prepare(ivec2 t) {
             float peak = max(c.r, max(c.g, c.b));
             float k = clamp((peak - GLOW_FROM * GLOW_FROM) / (GLOW_TO * GLOW_TO - GLOW_FROM * GLOW_FROM), 0.0, 1.0);
             source += c * (k * k * (3.0 - 2.0 * k) * backdropFade(code));
+        } else if (code < 0.0 && (pc.flags & CHARACTERS) != 0) {
+            // A sprite's: only what is near white (a lamp, a glowing blade; its pale cloth is no light).
+            float peak = max(c.r, max(c.g, c.b));
+            float k = clamp((peak - FIGURE_GLOW_FROM * FIGURE_GLOW_FROM) / (1.0 - FIGURE_GLOW_FROM * FIGURE_GLOW_FROM), 0.0, 1.0);
+            source += c * (FIGURE_GLOW * k * k * (3.0 - 2.0 * k));
         }
     }
     count = max(count, 1.0);
@@ -472,6 +510,53 @@ void shadeBlur(ivec2 t, ivec2 axis, bool second) {
     }
     if (second) imageStore(terms, t, own);
     else imageStore(tempB, t, own);
+}
+
+// Pass 24, after the shade is smoothed: a sprite pixel's part of the light, in
+// `terms` (scenery leaves sprite pixels empty there): r, the sun's term (its
+// row lit as a cylinder, less the row's mean); g, the scenery's shade at the
+// sprite's feet, faded by the height above them; b, its depth code; a, the
+// rim toward the sun.
+bool sameFigure(ivec2 s, float z) {
+    if (s.x < 0 || s.y < 0 || s.x >= pc.work.x || s.y >= pc.work.y) return false;
+    float c = imageLoad(geo, s).a;
+    return c < 0.0 && abs(-c - z) <= 0.05 * z;
+}
+
+float cylinder(float nx, vec3 sun) {
+    float lit = nx * sun.x - sqrt(max(1.0 - nx * nx, 0.0)) * sun.z;
+    return clamp((lit + FIGURE_WRAP) / (1.0 + FIGURE_WRAP), 0.0, 1.0);
+}
+
+void figureLight(ivec2 t) {
+    float code = imageLoad(geo, t).a;
+    int b = int(pc.lens.w);
+    if (code >= 0.0 || b < 0) return;
+    float z = -code;
+    vec3 sun = normalize(block[b].xyz);
+    // The row's run of this sprite.
+    int left = 0, right = 0;
+    while (left < FIGURE_SCAN && sameFigure(t - ivec2(left + 1, 0), z)) left++;
+    while (right < FIGURE_SCAN && sameFigure(t + ivec2(right + 1, 0), z)) right++;
+    float halfWidth = max(float(left + right + 1) * 0.5, 1.0);
+    float nx = clamp((float(left) + 0.5 - halfWidth) / halfWidth, -1.0, 1.0);
+    float mean = 0.0;
+    for (int k = 0; k < 8; k++) mean += cylinder((float(k) + 0.5) / 4.0 - 1.0, sun);
+    float sunTerm = cylinder(nx, sun) - mean / 8.0;
+    // The rim: this sprite ends within FIGURE_RIM PS1 pixels toward the sun.
+    vec2 way = length(sun.xy) > 1.0e-3 ? normalize(sun.xy) : vec2(0.0, -1.0);
+    float rim = 0.0;
+    for (int k = 1; k <= FIGURE_RIM; k++) {
+        if (!sameFigure(t + ivec2(round(way * float(k))), z)) { rim = 1.0 - float(k - 1) / float(FIGURE_RIM); break; }
+    }
+    // The scenery's shade at the feet: the first scenery pixel below in the column.
+    float shade = 0.0, tall = FIGURE_HEIGHT * pc.view.w / z; // a character's height here, PS1 pixels
+    for (int k = 1; k <= int(tall) + 2 && t.y + k < pc.work.y; k++) {
+        vec4 v = imageLoad(terms, t + ivec2(0, k));
+        if (v.b > 0.0) { shade = v.g * exp(-float(k) / (0.8 * tall)); break; }
+        if (v.b == 0.0) break; // nothing drawn below: no ground to take it from
+    }
+    imageStore(terms, t, vec4(sunTerm, shade, code, rim));
 }
 
 // The sources of 4x4 PS1 pixels as one: their light summed, at the depth
@@ -862,6 +947,59 @@ vec3 shaftLight(vec2 at, uint raw, int b) {
     return s.x * light;
 }
 
+// Cloud shadows: a value noise on a lattice that repeats every 256 cells, so
+// the cover repeats every 512 cloud sizes and the drift can wrap there
+// (scene.c CLOUD_PERIOD) without a jump.
+float cloudHash(ivec2 i, uint seed) {
+    uvec2 u = uvec2(i & 255);
+    uint h = u.x * 374761393u + u.y * 668265263u + seed * 2147483647u;
+    h = (h ^ (h >> 13)) * 1274126177u;
+    return float((h ^ (h >> 16)) & 0xFFFFu) / 65535.0;
+}
+
+float cloudNoise(vec2 p, uint seed) {
+    vec2 i = floor(p), f = p - i;
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    ivec2 k = ivec2(i);
+    return mix(mix(cloudHash(k, seed), cloudHash(k + ivec2(1, 0), seed), u.x),
+               mix(cloudHash(k + ivec2(0, 1), seed), cloudHash(k + ivec2(1, 1), seed), u.x), u.y);
+}
+
+// How much cloud covers a point of the cloud layer (in cloud sizes): four
+// octaves, the place warped a little first so the shapes are not grid-like.
+float cloudCover(vec2 p) {
+    p += 0.35 * (vec2(cloudNoise(p * 0.5, 3u), cloudNoise(p * 0.5 + vec2(5.0, 1.0), 4u)) - 0.5);
+    float total = 0.0, amp = 1.0, sum = 0.0, f = 1.0;
+    for (int k = 0; k < 4; k++) {
+        total += amp * cloudNoise(p * f, 11u + uint(k));
+        sum += amp;
+        amp *= 0.5;
+        f *= 2.0;
+    }
+    return smoothstep(CLOUD_EDGE - CLOUD_SOFT, CLOUD_EDGE + CLOUD_SOFT, (total / sum - 0.5) / CLOUD_SPREAD);
+}
+
+// The cloud between a point of the frame (at, PS1 pixels; z its view depth)
+// and the sun: the point is carried up along the sun to the cloud layer and
+// read there, on axes fixed in the room as the sun is (along its way across
+// the ground and across it), so the shadows keep their places on the ground
+// as the camera moves and slant across walls.
+float cloudAt(vec2 at, float z, int b) {
+    vec4 s = block[b + CLOUD_SLOT], o = block[b + CLOUD_SLOT + 1];
+    vec3 up = pc.view.xyz, sun = block[b].xyz;
+    vec3 along = sun - up * dot(sun, up);
+    float length2 = dot(along, along);
+    if (length2 < 1.0e-6) along = cross(up, abs(up.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0));
+    along = normalize(along);
+    vec3 across = cross(up, along);
+    vec3 rel = place(at, z) - o.xyz;
+    float height = dot(rel, up);
+    float sunUp = max(dot(sun, up), CLOUD_LOW_SUN);
+    vec2 g = vec2(dot(rel, along) - height * dot(sun, along) / sunUp, dot(rel, across)) / max(s.y, 1.0) + s.zw;
+    float cover = cloudCover(g);
+    return o.w > 0.0 ? cover * backdropFade(z) : cover;
+}
+
 // The warm and cool grade on a shown colour, by amount k (1: the agreed
 // look): shadows toward cool, highlights toward warm, a touch more colour
 // and contrast.
@@ -911,6 +1049,24 @@ void composite(ivec2 l) {
         }
         if (total > 1.0e-5) { top /= total; shade /= total; } else { top = 0.0; shade = 0.0; }
     }
+    // A sprite's own terms (pass 24): the four grid pixels around, those of a sprite at its depth.
+    vec4 figureTerms = vec4(0.0);
+    if (code < 0.0 && (pc.flags & CHARACTERS) != 0) {
+        vec2 f = at - 0.5;
+        ivec2 t0 = ivec2(floor(f));
+        vec2 w = f - vec2(t0);
+        float total = 0.0, z = -code;
+        for (int k = 0; k < 4; k++) {
+            ivec2 o = ivec2(k & 1, k >> 1);
+            vec4 v = imageLoad(terms, inside(t0 + o));
+            if (v.b >= 0.0) continue;
+            float weight = (o.x == 1 ? w.x : 1.0 - w.x) * (o.y == 1 ? w.y : 1.0 - w.y);
+            weight = (weight + 0.02) * exp(-abs(-v.b - z) / (0.02 * z));
+            figureTerms += vec4(v.r, v.g, 0.0, v.a) * weight;
+            total += weight;
+        }
+        figureTerms = total > 1.0e-5 ? figureTerms / total : vec4(0.0);
+    }
     vec3 pool = vec3(0.0);
     if (code != 0.0 && (all || pc.strength.z > 0.0)) {
         float z = abs(code);
@@ -940,10 +1096,12 @@ void composite(ivec2 l) {
     int b = int(pc.lens.w);
     float dark = b >= 0 ? block[b].w : 0.0;
     float shadow = code != 0.0 && b >= 0 && (all || dark > 0.0) ? castAt(at, uv, code) : 0.0;
+    float cloudDark = b >= 0 ? block[b + CLOUD_SLOT].x : 0.0;
+    float cloud = code != 0.0 && cloudDark > 0.0 ? cloudAt(at, abs(code), b) : 0.0;
 
     if ((pc.flags & DEBUG) != 0) {
-        // Red: shade and cast shadows; green: top light around a middle; blue: glow and bounce.
-        vec3 shown = vec3(clamp(max(shade * SHADE_GAIN, shadow), 0.0, 1.0), 0.5 + 0.5 * top,
+        // Red: shade, cast shadows and clouds; green: top light around a middle; blue: glow and bounce.
+        vec3 shown = vec3(clamp(max(max(shade * SHADE_GAIN, shadow), cloud), 0.0, 1.0), 0.5 + 0.5 * top,
                           clamp(dot(halo + pool, vec3(0.3333)), 0.0, 1.0));
         uvec3 o = uvec3(clamp(shown, 0.0, 1.0) * 255.0 + 0.5);
         imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
@@ -955,15 +1113,29 @@ void composite(ivec2 l) {
         f *= f;
         c = f > 1.0 ? brighten(c, vec3(f)) : c * f;
     }
+    if (code < 0.0 && (pc.flags & CHARACTERS) != 0) {
+        // The sprites in the light, by the top light's strength (Medium's: 1).
+        float k = pc.strength.x / TOP_MEDIUM;
+        c *= max(1.0 + FIGURE_ROUND * k * figureTerms.r, 0.0);
+        c *= 1.0 + FIGURE_RIM_GAIN * k * figureTerms.a * SUN_COLOUR;
+        float s = 1.0 - clamp(FIGURE_SHADE * pc.strength.y * SHADE_GAIN * figureTerms.g, 0.0, FIGURE_SHADE_MOST);
+        c *= s * s;
+    }
     if (pc.strength.z > 0.0) c = brighten(c, 1.0 + pc.strength.z * pool);
     if (code > 0.0 && pc.strength.y > 0.0) {
         float s = 1.0 - clamp(pc.strength.y * SHADE_GAIN * shade, 0.0, SHADE_MOST);
         c *= s * s;
     }
-    if (dark > 0.0 && shadow > 0.0) {
-        // A painted light (a window, a lamp, a fire) stays as bright as it is painted.
-        float own = max(c.r, max(c.g, c.b));
-        float s = 1.0 - clamp(dark * shadow * (1.0 - smoothstep(SHADOW_KEEP_FROM, SHADOW_KEEP_TO, own)), 0.0, SHADOW_MOST);
+    // Cast shadows and clouds both keep the sun off: where both fall, the
+    // darker of the two (a cloud over a shadow does not darken it again).
+    // In a cast shadow a painted light (a window, a lamp, a fire) stays as
+    // bright as it is painted; a cloud dims everything under it alike (the
+    // same rule would leave a bright path's light grains lit and darken the
+    // rest, a speckle instead of a shadow).
+    float own = max(c.r, max(c.g, c.b));
+    float sunOff = max(dark * shadow * (1.0 - smoothstep(SHADOW_KEEP_FROM, SHADOW_KEEP_TO, own)), cloudDark * cloud);
+    if (sunOff > 0.0) {
+        float s = 1.0 - clamp(sunOff, 0.0, SHADOW_MOST);
         c *= s * s;
     }
     if (pc.strength.w > 0.0) c += pc.strength.w * halo * (1.0 - clamp(c, 0.0, 1.0)); // never past white
@@ -1006,7 +1178,7 @@ void composite(ivec2 l) {
 // their order, those nearer than what is drawn there. Nothing over a pixel
 // where nothing or a kept picture is drawn.
 const int PARTICLES_MAX = 2048, PARTICLE_EMBERS = 1536; // embers from this index on
-const int PART_SLOT = 4 + MAX_FIGURES;                // after the fog's colour (vk.c LIGHT_BLOCK_BYTES)
+const int PART_SLOT = 6 + MAX_FIGURES;                // after the clouds' settings (vk.c LIGHT_BLOCK_BYTES)
 const int PART_REC = PART_SLOT + 5, PART_MASK = PART_REC + 3 * PARTICLES_MAX;
 const int PARTICLE_TILES = 64 * 16; // the masks' room (vk.c PARTICLE_TILES)
 
@@ -1260,6 +1432,7 @@ void main() {
     case 7: topAndShade(t); break;
     case 8: shadeBlur(t, ivec2(1, 0), false); break;
     case 9: shadeBlur(t, ivec2(0, 1), true); break;
+    case 24: figureLight(t); break;
     case 12: glowAcross(t); break;
     case 13: glowDown(t); break;
     case 14: shadowMarch(t); break;

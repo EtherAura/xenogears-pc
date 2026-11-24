@@ -221,10 +221,14 @@ std::vector<Spec>& table() {
     static const char* const dofRanges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
     add("depth_of_field_focus", N_("Focus range"), [](int) { return sceneDofFocus(); },
         [](int, int v) { sceneSetDofFocus(v); }, 1, dofRanges, 3);
+    add("depth_of_field_dialogue", N_("Dialogue focus"), [](int) { return sceneDofDialogue(); },
+        [](int, int v) { sceneSetDofDialogue(v); }, 1, offOn, 2);
     add("tilt_shift", N_("Tilt-shift"), [](int) { return sceneTiltShift(); }, [](int, int v) { sceneSetTiltShift(v); }, 0,
         dofLevels, 4);
     add("lighting", N_("Lighting"), [](int) { return sceneLighting(); }, [](int, int v) { sceneSetLighting(v); }, 0,
         dofLevels, 4);
+    add("lighting_characters", N_("Light on characters"), [](int) { return sceneLightCharacters(); },
+        [](int, int v) { sceneSetLightCharacters(v); }, 1, offOn, 2);
     add("glow", N_("Glow"), [](int) { return sceneGlow(); }, [](int, int v) { sceneSetGlow(v); }, 0, dofLevels, 4);
     add("shadows", N_("Shadows"), [](int) { return sceneShadows(); }, [](int, int v) { sceneSetShadows(v); }, 0, dofLevels, 4);
     add("fog", N_("Fog"), [](int) { return sceneFog(); }, [](int, int v) { sceneSetFog(v); }, 0, dofLevels, 4);
@@ -238,6 +242,8 @@ std::vector<Spec>& table() {
         dofLevels, 4);
     add("light_shafts", N_("Light shafts"), [](int) { return sceneLightShafts(); },
         [](int, int v) { sceneSetLightShafts(v); }, 0, dofLevels, 4);
+    add("cloud_shadows", N_("Cloud shadows"), [](int) { return sceneCloudShadows(); },
+        [](int, int v) { sceneSetCloudShadows(v); }, 0, dofLevels, 4);
     add("present_filter", N_("Filter"), [](int) { return presentFilter(); }, [](int, int v) { presentSetFilter(v); }, 0,
         filterNames, 5);
     add("present_movie_filter", N_("Movies"), [](int) { return presentMovieFilter() - PRESENT_FILTER_SAME; },

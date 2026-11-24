@@ -12,19 +12,35 @@
 #include "main/task.h"
 
 /* The sprite bytecode keeps return addresses in 24 bits on the animation
- * stack, and the PS1 takes the top byte from the current bytecode pointer.
- * The PC takes the address nearest the current one with those low 24 bits
- * (a call and its return lie within one bytecode block). */
-static inline u8* pcU24Address(u8* near, s32 low24) {
-    uptr n = (uptr)near;
-    uptr p = (n & ~(uptr)0xFFFFFF) | ((uptr)low24 & 0xFFFFFF);
+ * stack (call 0xE2 pushes them, return 0x85 pops them), and the PS1 takes the
+ * top byte from the current bytecode pointer. The PC keeps an address's
+ * offset from the game heap's start (pcU24Of): the bytecode lives in heap
+ * blocks, whose offsets are the same in every build and link layout, so the
+ * stack's bytes are too, and a state converted into another layout returns to
+ * the same code (the address's own low 24 bits, kept before, named the
+ * writer's heap: a sprite mid-call returned elsewhere after a load into a
+ * layout moved by other than a multiple of 16 MiB, xg-htn.60.7). The return
+ * takes the address nearest the current one with those low 24 bits (a call
+ * and its return lie within one bytecode block); within one run that is the
+ * address pushed, whatever the base. */
+u8* portHeapStart(void);
 
-    if (p > n + 0x800000) {
+static inline s32 pcU24Of(u8* p) {
+    return (s32)(((uptr)p - (uptr)portHeapStart()) & 0xFFFFFF);
+}
+
+static inline u8* pcU24Address(u8* near, s32 low24) {
+    uptr h = (uptr)portHeapStart();
+    uptr n = (uptr)near - h;
+    uptr p = (n & ~(uptr)0xFFFFFF) | ((uptr)low24 & 0xFFFFFF);
+    sptr d = (sptr)(p - n);
+
+    if (d > 0x800000) {
         p -= 0x1000000;
-    } else if (p + 0x800000 < n) {
+    } else if (d < -0x800000) {
         p += 0x1000000;
     }
-    return (u8*)p;
+    return (u8*)(p + h);
 }
 
 /* Three fixed-point coordinates without VECTOR's padding word (Noah: FP_VEC3). */

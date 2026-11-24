@@ -50,6 +50,11 @@ static void refused(const char* name, const char* path, const uint8_t* file, siz
 }
 
 int main(int argc, char** argv) {
+    if (argc > 1 && strcmp(argv[1], "--image") == 0) { /* for tools/state_schema.py's identity of this file */
+        printf("image %s bias %llx build %s path %s\n", stateImageIdText(), (unsigned long long)stateImageBias(),
+               stateBuildText(), stateImagePath() ? stateImagePath() : "-");
+        return stateImageId() == NULL;
+    }
     char base[1024], path[1100], badMagic[1100], badFormat[1100], tmp[1200];
     snprintf(base, sizeof base, "%s/xg-statefiletest-%u", argc > 1 ? argv[1] : SDL_GetCurrentDirectory(),
              (unsigned)SDL_GetTicksNS());
@@ -101,6 +106,16 @@ int main(int argc, char** argv) {
     CHECK(file[8] == STATE_FORMAT && file[9] == 0 && file[10] == 0 && file[11] == 0);
     CHECK(file[12] == 0 && file[13] == 1 && file[14] == 0 && file[15] == 0); /* 256 */
     CHECK(file[220] == 1 && file[221] == 0 && file[222] == 0 && file[223] == 0);
+    uint64_t bias = 0; /* the process's load bias at byte 232 (statefile.c H_IMAGE) */
+    for (int i = 0; i < 8; i++) bias |= (uint64_t)file[232 + i] << (8 * i);
+    CHECK(bias == (uint64_t)stateImageBias());
+
+    /* The image's identity: known, stable, in hex; at the link addresses the build id itself (ELF). */
+    const uint8_t* image = stateImageId();
+    CHECK(image != NULL && strlen(stateImageIdText()) == 32 && stateImageId() == image);
+#ifndef _WIN32
+    CHECK(image != NULL && (memcmp(image, stateBuildId(), 16) == 0) == (stateImageBias() == 0));
+#endif
 
     /* The header and the thumbnail. */
     StateHeader r;
@@ -125,6 +140,7 @@ int main(int argc, char** argv) {
     CHECK(r.bodySize == BODY_SIZE);
     CHECK(r.bodyHash == h.bodyHash);
     CHECK(strcmp(r.appVersion, "9.8.7-synth") == 0);
+    CHECK(r.imageBias == (uint64_t)stateImageBias());
     CHECK(thumbBack != NULL && memcmp(thumbBack, thumb, sizeof thumb) == 0);
     free(thumbBack);
 
@@ -250,7 +266,8 @@ int main(int argc, char** argv) {
         printf("statefiletest: %d failures\n", failures);
         return 1;
     }
-    printf("statefiletest: ok (header fields, engine byte 220, thumbnail, body; bad magic and format refused; a "
-           "portable trailer and its strings, unseen by the plain reader, damaged ones refused; a filed schema)\n");
+    printf("statefiletest: ok (header fields, engine byte 220, the load bias, thumbnail, body; bad magic and format "
+           "refused; the image id; a portable trailer and its strings, unseen by the plain reader, damaged ones "
+           "refused; a filed schema)\n");
     return 0;
 }

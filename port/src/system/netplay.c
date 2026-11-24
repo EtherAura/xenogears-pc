@@ -46,13 +46,36 @@
  * game makes them: their starting levels, equipment and Gears, never anyone's
  * save), and the formation asked for at once (XG_VERSUS): the battle starts
  * when the field first lets the party walk. "Party in its Gears" is the
- * host's (the settings below). When the versus battle is over (whoever won),
- * the session ends.
+ * host's (the settings below).
+ *
+ * A match's end (xg-htn.35.142): when the versus battle is over (whoever
+ * won), or a PLAYER1 VS PLAYER2 bout's victory screen is up, both players
+ * choose Rematch or Leave (port/src/game/main/arena.c), each on their own
+ * pad. The choice is pad input like any other: both games read the same two
+ * pads' bytes at every vblank, so both decide at the same frame of the same
+ * vblank, and what follows is the game's own. Both Rematch: the game's soft
+ * reset on both sides at that frame, into the session's start again (its
+ * options are still set: Battling's main menu, now its entry bytes asking
+ * for the same two Gears straight away, port/src/game/battling/arena.c; or
+ * field 22 with the formation asked for again, netplaySoftReset and
+ * system/arena.c pcArenaSoftReset). The vblank count, the lockstep and the
+ * state hash go on through the reset: no reconnect, no new handshake, and
+ * both sides' states stay the same (a soft reset in a session from
+ * Start+Select+L1+R1, which both games see too, does the same). Leave, by
+ * either: the session ends ("over leave"), as below.
+ *
+ * The end of a session: one started from the F1 menu (XG_NETPLAY_STATUS)
+ * quits, and the game that started it goes on (netplay_launch.c); one from
+ * the command line goes to the title screen instead (its start's options
+ * cleared, the settings the session held let go and the memory cards put
+ * back in as the settings have them, the game's soft reset at the next
+ * vblank; the stepped clock stays, held to real time: hw.c chose it at the
+ * start), unless its window was closed.
  *
  * Settings: those that change the game (gameplay: difficulty, enemy and
  * reward multipliers, encounters, deathblows, retry, text speed and its
  * holding and auto-advance, the original-game fixes; the arena's party in
- * Gears) are the host's on both sides: it sends them in the handshake
+ * Gears and battle music) are the host's on both sides: it sends them in the handshake
  * (SETTINGS, each range-checked), and both hold them for the session
  * (settingsPin: the settings menu shows them locked, a change is ignored,
  * nothing is written). Both also play without what one may have and the
@@ -69,7 +92,8 @@
  * joining <host:port>, connected <address> <delay>, waiting, paused, back,
  * lost, resumed, moved <address>,
  * over <why> [vblank] (why: error nobody noanswer build region busy desync
- * disc left silent battling quit address; versus p1|p2|escaped: who won).
+ * disc left silent battling quit address leave; versus p1|p2|escaped: who
+ * won), rematch.
  *
  * Desyncs: every vblank each side hashes its state (rand()'s seed, gameState,
  * and in Battling both Gears' records) and sends the hash with its input; a
@@ -107,6 +131,7 @@
 #include "battle/battle.h"
 #include "pc_arena.h"
 #include "cd/cd.h"
+#include "card/card.h"
 #include "arena.h"
 #include "gameplay.h"
 #include "hw.h"
@@ -132,6 +157,9 @@ void srand(u32 seed);
 extern void spuOutputClockGap(void) __attribute__((weak));
 extern BattlingGear battlingGear1;
 extern BattlingGear battlingGear2;
+void softReboot(void); /* src/main/kernel.c: the game's soft reset */
+int stateRestartAvailable(const char** why);          /* savestate.c (stateimage.h) */
+void stateRequestRestart(int keep, void (*entry)(void));
 
 #if VERSION_JP
 #define REGION 'J'
@@ -163,6 +191,7 @@ static struct {
     uint64_t lostShown; /* the connection lost: when the note was last put up */
     int64_t blackoutAt; /* XG_NETPLAY_TEST_BLACKOUT=<vblank>:<ms> */
     uint64_t blackoutNs;
+    int after; /* a command-line session ended: the game plays on from the title, still held to real time */
 } N;
 
 void presentShowNote(const char* text); /* gpu/present.c */
@@ -210,6 +239,8 @@ static void logicList(NpSession* s) {
     logicAdd(s, "text_hold_fast", 0, 1, K_BOOL, pcGameplayTextHold() != 0);
     logicAdd(s, "text_auto_advance", 0, 10, K_INT, pcGameplayTextAutoAdvance());
     logicAdd(s, "arena_versus_gears", 0, 1, K_BOOL, pcVersusGearsSetting() != 0);
+    /* the battle music: the song is game state (the driver and the SPU run in the game) */
+    logicAdd(s, "arena_music", 0, ARENA_MUSIC_IDS, K_INT, pcArenaMusicSetting());
 }
 
 /* The session's settings held on this side (both sides). */
@@ -232,6 +263,8 @@ static void logicPin(const NpTerms* t) {
     }
     for (size_t i = 0; i < sizeof fixed / sizeof fixed[0]; i++) settingsPin(fixed[i][0], fixed[i][1]);
 }
+
+static void setEnv(const char* name, const char* value);
 
 static void say(const char* fmt, ...) {
     va_list ap;
@@ -268,11 +301,34 @@ static void statusEnd(const NpSession* s) {
 
 /* How a session ends of itself, the same on both sides (the BYE carries it:
  * the side that gets there first tells the other, a few vblanks behind). */
-enum { END_NONE, END_BATTLING, END_VERSUS_P1, END_VERSUS_P2, END_VERSUS_ESCAPED, END_COUNT };
-static const char* const endWords[END_COUNT] = {NULL, "battling", "versus p1", "versus p2", "versus escaped"};
+enum { END_NONE, END_BATTLING, END_VERSUS_P1, END_VERSUS_P2, END_VERSUS_ESCAPED, END_LEAVE, END_COUNT };
+static const char* const endWords[END_COUNT] = {NULL, "battling", "versus p1", "versus p2", "versus escaped", "leave"};
 static const char* const endTexts[END_COUNT] = {
     NULL, "Battling ended: the session is over", "the versus battle is over: player 1 won",
-    "the versus battle is over: player 2 won", "the versus battle is over: player 1 escaped"};
+    "the versus battle is over: player 2 won", "the versus battle is over: player 1 escaped",
+    "a player chose Leave: the session is over"};
+
+/* A command-line session over: the game goes on from the title screen (the
+ * header). The start's options cleared (an empty one is unset), the reset at
+ * the next vblank (savestate.c), as the player's Start+Select+L1+R1. */
+static void toTitle(void) {
+    static const char* const options[] = {"XG_BOOT_MODE", "XG_FIELD", "XG_PARTY", "XG_VERSUS", "XG_GAMESTATE",
+                                          "XG_MUSIC"};
+    const char* why;
+    for (size_t i = 0; i < sizeof options / sizeof options[0]; i++) setEnv(options[i], "");
+    /* The session is over (nothing to keep together now): the player's own
+     * settings and memory cards again (xg-htn.35.149). The title's game reads
+     * the cards as newly inserted. */
+    settingsUnpinAll();
+    cardImagesReload();
+    N.after = 1;
+    if (!stateRestartAvailable(&why)) {
+        say("the game cannot go back to the title (%s): it ends", why);
+        quitNow();
+    }
+    say("back to the title screen");
+    stateRequestRestart(0, softReboot);
+}
 
 /* The session ends (`end`, or END_NONE: the protocol's reason): a message (a
  * box with a window), the other side told, then the program's own shut-down. */
@@ -286,10 +342,33 @@ static void stop(int end) {
     else statusEnd(&N.np);
     npBye(&N.np, end);
     N.active = 0;
-    if (SDL_getenv("XG_HEADLESS") == NULL) {
+    if (SDL_getenv("XG_HEADLESS") == NULL && !(end == END_LEAVE && !N.status)) {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Xenogears netplay", text, NULL);
     }
-    quitNow();
+    if (N.status) {
+        quitNow(); /* the menu's session: the game that started it goes on */
+    }
+    presentShowNote(text);
+    toTitle();
+}
+
+/* port/src/system/arena.c: a player chose Leave at a match's end (both games
+ * at the same frame: the header). */
+void netplayLeave(void) {
+    if (N.active) stop(END_LEAVE);
+}
+
+/* port/src/system/reset.c (through arena.c): the game's soft reset in a
+ * session, a Rematch's or the players' own: the session's start again, not
+ * its end. */
+void netplaySoftReset(void) {
+    if (!N.active) return;
+    if (N.seenBattling || N.seenVersus) {
+        say("rematch at vblank %u: the session's start again", hwVSyncCount());
+        status("rematch");
+    }
+    N.seenBattling = 0;
+    N.seenVersus = 0;
 }
 
 static void note(NpSession* s, int what, const char* text) {
@@ -632,27 +711,9 @@ static uint64_t discHash(void) {
     return h;
 }
 
-void netplayPace(void) {
-    if (!N.active) {
-        netplayLaunchWait(); /* a session started from the menu: this game waits */
-        return;
-    }
-    int mode = pcWideGetMode();
-    if (N.np.terms.mode == NP_MODE_VERSUS) {
-        int versus = pcVersusSession();
-        if (versus == PC_VERSUS_IN) {
-            N.seenVersus = 1;
-        } else if (N.seenVersus && versus == PC_VERSUS_IDLE) {
-            int r = pcVersusLastResult();
-            stop(r == 0x81 ? END_VERSUS_P2 : (r & 0x40) ? END_VERSUS_ESCAPED : END_VERSUS_P1);
-            return;
-        }
-    } else if (mode == 4) {
-        N.seenBattling = 1;
-    } else if (N.seenBattling) {
-        stop(END_BATTLING);
-        return;
-    }
+/* Each vblank held back to real time (the stepped clock alone would run as
+ * fast as the machine can). */
+static void paceToRealTime(void) {
     uint64_t wall = SDL_GetTicksNS();
     double emu = hwNow();
     if (!N.paced) {
@@ -672,6 +733,32 @@ void netplayPace(void) {
          * sound arrives and the session would stay silent (xg-htn.35.145). */
         if (spuOutputClockGap) spuOutputClockGap();
     }
+}
+
+void netplayPace(void) {
+    pcArenaVBlank(); /* the Battle arena's matches (system/arena.c) */
+    if (!N.active) {
+        if (N.after) paceToRealTime(); /* a command-line session's game after it */
+        netplayLaunchWait(); /* a session started from the menu: this game waits */
+        return;
+    }
+    int mode = pcWideGetMode();
+    if (N.np.terms.mode == NP_MODE_VERSUS) {
+        int versus = pcVersusSession();
+        if (versus == PC_VERSUS_IN) {
+            N.seenVersus = 1;
+        } else if (N.seenVersus && versus == PC_VERSUS_IDLE) {
+            int r = pcVersusLastResult();
+            stop(r == 0x81 ? END_VERSUS_P2 : (r & 0x40) ? END_VERSUS_ESCAPED : END_VERSUS_P1);
+            return;
+        }
+    } else if (mode == 4) {
+        N.seenBattling = 1;
+    } else if (N.seenBattling) {
+        stop(END_BATTLING);
+        return;
+    }
+    paceToRealTime();
 }
 
 void netplayIdle(void) {

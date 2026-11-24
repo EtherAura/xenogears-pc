@@ -1,5 +1,6 @@
 """The state schema in C (port/src/system/stateschema.c) against the reference (tools/statecanon.py's Schema):
-every index the converter uses, printed by both from one build's schema, must be the same.
+every index the converter uses, printed by both from one build's schema, must be the same: as it is, and
+rebased by a load bias (each address plus it, as a position-independent build's process has them).
 
     test_stateschema_c.py [BUILD]     BUILD (default build/pc/schema) holds state_schema.json and stateschematest
 """
@@ -10,10 +11,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 import statecanon as cn
 
 
-def reference(build: Path) -> list[str]:
+BIASES = (0, 0x7F3A_5C40_0000, 0x5800000000 - 0x400000)  # none, a Linux PIE's, Android's reserved address
+
+
+def reference(build: Path, bias: int = 0) -> list[str]:
     raw = json.load(gzip.open(build / "state_schema.json.gz", "rt"))
-    s = cn.Schema(build)
-    out = [f"version {raw['version']}",
+    s = cn.Schema(build, bias)
+    raw["symbols"] = [[n, (a + bias) & cn.MASK64, z, k] for n, a, z, k in raw.get("symbols", [])]
+    out = [f"version {raw['version']}", f"image {raw.get('image', {}).get('id', '')}",
            f"counts {len(s.types)} {len(s.vars)} {len(raw['functions'])} {len(raw.get('symbols', []))} {len(s.scratch)}"]
     for tid in s.types:
         if tid in s.tid_name:
@@ -52,19 +57,22 @@ def main() -> int:
     if not exe.exists() or not schema.exists():
         print(f"test_stateschema_c: skipped: no {exe.name} or {schema.name} in {build}")
         return 0
-    got = subprocess.run([str(exe), str(schema)], capture_output=True, text=True)
-    if got.returncode:
-        print(f"test_stateschema_c: the C reader failed: {got.stderr.strip()}")
-        return 1
-    c, py = got.stdout.splitlines(), reference(build)
-    if c == py:
-        print(f"test_stateschema_c: the C schema's indexes equal the reference's ({len(py)} lines)")
-        return 0
-    bad = [(i, a, b) for i, (a, b) in enumerate(zip(c, py)) if a != b]
-    print(f"test_stateschema_c: {len(bad)} lines differ (C {len(c)}, reference {len(py)} lines)")
-    for i, a, b in bad[:12]:
-        print(f"  {i}: C   {a}\n  {i}: ref {b}")
-    return 1
+    failed = 0
+    for bias in BIASES:
+        got = subprocess.run([str(exe), str(schema), f"{bias:x}"], capture_output=True, text=True)
+        if got.returncode:
+            print(f"test_stateschema_c: the C reader failed: {got.stderr.strip()}")
+            return 1
+        c, py = got.stdout.splitlines(), reference(build, bias)
+        if c == py:
+            print(f"test_stateschema_c: bias {bias:#x}: the C schema's indexes equal the reference's ({len(py)} lines)")
+            continue
+        failed += 1
+        bad = [(i, a, b) for i, (a, b) in enumerate(zip(c, py)) if a != b]
+        print(f"test_stateschema_c: bias {bias:#x}: {len(bad)} lines differ (C {len(c)}, reference {len(py)} lines)")
+        for i, a, b in bad[:12]:
+            print(f"  {i}: C   {a}\n  {i}: ref {b}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

@@ -26,6 +26,7 @@
 
 void battlingMainTask(void);
 void pcArenaBattlingStart(void); /* include/pc_arena.h */
+void pcArenaBattlingMusic(void);
 s32 VSync(s32 mode);
 
 extern s32 battlingGpuTime; /* the VSync count at the last DrawSync */
@@ -318,9 +319,11 @@ void func_8008BB1C(uptr* saved) {
 /* ---- 0x80088BFC: a one-entry task table, then a DrawSync callback --------- */
 
 /* The PC's entry first tells a Battle arena session that it is in Battling
- * (port/src/game/main/arena.c; nothing happens without one). */
+ * (port/src/game/main/arena.c), and starts a match's music, which no field
+ * loaded (port/src/game/battling/arena.c); nothing happens without one. */
 static void pcBattlingMainTask(void) {
     pcArenaBattlingStart();
+    pcArenaBattlingMusic();
     battlingMainTask();
 }
 

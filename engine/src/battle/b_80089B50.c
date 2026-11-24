@@ -61,6 +61,9 @@ extern s32* pRunningOnDTL;
 extern s32 g_playTimeInVsync;                        /* play time in vsyncs */
 extern u16 newPadButtonForDialogs;                        /* pad 0 newly pressed */
 extern u16 newPadButtonForField;                        /* pad 0 pressed with auto-repeat */
+extern u16 newPadButtonForDialogs2; /* pad 1 newly pressed */
+extern u16 newPadButtonForField2;   /* pad 1 pressed with auto-repeat */
+int pcVersusMirrorPad2(void);       /* port/src/game/battle/mirror.c */
 extern u8 battleIsPaused;
 extern u8 battleInputButton;
 s32 isControllerConnected(s32);
@@ -271,6 +274,11 @@ void battleHandleInput(u8 arg0) {
             resetInputs();
         } else {
             while (loadInputFromVSyncBuffer()) {
+                if (pcVersusMirrorPad2()) {
+                    /* a mirror match: player 2's member's turn is pad 2's (mirror.c) */
+                    newPadButtonForField = newPadButtonForField2;
+                    newPadButtonForDialogs = newPadButtonForDialogs2;
+                }
                 if (battleRunningVar1[0] != 0 || battleVar2->m2DB_turnEnded != 0) {
                     button = 0xFF;
                     break;

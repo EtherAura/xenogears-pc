@@ -46,6 +46,8 @@ void settingsUnset(const char* key);
  * it is never written. settingsPinned: the settings menu shows it locked. */
 void settingsPin(const char* key, const char* value);
 int settingsPinned(const char* key);
+/* Every pin let go (a session's end): each key reads as before it again. */
+void settingsUnpinAll(void);
 
 /* Changes with every settingsSet and settingsPin (not with the environment,
  * which is read as it is): a module that keeps a value it reads on a hot path

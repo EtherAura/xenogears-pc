@@ -4,10 +4,18 @@
 The state schema of a PC build, read from its DWARF, and a coverage report of what a canonical state
 could not yet identify:
 
-    tools/state_schema.py BUILD [--json OUT] [--report-only] [--top N]
+    tools/state_schema.py BUILD [--json OUT] [--ship OUT] [--image IMAGE] [--dwarfdump TOOL] [--gcc GCC] [--quiet]
+    tools/state_schema.py --verify SHIPPED --image IMAGE [--stripped] [--portable]
+    tools/state_schema.py --verify-apk APK [--portable]
 
 BUILD is a configured port build whose executable has debug information (a RelWithDebInfo or Debug
 build: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo). Read with llvm-dwarfdump (the system's or the NDK's).
+The image is an ELF executable, the game library of a shared-library build (XG_SHARED: lib<name>.so,
+which the launcher loads, as Android's app does), or a Windows (MinGW, PE/COFF) executable. Addresses
+in the schema are the image's link addresses; a position-independent image runs at them plus its load
+bias, which states record (statecanon.py Schema(build, bias)). The schema names the image by its
+identity ("image": the game's stateImageId), which neither the load address nor stripping the debug
+information changes, so a game reading the schema beside it can tell it describes that image.
 
 The schema joins each native object to its stable identity:
   - a variable in a game module's sections (xgdata_<module> / xgbss_<module>) to its retail address in
@@ -19,12 +27,33 @@ The report counts what is not joined yet: module variables without a retail addr
 without an offset tag in types a state saves, unions, pointer fields, and the game C's heap allocation
 sites without a retail size (PC_HEAP_*).
 
+--ship OUT also writes the schema to hand out with the build (port/CMakeLists.txt XG_STATE_SCHEMA; the
+packages install it where port/src/system/stateportable.c looks): the same schema with its "exe" the image's
+file name, not the build machine's path, and its read-only ranges' file offsets those of the image stripped (a
+PE's sections move), in the packed form the game reads ("XGSCHEMA", the JSON's size, the JSON packed by
+statePack). The game names a schema by the hash of its JSON, so the packed form keeps the name of those bytes.
+--verify checks such a file against the image it ships with: it unpacks, it was read from that image (the
+identity), its file offsets are the image's stripped, and no string in it is an absolute path; --stripped also
+requires the image to carry no debug information (what a package ships), --portable a schema that lets its states
+convert to other builds (not "portable": false). --verify-apk does that for every game library of an Android APK
+(lib/<abi>/libxenogears*.so, stripped as the APK packs it) with its schema, assets/schemas/<abi>/<library>.xgschema
+(tools/build_android.sh), and requires no other schema there.
+
+An image compiled by clang (Android) has no debug information for extern declarations, which the generated data's
+types come from: the game C is compiled once more with the host's GCC (--gcc) to read what they are called, and
+each is the image's own type of that name (clang_declared). Without GCC the schema says "portable": false.
+
 Exit status: 0 when the schema was built (the gate only reports in P0), 1 when it could not be."""
-import argparse, gzip, json, re, shutil, subprocess, sys
+from __future__ import annotations  # (deferred: the build runs this with the system's Python, 3.11 here)
+
+import argparse, contextlib, functools, gzip, io, json, os, re, shlex, shutil, struct, subprocess, sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+import statecheck as sc  # noqa: E402 (game_library)
+from statecanon import state_hash  # noqa: E402 (the build id's hash, statecodec.c stateHash)
 KEEP_TAGS = {
     "DW_TAG_compile_unit", "DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_class_type", "DW_TAG_typedef",
     "DW_TAG_base_type", "DW_TAG_pointer_type", "DW_TAG_array_type", "DW_TAG_subrange_type",
@@ -35,7 +64,7 @@ KEEP_ATTRS = {
     "DW_AT_name", "DW_AT_byte_size", "DW_AT_type", "DW_AT_data_member_location", "DW_AT_location",
     "DW_AT_low_pc", "DW_AT_upper_bound", "DW_AT_count", "DW_AT_bit_size", "DW_AT_data_bit_offset",
     "DW_AT_specification", "DW_AT_abstract_origin", "DW_AT_decl_file", "DW_AT_declaration", "DW_AT_external",
-    "DW_AT_linkage_name", "DW_AT_encoding", "DW_AT_bit_offset",
+    "DW_AT_linkage_name", "DW_AT_encoding", "DW_AT_bit_offset", "DW_AT_producer",
 }
 TAG_RE = re.compile(r"^0x([0-9a-f]+):(\s+)(DW_TAG_\w+|NULL)")
 ATTR_RE = re.compile(r"^\s+(DW_AT_\w+)\s+\((.*)\)\s*$")
@@ -109,7 +138,12 @@ def state_annotations(roots: list[Path]):
     return names, counted, unions
 
 
+DWARFDUMP = None  # --dwarfdump
+
+
 def dwarfdump() -> str:
+    if DWARFDUMP:
+        return DWARFDUMP
     for c in ("llvm-dwarfdump", *sorted(Path.home().glob("Android/sdk/ndk/*/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-dwarfdump"))):
         p = shutil.which(str(c)) if isinstance(c, str) else (str(c) if c.exists() else None)
         if p:
@@ -124,9 +158,10 @@ def parse_value(v: str):
     m = re.match(r"0x([0-9a-f]+)(?: \"(.*)\")?$", v)
     if m:
         return int(m.group(1), 16)
-    m = re.match(r"DW_OP_addr 0x([0-9a-f]+)$", v)
+    # (an object at an offset into a block of merged globals: AArch64's clang merges a file's statics)
+    m = re.match(r"DW_OP_addr 0x([0-9a-f]+)(?:, DW_OP_plus_uconst 0x([0-9a-f]+))?$", v)
     if m:
-        return ("addr", int(m.group(1), 16))
+        return ("addr", int(m.group(1), 16) + int(m.group(2) or "0", 16))
     if v in ("true", "false"):
         return v == "true"
     if re.match(r"^-?\d+$", v):
@@ -134,17 +169,18 @@ def parse_value(v: str):
     return v
 
 
-def read_dies(exe: Path) -> dict:
-    """offset -> {tag, attrs, children, parent}; only the tags and attributes a schema needs, and only the
-    compile units of this repository (the game C, the generated sources, the port)."""
+def read_dies(exe: Path, build: Path, keep: set[str] = KEEP_TAGS) -> dict:
+    """offset -> {tag, attrs, children, parent}; only the tags (keep) and attributes a schema needs, and only
+    the compile units of this repository (the game C, the port) and of the build (the generated sources, gen/,
+    in the build's folder, which need not be in the repository's: /mnt/Games/scratch/...)."""
     dies: dict[int, dict] = {}
     stack: list[tuple[int, int]] = []  # (depth, offset)
     cur = None
     skip_cu = False
-    root = str(ROOT)
+    root, gen = str(ROOT), str(build)
     proc = subprocess.Popen([dwarfdump(), "--debug-info", str(exe)], stdout=subprocess.PIPE, text=True, bufsize=1 << 20)
     for line in proc.stdout:
-        m = TAG_RE.match(line)
+        m = TAG_RE.match(line) if line.startswith("0x") else None  # (an entry's line; its attributes are indented)
         if m:
             depth = (len(m.group(2)) - 1) // 2
             tag = m.group(3)
@@ -157,7 +193,7 @@ def read_dies(exe: Path) -> dict:
             if tag == "DW_TAG_compile_unit":
                 skip_cu = False
                 stack.clear()
-            if skip_cu or tag not in KEEP_TAGS:
+            if skip_cu or tag not in keep:
                 cur = None
                 stack.append((depth, -1))
                 continue
@@ -172,19 +208,435 @@ def read_dies(exe: Path) -> dict:
             continue
         a = ATTR_RE.match(line)
         if a and a.group(1) in KEEP_ATTRS:
-            cur["attrs"][a.group(1)] = parse_value(a.group(2))
+            v = parse_value(a.group(2))
+            if a.group(1) == "DW_AT_decl_file" and isinstance(v, str) and v and not v.startswith("/"):
+                # a build to hand out names its files from the repository (-ffile-prefix-map, port/CMakeLists.txt
+                # XG_DIST: "port/src/system/hw.c"): read as a development build's absolute names are, below
+                # (every test there looks for "/port/src/" and the like)
+                v = "/" + v
+            elif a.group(1) in ("DW_AT_decl_file", "DW_AT_name") and isinstance(v, str) and v.startswith("/") and \
+                    (a.group(1) == "DW_AT_decl_file" or cur["tag"] == "DW_TAG_compile_unit"):
+                # by its real path: a tree reached through a symbolic link (a worktree parked on another disk)
+                # names its files by the link, and ROOT and the build are resolved
+                v = real_path(v)
+            cur["attrs"][a.group(1)] = v
             if cur["tag"] == "DW_TAG_compile_unit" and a.group(1) == "DW_AT_name":
                 name = cur["attrs"]["DW_AT_name"]
                 # LTO's partitions ("<artificial>") hold the definitions of what was optimised across files
-                if root not in name and name != "<artificial>" and not name.startswith(("src/", "port/", "engine/", "gen/", "build/")):
+                if root not in name and gen not in name and name != "<artificial>" and \
+                        not name.startswith(("src/", "port/", "engine/", "gen/", "build/")):
                     skip_cu = True
                     del dies[next(o for o, d in reversed(list(dies.items())) if d is cur)]
                     cur = None
-    proc.wait()
+    if proc.wait() != 0:
+        raise SystemExit(f"state_schema: {dwarfdump()} --debug-info {exe} failed")
     return dies
 
 
+# ---- a clang image's declarations, read with the host's GCC (xg-htn.60.8) -----------------------------
+# The generated sources define the asm-defined data as byte arrays (gen/: u8 gameState[0x2358]) and the
+# headers declare their real types, by which main retypes them; without those a state's pointers there move
+# as bytes, and a conversion into another build keeps the writer's addresses. Clang writes no debug
+# information for extern declarations; GCC does. So for an image whose compile units come from clang, the
+# game C (the build's game_<module> targets, by CMake's compile commands: their defines, include folders and
+# dialect) is compiled once more with the host's GCC, only to read what each declaration's type is called: a
+# typedef, struct, union or enum, or a base type, by name, through pointers and arrays (their dimensions).
+# Each name is then the image's own type of that name (its own compile unit's first): no layout comes from
+# GCC, and the retyping's size check still guards each. The objects and what was read from them stay in the
+# build (state_schema_gcc/), each compiled again only when its command, its source or a header it includes
+# changes.
+
+DECL_FORMAT = 1  # how state_schema_gcc/*.json record an object's declarations; another value reads them again
+DECL_TAGS = {
+    "DW_TAG_compile_unit", "DW_TAG_variable", "DW_TAG_typedef", "DW_TAG_base_type", "DW_TAG_structure_type",
+    "DW_TAG_union_type", "DW_TAG_class_type", "DW_TAG_enumeration_type", "DW_TAG_pointer_type",
+    "DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type", "DW_TAG_atomic_type",
+    "DW_TAG_array_type", "DW_TAG_subrange_type", "DW_TAG_subroutine_type",
+}
+NAMED_KIND = {"DW_TAG_typedef": "typedef", "DW_TAG_structure_type": "struct", "DW_TAG_class_type": "struct",
+              "DW_TAG_union_type": "union", "DW_TAG_enumeration_type": "enum", "DW_TAG_base_type": "base"}
+GCC_BASE = {"short int": "short", "short unsigned int": "unsigned short", "long int": "long",
+            "long unsigned int": "unsigned long", "long long int": "long long",
+            "long long unsigned int": "unsigned long long"}  # GCC's names of the base types, as clang names them
+GCC_VALUE_FLAGS = ("-D", "-U", "-I", "-isystem", "-iquote", "-idirafter", "-include", "-imacros")
+GCC_KEEP_FLAGS = {"-nostdinc", "-undef", "-ansi", "-funsigned-char", "-fsigned-char", "-fms-extensions",
+                  "-fplan9-extensions"}
+
+
+def host_gcc(name: str) -> tuple[str | None, str]:
+    """The host's GCC (not a clang called gcc, as macOS has): its path and its version and target, or None
+    and why not."""
+    path = shutil.which(name)
+    if path is None:
+        return None, f"no GCC ({name}) on this machine"
+    try:
+        ver = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=60).stdout
+        machine = subprocess.run([path, "-dumpmachine"], capture_output=True, text=True, timeout=60).stdout.strip()
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, f"{name} does not run ({e})"
+    first = ver.splitlines()[0] if ver.strip() else ""
+    if "Free Software Foundation" not in ver:
+        return None, f"{name} is not GCC ({first or 'no version'})"
+    return path, f"{first} {machine}"
+
+
+def gcc_flags(args: list[str], cwd: Path) -> list[str]:
+    """What of a compile command decides which declarations the C sees: its defines, include folders and
+    files, and dialect. The rest (the target, the sysroot, optimisation, warnings, code generation) is the
+    compiler's or the platform's; GCC takes its own headers for anything not in the include folders (libc)."""
+    out = []
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in GCC_VALUE_FLAGS and i + 1 < len(args):
+            v = args[i + 1]
+            if a not in ("-D", "-U") and (a not in ("-include", "-imacros") or (cwd / v).exists()):
+                v = str(cwd / v)
+            out += [a, v]
+            i += 2
+            continue
+        if a[:2] in ("-D", "-U") or a.startswith("-std=") or a in GCC_KEEP_FLAGS:
+            out.append(a)
+        elif a.startswith("-I"):
+            out.append("-I" + str(cwd / a[2:]))
+        i += 1
+    return out
+
+
+def game_commands(build: Path) -> tuple[list[dict], str | None]:
+    """The game C's compile commands, from CMake's compile_commands.json (port/CMakeLists.txt exports it with
+    XG_STATE_SCHEMA): each source of a game_<module> target, with its folder and the flags GCC takes from it."""
+    path = build / "compile_commands.json"
+    if not path.exists():
+        return [], "the build has no compile_commands.json (CMake: -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)"
+    try:
+        entries = json.loads(path.read_text())
+    except ValueError as e:
+        return [], f"the build's compile_commands.json is unreadable ({e})"
+    out, seen = [], set()
+    for e in entries:
+        args = e.get("arguments") or shlex.split(e.get("command", ""))
+        output = e.get("output") or next((args[i + 1] for i in range(len(args) - 1) if args[i] == "-o"), "")
+        if not re.search(r"(?:^|/)CMakeFiles/game_\w+\.dir/", output.replace("\\", "/")):
+            continue
+        cwd = Path(e.get("directory") or build)
+        src = real_path(str(cwd / e["file"]))
+        if src not in seen:
+            seen.add(src)
+            out.append({"file": src, "dir": cwd, "flags": gcc_flags(args[1:], cwd)})
+    if not out:
+        return [], "the build's compile_commands.json has no game C (no game_<module> target)"
+    return out, None
+
+
+def describe(dies: dict, off, depth: int = 0):
+    """What a type of a GCC object's DWARF is called, as JSON: ["typedef", name], ["struct" | "union" | "enum",
+    name], ["base", name, encoding], ["ptr", inner] (inner None: void), ["arr", [dimension or None, ...], element],
+    ["fn"];
+    None for void; ["?", what] for a type without a name to find it by (an anonymous struct)."""
+    if off is None:
+        return None
+    d = dies.get(off)
+    if d is None or depth > 32:
+        return ["?", "an entry not read"]
+    tag, a = d["tag"], d["attrs"]
+    if tag in ("DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_restrict_type", "DW_TAG_atomic_type"):
+        return describe(dies, a.get("DW_AT_type"), depth + 1)
+    kind = NAMED_KIND.get(tag)
+    if kind == "base":  # (and its encoding: the game C's char is unsigned, the port's signed)
+        return ["base", a.get("DW_AT_name"), a.get("DW_AT_encoding")]
+    if kind:
+        return [kind, a["DW_AT_name"]] if a.get("DW_AT_name") else ["?", f"an anonymous {kind}"]
+    if tag == "DW_TAG_pointer_type":
+        return ["ptr", describe(dies, a.get("DW_AT_type"), depth + 1)]
+    if tag == "DW_TAG_array_type":
+        dims = []
+        for c in d["children"]:
+            s = dies[c]["attrs"]
+            ub = s.get("DW_AT_upper_bound")
+            dims.append(s["DW_AT_count"] if isinstance(s.get("DW_AT_count"), int) else
+                        (0 if ub >= 1 << 63 else ub + 1) if isinstance(ub, int) else None)  # (no bound: T x[])
+        return ["arr", dims, describe(dies, a.get("DW_AT_type"), depth + 1)]
+    if tag == "DW_TAG_subroutine_type":
+        return ["fn"]
+    return ["?", tag]
+
+
+def object_decls(obj: Path, build: Path) -> list:
+    """[name, what its type is called] of each declaration in a GCC object (DW_AT_declaration: extern, at file
+    scope or in a function), in the object's order."""
+    dies = read_dies(obj, build, DECL_TAGS)
+    return [[d["attrs"]["DW_AT_name"], describe(dies, d["attrs"]["DW_AT_type"])] for d in dies.values()
+            if d["tag"] == "DW_TAG_variable" and d["attrs"].get("DW_AT_declaration") is True
+            and d["attrs"].get("DW_AT_name") and d["attrs"].get("DW_AT_type") is not None]
+
+
+def dep_files(text: str, cwd: Path) -> list[str]:
+    """The files a GCC dependency file (-MD) names: the source and each header it included."""
+    body = text.replace("\\\n", " ").replace("\\ ", "\0")
+    body = body.split(":", 1)[1].split("\n", 1)[0] if ":" in body else ""
+    return [str(cwd / p.replace("\0", " ")) for p in body.split()]
+
+
+def gcc_declarations(build: Path, gcc: str, ident: str, entries: list[dict]) -> tuple[list, dict, list[str]]:
+    """Each game C file's declarations, read with GCC (object_decls) or from the build's cache of them:
+    ([(source, declarations or None)], counts, problems)."""
+    import concurrent.futures, hashlib
+    cache = build / "state_schema_gcc"
+    digests: dict[str, str | None] = {}
+
+    def digest(p: str):
+        if p not in digests:
+            try:
+                digests[p] = hashlib.sha1(Path(p).read_bytes()).hexdigest()
+            except OSError:
+                digests[p] = None
+        return digests[p]
+
+    def one(e):
+        src = e["file"]
+        rel = (Path(src).relative_to(ROOT).as_posix() if Path(src).is_relative_to(ROOT) else
+               "build/" + Path(src).relative_to(build).as_posix() if Path(src).is_relative_to(build) else
+               "other/" + hashlib.sha1(src.encode()).hexdigest()[:16] + "-" + Path(src).name)
+        base = cache / rel
+        key = hashlib.sha1(json.dumps([DECL_FORMAT, ident, e["flags"], src]).encode()).hexdigest()
+        side = base.with_name(base.name + ".json")
+        with contextlib.suppress(OSError, ValueError, KeyError, AttributeError, TypeError):
+            old = json.loads(side.read_text())
+            if old["key"] == key and all(digest(p) == h for p, h in old["deps"].items()):
+                return src, old["decls"], "cached", None
+        obj, dep = base.with_name(base.name + ".o"), base.with_name(base.name + ".d")
+        base.parent.mkdir(parents=True, exist_ok=True)
+        p = subprocess.run([gcc, *e["flags"], "-fpermissive", "-w", "-g", "-O0", "-c", src, "-o", str(obj),
+                            "-MD", "-MF", str(dep)], cwd=e["dir"], capture_output=True, text=True)
+        if p.returncode != 0:
+            err = next((ln for ln in p.stderr.splitlines() if "error" in ln), p.stderr.strip()[:300] or "failed")
+            return src, None, "failed", f"{rel}: {gcc} cannot compile it: {err}"
+        try:
+            decls = object_decls(obj, build)
+        except SystemExit as x:
+            return src, None, "failed", f"{rel}: its object's debug information is unreadable ({x})"
+        deps = dep_files(dep.read_text(), e["dir"])
+        write_new(side, json.dumps({"key": key, "deps": {p_: digest(p_) for p_ in deps}, "decls": decls}).encode())
+        return src, decls, "compiled", None
+
+    jobs = int(os.environ.get("XG_YIELD_JOBS") or os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL") or os.cpu_count() or 4)
+    with concurrent.futures.ThreadPoolExecutor(max(1, jobs)) as pool:
+        done = list(pool.map(one, entries))
+    counts = Counter(how for _, _, how, _ in done)
+    return [(src, decls) for src, decls, _, _ in done], counts, [why for *_, why in done if why]
+
+
+class ImageTypes:
+    """An image's own types by name, for what GCC read the declarations' types to be called: typedefs, structs,
+    unions, enums and base types (its compile unit's first, else the image's if every one of that name is laid
+    out alike); a pointer or an array of one becomes a new entry of the image's (dies), as its DWARF would
+    describe it."""
+
+    def __init__(self, dies: dict, types: Types, build: Path):
+        self.dies, self.types = dies, types
+        self.in_cu: dict[tuple, list[int]] = defaultdict(list)  # (unit, kind, name) -> offsets
+        self.anywhere: dict[tuple, list[int]] = defaultdict(list)  # (kind, name) -> offsets
+        self.units: dict[str, int] = {}  # a source's real path -> its compile unit
+        self.next = max(dies) + 1 if dies else 1
+        self.memo, self.shapes, self.global_pick = {}, {}, {}
+        self.void_targets = 0  # pointers whose target has no type of its name in the image
+        cu = None
+        for off, d in list(dies.items()):
+            if d["tag"] == "DW_TAG_compile_unit":
+                cu = off
+                name = str(d["attrs"].get("DW_AT_name", ""))
+                self.units.setdefault(real_path(name if name.startswith("/") else str(build / name[6:])
+                                                if name.startswith("build/") else str(ROOT / name)), off)
+                continue
+            kind, name = NAMED_KIND.get(d["tag"]), d["attrs"].get("DW_AT_name")
+            if kind and name:
+                self.in_cu[(cu, kind, name)].append(off)
+                self.anywhere[(kind, name)].append(off)
+
+    def new(self, tag: str, attrs: dict, children=()) -> int:
+        off = self.next
+        self.next += 1
+        self.dies[off] = {"tag": tag, "attrs": attrs, "children": list(children), "parent": None}
+        for c in children:
+            self.dies[c]["parent"] = off
+        return off
+
+    def shape(self, off):
+        """What two types of one name must agree on to be the same: kind, name, size, members and their offsets."""
+        if off not in self.shapes:
+            o = self.types.strip(off)
+            d = self.dies.get(o, {"tag": None, "attrs": {}, "children": []})
+            a = d["attrs"]
+            members = tuple((m["attrs"].get("DW_AT_name"), m["attrs"].get("DW_AT_data_member_location"),
+                             m["attrs"].get("DW_AT_bit_size"), m["attrs"].get("DW_AT_data_bit_offset"),
+                             self.types.name(m["attrs"].get("DW_AT_type")))
+                            for m in (self.dies[c] for c in d["children"]) if m["tag"] == "DW_TAG_member")
+            self.shapes[off] = (d["tag"], a.get("DW_AT_name"), self.types.size(o), a.get("DW_AT_encoding"),
+                                self.types.name(a.get("DW_AT_type")), members)
+        return self.shapes[off]
+
+    def named(self, cu, kind: str, name: str, complete: bool, encoding=None):
+        """(offset, None) of the image's type of that kind and name, complete (a size) when asked, a base type of
+        that encoding; or (None, why)."""
+        ok = (lambda o: self.types.size(o) > 0) if complete else (lambda o: True)
+        if encoding is not None:
+            ok = lambda o: self.dies[o]["attrs"].get("DW_AT_encoding") == encoding  # noqa: E731
+        own = next((o for o in self.in_cu.get((cu, kind, name), ()) if ok(o)), None)
+        if own is not None:
+            return own, None
+        key = (kind, name, complete, encoding)
+        if key not in self.global_pick:
+            every = [o for o in self.anywhere.get((kind, name), ()) if ok(o)]
+            if not every:
+                self.global_pick[key] = None, f"no {kind} {name} in its debug information"
+            elif len({self.shape(o) for o in every}) > 1:
+                self.global_pick[key] = None, f"{kind} {name}: laid out otherwise in another file"
+            else:
+                self.global_pick[key] = every[0], None
+        return self.global_pick[key]
+
+    def resolve(self, what, cu, complete: bool = True):
+        """The image's type for what GCC called a declaration's type (describe): (offset, None) or (None, why)."""
+        key = (cu, json.dumps(what), complete)
+        if key not in self.memo:
+            self.memo[key] = self._resolve(what, cu, complete)
+        return self.memo[key]
+
+    def _resolve(self, what, cu, complete):
+        if what is None:
+            return None, "void"
+        k = what[0]
+        if k in ("typedef", "struct", "union", "enum"):
+            return self.named(cu, k, what[1], complete)
+        if k == "base":
+            return self.named(cu, "base", GCC_BASE.get(what[1], what[1]), True, what[2])
+        if k == "fn":
+            return self.new("DW_TAG_subroutine_type", {}), None
+        if k == "ptr":
+            # a pointer still, to void when the image has no type of that name: a state moves it by the address
+            # it holds (its target's type types only the port's own parts' arrays: stateconvert.c pointedStruct)
+            to, why = (None, None) if what[1] is None else self.resolve(what[1], cu, False)
+            if why:
+                self.void_targets += 1
+            return self.new("DW_TAG_pointer_type", {} if to is None else {"DW_AT_type": to}), None
+        if k == "arr":
+            of, why = self.resolve(what[2], cu, True)
+            if why:
+                return None, why
+            dims = [self.new("DW_TAG_subrange_type", {} if n is None else {"DW_AT_count": n}) for n in what[1]]
+            return self.new("DW_TAG_array_type", {"DW_AT_type": of}, dims), None
+        return None, f"{what[1]}, which has no name to find it by"
+
+
+def plain(what) -> bool:
+    """A declared type that holds no pointer, whatever its layout: a base type, or an array of them."""
+    return what is not None and (what[0] == "base" or (what[0] == "arr" and plain(what[2])))
+
+
+def clang_declared(dies: dict, types: Types, build: Path, gcc_name: str, report: list[str]):
+    """main's declared (name -> the image's types of its declarations, in the image's order of compile units)
+    for a clang image, from GCC's reading of the game C, and why each name declared by a type the image lacks
+    (one that may hold a pointer: not plain) is so: (declared, unresolved, None), or (None, {}, why not)."""
+    import time
+    t0 = time.monotonic()
+    gcc, ident = host_gcc(gcc_name)
+    if gcc is None:
+        return None, {}, ident
+    entries, why = game_commands(build)
+    if why:
+        return None, {}, why
+    image = ImageTypes(dies, types, build)
+    order = {p: i for i, p in enumerate(image.units)}
+    entries.sort(key=lambda e: order.get(e["file"], len(order)))
+    files, counts, problems = gcc_declarations(build, gcc, ident, entries)
+    for p_ in problems:
+        print(f"state_schema: {p_}", file=sys.stderr)
+    if problems:
+        return None, {}, f"{len(problems)} of {len(entries)} game C files could not be read with {gcc_name} " \
+                         f"({'; '.join(problems[:2])})"
+    declared = defaultdict(list)
+    unresolved = Counter()
+    names: dict[str, str] = {}
+    n = 0
+    for src, decls in files:
+        cu = image.units.get(src)
+        for name, what in decls:
+            n += 1
+            off, why = image.resolve(what, cu)
+            if off is None:
+                unresolved[why] += 1
+                if not plain(what):
+                    names.setdefault(name, why)
+            else:
+                declared[name].append(off)
+    report.append(f"  declarations read with {ident}: {len(files)} game C files ({counts['compiled']} compiled, "
+                  f"{counts['cached']} cached) in {time.monotonic() - t0:.1f} s; {n} declarations, "
+                  f"{n - sum(unresolved.values())} found in the image's own types, {sum(unresolved.values())} not; "
+                  f"{image.void_targets} pointer types to a type the image lacks, kept as pointers to void")
+    for why, k in unresolved.most_common(12):
+        report.append(f"    {k}: {why}")
+    return declared, names, None
+
+
+# ---- the image: ELF (readelf, nm) or PE/COFF (its headers, nm) --------------------------------------
+
+@functools.lru_cache(maxsize=None)
+def real_path(name: str) -> str:
+    return os.path.realpath(name)
+
+
+def is_pe(exe: Path) -> bool:
+    with exe.open("rb") as f:
+        return f.read(2) == b"MZ"
+
+
+class PeImage:
+    """A PE32+ image's headers (Microsoft's PE/COFF specification): the preferred image base and the
+    section table, each section's name resolved (a long name, "/n", is an offset into the COFF string
+    table after the symbols: GNU ld writes long names when the image has debug information)."""
+    DISCARDABLE, CODE, INITIALIZED, EXECUTE, READ = 0x02000000, 0x00000020, 0x00000040, 0x20000000, 0x40000000
+
+    def __init__(self, exe: Path):
+        self.data = data = exe.read_bytes()
+        pe = struct.unpack_from("<I", data, 0x3C)[0]
+        if data[:2] != b"MZ" or data[pe:pe + 4] != b"PE\0\0":
+            raise SystemExit(f"state_schema: {exe}: not a PE image")
+        nsec, _, symptr, nsym, optsize = struct.unpack_from("<HIIIH", data, pe + 6)
+        opt = pe + 24
+        if struct.unpack_from("<H", data, opt)[0] != 0x20B:
+            raise SystemExit(f"state_schema: {exe}: not a PE32+ (64-bit) image")
+        self.base = struct.unpack_from("<Q", data, opt + 24)[0]
+        self.file_alignment = struct.unpack_from("<I", data, opt + 36)[0]
+        self.table = opt + optsize  # the section table, 40 bytes a section
+        strtab = symptr + nsym * 18 if symptr else None
+        self.sections = []
+        for i in range(nsec):
+            raw, vsize, rva, rawsize, rawptr = struct.unpack_from("<8sIIII", data, opt + optsize + 40 * i)
+            flags = struct.unpack_from("<I", data, opt + optsize + 40 * i + 36)[0]
+            name = raw.rstrip(b"\0")
+            if name.startswith(b"/") and strtab is not None and name[1:].isdigit():
+                at = strtab + int(name[1:])
+                name = data[at:data.index(b"\0", at)]
+            self.sections.append({"name": name.decode(errors="replace"), "rva": rva, "lo": self.base + rva,
+                                  "vsize": vsize, "rawsize": rawsize, "rawptr": rawptr, "flags": flags})
+
+    def file_bytes(self, sec) -> bytes:
+        """A section as loaded: its raw data, zeros past it up to its virtual size."""
+        n = min(sec["vsize"], sec["rawsize"])
+        return self.data[sec["rawptr"]:sec["rawptr"] + n] + bytes(sec["vsize"] - n)
+
+
+def has_debug_info(exe: Path) -> bool:
+    if is_pe(exe):
+        return any(sec["name"] == ".debug_info" for sec in PeImage(exe).sections)
+    return ".debug_info" in subprocess.run(["readelf", "-SW", str(exe)], capture_output=True, text=True).stdout
+
+
 def sections(exe: Path) -> dict[str, tuple[int, int]]:
+    if is_pe(exe):
+        img = PeImage(exe)
+        return {sec["name"]: (sec["lo"], sec["lo"] + sec["vsize"]) for sec in img.sections}
     out = {}
     for line in subprocess.run(["readelf", "-SW", str(exe)], capture_output=True, text=True).stdout.splitlines():
         m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+\S+\s+([0-9a-f]+)\s+[0-9a-f]+\s+([0-9a-f]+)", line)
@@ -193,28 +645,134 @@ def sections(exe: Path) -> dict[str, tuple[int, int]]:
     return out
 
 
+def nm_tool(exe: Path) -> list[str]:
+    """An nm that reads this image: the system's (binutils for every target), else MinGW's or LLVM's."""
+    for tool in ("nm", "x86_64-w64-mingw32-nm", "llvm-nm"):
+        if shutil.which(tool) and subprocess.run([tool, "--defined-only", str(exe)], capture_output=True).returncode == 0:
+            return [tool]
+    raise SystemExit(f"state_schema: no nm reads {exe}")
+
+
 def symbols(exe: Path) -> list[list]:
     """Every defined symbol, [name, address, size, nm kind]: a state names functions and constants by them,
-    and a build converting another build's state has only that build's schema (no executable)."""
+    and a build converting another build's state has only that build's schema (no executable). COFF symbols
+    have no sizes (0 here; the variables' from DWARF are filled in by main)."""
     rows = []
-    for line in subprocess.run(["nm", "-n", "-S", "--defined-only", str(exe)], capture_output=True,
+    for line in subprocess.run(nm_tool(exe) + ["-n", "-S", "--defined-only", str(exe)], capture_output=True,
                                text=True).stdout.splitlines():
         m = re.match(r"([0-9a-f]+) (?:([0-9a-f]+) )?(\S) (\S+)$", line)
-        if m:
+        if m and m.group(3) != "N":  # (COFF: symbols of the debug sections, which stripping removes)
             rows.append([m.group(4), int(m.group(1), 16), int(m.group(2) or "0", 16), m.group(3)])
     return rows
 
 
 def read_only(exe: Path) -> list[list[int]]:
     """The file-backed data that does not change: [start, end, file offset] of .rodata and the writable
-    .data sections that hold the game's string tables (allocated PROGBITS, not code)."""
+    .data sections that hold the game's string tables (allocated PROGBITS, not code). PE: the sections of
+    initialised data that stay loaded (not code, not discardable: no debug sections, no .reloc), each to
+    the end of its raw data."""
     out = []
+    if is_pe(exe):
+        img = PeImage(exe)
+        for sec in img.sections:
+            f = sec["flags"]
+            if f & PeImage.INITIALIZED and not f & (PeImage.CODE | PeImage.EXECUTE | PeImage.DISCARDABLE) and \
+                    sec["rawsize"] and sec["vsize"]:
+                out.append([sec["lo"], sec["lo"] + min(sec["vsize"], sec["rawsize"]), sec["rawptr"]])
+        return out
     for line in subprocess.run(["readelf", "-SW", str(exe)], capture_output=True, text=True).stdout.splitlines():
         m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+\S+\s+(\S*)", line)
         if m and m.group(2) == "PROGBITS" and "A" in m.group(6) and "X" not in m.group(6) and int(m.group(3), 16):
             lo = int(m.group(3), 16)
             out.append([lo, lo + int(m.group(5), 16), int(m.group(4), 16)])
     return out
+
+
+def stripped_read_only(exe: Path) -> list[list[int]]:
+    """read_only as the image has it once stripped of its debug information (what a package ships, and the file
+    a shipped schema's "exe" names): the image's own without any. ELF: the same (stripping keeps the file offsets of
+    what loads). PE: the section table loses the debug sections, the headers end where it then ends (to the file
+    alignment) and the raw data that stays follows in its order, each section to the file alignment: binutils'
+    strip (--strip-debug, --strip-all) and llvm-strip lay a MinGW executable out so, 0x200 bytes earlier than
+    before; --verify checks a shipped image has them."""
+    ro = read_only(exe)
+    if not is_pe(exe) or not debug_sections(exe):
+        return ro
+    img = PeImage(exe)
+    align = lambda n: -(-n // img.file_alignment) * img.file_alignment  # noqa: E731
+    kept = [sec for sec in img.sections if not pe_debug(sec["name"])]
+    at, moved = align(img.table + 40 * len(kept)), {}
+    for sec in sorted((sec for sec in kept if sec["rawsize"]), key=lambda sec: sec["rawptr"]):
+        moved[sec["rawptr"]] = at
+        at += align(sec["rawsize"])
+    return [[lo, hi, moved[fo]] for lo, hi, fo in ro]
+
+
+ID_SEEDS = (0x243F6A8885A308D3, 0x13198A2E03707344)  # statefile.c stateBuildId's
+
+
+def id_mix(ab: list[int], data: bytes) -> None:
+    """statefile.c idMix: both halves of the id, the second with another seed."""
+    ab[0] = state_hash(data, ab[0])
+    ab[1] = state_hash(data, ab[1] ^ 0x5851F42D4C957F2D)
+
+
+def elf_identity(exe: Path) -> bytes:
+    """statefile.c computeImageId for ELF: every allocated section's name, address, size, type and flags in
+    the section table's order, and the code (executable PROGBITS) itself; the build id of the image at its
+    link addresses (no load bias), from the file. Stripping keeps all of it."""
+    data = exe.read_bytes()
+    if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
+        raise SystemExit(f"state_schema: {exe}: not a 64-bit little-endian ELF")
+    shoff, = struct.unpack_from("<Q", data, 0x28)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+    if shentsize != 64 or not shnum or shstrndx >= shnum:
+        raise SystemExit(f"state_schema: {exe}: no section table")
+    heads = [struct.unpack_from("<IIQQQQIIQQ", data, shoff + 64 * i) for i in range(shnum)]
+    strs = heads[shstrndx]
+    names = data[strs[4]:strs[4] + strs[5]] + b"\0"
+    ab = list(ID_SEEDS)
+    for name, typ, flags, addr, off, size, *_ in heads:
+        if not flags & 0x2:  # SHF_ALLOC
+            continue
+        text = names[name:names.index(b"\0", name)] if name < len(names) - 1 else b""
+        id_mix(ab, text)
+        id_mix(ab, struct.pack("<4Q", addr, size, typ, flags))
+        if flags & 0x4 and typ == 1:  # SHF_EXECINSTR, SHT_PROGBITS
+            id_mix(ab, data[off:off + size])
+    return ab[0].to_bytes(8, "little") + ab[1].to_bytes(8, "little")
+
+
+def pe_identity(exe: Path) -> bytes:
+    """statefile.c computeImageId for PE: the preferred image base, then each section that stays loaded (not
+    discardable: debug sections and .reloc left out) by its address, size and flags, and the code."""
+    img = PeImage(exe)
+    ab = list(ID_SEEDS)
+    id_mix(ab, struct.pack("<Q", img.base))
+    for sec in img.sections:
+        if sec["flags"] & PeImage.DISCARDABLE:
+            continue
+        id_mix(ab, struct.pack("<3I", sec["rva"], sec["vsize"], sec["flags"]))
+        if sec["flags"] & PeImage.CODE:
+            id_mix(ab, img.file_bytes(sec))
+    return ab[0].to_bytes(8, "little") + ab[1].to_bytes(8, "little")
+
+
+def image_identity(exe: Path) -> dict:
+    """The schema's "image": the format and the identity the game computes from its running image (statefile.h
+    stateImageIdText): its hex."""
+    pe = is_pe(exe)
+    return {"format": "pe" if pe else "elf", "id": (pe_identity(exe) if pe else elf_identity(exe)).hex()}
+
+
+def build_image(build: Path) -> Path | None:
+    """The image a build's schema describes: its executable (xenogears or xenogears-enhanced, .exe on
+    Windows) or, for a shared-library build, the game library its launcher loads (lib<name>.so)."""
+    for name in ("xenogears", "xenogears-enhanced"):
+        for exe in (build / name, build / f"{name}.exe"):
+            if exe.exists():
+                return (sc.game_library(exe) if exe.suffix != ".exe" else None) or exe
+    return None
 
 
 def retail_symbols(version: str) -> dict[str, dict[str, int]]:
@@ -292,25 +850,166 @@ class Types:
         return 0
 
 
+def pe_debug(name: str) -> bool:
+    """A PE section of debug information: .debug_*, .zdebug_*, or a long name left without its string table."""
+    return name.startswith((".debug", ".zdebug")) or re.fullmatch(r"/\d+", name) is not None
+
+
+def debug_sections(exe: Path) -> list[str]:
+    """The image's sections of debug information (.debug_*, .zdebug_*; in a PE, also a long name left without
+    its string table)."""
+    if is_pe(exe):
+        return [sec["name"] for sec in PeImage(exe).sections if pe_debug(sec["name"])]
+    data = exe.read_bytes()
+    if data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
+        raise SystemExit(f"state_schema: {exe}: not a 64-bit little-endian ELF")
+    shoff, = struct.unpack_from("<Q", data, 0x28)
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+    if not shnum or shstrndx >= shnum:
+        return []
+    heads = [struct.unpack_from("<IIQQQQIIQQ", data, shoff + 64 * i) for i in range(shnum)]
+    strs = heads[shstrndx]
+    table = data[strs[4]:strs[4] + strs[5]] + b"\0"
+    names = [table[h[0]:table.index(b"\0", h[0])].decode(errors="replace") for h in heads]
+    return [n for n in names if n.startswith((".debug", ".zdebug"))]
+
+
+ABSOLUTE = re.compile(r"^(?:/|\\|[A-Za-z]:[\\/])|/home/|/Users/|\\Users\\")
+
+
+def strings_of(value, out: list[str]) -> list[str]:
+    """Every string in a JSON value, keys too."""
+    if isinstance(value, str):
+        out.append(value)
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            out.append(k)
+            strings_of(v, out)
+    elif isinstance(value, list):
+        for v in value:
+            strings_of(v, out)
+    return out
+
+
+def verify(shipped: Path, image: Path, stripped: bool, portable: bool = False) -> int:
+    """--verify: a schema to hand out against the image it ships with; --portable: one whose states convert."""
+    problems = []
+    data = shipped.read_bytes()
+    try:
+        if data[:8] != sc.SCHEMA_MAGIC:
+            raise ValueError("not the packed form (XGSCHEMA)")
+        schema = json.loads(sc.schema_text(data))
+    except ValueError as e:
+        print(f"state_schema: {shipped}: {e}", file=sys.stderr)
+        return 1
+    want = image_identity(image)
+    if schema.get("image") != want:
+        problems.append(f"it was read from another image ({schema.get('image')}; {image.name} is {want})")
+    if schema.get("exe") != image.name:
+        problems.append(f"its exe is {schema.get('exe')!r}, not the image's name {image.name!r}")
+    if schema.get("ro") != stripped_read_only(image):  # (where statecanon.py reads a string from "exe")
+        problems.append(f"its read-only ranges' file offsets are not those of {image.name} stripped")
+    paths = sorted({s for s in strings_of(schema, []) if ABSOLUTE.search(s)})
+    if paths:
+        problems.append(f"{len(paths)} absolute paths in it: {', '.join(paths[:3])}")
+    if stripped and (left := debug_sections(image)):
+        problems.append(f"{image.name} still has debug information ({', '.join(left[:4])})")
+    if portable and schema.get("portable") is False:
+        problems.append(f"its states cannot convert to other builds: {schema.get('portable_why', '(no reason given)')}")
+    for p_ in problems:
+        print(f"state_schema: {shipped.name}: {p_}", file=sys.stderr)
+    if not problems:
+        print(f"state-schema: {shipped.name} ({len(data)} bytes, {len(sc.schema_text(data))} as JSON) describes "
+              f"{image.name} (image {want['format']} {want['id']}){', stripped' if stripped else ''}")
+    return 1 if problems else 0
+
+
+def verify_apk(apk: Path, portable: bool = False) -> int:
+    """--verify-apk: each game library of an APK with its schema in the APK's assets."""
+    import tempfile, zipfile
+    with zipfile.ZipFile(apk) as z, tempfile.TemporaryDirectory() as tmp:
+        names = set(z.namelist())
+        libs = sorted(n for n in names if re.fullmatch(r"lib/[^/]+/libxenogears[^/]*\.so", n))
+        want = {f"assets/schemas/{n.split('/')[1]}/{Path(n).stem}.xgschema": n for n in libs}
+        problems = sum(1 for n in sorted(names) if n.startswith("assets/schemas/") and not n.endswith("/")
+                       and n not in want)
+        for n in sorted(names):
+            if n.startswith("assets/schemas/") and not n.endswith("/") and n not in want:
+                print(f"state_schema: {apk.name}: {n} is no game library's", file=sys.stderr)
+        if not libs:
+            print(f"state_schema: {apk.name}: no game library (lib/<abi>/libxenogears*.so)", file=sys.stderr)
+            problems += 1
+        for asset, lib in want.items():
+            if asset not in names:
+                print(f"state_schema: {apk.name}: {lib} has no state schema ({asset})", file=sys.stderr)
+                problems += 1
+                continue
+            folder = Path(tmp) / lib.split("/")[1]
+            folder.mkdir(exist_ok=True)
+            image, packed = folder / Path(lib).name, folder / Path(asset).name
+            image.write_bytes(z.read(lib))
+            packed.write_bytes(z.read(asset))
+            problems += verify(packed, image, True, portable)
+    if not problems:
+        print(f"state-schema: {apk.name}: {len(want)} game libraries, each with its schema")
+    return 1 if problems else 0
+
+
+def write_new(path: Path, data: bytes) -> None:
+    """Replace a file as a whole (a reader never sees half of it)."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_bytes(data)
+    os.replace(tmp, path)
+
+
 def main() -> int:
+    global DWARFDUMP
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("build", type=Path)
+    ap.add_argument("build", type=Path, nargs="?")
     ap.add_argument("--json", type=Path, help="write the schema here (default BUILD/state_schema.json.gz)")
+    ap.add_argument("--ship", type=Path, help="also write the schema to hand out here (packed, no path of this machine)")
+    ap.add_argument("--image", type=Path, help="the image to read (default: the build's executable, or the game "
+                    "library of a shared-library build)")
+    ap.add_argument("--dwarfdump", help="the llvm-dwarfdump to read the DWARF with (default: the system's or the NDK's)")
+    ap.add_argument("--gcc", default="gcc", help="for an image compiled by clang: the host's GCC, which reads the "
+                    "game C's declarations (default: gcc)")
+    ap.add_argument("--quiet", action="store_true", help="no coverage report: the schema's line and problems only")
+    ap.add_argument("--verify", type=Path, metavar="SHIPPED", help="check a schema to hand out against --image")
+    ap.add_argument("--stripped", action="store_true", help="with --verify: the image must have no debug information")
+    ap.add_argument("--portable", action="store_true", help="with --verify or --verify-apk: the schema must let its "
+                    "states convert to other builds (a clang build's needs the host's GCC: portable_why)")
+    ap.add_argument("--verify-apk", type=Path, metavar="APK", help="check each game library of an Android APK with "
+                    "its schema in the APK's assets")
     ap.add_argument("--top", type=int, default=12, help="examples listed per finding")
     ap.add_argument("--source", type=Path, action="append",
                     help="read the heap annotations (include/pc_state.h) from this folder instead of the build's game C "
                          "and port/src (tests)")
     args = ap.parse_args()
+    if args.verify_apk:
+        if args.build is not None or args.verify or args.image:
+            ap.error("--verify-apk takes nothing else")
+        return verify_apk(args.verify_apk, args.portable)
+    if args.verify:
+        if args.image is None or args.build is not None:
+            ap.error("--verify takes --image and no build")
+        return verify(args.verify, args.image, args.stripped, args.portable)
+    if args.build is None:
+        ap.error("a build folder is needed")
+    DWARFDUMP = args.dwarfdump
     build = args.build.resolve()
     cache = (build / "CMakeCache.txt").read_text() if (build / "CMakeCache.txt").exists() else ""
     version = (re.search(r"^XG_VERSION:\w+=(\w+)", cache, re.M) or [None, "US"])[1].lower()
-    exe = next((p for p in (build / "xenogears", build / "xenogears-enhanced") if p.exists()), None)
-    if exe is None:
-        print(f"state_schema: no executable in {build}")
+    exe = args.image.resolve() if args.image else build_image(build)
+    if exe is None or not exe.is_file():
+        print(f"state_schema: no executable in {build}", file=sys.stderr)
         return 1
-    if ".debug_info" not in subprocess.run(["readelf", "-SW", str(exe)], capture_output=True, text=True).stdout:
-        print(f"state_schema: {exe} has no debug information (configure with -DCMAKE_BUILD_TYPE=RelWithDebInfo)")
+    if not has_debug_info(exe):
+        print(f"state_schema: {exe} has no debug information (configure with -DCMAKE_BUILD_TYPE=RelWithDebInfo, "
+              "or Release with -DXG_STATE_SCHEMA=ON)", file=sys.stderr)
         return 1
+    report = contextlib.ExitStack()  # --quiet: the coverage report goes nowhere
+    if args.quiet:
+        report.enter_context(contextlib.redirect_stdout(io.StringIO()))
 
     secs = sections(exe)
     modsec = []  # (lo, hi, module, kind)
@@ -319,6 +1018,10 @@ def main() -> int:
         if m:
             modsec.append((lo, hi, m.group(2), m.group(1)))
     modsec.sort()
+    if not modsec:
+        print(f"state_schema: {exe} has no xgdata_/xgbss_ sections (a PE image without long section names?)",
+              file=sys.stderr)
+        return 1
 
     def module_of(addr):
         for lo, hi, mod, kind in modsec:
@@ -326,8 +1029,24 @@ def main() -> int:
                 return mod, kind
         return None, None
 
-    dies = read_dies(exe)
+    dies = read_dies(exe, build)
+    # Clang writes no debug information for extern declarations (GCC does), and the generated sources'
+    # data (gen/: u8 arrays) take their real types from them: without them a state's pointers there move
+    # as bytes, and a conversion into another build crashes it (xg-htn.60.8). The host's GCC reads them
+    # (clang_declared); when it cannot, the schema keeps slots in their own build (stateportable.c:
+    # portable false).
+    clang = sorted({str(d["attrs"].get("DW_AT_producer", "")).split(" version")[0] for d in dies.values()
+                    if d["tag"] == "DW_TAG_compile_unit" and "clang" in str(d["attrs"].get("DW_AT_producer", ""))})
     types = Types(dies)
+    portable_why = None
+    decl_report: list[str] = []
+    gcc_declared, gcc_unresolved = None, {}
+    if clang:
+        gcc_declared, gcc_unresolved, why = clang_declared(dies, types, build, args.gcc, decl_report)
+        if why:
+            portable_why = (f"compiled by {clang[0]}, which writes no debug information for extern declarations, "
+                            f"and {why}: the generated data's types are unknown (xg-htn.60.8)")
+            print(f"state_schema: warning: this build's slots stay in it: {portable_why}", file=sys.stderr)
     retail = retail_symbols(version)
     inv = inventory_state()
 
@@ -352,6 +1071,21 @@ def main() -> int:
                 a.setdefault(k, v)
         return a
 
+    def is_const(off):
+        """Whether an object of this type is constant: const itself, or an array of const elements (a
+        position-independent build's tables of pointers: .data.rel.ro, which the module link puts in the
+        module's data section, where a fixed-address build has them in .rodata)."""
+        for _ in range(16):
+            d = dies.get(off)
+            if d is None:
+                return False
+            if d["tag"] == "DW_TAG_const_type":
+                return True
+            if d["tag"] not in ("DW_TAG_typedef", "DW_TAG_volatile_type", "DW_TAG_array_type"):
+                return False
+            off = d["attrs"].get("DW_AT_type")
+        return False
+
     # ---- variables with a fixed address ------------------------------------------------------
     variables = []
     for off, d in dies.items():
@@ -370,12 +1104,13 @@ def main() -> int:
         rel = f.split("/port/src/", 1)[1] if "/port/src/" in f else None
         variables.append({"name": name, "addr": addr, "type": a.get("DW_AT_type"), "size": types.size(a.get("DW_AT_type")),
                           "module": mod, "section": kind, "file": f, "platform": rel,
-                          "retail": retail_of(mod, name) if mod else None})
+                          "retail": retail_of(mod, name) if mod else None, "const": is_const(a.get("DW_AT_type"))})
 
     # The generated sources define the asm-defined data as byte arrays (gen/: u8 gameState[0x2358]); the
     # headers declare their real types. A declaration's type of the same size is the one to encode by.
-    declared = defaultdict(list)
-    for off, d in dies.items():
+    # (A clang image's: GCC's reading of the game C, as the image's own types: clang_declared.)
+    declared = gcc_declared if gcc_declared is not None else defaultdict(list)
+    for off, d in dies.items() if gcc_declared is None else ():
         if d["tag"] == "DW_TAG_variable" and "DW_AT_location" not in d["attrs"] and d["attrs"].get("DW_AT_name"):
             t = d["attrs"].get("DW_AT_type")
             if t is not None:
@@ -411,7 +1146,7 @@ def main() -> int:
 
     retyped = 0
     for v in variables:
-        t = v["type"]
+        t = v["defined"] = v["type"]
         st = dies.get(types.strip(t)) if t is not None else None
         if st is not None and st["tag"] == "DW_TAG_base_type":
             for cand in declared.get(v["name"], []):
@@ -433,6 +1168,17 @@ def main() -> int:
                     retyped += 1
                     break
         v["type"] = t
+    # A clang image's generated data left as bytes although the game C declares it, by a type the image's own
+    # debug information lacks (one clang left out, an anonymous struct): its pointers would move as bytes
+    left = sorted({v["name"] for v in variables if v["module"] and v["name"] in gcc_unresolved and
+                   v["type"] == v["defined"] and v.get("elem") is None and v["type"] is not None and
+                   (is_bytes(v["type"]) or dies.get(types.strip(v["type"]), {}).get("tag") == "DW_TAG_base_type")})
+    if left and portable_why is None:
+        portable_why = (f"compiled by {clang[0]}, which writes no debug information for extern declarations, and "
+                        f"{len(left)} generated variables are declared by types not in its own "
+                        f"({'; '.join(f'{n}: {gcc_unresolved[n]}' for n in left[:3])}) (xg-htn.60.8)")
+        print(f"state_schema: warning: this build's slots stay in it: {portable_why}", file=sys.stderr)
+    retyped_game = sum(1 for v in variables if v["module"] and (v["type"] != v["defined"] or v.get("elem") is not None))
 
     game = [v for v in variables if v["module"]]
     platform = [v for v in variables if not v["module"] and v["platform"] and (v["platform"], v["name"]) in inv]
@@ -496,7 +1242,7 @@ def main() -> int:
         if d["tag"] == "DW_TAG_subprogram" and "DW_AT_low_pc" in d["attrs"]:
             a = resolved(d)
             name = a.get("DW_AT_name")
-            if name:
+            if name and a["DW_AT_low_pc"] not in (0, (1 << 64) - 1):  # (0, -1: a discarded function's tombstone)
                 f = str(a.get("DW_AT_decl_file", ""))
                 side = "port" if "/port/src/" in f else "game"
                 ra = None
@@ -524,6 +1270,10 @@ def main() -> int:
     gn = [v for v in game if v["retail"] is None]
     print(f"state schema of {exe.relative_to(ROOT) if ROOT in exe.parents else exe} ({version.upper()})")
     print(f"  DWARF entries kept: {len(dies)}; variables at fixed addresses: {len(variables)}")
+    for line in decl_report:
+        print(line)
+    print(f"  generated data retyped by its declarations: {retyped}, {retyped_game} in game modules"
+          + (" (clang: by GCC's reading)" if clang else ""))
     print(f"  game module variables: {len(game)} ({sum(v['size'] for v in game)} bytes), "
           f"{len(gj)} with a retail address, {len(gn)} without")
     def origin(v):
@@ -740,8 +1490,18 @@ def main() -> int:
         if fn in io_decl:
             part_files[pname] = io_decl[fn]
 
-    schema = {"version": version, "exe": str(exe), "variables": [
-        {k: v.get(k) for k in ("name", "addr", "size", "module", "section", "retail", "platform", "tid")}
+    syms = symbols(exe)
+    if is_pe(exe):  # COFF symbols have no sizes: a variable's from DWARF, where name and address agree
+        sized = {}
+        for v in variables:
+            sized.setdefault((v["name"], v["addr"]), v["size"])
+        for row in syms:
+            if not row[2]:
+                row[2] = sized.get((re.sub(r"\.lto_priv\.\d+$", "", row[0]), row[1]), 0)
+    schema = {"version": version, "exe": str(exe), "image": image_identity(exe), "variables": [
+        # "const": the build's own constant (no state carries it: a reader keeps its own bytes)
+        {**{k: v.get(k) for k in ("name", "addr", "size", "module", "section", "retail", "platform", "tid")},
+         **({"const": True} if v["const"] else {})}
         for v in variables if v["module"] or v["platform"]],
         "types": table, "type_names": type_names, "parts": part_files, "retyped": retyped,
         # where a raw state's memory chunks sit in this build (statecanon.py reads them by these)
@@ -753,15 +1513,25 @@ def main() -> int:
         "heap_types": heap_types, "counted": counted,
         # a union member's live view by another member's value (PC_STATE_UNION): struct tid -> rule
         "unions": union_rules,
+        # whether another build may convert this one's states (False: clang without GCC's declarations: portable_why)
+        "portable": portable_why is None, **({"portable_why": portable_why} if portable_why else {}),
         # what statecanon.py once read from the executable: symbol names and addresses, constant data's ranges
-        "symbols": symbols(exe), "ro": read_only(exe)}
-    with gzip.open(out, "wt") as fh:
-        json.dump(schema, fh)
+        "symbols": syms, "ro": read_only(exe)}
+    report.close()
+    text = json.dumps(schema).encode()  # (json.dumps: the C encoder; the same bytes as json.dump)
+    write_new(out, gzip.compress(text, mtime=0))
     # the same, plain, for the game's own reader (port/src/system/stateschema.c: the port has no inflate)
     plain = out.with_name(out.name.removesuffix(".gz")) if out.name.endswith(".gz") else out.with_name(out.name + ".plain")
-    with plain.open("w") as fh:
-        json.dump(schema, fh)
-    print(f"  schema: {out} ({out.stat().st_size} bytes), {plain.name} ({plain.stat().st_size} bytes)")
+    write_new(plain, text)
+    shipped = ""
+    if args.ship:
+        # to hand out: the image named by its file only, and as stripped, where the read-only ranges' bytes are then
+        # (statecanon.py reads strings from "exe"; the game never)
+        ship = {**schema, "exe": exe.name, "ro": stripped_read_only(exe)}
+        write_new(args.ship, sc.schema_file(json.dumps(ship).encode()))
+        shipped = f", {args.ship.name} ({args.ship.stat().st_size} bytes)"
+    print(f"  schema: {out} ({out.stat().st_size} bytes), {plain.name} ({plain.stat().st_size} bytes){shipped}; "
+          f"image {schema['image']['format']} {schema['image']['id']}")
     print(f"  heap types named in the source (include/pc_state.h): {len(heap_types)}; counted arrays: {len(counted)}; "
           f"unions with a selector: {len(union_rules)}")
     for p_ in heap_problems:

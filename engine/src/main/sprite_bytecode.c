@@ -113,7 +113,7 @@ loop:
         return;
     case 0xE2: {
         s16 off = p[0] + ((s8)p[1] << 8);
-        pushU24OnAnimationStack(actor, (s32)(uptr)(actor->m64_spriteByteCode + 3));
+        pushU24OnAnimationStack(actor, pcU24Of(actor->m64_spriteByteCode + 3));
         actor->m64_spriteByteCode += off;
         goto loop;
     }

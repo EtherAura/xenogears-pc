@@ -12,6 +12,9 @@
  *                                    arena's reception does it, the return
  *   port/src/game/battling/thread.c  Battling's task: pcArenaBattlingStart
  *   port/src/game/battle/versus.c    versus battles: player 2's choices
+ *   port/src/game/battle/mirror.c    mirror matches: player 2's copy of the party
+ *   port/src/game/battling/arena.c   Battling's side of a match: its music,
+ *                                    its end's Rematch / Leave
  *   port/src/ui/arena.cpp            the menu block
  */
 
@@ -73,9 +76,69 @@ void pcVersusBattleEnd(void);
 void pcVersusDraw(void);
 int pcVersusRandom(int lo, int hi, int* out);
 
+/* Mirror match (xg-htn.35.143): a versus battle where player 2 commands a copy
+ * of player 1's party (its members in enemy slots 3-5, on foot), with the
+ * party's own commands, in the mirror's stage (VERSUS_MIRROR_TABLE/CONFIG).
+ *   platform (port/src/system/arena.c): the request is a mirror match */
+#define VERSUS_MIRROR_TABLE 2  /* the stage: Jackal x2, Hobgob x2 (set 1, on foot) */
+#define VERSUS_MIRROR_CONFIG 1
+int pcVersusMirrorAsked(void);
+/*   main (port/src/game/main/arena.c): this versus battle is a mirror match */
+int pcVersusMirror(void);
+/*   battle (port/src/game/battle/mirror.c): battleMain, battleTickMain,
+ *   battleHandleInput and the battle loader's hooks */
+void pcVersusBattleLoaded(void);
+int pcVersusMirrorTurn(unsigned char entity);
+int pcVersusMirrorPad2(void);
+int pcVersusMirrorSlot(int entity);
+void pcVersusMirrorSprites(void);
+
 /* Field (port/src/game/field/arena_field.c): fieldEntryPoint, where the
  * player could open the menu. */
 void pcArenaFieldTick(void);
+/* Platform: XG_ARENA=2,GEAR1,GEAR2[,WINS[,COM]] (the oracle's runs): 1 when
+ * it wrote Battling's entry bytes for that match (each by its name). */
+int pcArenaDirectEntry(void);
+
+/* The battle music (xg-htn.35.146): the music ID the players chose for an
+ * arena battle (the setting arena_music; online the host's, held for the
+ * session), else `def`, the game's own (a versus battle's 0x1D, Battling's
+ * 0x0B). Read where the battle's music starts, so both games of a session
+ * start the same song at the same frame.
+ *   platform: */
+int pcArenaMusic(int def);
+/* The field's music selector for music ID `id` (src/field/f_8008083C.c
+ * playMusic, musicLookupTable): its sample bank file's number (0xFF: the
+ * resident banks do) and flags (1: the second resident bank makes room);
+ * 0 for an ID past the table. */
+int pcArenaMusicSelector(int id, int* wave, int* flags);
+/*   battling (port/src/game/battling/arena.c): a match's Battling starts
+ *   from the kernel, without the field that loads its song: the song then,
+ *   as the field loads it (thread.c, before battlingMainTask takes pMusic). */
+void pcArenaBattlingMusic(void);
+
+/* Matches (xg-htn.35.144, .142): started from anywhere, from their canonical
+ * start, and ended by Rematch / Leave (port/src/system/arena.c has the
+ * story; online: port/src/system/netplay.c).
+ *   platform: */
+int pcArenaMatchOn(void);       /* 1 a local match (the game kept), 2 an online session; 0 none */
+void pcArenaMatchRematch(void); /* both chose Rematch: the game's softReboot comes next (the same start) */
+void pcArenaMatchLeave(void);   /* a player chose Leave: the platform takes the game back at a vblank */
+/*   main (port/src/game/main/arena.c): the end's prompt, each player on their
+ *   own pad (both pads' bytes: online, the exchanged ones) */
+enum { PC_PROMPT_WAIT, PC_PROMPT_REMATCH, PC_PROMPT_LEAVE };
+enum { PC_PROMPT_SOUND_NONE, PC_PROMPT_SOUND_MOVE, PC_PROMPT_SOUND_CONFIRM, PC_PROMPT_SOUND_CANCEL };
+void pcArenaPromptBegin(void);
+int pcArenaPromptActive(void);
+int pcArenaPromptStep(int* sound); /* each frame: PC_PROMPT_*, once; the sound to play */
+/* The prompt as it is now: 0 none, 1 choosing, 2 Leave decided, 3 Rematch
+ * decided; each player's pick (0 Rematch, 1 Leave) and whether they are
+ * ready; players: 1 when player 1 decides alone (no second pad), else 2.
+ * The game draws it (versus.c in the battle's dialogue window, battling/
+ * arena.c in Battling's own text). */
+int pcArenaPromptState(int* pick, int* ready, int* players);
+/*   battling (port/src/game/battling/arena.c): updateBattlingVictoryScreen */
+int pcArenaBattlingVictory(void); /* 1: the prompt holds the screen (its confirm ends nothing) */
 
 #ifdef __cplusplus
 }
