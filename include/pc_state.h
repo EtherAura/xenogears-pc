@@ -42,6 +42,55 @@
  * The names are written out (no macros as T), one use per line: the schema
  * reads them from the source.
  */
+
+/*
+ * The state rules (docs: canonical states, 17.2): how a state converts
+ * between builds where saved data changed. A slot keeps its writer's schema,
+ * and the newer of the two builds' schemas carries every rule between them,
+ * so the same rule takes an older state forward and a newer one back. The
+ * rules language is fixed: tools/state_schema.py refuses any other PC_STATE_*
+ * macro, and every converter since the first canonical release reads these.
+ *
+ * PC_STATE_REVISION: this source's state revision. A change that needs a rule
+ *   raises it by one, and its rules carry the new value as rev ("from builds
+ *   of revision rev on"). A rule, once released, stays as it is.
+ *
+ * History (each with rev; the newer build's apply between two revisions):
+ * PC_STATE_WAS(rev, T, member, "old"): before rev, T's member was "old" (a
+ *   member name, its key from its offset tag; or a key, "+1c" or "pc:name").
+ *   member may be a path through unnamed structs (m8_in.pcLevel).
+ * PC_STATE_VAR_WAS(rev, var, "old"): before rev, the variable's identity was
+ *   "old": a PC variable's old name, or an identity ("field:800adc04",
+ *   "main:pc:name", "pc:system/hw.c:name").
+ * PC_STATE_TYPE_WAS(rev, T, "Old"): before rev, the struct T was named Old
+ *   (heap blocks are typed by name).
+ * PC_STATE_TAG_WAS(rev, "part.expr", "part.old"): a host part's chunk tag
+ *   before rev (XG_STATE_VAR's expression).
+ * PC_STATE_FN_WAS(rev, fn, "old"): before rev, the function fn was named old
+ *   (saved function pointers name their target; a game function is found by
+ *   its retail address too, where one function has it).
+ * PC_STATE_VALUES(rev, T, member, ((old, new), ...)): from rev, the integer
+ *   member (a bitfield, or each element of an integer array) holds new where
+ *   it held old. A newer build maps old to new, an older one new to old, the
+ *   first pair that matches; values in no pair stay.
+ * PC_STATE_VAR_VALUES(rev, var, ((old, new), ...)): the same for a variable.
+ * PC_STATE_RESET(rev, T, member), PC_STATE_VAR_RESET(rev, var): what it holds
+ *   changed at rev as no rule says: a state from the other side of rev does
+ *   not carry it (the reader's default).
+ * PC_STATE_REMOVED(rev, T, value, ("old", ...)): T's members removed at rev
+ *   (their names or keys); a build before rev gives them value.
+ * PC_STATE_VAR_REMOVED(rev, value, ("identity", ...)): variables removed at
+ *   rev, by their identities.
+ * Properties (no rev; the reading build's own):
+ * PC_STATE_DEFAULT(T, member, value), PC_STATE_VAR_DEFAULT(var, value): what
+ *   an integer gets when the state does not carry it (else zero).
+ * PC_STATE_HASHES(T, member): the member holds heap type hashes
+ *   (pcStateTypeId), which a type's rename changes too.
+ *
+ * Integers are literals (decimal or hex), names and identities strings. Each
+ * goes next to what it names, after its definition (no semicolon: it brings
+ * its own); PC_STATE_TAG_WAS beside the part's XG_STATE_VAR.
+ */
 #ifdef PLATFORM_PC
 #include "common.h"
 
@@ -119,6 +168,27 @@ void pcStateForget(const void* start, const void* end);
 #define PC_STATE_TAIL(T, array) _Static_assert(sizeof(((T*)0)->array[0]) > 0, "PC_STATE_TAIL: " #T);
 #define PC_STATE_UNION(T, member, selector, views) \
     _Static_assert(sizeof(((T*)0)->member) > 0 && sizeof(((T*)0)->selector) > 0, "PC_STATE_UNION: " #T);
+
+/* The state rules (above). A member is checked as any type, a bitfield too: sizeof((void)member, 0). */
+#define PC_STATE_REVISION 1
+#define PC_STATE_MEMBER(T, member) (sizeof((void)((T*)0)->member, 0) > 0)
+#define PC_STATE_VARIABLE(var) (sizeof((void)(var), 0) > 0)
+#define PC_STATE_WAS(rev, T, member, old) \
+    _Static_assert((rev) > 0 && PC_STATE_MEMBER(T, member) && sizeof(old) > 1, "PC_STATE_WAS: " #T);
+#define PC_STATE_VAR_WAS(rev, var, old) \
+    _Static_assert((rev) > 0 && PC_STATE_VARIABLE(var) && sizeof(old) > 1, "PC_STATE_VAR_WAS: " #var);
+#define PC_STATE_TYPE_WAS(rev, T, old) _Static_assert((rev) > 0 && sizeof(T) > 0 && sizeof(old) > 1, "PC_STATE_TYPE_WAS: " #T);
+#define PC_STATE_TAG_WAS(rev, tag, old) _Static_assert((rev) > 0 && sizeof(tag) > 1 && sizeof(old) > 1, "PC_STATE_TAG_WAS");
+#define PC_STATE_FN_WAS(rev, fn, old) _Static_assert((rev) > 0 && sizeof(&(fn)) > 0 && sizeof(old) > 1, "PC_STATE_FN_WAS: " #fn);
+#define PC_STATE_VALUES(rev, T, member, map) _Static_assert((rev) > 0 && PC_STATE_MEMBER(T, member), "PC_STATE_VALUES: " #T);
+#define PC_STATE_VAR_VALUES(rev, var, map) _Static_assert((rev) > 0 && PC_STATE_VARIABLE(var), "PC_STATE_VAR_VALUES: " #var);
+#define PC_STATE_RESET(rev, T, member) _Static_assert((rev) > 0 && PC_STATE_MEMBER(T, member), "PC_STATE_RESET: " #T);
+#define PC_STATE_VAR_RESET(rev, var) _Static_assert((rev) > 0 && PC_STATE_VARIABLE(var), "PC_STATE_VAR_RESET: " #var);
+#define PC_STATE_REMOVED(rev, T, value, names) _Static_assert((rev) > 0 && sizeof(T) > 0, "PC_STATE_REMOVED: " #T);
+#define PC_STATE_VAR_REMOVED(rev, value, identities) _Static_assert((rev) > 0, "PC_STATE_VAR_REMOVED");
+#define PC_STATE_DEFAULT(T, member, value) _Static_assert(PC_STATE_MEMBER(T, member), "PC_STATE_DEFAULT: " #T);
+#define PC_STATE_VAR_DEFAULT(var, value) _Static_assert(PC_STATE_VARIABLE(var), "PC_STATE_VAR_DEFAULT: " #var);
+#define PC_STATE_HASHES(T, member) _Static_assert(PC_STATE_MEMBER(T, member), "PC_STATE_HASHES: " #T);
 #else
 #define PC_HEAP_OF(T, size) (size)
 #define PC_HEAP_ONE(T, size) (size)
@@ -127,6 +197,20 @@ void pcStateForget(const void* start, const void* end);
 #define PC_STATE_COUNTED(T, array, count, extra)
 #define PC_STATE_TAIL(T, array)
 #define PC_STATE_UNION(T, member, selector, views)
+#define PC_STATE_WAS(rev, T, member, old)
+#define PC_STATE_VAR_WAS(rev, var, old)
+#define PC_STATE_TYPE_WAS(rev, T, old)
+#define PC_STATE_TAG_WAS(rev, tag, old)
+#define PC_STATE_FN_WAS(rev, fn, old)
+#define PC_STATE_VALUES(rev, T, member, map)
+#define PC_STATE_VAR_VALUES(rev, var, map)
+#define PC_STATE_RESET(rev, T, member)
+#define PC_STATE_VAR_RESET(rev, var)
+#define PC_STATE_REMOVED(rev, T, value, names)
+#define PC_STATE_VAR_REMOVED(rev, value, identities)
+#define PC_STATE_DEFAULT(T, member, value)
+#define PC_STATE_VAR_DEFAULT(var, value)
+#define PC_STATE_HASHES(T, member)
 #endif
 
 #endif

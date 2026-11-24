@@ -9,6 +9,18 @@
 #include "pc_wide.h"
 #define AddPrim pcTextureHudPrim
 #endif
+/* The status bar's code reads a party slot's numbers through HUD_SLOT. On
+ * the PC a mirror match (port/src/game/battle/mirror.c) also has it draw
+ * player 2's bar, its members in slots 3-5: HUD_SLOT gives theirs then.
+ * The PS1 reads the slot. */
+#ifdef PLATFORM_PC
+int pcBattleHudSlot(int slot);
+#define HUD_SLOT(i) pcBattleHudSlot(i)
+int pcVersusViewBar(void);      /* drawBattleMode1: player 2's bar drawn instead of the party's */
+void pcVersusViewSwap(int in);  /* its HUD in (1) and out (0) around the fills and the turn gauge */
+#else
+#define HUD_SLOT(i) (i)
+#endif
 
 
 /* Globals (splat names; Noah names in comments) */
@@ -248,10 +260,10 @@ s32 setupPolyArray3A88_HP2(s32 idx, u8 isGear) {
     s32 k;
     s32 b;
 
-    currentEntityMaxHpForDisplay = currentEntityMaxHpCopy = battleEntities.m0_entities[idx].m0_base.m4E_MaxHP;
-    currentEntityHpForDisplay = currentEntityHpCopy = battleEntities.m0_entities[idx].m0_base.m4C_HP;
-    currentEntityGearMaxHpForDisplay = currentEntityGearHpCopy = battleEntities.m0_entities[idx].mA4_gear.m60_hp;
-    currentEntityGearHpForDisplay = battleEntities.m0_entities[idx].mA4_gear.m64_maxHp;
+    currentEntityMaxHpForDisplay = currentEntityMaxHpCopy = battleEntities.m0_entities[HUD_SLOT(idx)].m0_base.m4E_MaxHP;
+    currentEntityHpForDisplay = currentEntityHpCopy = battleEntities.m0_entities[HUD_SLOT(idx)].m0_base.m4C_HP;
+    currentEntityGearMaxHpForDisplay = currentEntityGearHpCopy = battleEntities.m0_entities[HUD_SLOT(idx)].mA4_gear.m60_hp;
+    currentEntityGearHpForDisplay = battleEntities.m0_entities[HUD_SLOT(idx)].mA4_gear.m64_maxHp;
     if (isGear) {
         if (!(currentEntityGearHpForDisplay / 8 < currentEntityGearMaxHpForDisplay)) {
             goto two;
@@ -314,9 +326,9 @@ void setupPolyArray3A88_HP(s32 idx) {
     s32 i;
 
     if (battleVar0->m835C_apFuelLabels[idx].m1E1_barMode == 1) {
-        value = apConfigArray[idx].m0_storedAP;
+        value = apConfigArray[HUD_SLOT(idx)].m0_storedAP;
     } else {
-        value = battleEntities.m0_entities[idx].mA4_gear.m38_fuel;
+        value = battleEntities.m0_entities[HUD_SLOT(idx)].mA4_gear.m38_fuel;
     }
     printIntegerToStringBattle(value);
     for (i = 0; i < 4; i++) {
@@ -370,8 +382,8 @@ void updatePortraits(void) {
                 battleVar1->m84_timeBarsOddOrEven[3] = D_800CCB04.m30_battleOddOrEven;
                 break;
             case 3:
-                if (apConfigArray[i].m1_gearState != 0) {
-                    if (battleCharacters[i] != 7) {
+                if (apConfigArray[HUD_SLOT(i)].m1_gearState != 0) {
+                    if (BATTLE_CHARACTER(HUD_SLOT(i)) != 7) {
                         battleVar1->mCC_drawApFuel[i] = 0;
                     } else {
                         battleVar1->m74_timeBarsLengths[i] = 0;
@@ -382,7 +394,7 @@ void updatePortraits(void) {
                 timerBarInitStartOfTurnAnimation(i);
             case 2:
                 timerBarUpdateStartOfTurnAnimation(i);
-                if (apConfigArray[i].m1_gearState == 0 || battleCharacters[i] == 7) {
+                if (apConfigArray[HUD_SLOT(i)].m1_gearState == 0 || BATTLE_CHARACTER(HUD_SLOT(i)) == 7) {
                     battleVar1->m7F_drawTimeBarFill[i] = 0;
                 }
                 break;
@@ -564,11 +576,17 @@ void battleDrawAPBar(void) {
     s32 i;
 
     AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m8920_fullWindowDrMode[D_800CCB04.m30_battleOddOrEven]);
+#ifdef PLATFORM_PC
+    pcVersusViewSwap(1); /* the bar's fills: player 2's when its bar is the one shown (mirror.c) */
+#endif
     for (i = 0; i < 4; i++) {
         if (battleVar1->m7F_drawTimeBarFill[i] && currentBattleMode == 1) {
             AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m5A0_timeBarFills[0][i * 2 + battleVar1->m84_timeBarsOddOrEven[i]]);
         }
     }
+#ifdef PLATFORM_PC
+    pcVersusViewSwap(0);
+#endif
     AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m8908_drMode[D_800CCB04.m30_battleOddOrEven]);
     for (i = 0; i < 7; i++) {
         if (battleVar1->mB0_isDialogWindowInitialized[i]) {
@@ -601,8 +619,8 @@ void updatePolyArray3A88(void) {
             battleVar1->mEC_apFuelDigitCounts[i] = 0;
             if (battleVisualEntities[i].m2_characterId != 0x7F) {
                 setupPolyArray3A88_HP(i);
-                tint = setupPolyArray3A88_HP2(i, apConfigArray[i].m1_gearState);
-                if (apConfigArray[i].m1_gearState != 0) {
+                tint = setupPolyArray3A88_HP2(i, apConfigArray[HUD_SLOT(i)].m1_gearState);
+                if (apConfigArray[HUD_SLOT(i)].m1_gearState != 0) {
                     tintHpGear(i, tint);
                 } else {
                     tintHP(i, tint);
@@ -819,15 +837,15 @@ void updateApFuelPolyBar(void) {
         case 1:
             setXY4(&battleVar0->m740_APOrFuelPoly[0][i * 2 + D_800CCB04.m30_battleOddOrEven],
                    i * 0x60 + (partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + 0x28), 0x22,
-                   i * 0x60 + (partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + 0x28) + apConfigArray[i].m0_storedAP * 2, 0x22,
+                   i * 0x60 + (partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + 0x28) + apConfigArray[HUD_SLOT(i)].m0_storedAP * 2, 0x22,
                    i * 0x60 + (partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + 0x28), 0x26,
-                   i * 0x60 + (partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + 0x28) + apConfigArray[i].m0_storedAP * 2, 0x26);
+                   i * 0x60 + (partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + 0x28) + apConfigArray[HUD_SLOT(i)].m0_storedAP * 2, 0x26);
             setRGB0(&battleVar0->m740_APOrFuelPoly[0][i * 2 + D_800CCB04.m30_battleOddOrEven], 0, 0xFF, 0);
             setRGB1(&battleVar0->m740_APOrFuelPoly[0][i * 2 + D_800CCB04.m30_battleOddOrEven], 0, 0xFF, 0);
             break;
         case 2: {
-            u32 fuel = battleEntities.m0_entities[i].mA4_gear.m38_fuel;
-            u32 maxFuel = battleEntities.m0_entities[i].mA4_gear.m3A_maxFuel;
+            u32 fuel = battleEntities.m0_entities[HUD_SLOT(i)].mA4_gear.m38_fuel;
+            u32 maxFuel = battleEntities.m0_entities[HUD_SLOT(i)].mA4_gear.m3A_maxFuel;
             u32 ratio = R3000_DIV(fuel * 100, maxFuel) * 5600 / 10000;
 
             setXY4(&battleVar0->m740_APOrFuelPoly[0][i * 2 + D_800CCB04.m30_battleOddOrEven],
@@ -865,7 +883,7 @@ void renderGearHP(void) {
             fill[i] = 0;
         }
         if (battleVar1->m90_perPCTimeBarStatus[i] == 0) {
-            fill[i] = (100 - R3000_DIV(battleSlotStatusVar0.m16_numTicksBeforeReady[i] * 100, battleSlotStatusVar0.m0_battleSlotStatusVar0[i])) * 5600 / 10000;
+            fill[i] = (100 - R3000_DIV(battleSlotStatusVar0.m16_numTicksBeforeReady[HUD_SLOT(i)] * 100, battleSlotStatusVar0.m0_battleSlotStatusVar0[HUD_SLOT(i)])) * 5600 / 10000;
             setXY4(&battleVar0->m5A0_timeBarFills[0][i * 2 + D_800CCB04.m30_battleOddOrEven],
                    partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + i * 0x60 + 0x2D, 0x1A,
                    i * 0x60 + (partyMemberSpritesOffset[battlePartyLayoutType * 3 + i] + 0x2C) + (s16)(fill[i] + 1), 0x1A,
@@ -876,9 +894,9 @@ void renderGearHP(void) {
                    ((battleVar0->mA234_glyphTextures[0].m10_tpage_X & 0x3F) << 1) + fill[i] * 2, battleVar0->mA234_glyphTextures[0].m14_tpage_Y,
                    (battleVar0->mA234_glyphTextures[0].m10_tpage_X & 0x3F) << 1, battleVar0->mA234_glyphTextures[0].m14_tpage_Y + 4,
                    ((battleVar0->mA234_glyphTextures[0].m10_tpage_X & 0x3F) << 1) + fill[i] * 2, battleVar0->mA234_glyphTextures[0].m14_tpage_Y + 4);
-            if ((battleEntities.m0_entities[i].m0_base.m84_statusFlags2[0] | battleEntities.m0_entities[i].m0_base.m84_statusFlags2[1]) & 0x8000) {
+            if ((battleEntities.m0_entities[HUD_SLOT(i)].m0_base.m84_statusFlags2[0] | battleEntities.m0_entities[HUD_SLOT(i)].m0_base.m84_statusFlags2[1]) & 0x8000) {
                 clut = battleVar0->mA2B2_hasteTimeBarClut;
-            } else if (battleEntities.m0_entities[i].m0_base.m7C_statusFlags[0] & 0x1000) {
+            } else if (battleEntities.m0_entities[HUD_SLOT(i)].m0_base.m7C_statusFlags[0] & 0x1000) {
                 clut = battleVar0->mA2B0_slowTimeBarClut;
             } else {
                 clut = battleVar0->mA2AC_timeBarClut;
@@ -886,9 +904,9 @@ void renderGearHP(void) {
             battleVar0->m5A0_timeBarFills[0][i * 2 + D_800CCB04.m30_battleOddOrEven].clut = clut;
             battleVar1->m7F_drawTimeBarFill[i] = 1;
         } else {
-            fill[i] = (100 - battleSlotStatusVar0.m16_numTicksBeforeReady[i]) * 5600 / 10000;
-            if (apConfigArray[i].m1_gearState != 0 && battleCharacters[i] != 7) {
-                fill[i] = R3000_DIV(battleEntities.m0_entities[i].mA4_gear.m38_fuel * 100, battleEntities.m0_entities[i].mA4_gear.m3A_maxFuel) * 5600 / 10000;
+            fill[i] = (100 - battleSlotStatusVar0.m16_numTicksBeforeReady[HUD_SLOT(i)]) * 5600 / 10000;
+            if (apConfigArray[HUD_SLOT(i)].m1_gearState != 0 && BATTLE_CHARACTER(HUD_SLOT(i)) != 7) {
+                fill[i] = R3000_DIV(battleEntities.m0_entities[HUD_SLOT(i)].mA4_gear.m38_fuel * 100, battleEntities.m0_entities[HUD_SLOT(i)].mA4_gear.m3A_maxFuel) * 5600 / 10000;
             }
             setXY4(&battleVar0->m5A0_timeBarFills[3][D_800CCB04.m30_battleOddOrEven],
                    0xC, 0xCE, 0xC, 0xCE - fill[i] * 2, 0x14, 0xCE, 0x14, 0xCE - fill[i] * 2);
@@ -931,8 +949,13 @@ void drawBattleMode1(void) {
         updatePolyArray3A88();
         renderGearHP();
         updatePortraits();
-        battleRenderPortraitSelection();
-        battleRenderPlayerPortraits();
+#ifdef PLATFORM_PC
+        if (!pcVersusViewBar()) /* a mirror match: player 2's bar instead, on its side's turns (mirror.c) */
+#endif
+        {
+            battleRenderPortraitSelection();
+            battleRenderPlayerPortraits();
+        }
         battleRenderCommandRing();
         render_BA8_27C8_1E68();
         drawMonsterNames();
@@ -1144,12 +1167,14 @@ static void wideBattleHud(void) {
         return;
     }
     if (currentBattleMode == 1) {
+        pcVersusViewSwap(1); /* the turn gauge is the bar's: player 2's when its bar is shown (mirror.c) */
         wideHudArray(battleVar0->m2E08_timeBars[3][0], battleVar1->m74_timeBarsLengths[3],
                      battleVar1->m84_timeBarsOddOrEven[3], wideTimeLabelDx());
         pcWidePrim(&battleVar0->m5A0_timeBarFills[0][6 + battleVar1->m84_timeBarsOddOrEven[3]], left, 0);
         for (i = 0; i < battleVar1->m97_apMarkCount; i++) {
             pcWidePrim(&battleVar0->m908_apMarks[battleVar1->m98_apMarksOddOrEven + i * 2], left, 0);
         }
+        pcVersusViewSwap(0);
         wideHudArray(battleVar0->m9C8_APCounterDisplayPolys[0], battleVar1->m7B_apCounterLength,
                      battleVar1->mA4_oddOrEven7B, left);
         for (i = 0; i < 2; i++) {
@@ -1210,7 +1235,7 @@ void timerBarInitStartOfTurnAnimation(s32 idx) {
 
     battleVar1->m44_timeBarScreenPositionY = 0x1C;
     battleVar1->m34_timeBarScreenPositionX = idx * 0x60 + off;
-    if (apConfigArray[idx].m1_gearState != 0 && battleCharacters[idx] != 7) {
+    if (apConfigArray[HUD_SLOT(idx)].m1_gearState != 0 && BATTLE_CHARACTER(HUD_SLOT(idx)) != 7) {
         s32 off2 = partyMemberSpritesOffset[battlePartyLayoutType * 3 + idx] + 0x44;
         battleVar1->m44_timeBarScreenPositionY = 0x24;
         battleVar1->m34_timeBarScreenPositionX = idx * 0x60 + off2;

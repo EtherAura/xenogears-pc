@@ -75,7 +75,7 @@
  * Settings: those that change the game (gameplay: difficulty, enemy and
  * reward multipliers, encounters, deathblows, retry, text speed and its
  * holding and auto-advance, the original-game fixes; the arena's party in
- * Gears and battle music) are the host's on both sides: it sends them in the handshake
+ * Gears, battle music and opponent's HP) are the host's on both sides: it sends them in the handshake
  * (SETTINGS, each range-checked), and both hold them for the session
  * (settingsPin: the settings menu shows them locked, a change is ignored,
  * nothing is written). Both also play without what one may have and the
@@ -241,6 +241,9 @@ static void logicList(NpSession* s) {
     logicAdd(s, "arena_versus_gears", 0, 1, K_BOOL, pcVersusGearsSetting() != 0);
     /* the battle music: the song is game state (the driver and the SPU run in the game) */
     logicAdd(s, "arena_music", 0, ARENA_MUSIC_IDS, K_INT, pcArenaMusicSetting());
+    /* the opponent's HP and EP in a versus battle: a picture only, but the match's
+     * terms (both players see the same of each other) */
+    logicAdd(s, "arena_opponent_hp", 0, 1, K_BOOL, pcVersusOpponentHpSetting() != 0);
 }
 
 /* The session's settings held on this side (both sides). */
@@ -628,6 +631,8 @@ int netplayConnect(void) {
     N.blackoutNs = (uint64_t)ms * 1000000ull;
     s->poll = pollQuit;
     N.active = 1;
+    /* each machine shows its own player's side of a mirror match (system/arena.c) */
+    pcVersusSetPerspective(N.host ? 1 : 2);
     atexit(byeAtExit);
     return 1;
 }

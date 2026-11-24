@@ -268,6 +268,13 @@ add_executable(card_speeduptest EXCLUDE_FROM_ALL src/card/test/speeduptest.c
 target_include_directories(card_speeduptest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
 target_compile_definitions(card_speeduptest PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
 target_link_libraries(card_speeduptest PRIVATE SDL3::SDL3)
+# The save reader and the party record (card/saves.c, party.c, xg-htn.35.143) on synthetic saves.
+add_executable(card_savestest EXCLUDE_FROM_ALL src/card/test/savestest.c src/card/saves.c src/card/party.c
+    src/card/fs.c src/card/mcs.c src/card/image.c src/system/settings.c)
+target_include_directories(card_savestest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
+target_compile_definitions(card_savestest PRIVATE PLATFORM_PC VERSION_${XG_VERSION})
+target_compile_options(card_savestest PRIVATE -fno-strict-aliasing)
+target_link_libraries(card_savestest PRIVATE SDL3::SDL3)
 add_executable(pad_profiletest EXCLUDE_FROM_ALL src/system/test/padtest.c
     src/system/pad.c src/system/mouse.c src/system/touch.c src/system/rumble.c src/system/settings.c)
 target_include_directories(pad_profiletest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_GAME_ROOT}/include")
@@ -565,6 +572,19 @@ if(XG_DIST)
 endif()
 target_compile_definitions(platform PRIVATE PLATFORM_PC VERSION_${XG_VERSION} ${XG_ROOT_DEFINE}
     XG_ENGINE_ENHANCED=${XG_ENGINE_ENHANCED})
+# Save state slots that other builds load (port/src/system/stateportable.c) stay out of builds to hand
+# out until canonical states' compatibility phase is in (docs/CANONICAL_STATES.md 17, carl):
+# the first release that writes them must pass the state-compat gate both ways.
+if(XG_DIST)
+    set(xg_portable_default OFF)
+else()
+    set(xg_portable_default ON)
+endif()
+option(XG_PORTABLE_SLOTS "save state slots that other builds load (off in a build to hand out until P5)"
+    ${xg_portable_default})
+if(NOT XG_PORTABLE_SLOTS)
+    target_compile_definitions(platform PRIVATE XG_PORTABLE_SLOTS_OFF=1)
+endif()
 # -fno-strict-aliasing: platform code reads the game's packets and buffers
 # through the same punned views the game uses.
 target_compile_options(platform PRIVATE ${XG_PIC_OPTIONS} -fno-strict-aliasing ${XG_WIN32_LAYOUT_OPTIONS})

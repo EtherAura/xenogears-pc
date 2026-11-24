@@ -435,8 +435,8 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 /* That block: a vec4 of the sun and the shadow's darkness, a vec4 of the
  * count, one vec4 per ground point, then the fog's colour, which light.comp's
  * fog pass writes there (FOG_SLOT), light shafts' settings (SHAFT_SLOT) and
- * the cloud shadows' (CLOUD_SLOT, two vec4s). */
-#define LIGHT_BLOCK_BYTES ((5 + SCENE_FIGURES) * 16 + 16)
+ * the cloud shadows' (CLOUD_SLOT, two vec4s) and the firelight's (FLICKER_SLOT). */
+#define LIGHT_BLOCK_BYTES ((6 + SCENE_FIGURES) * 16 + 16)
 /* With ambient particles (xg-rgcf.5.10), after it: the room's frame and the
  * particles' settings (5 vec4s), a record of 3 vec4s per particle (light.comp
  * pass 20 writes them), and a 2048-bit mask per 16x16 PS1-pixel tile of the
@@ -6328,6 +6328,9 @@ static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
     float* cl = b + 4 * (4 + SCENE_FIGURES);
     cl[0] = p->clouds; cl[1] = p->cloudSize; cl[2] = p->cloudDrift[0]; cl[3] = p->cloudDrift[1];
     cl[4] = p->roomTrans[0]; cl[5] = p->roomTrans[1]; cl[6] = p->roomTrans[2]; cl[7] = p->cloudFar ? 1.0f : 0.0f;
+    /* Firelight's settings (light.comp FLICKER_SLOT, xg-rgcf.5.20). */
+    float* fl = b + 4 * (6 + SCENE_FIGURES);
+    fl[0] = p->flicker; fl[1] = p->flickerTime; fl[2] = p->flickerSpeed; fl[3] = p->flickerIrregular;
     for (int k = 0; k < count; k++) {
         b[8 + 4 * k] = p->figure[k][0]; b[9 + 4 * k] = p->figure[k][1]; b[10 + 4 * k] = p->figure[k][2]; b[11 + 4 * k] = 0;
     }
@@ -6363,8 +6366,8 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
     /* prepare's samples per PS1 pixel: all of them up to 3x, nine beyond. */
     int shadows = p->all || p->shadow > 0, fog = p->all || p->fogMost > 0, particles = p->particles > 0;
-    int shafts = p->shafts > 0, clouds = p->clouds > 0, figures = p->figureLight != 0;
-    int32_t block = shadows || fog || particles || shafts || clouds || figures ? lightBlock(ctx, p) : -1;
+    int shafts = p->shafts > 0, clouds = p->clouds > 0, figures = p->figureLight != 0, flicker = p->flicker > 0;
+    int32_t block = shadows || fog || particles || shafts || clouds || figures || flicker ? lightBlock(ctx, p) : -1;
     if (block < 0) shadows = fog = particles = shafts = clouds = figures = 0; /* no room for the block: none of these here */
     LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0) | (figures ? 4 : 0), x * n, y * n, w * n,
                         h * n, w, h, 0, 0, {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus,

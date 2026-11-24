@@ -26,6 +26,8 @@ void pcVersusBattleEnd(void);
 void pcVersusBattleLoaded(void);
 int pcVersusMirrorTurn(u8 entity);
 int pcVersusMirror(void);
+void pcVersusViewTurn(u8 entity); /* the status bar shows the acting side's (mirror.c) */
+void pcVersusViewHpShown(void);   /* player 2's bar shows the turn's numbers too */
 #endif
 
 /* Globals (splat names; Noah names in comments) */
@@ -619,6 +621,9 @@ void copyBattleVar1_m7C(void) {
     for (i = 0; i < 3; i++) {
         battleVar1->m7C_hpDisplayDirty[i] = battleVar2->m2EB_hpChanged[i];
     }
+#ifdef PLATFORM_PC
+    pcVersusViewHpShown(); /* a mirror match: player 2's bar shows them now too (mirror.c) */
+#endif
     battleRenderDebugAndMain();
 }
 
@@ -677,6 +682,9 @@ void battleTickMain(u8 arg0) {
     }
     entitiesHitInCurrentAttackBF = 0;
     updateBattleEntityStatus(battleVar2->m2D3_currentEntityTurn);
+#ifdef PLATFORM_PC
+    pcVersusViewTurn(battleVar2->m2D3_currentEntityTurn); /* a mirror match: whose side the status bar shows */
+#endif
     if (battleVar2->m2D3_currentEntityTurn >= 3) {
 #ifdef PLATFORM_PC
         if (arg0 == 0 && pcVersusMirrorTurn(battleVar2->m2D3_currentEntityTurn)) {

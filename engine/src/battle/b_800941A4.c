@@ -1450,12 +1450,19 @@ void battleStartPartyFixups(void) {
 }
 
 /* initial ATB wait of an entity: 0xA5 - 9 * (agility - command m27) (min 9 * 1, capped 0xA0) with +-4 jitter */
+/* PARTY_SPEED: the party's formula (its command's agility penalty), not an
+ * enemy's; a mirror match's copy of the party (slots 3-5,
+ * port/src/game/battle/mirror.c) is the party's too: its rows of
+ * m1058_partyBattleStats are its member's. */
+int pcVersusMirrorSlot(int entity);
+void pcVersusSpeedLog(int entity, int wait);
+#define PARTY_SPEED(entity) ((entity) < 3 || pcVersusMirrorSlot(entity))
 u8 battleGetSlotStatusSub(u8 entity, s32 unused) {
     u16 speed;
 
     battleGetSlotStatusSub_currentBattleEntity = &pBattleEntities->m0_entities[entity];
     battleGetSlotStatusSub_currentBattleEntityGear = &pBattleEntities->m0_entities[entity].mA4_gear;
-    if (entity < 3) {
+    if (PARTY_SPEED(entity)) {
         if (!(battleGetSlotStatusSub_currentBattleEntity->m15A_flags & 0x80)) {
             currentEntityBattleStats = &pBattleEntities->m1058_partyBattleStats[entity][pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
             if (battleGetSlotStatusSub_currentBattleEntity->m0_base.m5A_agility > (s8)currentEntityBattleStats->m27_agilityPenalty) {
@@ -1478,6 +1485,7 @@ u8 battleGetSlotStatusSub(u8 entity, s32 unused) {
         speed = 0xA0;
     }
     speed = 0xA5 - speed;
+    pcVersusSpeedLog(entity, speed); /* a mirror match: XG_ARENA_LOG (mirror.c) */
     speed -= rand() % 8 - 4;
     updatePlayerWithStatusC000And2();
     return speed;
@@ -2218,7 +2226,11 @@ s32 isBillyAmmoLoaded(u8 idx) {
  * records (u16 attack, m2, m3 type, m4 power, m5, m6 id, m7): record k's
  * bytes 2/3/4/6 are m4[k].m1[-3], m1[-2], m0, m1[1]. Written as
  * decl-based ARRAY_REFs so gameState+off folds into each %lo (m4[k - 1].m7
- * does not match) and the stores keep their order. */
+ * does not match) and the stores keep their order. The battle entities it
+ * updates are AMMO_SLOT's: on player 2's turn in a mirror match
+ * (port/src/game/battle/mirror.c) its copy of the party's, entities 3-5. */
+int pcVersusPartySlot(int slot);
+#define AMMO_SLOT(i) pcVersusPartySlot(i)
 void loadBillyAmmo(u8 id, u8 slot) {
     sBattleItemData* e = &pBattleEntities->m5518_items[id - 2];
     sBattleEntity* ent;
@@ -2244,7 +2256,7 @@ void loadBillyAmmo(u8 id, u8 slot) {
     gameStateAmmoByWeaponItem[id] = e->m3_ammoCount;
     gameState.m26C_party[4].m6F_equipment[slot] = id;
     for (i = 0; i < 3; i++) {
-        ent = &pBattleEntities->m0_entities[i];
+        ent = &pBattleEntities->m0_entities[AMMO_SLOT(i)];
         if (ent->m0_base.m56_battleCommandLoadout == 4) {
             ent->m0_base.m4_weaponSlots[slot].m0_weaponPower = e->mA.ammo.mC_power;
             ent->m0_base.m4_weaponSlots[slot].m1[-2] = e->mA.ammo.mB_statusType;

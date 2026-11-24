@@ -92,6 +92,26 @@ int pcVersusMirrorTurn(unsigned char entity);
 int pcVersusMirrorPad2(void);
 int pcVersusMirrorSlot(int entity);
 void pcVersusMirrorSprites(void);
+/* What each player sees (display only; mirror.c's header): their own side's
+ * status bar, and the opponent's HP and EP only when the match lets them.
+ *   platform: whose this machine shows: 0 one screen (the side whose turn
+ *   began last), 1 or 2 that player's (online netplay's player number; for
+ *   tests XG_VERSUS_VIEW=1|2); the Enemy info window of a versus battle lists
+ *   the opponent's HP and EP (arena_opponent_hp, 0 by default; online the
+ *   host's) */
+int pcVersusPerspective(void);
+int pcVersusOpponentHpSetting(void);
+/*   battle (mirror.c): the status bar's hooks (src/battle/b_800728B8.c:
+ *   HUD_SLOT, drawBattleMode1, battleDrawAPBar, wideBattleHud; b_8008A274.c,
+ *   b_80070E2C.c) and Billy's reload (b_800941A4.c AMMO_SLOT) */
+int pcBattleHudSlot(int slot);
+int pcVersusViewBar(void);
+void pcVersusViewSwap(int in);
+void pcVersusViewTick(void);
+void pcVersusViewTurn(unsigned char entity);
+void pcVersusViewHpShown(void);
+int pcVersusPartySlot(int slot);
+void pcVersusSpeedLog(int entity, int wait); /* battleGetSlotStatusSub (b_800941A4.c PARTY_SPEED) */
 
 /* Field (port/src/game/field/arena_field.c): fieldEntryPoint, where the
  * player could open the menu. */

@@ -23,7 +23,7 @@ extern "C" {
 #endif
 
 #define NP_MAGIC 0x504E4758u /* "XGNP" */
-#define NP_VERSION 4 /* 4: the battle music among the settings (xg-htn.35.146) */
+#define NP_VERSION 5 /* 4: the battle music among the settings (xg-htn.35.146); 5: the opponent's HP (.143) */
 #define NP_PACKET 80
 #define NP_TAG 72 /* the tag's place: SipHash-2-4 of bytes 0..71 */
 #define NP_RING 256

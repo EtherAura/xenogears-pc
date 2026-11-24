@@ -227,6 +227,8 @@ std::vector<Spec>& table() {
         dofLevels, 4);
     add("lighting", N_("Lighting"), [](int) { return sceneLighting(); }, [](int, int v) { sceneSetLighting(v); }, 0,
         dofLevels, 4);
+    add("lighting_firelight", N_("Firelight flicker"), [](int) { return sceneFirelight(); },
+        [](int, int v) { sceneSetFirelight(v); }, 1, offOn, 2);
     add("lighting_characters", N_("Light on characters"), [](int) { return sceneLightCharacters(); },
         [](int, int v) { sceneSetLightCharacters(v); }, 1, offOn, 2);
     add("glow", N_("Glow"), [](int) { return sceneGlow(); }, [](int, int v) { sceneSetGlow(v); }, 0, dofLevels, 4);

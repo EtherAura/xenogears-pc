@@ -71,9 +71,18 @@ typedef struct {
     int32_t encodeWarningCount;
     StateConvertWarning* decodeWarnings;
     int32_t decodeWarningCount;
+    /* what the state rules and the types changed between the builds did (statecanon Decoder.applied: a
+     * renamed thing found, values mapped, a value of another type carried by its bytes; docs 17.2), in the
+     * order each was first counted. Not losses: what a conversion did not carry is a decode warning. */
+    StateConvertWarning* ruleNotes;
+    int32_t ruleNoteCount;
 } StateConvertResult;
 
-/* The writer's state as the reader's: statecanon decode(encode(writer), reader, template, stackless).
+/* The writer's state as the reader's: statecanon decode(encode(writer), reader, template, stackless, writer)
+ * with the state rules between the two builds (docs/CANONICAL_STATES.md 17.2): the newer schema's, forward
+ * for a newer reader, backward for a newer writer. A rule this build cannot read is ignored (a decode
+ * warning), never a refusal; a value whose type changed is carried by its bytes when neither type holds a
+ * pointer, else not carried (a decode warning).
  * reader->body is the template. stackless: without the game's frames (statecanon convert always
  * converts so: the load starts the game again at the safe point it was saved at). 1 on success; 0 with
  * a message in err where statecanon would fail too (another shape of value than the type takes, a state

@@ -101,7 +101,11 @@ static const char* ownPath(void) {
 }
 
 int statePortableOn(void) {
+#ifdef XG_PORTABLE_SLOTS_OFF
+    return 0; /* a release before canonical states' compatibility phase (port/CMakeLists.txt XG_PORTABLE_SLOTS) */
+#else
     return ownPath()[0] != '\0';
+#endif
 }
 
 /* A schema file's JSON (NUL-terminated): the file's bytes, or the packed form's ("XGSCHEMA", u64 the JSON's
@@ -204,6 +208,12 @@ static int describesThis(const StateSchema* s, char* why, size_t size) {
 }
 
 static const StateSchema* ownSchema(char* why, size_t size) {
+#ifdef XG_PORTABLE_SLOTS_OFF
+    /* A release before canonical states' compatibility phase: its slots load in it alone, and it
+     * converts none (port/CMakeLists.txt XG_PORTABLE_SLOTS; docs/CANONICAL_STATES.md 17). */
+    snprintf(why, size, "slots that other versions load come in a later release");
+    return NULL;
+#endif
     if (!own.tried) {
         own.tried = 1;
         const char* path = ownPath();

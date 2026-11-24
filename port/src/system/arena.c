@@ -256,6 +256,40 @@ int pcVersusGears(void) {
     return pcVersusSession() == PC_VERSUS_IN && pcVersusGearsSetting();
 }
 
+/* ---- what each player sees (xg-htn.35.143) ----
+ *
+ * Each player sees their own side's status bar, as though they were player 1
+ * (port/src/game/battle/mirror.c); the opponent's HP and EP only when the
+ * match lets them (the Enemy info window, port/src/game/battle/enemyinfo.c).
+ * Both are pictures only: the two games of a session stay the same whatever
+ * each shows. */
+
+static int perspective;         /* this machine's player online (netplay.c), 0 one screen */
+static int perspectiveEnv = -1; /* XG_VERSUS_VIEW: -1 not read yet */
+
+int pcVersusPerspective(void) {
+    if (perspectiveEnv < 0) {
+        const char* s = getenv("XG_VERSUS_VIEW");
+        perspectiveEnv = s != NULL && (strcmp(s, "1") == 0 || strcmp(s, "2") == 0) ? s[0] - '0' : 0;
+    }
+    return perspectiveEnv != 0 ? perspectiveEnv : perspective;
+}
+
+void pcVersusSetPerspective(int player) {
+    perspective = player == 1 || player == 2 ? player : 0;
+}
+
+int pcVersusOpponentHpSetting(void) {
+    settingsDescribe("arena_opponent_hp", "Battle arena: in a versus battle the Enemy info window (Select) lists the "
+                                          "opponent's HP and EP (0/1; online the host's)");
+    return settingsBool("arena_opponent_hp", 0);
+}
+
+void pcVersusSetOpponentHp(int on) {
+    settingsSetInt("arena_opponent_hp", on != 0);
+    settingsSave();
+}
+
 void pcArenaKeyboard(int arena) {
     int on = arena && pcArenaKeyboardOffered() && pcArenaPlayer2Keyboard();
     if (on != keyboardOn && padSetKeyboardPort != NULL) {

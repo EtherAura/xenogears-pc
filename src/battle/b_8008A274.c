@@ -167,6 +167,10 @@ void freeBattleRenderStruct2(u8);
 void setDamageDone(u8);
 void applyChangeToHpOrMp(u8);
 
+#ifdef PLATFORM_PC
+void pcVersusViewTick(void); /* port/src/game/battle/mirror.c: player 2's status bar, a vblank on */
+#endif
+
 /* 72 263 260] */
 void battleUpdateInputs_mode1(u8 arg0) {
     sBattleVar0* p;
@@ -198,6 +202,9 @@ void battleUpdateInputs_mode1(u8 arg0) {
             }
         }
     }
+#ifdef PLATFORM_PC
+    pcVersusViewTick(); /* a mirror match: player 2's status bar's time bar steps and highlight, as above */
+#endif
     switch (battleMenuScrollRequest) {
     case 1:
     case 3:

@@ -16,6 +16,8 @@ typedef struct {
     u32 type;  /* pcStateTypeId of the name */
     s32 count;
 } StateRange;
+/* (a type's rename changes its hash: a conversion maps these as it maps heap blocks' headers) */
+PC_STATE_HASHES(StateRange, type)
 
 static u32 pendingType;
 static struct {

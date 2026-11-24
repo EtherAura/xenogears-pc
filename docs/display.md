@@ -106,6 +106,15 @@ darker on the far side, gets shade at its feet in a corner, and what is near
 white on it glows. F1 > Display > Light on characters (On by default) turns
 it off.
 
+With Lighting or Glow on, fires, torches and lamps flicker indoors, at night
+and in battles (not in daylight, where a sunlit roof could pass for a
+flame): the light they throw on what is around them and their glow rise and
+fall, each fire in its own rhythm, while windows, the sky and white or blue
+lights stay steady. Only fires that are part of the scenery flicker; flames
+the game draws as a separate effect (such as Lahan's burning houses) do not
+light the scene yet. F1 > Display > Firelight flicker (On by default) turns
+it off.
+
 ## Shadows
 
 In fields, battles and on the world map, the scenery casts shadows from a
@@ -202,6 +211,7 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Dialogue focus | On |
 | Tilt-shift | Off |
 | Lighting | Off |
+| Firelight flicker | On |
 | Light on characters | On |
 | Glow | Off |
 | Shadows | Off |

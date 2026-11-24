@@ -304,8 +304,52 @@ typedef struct {
     int64_t off, size;
 } Chunk;
 
+/* ---- the state rules between the two builds (statecanon Rules; docs/CANONICAL_STATES.md 17.2) ----------- */
+
+typedef struct {
+    int32_t tid;      /* a type of the side the rule's schema is (the newer, or the reader for properties) */
+    const char* key;  /* its member's key */
+    const char* old;  /* was: the key before */
+    const StRule* r;  /* values, reset */
+    int64_t value;    /* removed, default */
+} FieldEntry;
+
+typedef struct {
+    const char* cur;  /* the identity or name now (removed, defaults: the identity) */
+    const char* old;
+    const StRule* r;
+    int64_t value;
+} NameEntry;
+
+typedef struct {
+    FieldEntry* e;
+    int32_t n, cap;
+} FieldList;
+
+typedef struct {
+    NameEntry* e;
+    int32_t n, cap;
+} NameList;
+
+typedef struct {
+    int forward, backward, active;
+    int64_t older, unknown;
+    FieldList fieldWas, fieldHist, removedFields, defaultsField, hashes;
+    NameList varWas, typeWas, tagWas, fnWas, varHist, removedVars, defaultsVar;
+    uint8_t* ruledA; /* per writer type: an entry names it (a newer writer's history) */
+    uint8_t* ruledB; /* per reader type: an entry names it (a newer reader's history, the reader's properties) */
+    int32_t histCount;
+} CRules;
+
 typedef struct {
     Side a, b;
+    CRules R;
+    Warns notes; /* what the rules and the type changes did (statecanon Decoder.applied) */
+    int self;    /* > 0: a writer's value laid out by its own schema (writer_bytes): no rules, types or warnings */
+    int8_t* plainA; /* plain() per type of each side: -1 not yet, 2 deciding */
+    int8_t* plainB;
+    uint8_t* defaultsState; /* defaults_in per reader type: 0 not yet, 1 deciding, 2 done */
+    struct DefaultList* defaults;
     Chunk* ac;
     int32_t nac;
     Mem* acMem;
@@ -408,6 +452,7 @@ static void bufSet(Ctx* c, Buf* b, int64_t a, int64_t e, const uint8_t* data, in
 }
 
 static void warn(Ctx* c, Warns* w, const char* text) {
+    if (c->self && w != &c->enc) return; /* a writer's value laid out by its own schema: its decoder's, unkept */
     for (int32_t i = 0; i < w->n; i++) {
         if (strcmp(w->rows[i].text, text) == 0) {
             w->rows[i].count++;
@@ -955,28 +1000,43 @@ static void encPointer(Ctx* c, uint64_t v, int quiet, CPtr* p) {
     p->raw = v;
 }
 
+static CRules* rulesOn(Ctx* c);
+static const char* fieldTarget(const CRules* R, int32_t rtid, int32_t wtid, const char* wkey);
+static const char* nameTarget(const CRules* R, const NameList* l, const char* ident);
+static const char* fnTarget(const CRules* R, const char* ident, char* buf, size_t size);
+
 /* Decoder.offset_of: a field path's offset from a value of type tid in the reader; 0 when the path is
- * not in this build. */
-static int offsetOf(Ctx* c, int32_t tid, const Step* steps, int32_t n, int64_t* out) {
+ * not in this build. The path's keys are the writer's, of its type wtid: with rules, followed alongside
+ * (a renamed member's key by them). */
+static int offsetOf(Ctx* c, int32_t tid, const Step* steps, int32_t n, int64_t* out, int32_t wtid) {
     Side* s = &c->b;
+    CRules* R = rulesOn(c);
     int64_t off = 0;
     for (int32_t k = 0; k < n; k++) {
         const StType* t = ty(s, tid);
         if (!t) return 0;
+        const StType* wtt = R ? ty(&c->a, wtid) : NULL;
         if (steps[k].kind == S_VIEW) {
-            int32_t f = fieldNamed(t, steps[k].s);
+            const char* name = R ? fieldTarget(R, tid, wtid, steps[k].s) : steps[k].s;
+            int32_t f = name ? fieldNamed(t, name) : -1;
             if (t->kind != ST_UNION || f < 0) return 0;
+            int32_t wv = wtt ? fieldNamed(wtt, steps[k].s) : -1;
             tid = t->fields[f].type;
+            wtid = wv >= 0 ? wtt->fields[wv].type : ST_NONE;
         } else if (steps[k].kind == S_INT) {
             if (t->kind != ST_ARR) return 0;
             off += steps[k].i * tsize(s, t->of);
             tid = t->of;
+            wtid = wtt && wtt->kind == ST_ARR ? wtt->of : ST_NONE;
         } else {
             if (t->kind != ST_STRUCT) return 0;
-            int32_t f = firstKey(c, s, tid, steps[k].s);
+            const char* key = R ? fieldTarget(R, tid, wtid, steps[k].s) : steps[k].s;
+            int32_t f = key ? firstKey(c, s, tid, key) : -1;
             if (f < 0) return 0;
+            int32_t wf = wtt && wtt->kind == ST_STRUCT ? firstKey(c, &c->a, wtid, steps[k].s) : -1;
             off += t->fields[f].off;
             tid = t->fields[f].type;
+            wtid = wf >= 0 ? wtt->fields[wf].type : ST_NONE;
         }
     }
     *out = off;
@@ -1013,7 +1073,7 @@ static uint64_t decPointer(Ctx* c, const CPtr* p) {
                 return base;
             }
             int64_t o = 0;
-            if (!offsetOf(c, lay->tid, p->steps, p->nsteps, &o)) {
+            if (!offsetOf(c, lay->tid, p->steps, p->nsteps, &o, part->tid)) {
                 warn(c, &c->dec, "heap pointer path not in this build");
                 o = 0;
             }
@@ -1057,21 +1117,26 @@ static uint64_t decPointer(Ctx* c, const CPtr* p) {
     }
     case P_FN: {
         uint64_t a = 0;
-        if (!stateSchemaFnFind(s, p->fn, &a)) {
+        CRules* R = rulesOn(c);
+        char renamed[FN_ID];
+        if (!stateSchemaFnFind(s, R ? fnTarget(R, p->fn, renamed, sizeof renamed) : p->fn, &a)) {
             warn(c, &c->dec, "function not in this build");
             return 0;
         }
         return a;
     }
     default: {
-        int32_t vi = stateSchemaVarById(s, p->name);
+        CRules* R = rulesOn(c);
+        const char* vid = R ? nameTarget(R, &R->varWas, p->name) : p->name;
+        int32_t vi = vid ? stateSchemaVarById(s, vid) : ST_NONE;
         if (vi == ST_NONE) {
             warn(c, &c->dec, "pointer to a variable not in this build");
             return 0;
         }
         const StVar* var = stateSchemaVarAt(s, vi);
+        int32_t wv = R ? stateSchemaVarById(c->a.s, p->name) : ST_NONE;
         int64_t o = 0;
-        if (!offsetOf(c, var->type, p->steps, p->nsteps, &o)) {
+        if (!offsetOf(c, var->type, p->steps, p->nsteps, &o, wv != ST_NONE ? stateSchemaVarAt(c->a.s, wv)->type : ST_NONE)) {
             warn(c, &c->dec, "pointer path not in this build");
             o = 0;
         }
@@ -1117,10 +1182,6 @@ struct AVal {
     int32_t nov;
     Override ov[2];
 };
-
-static int isDict(const AVal* v) {
-    return v->kind != AV_NONE && v->kind != AV_INT && v->kind != AV_LIST;
-}
 
 static void makeVal(Ctx* c, int32_t tid, const Mem* m, int64_t off, int warnOn, AVal* v);
 
@@ -1383,12 +1444,720 @@ static const char* shapeName(const AVal* v) {
 
 /* ---- the reader's bytes (Decoder.put) ---------------------------------------------------------- */
 
-static void put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off);
-
 /* The bytes of a dict's "x" (AV_HEX, AV_SEL). */
 static int64_t hexBytes(const AVal* v, const uint8_t** p) { return memSlice(v->m, v->off, v->off + v->n, p); }
 
-static void putStruct(Ctx* c, int32_t tid, const StType* t, const AVal* val, Buf* buf, int64_t off) {
+/* ---- the state rules (statecanon Rules, rule_target; docs/CANONICAL_STATES.md 17.2) -------------------- */
+
+static int fieldAdd(Ctx* c, FieldList* l, FieldEntry e) {
+    if (l->n == l->cap) {
+        int32_t cap = l->cap ? l->cap * 2 : 16;
+        FieldEntry* more = poolAlloc(c, (size_t)cap * sizeof *more);
+        if (!more) return 0;
+        if (l->n) memcpy(more, l->e, (size_t)l->n * sizeof *more);
+        l->e = more;
+        l->cap = cap;
+    }
+    l->e[l->n++] = e;
+    return 1;
+}
+
+static int nameAdd(Ctx* c, NameList* l, NameEntry e) {
+    if (l->n == l->cap) {
+        int32_t cap = l->cap ? l->cap * 2 : 16;
+        NameEntry* more = poolAlloc(c, (size_t)cap * sizeof *more);
+        if (!more) return 0;
+        if (l->n) memcpy(more, l->e, (size_t)l->n * sizeof *more);
+        l->e = more;
+        l->cap = cap;
+    }
+    l->e[l->n++] = e;
+    return 1;
+}
+
+/* dict.setdefault: the first entry of (tid, key) */
+static const FieldEntry* fieldFirst(const FieldList* l, int32_t tid, const char* key) {
+    for (int32_t i = 0; i < l->n; i++) {
+        if (l->e[i].tid == tid && strcmp(l->e[i].key, key) == 0) return &l->e[i];
+    }
+    return NULL;
+}
+
+/* {(t, old): cur for ...}: the last entry whose old is key */
+static const FieldEntry* fieldBack(const FieldList* l, int32_t tid, const char* old) {
+    for (int32_t i = l->n - 1; i >= 0; i--) {
+        if (l->e[i].tid == tid && strcmp(l->e[i].old, old) == 0) return &l->e[i];
+    }
+    return NULL;
+}
+
+static const NameEntry* nameFirst(const NameList* l, const char* cur) {
+    for (int32_t i = 0; i < l->n; i++) {
+        if (strcmp(l->e[i].cur, cur) == 0) return &l->e[i];
+    }
+    return NULL;
+}
+
+static const NameEntry* nameBack(const NameList* l, const char* old) {
+    for (int32_t i = l->n - 1; i >= 0; i--) {
+        if (strcmp(l->e[i].old, old) == 0) return &l->e[i];
+    }
+    return NULL;
+}
+
+static int ruleIsHistory(const StRule* r) { return r->kind != ST_RULE_DEFAULT && r->kind != ST_RULE_HASHES; }
+
+static void ruled(Ctx* c, int side, int32_t tid) {
+    uint8_t* f = side ? c->R.ruledB : c->R.ruledA;
+    int32_t n = side ? c->b.ntypes : c->a.ntypes;
+    if (f && tid >= 0 && tid < n) f[tid] = 1;
+}
+
+/* Rules.__init__: the newer schema's history rules between the two revisions, in revision order; the reader's
+ * defaults and type hashes. */
+static void rulesInit(Ctx* c) {
+    CRules* R = &c->R;
+    int64_t wr = stateSchemaRevision(c->a.s), rr = stateSchemaRevision(c->b.s);
+    R->forward = wr < rr;
+    R->backward = wr > rr;
+    R->older = wr < rr ? wr : rr;
+    int64_t newerRev = wr > rr ? wr : rr;
+    const StateSchema* newer = R->forward ? c->b.s : R->backward ? c->a.s : NULL;
+    int newerSide = R->forward ? 1 : 0;
+    R->ruledA = poolAlloc(c, (size_t)c->a.ntypes + 1);
+    R->ruledB = poolAlloc(c, (size_t)c->b.ntypes + 1);
+    int32_t n = newer ? stateSchemaRuleCount(newer) : 0;
+    const StRule** hist = n ? poolAlloc(c, (size_t)n * sizeof *hist) : NULL;
+    if (c->failed) return;
+    int32_t nh = 0;
+    for (int32_t i = 0; i < n; i++) {
+        const StRule* r = stateSchemaRuleAt(newer, i);
+        if (!r->readable) {
+            R->unknown++;
+        } else if (ruleIsHistory(r) && R->older < r->rev && r->rev <= newerRev) {
+            int32_t j = nh++; /* a stable sort by revision */
+            while (j > 0 && hist[j - 1]->rev > r->rev) {
+                hist[j] = hist[j - 1];
+                j--;
+            }
+            hist[j] = r;
+        }
+    }
+    for (int32_t i = 0; i < nh && !c->failed; i++) {
+        const StRule* r = hist[i];
+        if (r->kind == ST_RULE_WAS) {
+            if (r->on == ST_ON_FIELD) {
+                for (int32_t k = 0; k < r->tidCount; k++) {
+                    if (r->types[k] == ST_NONE || fieldFirst(&R->fieldWas, r->types[k], r->name)) continue;
+                    FieldEntry e = {r->types[k], r->name, r->old, r, 0};
+                    fieldAdd(c, &R->fieldWas, e);
+                    ruled(c, newerSide, r->types[k]);
+                }
+            } else {
+                NameList* l = r->on == ST_ON_VAR ? &R->varWas : r->on == ST_ON_TYPENAME ? &R->typeWas
+                            : r->on == ST_ON_TAG ? &R->tagWas : &R->fnWas;
+                if (!nameFirst(l, r->name)) {
+                    NameEntry e = {r->name, r->old, r, 0};
+                    nameAdd(c, l, e);
+                }
+            }
+        } else if (r->kind == ST_RULE_VALUES || r->kind == ST_RULE_RESET) {
+            if (r->on == ST_ON_FIELD) {
+                for (int32_t k = 0; k < r->tidCount; k++) {
+                    if (r->types[k] == ST_NONE) continue;
+                    FieldEntry e = {r->types[k], r->name, NULL, r, 0};
+                    fieldAdd(c, &R->fieldHist, e);
+                    ruled(c, newerSide, r->types[k]);
+                }
+            } else {
+                NameEntry e = {r->name, NULL, r, 0};
+                nameAdd(c, &R->varHist, e);
+            }
+        } else if (r->kind == ST_RULE_REMOVED) {
+            if (r->on == ST_ON_VARS) {
+                for (int32_t k = 0; k < r->nameCount; k++) {
+                    if (nameFirst(&R->removedVars, r->names[k])) continue;
+                    NameEntry e = {r->names[k], NULL, r, r->value};
+                    nameAdd(c, &R->removedVars, e);
+                }
+            } else {
+                for (int32_t k = 0; k < r->tidCount; k++) {
+                    for (int32_t q = 0; q < r->nameCount && r->types[k] != ST_NONE; q++) {
+                        if (fieldFirst(&R->removedFields, r->types[k], r->names[q])) continue;
+                        FieldEntry e = {r->types[k], r->names[q], NULL, r, r->value};
+                        fieldAdd(c, &R->removedFields, e);
+                        ruled(c, newerSide, r->types[k]);
+                    }
+                }
+            }
+        }
+    }
+    R->histCount = nh;
+    for (int32_t i = 0; i < stateSchemaRuleCount(c->b.s) && !c->failed; i++) { /* the reader's own properties */
+        const StRule* r = stateSchemaRuleAt(c->b.s, i);
+        if (!r->readable || ruleIsHistory(r)) continue;
+        if (r->kind == ST_RULE_DEFAULT && r->on == ST_ON_VAR) {
+            if (!nameFirst(&R->defaultsVar, r->name)) {
+                NameEntry e = {r->name, NULL, r, r->value};
+                nameAdd(c, &R->defaultsVar, e);
+            }
+            continue;
+        }
+        for (int32_t k = 0; k < r->tidCount; k++) {
+            FieldList* l = r->kind == ST_RULE_DEFAULT ? &R->defaultsField : &R->hashes;
+            if (r->types[k] == ST_NONE || fieldFirst(l, r->types[k], r->name)) continue;
+            FieldEntry e = {r->types[k], r->name, NULL, r, r->value};
+            fieldAdd(c, l, e);
+            ruled(c, 1, r->types[k]);
+        }
+    }
+    R->active = nh > 0 || R->defaultsVar.n > 0 || R->defaultsField.n > 0 || R->hashes.n > 0;
+}
+
+/* The rules in force: none in a writer's own layout (writer_bytes), none when nothing applies. */
+static CRules* rulesOn(Ctx* c) { return !c->self && c->R.active ? &c->R : NULL; }
+
+/* Rules.source: what the writer calls the reader's thing; NULL when the writer has it not. */
+static const char* nameSource(const CRules* R, const NameList* l, const char* ident) {
+    if (R->forward) {
+        const NameEntry* e = nameFirst(l, ident);
+        return e ? e->old : ident;
+    }
+    if (R->backward) {
+        const NameEntry* e = nameBack(l, ident);
+        if (e) return e->cur;
+        return nameFirst(l, ident) ? NULL : ident;
+    }
+    return ident;
+}
+
+/* Rules.target: the reader's name of the writer's thing; NULL when the reader has it not. */
+static const char* nameTarget(const CRules* R, const NameList* l, const char* ident) {
+    if (R->forward) {
+        const NameEntry* e = nameBack(l, ident);
+        if (e) return e->cur;
+        return nameFirst(l, ident) ? NULL : ident;
+    }
+    if (R->backward) {
+        const NameEntry* e = nameFirst(l, ident);
+        return e ? e->old : ident;
+    }
+    return ident;
+}
+
+/* Rules.field_source: the writer's key of the reader's member key; NULL when the writer has it not. */
+static const char* fieldSource(const CRules* R, int32_t rtid, int32_t wtid, const char* key) {
+    if (R->forward) {
+        if (rtid < 0 || !R->ruledB[rtid]) return key;
+        const FieldEntry* e = fieldFirst(&R->fieldWas, rtid, key);
+        return e ? e->old : key;
+    }
+    if (R->backward) {
+        if (wtid < 0 || !R->ruledA[wtid]) return key;
+        const FieldEntry* e = fieldBack(&R->fieldWas, wtid, key);
+        if (e) return e->key;
+        return fieldFirst(&R->fieldWas, wtid, key) ? NULL : key;
+    }
+    return key;
+}
+
+/* Rules.field_target: the reader's key of the writer's member key; NULL when the reader has it not. */
+static const char* fieldTarget(const CRules* R, int32_t rtid, int32_t wtid, const char* wkey) {
+    if (R->forward) {
+        if (rtid < 0 || !R->ruledB[rtid]) return wkey;
+        const FieldEntry* e = fieldBack(&R->fieldWas, rtid, wkey);
+        if (e) return e->key;
+        return fieldFirst(&R->fieldWas, rtid, wkey) ? NULL : wkey;
+    }
+    if (R->backward) {
+        if (wtid < 0 || !R->ruledA[wtid]) return wkey;
+        const FieldEntry* e = fieldFirst(&R->fieldWas, wtid, wkey);
+        return e ? e->old : wkey;
+    }
+    return wkey;
+}
+
+/* Rules.fn_target: the reader's identity of the writer's function (its name through the renames). */
+static const char* fnTarget(const CRules* R, const char* ident, char* buf, size_t size) {
+    const char* colon = strrchr(ident, ':');
+    const char* name = colon ? colon + 1 : ident;
+    const char* t = nameTarget(R, &R->fnWas, name);
+    if (!t || strcmp(t, name) == 0) return ident;
+    snprintf(buf, size, "%.*s:%s", colon ? (int)(colon - ident) : 0, ident, t);
+    return buf;
+}
+
+/* Rules.history: the values and reset rules of the newer build's member (type, key) or variable, in the
+ * order they apply (forward: by revision; backward: the other way). */
+static int32_t history(Ctx* c, const CRules* R, int32_t tid, const char* key, const char* var, const StRule** out,
+                       int32_t max) {
+    int32_t n = 0;
+    if (var) {
+        for (int32_t i = 0; i < R->varHist.n && n < max; i++) {
+            if (strcmp(R->varHist.e[i].cur, var) == 0) out[n++] = R->varHist.e[i].r;
+        }
+    } else if (tid >= 0 && (R->forward ? R->ruledB : R->ruledA)[tid]) {
+        for (int32_t i = 0; i < R->fieldHist.n && n < max; i++) {
+            if (R->fieldHist.e[i].tid == tid && strcmp(R->fieldHist.e[i].key, key) == 0) out[n++] = R->fieldHist.e[i].r;
+        }
+    }
+    (void)c;
+    if (R->backward) {
+        for (int32_t i = 0; i < n / 2; i++) {
+            const StRule* t = out[i];
+            out[i] = out[n - 1 - i];
+            out[n - 1 - i] = t;
+        }
+    }
+    return n;
+}
+
+static int pyIntIs(PyInt v, int64_t x) { return v.neg == (x < 0) && v.v == (uint64_t)x; }
+
+/* map_value: forward old -> new, else new -> old; the first pair that matches, else v. */
+static PyInt mapValue(PyInt v, const StRule* r, int forward) {
+    for (int32_t i = 0; i < r->mapCount; i++) {
+        if (pyIntIs(v, r->map[i][forward ? 0 : 1])) {
+            int64_t x = r->map[i][forward ? 1 : 0];
+            PyInt out = {(uint64_t)x, x < 0};
+            return out;
+        }
+    }
+    return v;
+}
+
+/* Rules.values: whether a reset rule drops the value (1), else the value through each values rule in *out: an
+ * int, or an integer array's elements (as the writer's element type is signed). */
+static int ruleValues(Ctx* c, const StRule* const* rs, int32_t n, const AVal* val, int32_t wtype, AVal* out) {
+    *out = *val;
+    int any = 0;
+    for (int32_t i = 0; i < n; i++) {
+        if (rs[i]->kind == ST_RULE_RESET) return 1;
+        any |= rs[i]->kind == ST_RULE_VALUES;
+    }
+    if (!any) return 0;
+    if (val->kind == AV_INT) {
+        for (int32_t i = 0; i < n; i++) {
+            if (rs[i]->kind == ST_RULE_VALUES) out->num = mapValue(out->num, rs[i], c->R.forward);
+        }
+        return 0;
+    }
+    if (val->kind == AV_HEX && val->w > 0 && val->w <= 8) {
+        const uint8_t* x;
+        int64_t len = hexBytes(val, &x), w = val->w;
+        const StType* wt = ty(&c->a, wtype);
+        const StType* et = wt && wt->kind == ST_ARR ? ty(&c->a, wt->of) : NULL;
+        int sign = et && et->isSigned;
+        uint8_t* p = poolAlloc(c, (size_t)len + 1);
+        Mem* m = poolAlloc(c, sizeof *m);
+        if (!p || !m) return 0;
+        memcpy(p, x, (size_t)len);
+        for (int64_t i = 0; i + w <= len; i += w) {
+            PyInt e = bytesInt(p + i, w, sign);
+            for (int32_t k = 0; k < n; k++) {
+                if (rs[k]->kind == ST_RULE_VALUES) e = mapValue(e, rs[k], c->R.forward);
+            }
+            intOut(e, p + i, w);
+        }
+        m->p = p;
+        m->n = len;
+        out->m = m;
+        out->off = 0;
+        out->n = len;
+    }
+    return 0;
+}
+
+/* pcStateTypeId: FNV-1a of a type's name without its blanks; never 0. */
+static uint32_t typeHash(const char* s) {
+    uint32_t h = 0x811C9DC5u;
+    for (; *s; s++) {
+        if (*s != ' ' && *s != '\t' && *s != '\n') h = (h ^ (uint8_t)*s) * 0x01000193u;
+    }
+    return h ? h : 1;
+}
+
+/* Decoder.remap_hash: the writer's heap type hash as the reader names the type, where a rule renamed it and
+ * the reader knows the hash; else as it is. */
+static uint32_t remapHash(Ctx* c, uint32_t h) {
+    CRules* R = rulesOn(c);
+    if (!R || !h || !R->typeWas.n) return h;
+    const StHeapType* e = stateSchemaHeapType(c->a.s, h);
+    if (!e || !e->name) return h;
+    size_t n = strlen(e->name), base = n;
+    if (n >= 3 && strcmp(e->name + n - 3, "[1]") == 0) {
+        base = n - 3;
+    } else {
+        while (base > 0 && e->name[base - 1] == '*') base--;
+    }
+    char b[KEY_MAX], full[KEY_MAX];
+    snprintf(b, sizeof b, "%.*s", (int)base, e->name);
+    const char* t = nameTarget(R, &R->typeWas, b);
+    if (!t || strcmp(t, b) == 0) return h;
+    snprintf(full, sizeof full, "%s%s", t, e->name + base);
+    uint32_t h2 = typeHash(full);
+    if (!stateSchemaHeapType(c->b.s, h2)) return h;
+    warn(c, &c->notes, "type hash remapped by a state rule");
+    return h2;
+}
+
+/* ---- a value of another type than the reader's (statecanon type_class, plain, mismatch, reshape) ------- */
+
+enum { K_INT, K_FLOAT, K_ADDR, K_PTR, K_OTAG, K_SCRATCH, K_ARR, K_STRUCT, K_UNION, K_BYTES };
+
+static int typeClass(const StType* t) {
+    switch (t->kind) {
+    case ST_INT: return K_INT;
+    case ST_FLOAT: return K_FLOAT;
+    case ST_ADDR: return K_ADDR;
+    case ST_PTR: return K_PTR;
+    case ST_OTAG: return K_OTAG;
+    case ST_SCRATCH: return K_SCRATCH;
+    case ST_ARR: return K_ARR;
+    case ST_STRUCT: return K_STRUCT;
+    case ST_UNION: return K_UNION;
+    default: return K_BYTES;
+    }
+}
+
+/* plain: no pointer, ordering-table link, address or scratch word inside; a type that holds itself is not. */
+static int plainType(Ctx* c, const Side* s, int32_t tid) {
+    const StType* t = ty(s, tid);
+    if (!t) return 0;
+    int8_t* memo = s == &c->a || s->s == c->a.s ? c->plainA : c->plainB;
+    if (memo[tid] == 2) return 0;
+    if (memo[tid] >= 0) return memo[tid];
+    memo[tid] = 2;
+    int r;
+    if (t->kind == ST_PTR || t->kind == ST_ADDR || t->kind == ST_OTAG || t->kind == ST_SCRATCH) {
+        r = 0;
+    } else if (t->kind == ST_ARR) {
+        r = !ty(s, t->of) || t->n == 0 || plainType(c, s, t->of);
+    } else if (t->kind == ST_STRUCT || t->kind == ST_UNION) {
+        r = 1;
+        for (int32_t i = 0; i < t->fieldCount && r; i++) r = plainType(c, s, t->fields[i].type);
+    } else {
+        r = 1;
+    }
+    memo[tid] = (int8_t)r;
+    return r;
+}
+
+/* bytes_differ: another kind, size, or an array's elements of another size. */
+static int bytesDiffer(Ctx* c, int32_t wt, int32_t rt) {
+    const StType* a = ty(&c->a, wt);
+    const StType* b = ty(&c->b, rt);
+    if (!a || !b) return 0;
+    if (typeClass(a) != typeClass(b) || a->size != b->size) return 1;
+    return a->kind == ST_ARR && tsize(&c->a, a->of) != tsize(&c->b, b->of);
+}
+
+/* Decoder.mismatch: the writer's value of type wt cannot be put as the reader's type tid by value. */
+static int mismatch(Ctx* c, int32_t wt, int32_t tid, const AVal* val) {
+    const StType* a = ty(&c->a, wt);
+    const StType* b = ty(&c->b, tid);
+    if (!a || !b) return 0;
+    int ca = typeClass(a), cb = typeClass(b);
+    if (cb == K_SCRATCH) return 0;
+    if (ca == cb) {
+        if (ca == K_FLOAT) return a->size != b->size;
+        if (ca == K_ARR && (val->kind == AV_HEX || val->kind == AV_SEL)) { /* integers (or bytes) into other elements */
+            const StType* et = ty(&c->b, b->of);
+            return et && b->n > 0 && typeClass(et) != K_INT && typeClass(et) != K_BYTES;
+        }
+        return 0;
+    }
+    if ((ca == K_INT && cb == K_ADDR) || (ca == K_ADDR && cb == K_INT)) return cb == K_INT && val->kind != AV_INT;
+    return 1;
+}
+
+static int put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off, int32_t wt);
+
+/* Decoder.writer_bytes: a writer's value as its own build lays it out (its schema both ways, no rules). */
+static void writerBytes(Ctx* c, int32_t wt, const AVal* val, Buf* out) {
+    if (!bufZero(c, out, tsize(&c->a, wt))) return;
+    Side reader = c->b;
+    c->b = c->a;
+    c->self++;
+    put(c, wt, val, out, 0, ST_NONE);
+    c->self--;
+    c->b = reader;
+}
+
+static void carryBytes(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off, int32_t wt) {
+    Buf b = {0};
+    writerBytes(c, wt, val, &b);
+    int64_t n = b.n < tsize(&c->b, tid) ? b.n : tsize(&c->b, tid);
+    if (n < 0) n = 0;
+    bufSet(c, buf, off, off + n, b.p, n);
+    free(b.p);
+    warn(c, &c->notes, "value of another type carried as its bytes");
+}
+
+/* ---- the reader's defaults (Decoder.defaults_in, put_defaults, put_int) ------------------------------- */
+
+typedef struct {
+    int64_t off;    /* of the struct the member is in */
+    int32_t owner;  /* that struct (a reader type) */
+    int32_t field;  /* the member */
+    int64_t value;
+} DefaultAt;
+
+typedef struct DefaultList {
+    DefaultAt* e;
+    int32_t n;
+} DefaultList;
+
+static void putBits(Ctx* c, Buf* buf, int64_t off, int32_t bit, int32_t nbits, PyInt value) {
+    int64_t base = floorDiv(bit, 8), span = floorDiv((int64_t)(bit % 8) + nbits + 7, 8);
+    uint8_t raw[16] = {0};
+    int64_t a = off + base, e = off + base + span;
+    pySlice(buf->n, &a, &e);
+    memcpy(raw, buf->p + a, (size_t)(e - a));
+    int sh = bit % 8;
+    for (int32_t k = 0; k < nbits; k++) {
+        int64_t at = sh + k;
+        int bitv = k < 64 ? (int)((value.v >> k) & 1) : value.neg;
+        if (bitv) raw[at / 8] |= (uint8_t)(1u << (at % 8));
+        else raw[at / 8] &= (uint8_t) ~(1u << (at % 8));
+    }
+    bufSet(c, buf, off + base, off + base + span, raw, span);
+}
+
+/* put_int: an integer into a reader's member (owner's field; owner ST_NONE: the whole of type tid): a
+ * bitfield's bits, an integer, or each element of an integer array. */
+static void putInt(Ctx* c, int32_t owner, int32_t field, int32_t tid, int64_t value, Buf* buf, int64_t base) {
+    PyInt v = {(uint64_t)value, value < 0};
+    uint8_t b[16];
+    int64_t at = base;
+    if (owner != ST_NONE) {
+        const StField* f = &ty(&c->b, owner)->fields[field];
+        if (f->bits) {
+            if (f->bits <= 64) putBits(c, buf, base, f->bit, f->bits, v);
+            return;
+        }
+        tid = f->type;
+        at = base + f->off;
+    }
+    const StType* t = ty(&c->b, tid);
+    if (!t) return;
+    if (t->kind == ST_ARR) {
+        int64_t es = tsize(&c->b, t->of);
+        for (int64_t i = 0; es > 0 && es <= (int64_t)sizeof b && i < t->n && !c->failed; i++) {
+            intOut(v, b, es);
+            bufSet(c, buf, at + i * es, at + (i + 1) * es, b, es);
+        }
+    } else if (t->kind == ST_INT && t->size <= (int64_t)sizeof b) {
+        intOut(v, b, t->size);
+        bufSet(c, buf, at, at + t->size, b, t->size);
+    }
+}
+
+static int defaultsAdd(Ctx* c, DefaultList* l, int32_t* cap, DefaultAt d) {
+    if (l->n == *cap) {
+        int32_t more = *cap ? *cap * 2 : 8;
+        DefaultAt* e = realloc(l->e, (size_t)more * sizeof *e);
+        if (!e) {
+            fail(c, "out of memory");
+            return 0;
+        }
+        l->e = e;
+        *cap = more;
+    }
+    l->e[l->n++] = d;
+    return 1;
+}
+
+/* defaults_in: the reader's defaults inside a type (its members', arrays of structs' too; not through
+ * pointers or unions), cached; a type that holds itself: none. */
+static const DefaultList* defaultsIn(Ctx* c, int32_t tid) {
+    static const DefaultList none = {NULL, 0};
+    CRules* R = rulesOn(c);
+    const StType* t = ty(&c->b, tid);
+    if (!R || !R->defaultsField.n || !t) return &none;
+    if (c->defaultsState[tid] == 2) return &c->defaults[tid];
+    if (c->defaultsState[tid] == 1) return &none;
+    c->defaultsState[tid] = 1;
+    DefaultList out = {NULL, 0};
+    int32_t cap = 0;
+    if (t->kind == ST_STRUCT) {
+        const char* const* keys = keysOf(c, &c->b, tid);
+        for (int32_t i = 0; keys && i < t->fieldCount && !c->failed; i++) {
+            const FieldEntry* d = R->ruledB[tid] ? fieldFirst(&R->defaultsField, tid, keys[i]) : NULL;
+            if (d) {
+                DefaultAt e = {0, tid, i, d->value};
+                defaultsAdd(c, &out, &cap, e);
+            } else if (!t->fields[i].bits) {
+                const DefaultList* sub = defaultsIn(c, t->fields[i].type);
+                for (int32_t k = 0; k < sub->n; k++) {
+                    DefaultAt e = sub->e[k];
+                    e.off += t->fields[i].off;
+                    defaultsAdd(c, &out, &cap, e);
+                }
+            }
+        }
+    } else if (t->kind == ST_ARR && ty(&c->b, t->of) && t->n) {
+        const DefaultList* sub = defaultsIn(c, t->of);
+        int64_t es = tsize(&c->b, t->of);
+        for (int64_t i = 0; sub->n && i < t->n && !c->failed; i++) {
+            for (int32_t k = 0; k < sub->n; k++) {
+                DefaultAt e = sub->e[k];
+                e.off += i * es;
+                defaultsAdd(c, &out, &cap, e);
+            }
+        }
+    }
+    c->defaults[tid] = out;
+    c->defaultsState[tid] = 2;
+    return &c->defaults[tid];
+}
+
+static int64_t putDefaults(Ctx* c, int32_t tid, Buf* buf, int64_t off) {
+    const DefaultList* l = defaultsIn(c, tid);
+    for (int32_t i = 0; i < l->n && !c->failed; i++) {
+        putInt(c, l->e[i].owner, l->e[i].field, ST_NONE, l->e[i].value, buf, off + l->e[i].off);
+    }
+    return l->n;
+}
+
+/* Decoder.reshape: a value of another kind of type, by its bytes when neither type holds a pointer, else not
+ * carried (the reader's defaults inside it). 1: not carried. */
+static int reshape(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off, int32_t wt) {
+    if (plainType(c, &c->a, wt) && plainType(c, &c->b, tid)) {
+        carryBytes(c, tid, val, buf, off, wt);
+        return 0;
+    }
+    warn(c, &c->dec, "value of another type in the state (not carried)");
+    putDefaults(c, tid, buf, off);
+    return 1;
+}
+
+/* The type of the writer struct wt's member key (writer_fields: the last of a key), ST_NONE if none. */
+static int32_t writerFieldType(Ctx* c, int32_t wt, const char* key) {
+    const StType* t = ty(&c->a, wt);
+    if (!t || (t->kind != ST_STRUCT && t->kind != ST_UNION) || !key) return ST_NONE;
+    int32_t i = lastKey(c, &c->a, wt, key, -1);
+    return i >= 0 ? t->fields[i].type : ST_NONE;
+}
+
+/* Decoder.retail_carry: a game member the writer has not as a value of its type: its PS1 bytes, from the
+ * writer's members of the same struct that cover them and hold no pointer. 1 when any byte came. */
+static int retailCarry(Ctx* c, const StField* f, const AVal* val, int32_t wt, Buf* buf, int64_t off) {
+    const StType* wtt = c->self ? NULL : ty(&c->a, wt);
+    if (f->retail == ST_NO_RETAIL || f->bits || !wtt || wtt->kind != ST_STRUCT || val->kind != AV_STRUCT ||
+        !plainType(c, &c->b, f->type)) {
+        return 0;
+    }
+    int64_t lo = f->retail, size = tsize(&c->b, f->type), hi = lo + size;
+    if (size <= 0) return 0;
+    const char* const* keys = keysOf(c, &c->a, wt);
+    uint8_t* got = calloc((size_t)size, 2);
+    if (!got || !keys) {
+        free(got);
+        fail(c, "out of memory");
+        return 0;
+    }
+    uint8_t* cover = got + size;
+    Buf gb = {0};
+    for (int32_t i = 0; i < wtt->fieldCount && !c->failed; i++) {
+        if (firstKey(c, &c->a, wt, keys[i]) != i) continue; /* writer_fields' order: each key where it first is */
+        int32_t gi = lastKey(c, &c->a, wt, keys[i], -1);
+        const StField* g = &wtt->fields[gi];
+        AVal child;
+        if (g->retail == ST_NO_RETAIL || g->bits || !structGet(c, val, keys[i], gi, &child) ||
+            !plainType(c, &c->a, g->type)) {
+            continue;
+        }
+        int64_t a = lo > g->retail ? lo : g->retail, gs = tsize(&c->a, g->type);
+        int64_t b = hi < g->retail + gs ? hi : g->retail + gs;
+        if (a >= b) continue;
+        writerBytes(c, g->type, &child, &gb);
+        for (int64_t k = a; k < b; k++) {
+            int64_t at = k - g->retail;
+            got[k - lo] = at < gb.n ? gb.p[at] : 0;
+            cover[k - lo] = 1;
+        }
+    }
+    free(gb.p);
+    int any = 0;
+    for (int64_t i = 0; i < size && !any; i++) any = cover[i];
+    if (any) {
+        int64_t base = off + f->off;
+        for (int64_t i = 0; i < size;) {
+            if (!cover[i]) {
+                i++;
+                continue;
+            }
+            int64_t j = i;
+            while (j < size && cover[j]) j++;
+            bufSet(c, buf, base + i, base + j, got + i, j - i);
+            i = j;
+        }
+        warn(c, &c->notes, "carried by its PS1 bytes");
+    }
+    free(got);
+    return any;
+}
+
+enum { LOST_MISSING, LOST_RESET, LOST_TYPE };
+
+/* Decoder.field_lost: a reader's member the state does not carry: a newer writer's removed value, else its
+ * default or those inside it, else zero. */
+static void fieldLost(Ctx* c, int32_t tid, int32_t wt, const char* key, int32_t field, Buf* buf, int64_t off, int why) {
+    CRules* R = rulesOn(c);
+    const StField* f = &ty(&c->b, tid)->fields[field];
+    if (R && why == LOST_MISSING && R->backward && wt >= 0 && R->ruledA[wt]) {
+        const FieldEntry* e = fieldFirst(&R->removedFields, wt, key);
+        if (e) {
+            putInt(c, tid, field, ST_NONE, e->value, buf, off);
+            warn(c, &c->dec, "field removed by a later build (given the value its rule names)");
+            return;
+        }
+    }
+    const FieldEntry* d = R && R->ruledB[tid] ? fieldFirst(&R->defaultsField, tid, key) : NULL;
+    int64_t n = 0;
+    if (d) {
+        putInt(c, tid, field, ST_NONE, d->value, buf, off);
+        n = 1;
+    } else if (!f->bits && why != LOST_TYPE) {
+        n = putDefaults(c, f->type, buf, off + f->off);
+    }
+    if (why == LOST_MISSING) {
+        warn(c, &c->dec, n ? "field missing in the state (given its default)" : "field missing in the state (left zero)");
+    } else if (why == LOST_RESET) {
+        warn(c, &c->dec, "field reset by a state rule (not carried)");
+    }
+}
+
+/* var_lost: a reader's variable the state does not carry. */
+static void varLost(Ctx* c, const StVar* v, Buf* buf, int64_t off, int why) {
+    CRules* R = rulesOn(c);
+    if (R && why == LOST_MISSING && R->backward) {
+        const NameEntry* e = nameFirst(&R->removedVars, v->id);
+        if (e) {
+            putInt(c, ST_NONE, 0, v->type, e->value, buf, off);
+            warn(c, &c->dec, "variable removed by a later build (given the value its rule names)");
+            return;
+        }
+    }
+    const NameEntry* d = R ? nameFirst(&R->defaultsVar, v->id) : NULL;
+    int64_t n = 0;
+    if (d) {
+        putInt(c, ST_NONE, 0, v->type, d->value, buf, off);
+        n = 1;
+    } else if (why != LOST_TYPE) {
+        n = putDefaults(c, v->type, buf, off);
+    }
+    if (why == LOST_MISSING) {
+        warn(c, &c->dec, n ? "variable not in the state (given its default)" : "variable not in the state (left zero)");
+    } else if (why == LOST_RESET) {
+        warn(c, &c->dec, "variable reset by a state rule (not carried)");
+    }
+}
+
+#define MAX_RULES 64 /* values and reset rules of one member, more are not applied (never so many) */
+
+static void putStruct(Ctx* c, int32_t tid, const StType* t, const AVal* val, Buf* buf, int64_t off, int32_t wt) {
     if (val->kind == AV_INT) {
         fail(c, "a struct %s holds an int in the state", t->name);
         return;
@@ -1427,14 +2196,48 @@ static void putStruct(Ctx* c, int32_t tid, const StType* t, const AVal* val, Buf
     }
     const char* const* keys = keysOf(c, &c->b, tid);
     if (!keys) return;
+    const StType* wtt = c->self ? NULL : ty(&c->a, wt);
+    if (wtt && wtt->kind != ST_STRUCT && wtt->kind != ST_UNION) wtt = NULL; /* (writer_fields: {}) */
+    CRules* R = rulesOn(c);
     for (int32_t i = 0; i < t->fieldCount && !c->failed; i++) {
         const StField* f = &t->fields[i];
+        const char* key = keys[i];
+        const char* src = R ? fieldSource(R, tid, wt, key) : key;
         AVal child;
-        if (!structGet(c, val, keys[i], i, &child)) {
-            warn(c, &c->dec, "field missing in the state (left zero)");
+        if (!src || !structGet(c, val, src, i, &child)) {
+            if (!retailCarry(c, f, val, wt, buf, off)) fieldLost(c, tid, wt, key, i, buf, off, LOST_MISSING);
             continue;
         }
+        if (src != key && strcmp(src, key) != 0) warn(c, &c->notes, "renamed by a state rule");
+        int32_t cwt = wtt ? writerFieldType(c, wt, src) : ST_NONE;
+        if (R) {
+            const StRule* rs[MAX_RULES];
+            int32_t nr = history(c, R, R->forward ? tid : wt, R->forward ? key : src, NULL, rs, MAX_RULES);
+            if (nr) {
+                AVal mapped;
+                if (ruleValues(c, rs, nr, &child, cwt, &mapped)) {
+                    fieldLost(c, tid, wt, key, i, buf, off, LOST_RESET);
+                    continue;
+                }
+                child = mapped;
+                for (int32_t k = 0; k < nr; k++) {
+                    if (rs[k]->kind == ST_RULE_VALUES) {
+                        warn(c, &c->notes, "values mapped by a state rule");
+                        break;
+                    }
+                }
+            }
+            if (R->ruledB[tid] && child.kind == AV_INT && !child.num.neg && child.num.v <= 0xFFFFFFFFu &&
+                fieldFirst(&R->hashes, tid, key)) {
+                child.num = pyUint(remapHash(c, (uint32_t)child.num.v));
+            }
+        }
         if (f->bits) {
+            if (!c->self && child.kind != AV_INT) {
+                warn(c, &c->dec, "value of another type in the state (not carried)");
+                fieldLost(c, tid, wt, key, i, buf, off, LOST_TYPE);
+                continue;
+            }
             if (child.kind != AV_INT) {
                 fail(c, "the bitfield %s.%s holds %s in the state", t->name, f->name, shapeName(&child));
                 return;
@@ -1443,19 +2246,7 @@ static void putStruct(Ctx* c, int32_t tid, const StType* t, const AVal* val, Buf
                 fail(c, "a bitfield wider than 64 bits");
                 return;
             }
-            int64_t base = floorDiv(f->bit, 8), span = floorDiv((int64_t)(f->bit % 8) + f->bits + 7, 8);
-            uint8_t raw[16] = {0};
-            int64_t a = off + base, e = off + base + span;
-            pySlice(buf->n, &a, &e);
-            memcpy(raw, buf->p + a, (size_t)(e - a));
-            int sh = f->bit % 8;
-            for (int32_t k = 0; k < f->bits; k++) {
-                int64_t at = sh + k;
-                int bitv = k < 64 ? (int)((child.num.v >> k) & 1) : child.num.neg;
-                if (bitv) raw[at / 8] |= (uint8_t)(1u << (at % 8));
-                else raw[at / 8] &= (uint8_t) ~(1u << (at % 8));
-            }
-            bufSet(c, buf, off + base, off + base + span, raw, span);
+            putBits(c, buf, off, f->bit, f->bits, child.num);
             continue;
         }
         if (child.kind == AV_SEL) {
@@ -1463,48 +2254,63 @@ static void putStruct(Ctx* c, int32_t tid, const StType* t, const AVal* val, Buf
             int64_t nx = hexBytes(&child, &x), n = tsize(&c->b, f->type);
             if (nx > n) nx = n < 0 ? 0 : n;
             bufSet(c, buf, off + f->off, off + f->off + nx, x, nx);
-            int32_t view = fieldNamed(ty(&c->b, f->type), child.sel);
+            const char* sel = child.sel;
+            const StType* wut = c->self ? NULL : ty(&c->a, cwt);
+            if (R && wut) sel = fieldTarget(R, f->type, cwt, sel); /* the writer's view by the reader's name */
+            int32_t view = sel ? fieldNamed(ty(&c->b, f->type), sel) : -1;
             if (view < 0) {
                 warn(c, &c->dec, "union view not in this build (bytes kept)");
                 continue;
             }
+            if (strcmp(sel, child.sel) != 0) warn(c, &c->notes, "renamed by a state rule");
+            int32_t wv = wut ? fieldNamed(wut, child.sel) : -1;
             const StField* vf = &ty(&c->b, f->type)->fields[view];
             AVal vv;
             makeVal(c, child.tid, child.m, child.selOff, 0, &vv);
-            put(c, vf->type, &vv, buf, off + f->off + vf->off);
+            put(c, vf->type, &vv, buf, off + f->off + vf->off, wv >= 0 ? wut->fields[wv].type : ST_NONE);
             continue;
         }
-        put(c, f->type, &child, buf, off + f->off);
+        if (cwt != ST_NONE && f->retail != ST_NO_RETAIL && bytesDiffer(c, cwt, f->type) &&
+            retailCarry(c, f, val, wt, buf, off)) {
+            continue;
+        }
+        if (put(c, f->type, &child, buf, off + f->off, cwt)) fieldLost(c, tid, wt, key, i, buf, off, LOST_TYPE);
     }
 }
 
-static void put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off) {
-    if (c->failed) return;
+/* Decoder.put: the reader's bytes of the writer's value as type tid; wt: the writer's type of the value
+ * (ST_NONE: unknown). 1 when a value of another kind was not carried. */
+static int put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off, int32_t wt) {
+    if (c->failed) return 0;
     const StType* t = ty(&c->b, tid);
-    if (!t || (val->kind == AV_NONE && t->kind != ST_PTR)) return;
+    if (!t) return 0;
+    if (c->self) wt = ST_NONE;
+    if (wt != ST_NONE && mismatch(c, wt, tid, val)) return reshape(c, tid, val, buf, off, wt);
+    if (val->kind == AV_NONE && t->kind != ST_PTR) return 0;
+    const StType* wtt = ty(&c->a, wt);
     uint8_t b[16];
     switch (t->kind) {
     case ST_INT:
         if (val->kind != AV_INT) {
             fail(c, "an int %s holds %s in the state", t->name, shapeName(val));
-            return;
+            return 0;
         }
         if (t->size > (int64_t)sizeof b) {
             fail(c, "an int of %lld bytes", (long long)t->size);
-            return;
+            return 0;
         }
         intOut(val->num, b, t->size);
         bufSet(c, buf, off, off + t->size, b, t->size);
-        return;
+        return 0;
     case ST_FLOAT: {
         if (val->kind != AV_FLOAT) {
             fail(c, "a float holds %s in the state", shapeName(val));
-            return;
+            return 0;
         }
         const uint8_t* p;
         int64_t n = hexBytes(val, &p);
         bufSet(c, buf, off, off + n, p, n);
-        return;
+        return 0;
     }
     case ST_ADDR: {
         PyInt v;
@@ -1514,34 +2320,34 @@ static void put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off) {
             v = val->num;
         } else {
             fail(c, "an address holds %s in the state", shapeName(val));
-            return;
+            return 0;
         }
         if (t->size > (int64_t)sizeof b) {
             fail(c, "an address of %lld bytes", (long long)t->size);
-            return;
+            return 0;
         }
         intOut(v, b, t->size);
         bufSet(c, buf, off, off + t->size, b, t->size);
-        return;
+        return 0;
     }
     case ST_SCRATCH:
         bufSet(c, buf, off, off + t->size, NULL, t->size);
-        return;
+        return 0;
     case ST_OTAG: {
         if (val->kind != AV_OTAG || t->size < 1 || t->size > 8) {
             fail(c, "an OT tag holds %s in the state", shapeName(val));
-            return;
+            return 0;
         }
         int bits = (int)(8 * t->size - 8);
         uint64_t mask = MASK_BITS(bits);
         uint64_t link = val->end ? mask : movePointer(c, val->word) & mask;
         if (val->num.neg || (val->num.v >> 8) != 0) {
             fail(c, "an OT tag's count does not fit");
-            return;
+            return 0;
         }
         intOut(pyUint((bits < 64 ? val->num.v << bits : 0) | link), b, t->size);
         bufSet(c, buf, off, off + t->size, b, t->size);
-        return;
+        return 0;
     }
     case ST_PTR: {
         uint64_t a = 0;
@@ -1549,11 +2355,11 @@ static void put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off) {
             a = valPointer(c, val);
         } else if (val->kind != AV_NONE) {
             fail(c, "a pointer holds %s in the state", shapeName(val));
-            return;
+            return 0;
         }
         intOut(pyUint(a), b, 8);
         bufSet(c, buf, off, off + 8, b, 8);
-        return;
+        return 0;
     }
     case ST_ARR:
         if (val->kind == AV_Z) {
@@ -1561,43 +2367,67 @@ static void put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off) {
         } else if (val->kind == AV_HEX || val->kind == AV_SEL) {
             const uint8_t* p;
             int64_t n = hexBytes(val, &p);
-            if (n > t->size) n = t->size;
-            bufSet(c, buf, off, off + n, p, n);
+            const StType* et = ty(&c->b, t->of);
+            int64_t w = val->kind == AV_HEX ? val->w : 0, es = et ? et->size : 0;
+            if (wtt && w && es && w != es && et->kind == ST_INT && es <= (int64_t)sizeof b) {
+                /* integers of another width: each element by its value (as the writer's elements are signed) */
+                const StType* we = wtt->kind == ST_ARR ? ty(&c->a, wtt->of) : NULL;
+                int sign = we && we->isSigned;
+                int64_t m = floorDiv(n, w) < t->n ? floorDiv(n, w) : t->n;
+                for (int64_t i = 0; i < m && !c->failed; i++) {
+                    intOut(bytesInt(p + i * w, w < 8 ? w : 8, sign && w <= 8), b, es);
+                    bufSet(c, buf, off + i * es, off + (i + 1) * es, b, es);
+                }
+                warn(c, &c->notes, "integers of another width carried by value");
+            } else {
+                if (n > t->size) n = t->size;
+                bufSet(c, buf, off, off + n, p, n);
+            }
         } else if (val->kind == AV_LIST) {
             int64_t es = tsize(&c->b, t->of), n = val->n < t->n ? val->n : t->n;
+            int32_t wof = wtt && wtt->kind == ST_ARR ? wtt->of : ST_NONE;
             for (int64_t i = 0; i < n && !c->failed; i++) {
                 AVal e;
                 makeVal(c, val->tid, val->m, val->off + i * val->es, 0, &e);
-                put(c, t->of, &e, buf, off + i * es);
+                put(c, t->of, &e, buf, off + i * es, wof);
             }
         } else {
             fail(c, "an array holds %s in the state", shapeName(val));
         }
-        return;
+        return 0;
     case ST_STRUCT:
-        putStruct(c, tid, t, val, buf, off);
-        return;
+        putStruct(c, tid, t, val, buf, off, wt);
+        return 0;
     case ST_UNION:
         if (val->kind == AV_UNION) { /* least typed first: the fully typed view writes last */
             int32_t nb, na;
             const int32_t* vb = viewsOf(c, &c->b, tid, &nb);
             const int32_t* va = viewsOf(c, &c->a, val->tid, &na);
             const StType* at = ty(&c->a, val->tid);
+            CRules* R = rulesOn(c);
             for (int32_t k = 0; k < nb && !c->failed; k++) {
                 const StField* f = &t->fields[vb[k]];
+                const char* name = R ? fieldSource(R, tid, wt, f->name) : f->name;
                 int32_t hit = -1; /* the dict comprehension keeps the last view of a name */
-                for (int32_t j = 0; j < na; j++) {
-                    if (strcmp(at->fields[va[j]].name, f->name) == 0) hit = va[j];
+                for (int32_t j = 0; name && j < na; j++) {
+                    if (strcmp(at->fields[va[j]].name, name) == 0) hit = va[j];
                 }
                 if (hit < 0) {
                     warn(c, &c->dec, "union view not in the state");
                     continue;
                 }
+                if (strcmp(name, f->name) != 0) warn(c, &c->notes, "renamed by a state rule");
+                int32_t wv = -1;
+                if (wtt) { /* the writer union's member of that name: the last (wv: {name: f for f in ...}) */
+                    for (int32_t j = 0; j < wtt->fieldCount; j++) {
+                        if (strcmp(wtt->fields[j].name, name) == 0) wv = j;
+                    }
+                }
                 AVal e;
                 makeVal(c, at->fields[hit].type, val->m, val->off + at->fields[hit].off, 0, &e);
-                put(c, f->type, &e, buf, off + f->off);
+                put(c, f->type, &e, buf, off + f->off, wv >= 0 ? wtt->fields[wv].type : ST_NONE);
             }
-            return;
+            return 0;
         }
         break;
     default:
@@ -1605,12 +2435,13 @@ static void put(Ctx* c, int32_t tid, const AVal* val, Buf* buf, int64_t off) {
     }
     if (val->kind != AV_HEX && val->kind != AV_SEL) {
         fail(c, "a %s holds %s in the state", t->kind == ST_UNION ? "union" : "value", shapeName(val));
-        return;
+        return 0;
     }
     const uint8_t* p;
     int64_t n = hexBytes(val, &p);
     if (n > t->size) n = t->size;
     bufSet(c, buf, off, off + n, p, n);
+    return 0;
 }
 
 /* ---- the writer's heap and sound arena (heap_blocks, arena_blocks, block_layout) ---------------- */
@@ -2277,8 +3108,11 @@ static void walkPart(Ctx* c, const APart* p) {
 /* part_tid: a struct part's type in the reader, by its name; an unnamed one by the writer's tid. */
 static int32_t partTid(Ctx* c, const APart* p) {
     if (p->name) {
-        int32_t t = stateSchemaTypeNamed(c->b.s, p->name);
+        CRules* R = rulesOn(c);
+        const char* name = R ? nameTarget(R, &R->typeWas, p->name) : p->name;
+        int32_t t = name ? stateSchemaTypeNamed(c->b.s, name) : ST_NONE;
         if (t == ST_NONE) warn(c, &c->dec, "heap part type not in this build (left zero)");
+        else if (strcmp(name, p->name) != 0) warn(c, &c->notes, "renamed by a state rule");
         return t;
     }
     return stateSchemaType(c->b.s, ty(&c->a, p->tid)->tid);
@@ -2293,8 +3127,16 @@ static int64_t countedLength(Ctx* c, const AVal* av, int found) {
         const uint8_t* p;
         return floorDiv(hexBytes(av, &p), av->w);
     }
-    fail(c, "a counted array holds %s in the state", shapeName(av));
-    return 0;
+    (void)c;
+    return 0; /* another shape: none (putElement warns) */
+}
+
+/* counted_source: the writer's key of the reader's counted array of tid (a renamed member's by the rules), NULL
+ * when the writer has it not. */
+static const char* countedSource(Ctx* c, int32_t tid, int32_t wt, const Rules* r) {
+    const char* key = arrayKey(c, &c->b, tid, r->ca);
+    CRules* R = rulesOn(c);
+    return R && key ? fieldSource(R, tid, wt, key) : key;
 }
 
 /* part_size: a part's size in the reader, and its elements' offsets. */
@@ -2314,7 +3156,7 @@ static int64_t partSize(Ctx* c, const APart* p, int32_t tid, LPart* lay) {
         int64_t o = 0;
         if (!p->upto) return p->size;
         Step s = {S_KEY, 0, p->upto};
-        return offsetOf(c, tid, &s, 1, &o) ? o : p->size;
+        return offsetOf(c, tid, &s, 1, &o, p->tid) ? o : p->size;
     }
     lay->eo = poolAlloc(c, (size_t)(p->neo + 1) * sizeof *lay->eo);
     if (!lay->eo) return 0;
@@ -2333,7 +3175,8 @@ static int64_t partSize(Ctx* c, const APart* p, int32_t tid, LPart* lay) {
             }
             AVal v, ov, av;
             elementVal(c, p, j, &v, &ov);
-            int found = structGet(c, &v, arrayKey(c, &c->b, tid, r->ca), r->ca, &av);
+            const char* key = countedSource(c, tid, p->tid, r);
+            int found = key && structGet(c, &v, key, r->ca, &av);
             o += a->off + countedLength(c, &av, found) * tsize(&c->b, at->of);
         } else {
             o += tsize(&c->b, tid);
@@ -2420,14 +3263,15 @@ static void decodeArenaLayout(Ctx* c, const StVar* var) {
 
 /* put_element: one struct element; a counted one with its first array element in the T, then the
  * array's elements from the array's place. */
-static void putElement(Ctx* c, int32_t tid, const AVal* v, Buf* buf, int64_t off, int counted) {
+static void putElement(Ctx* c, int32_t tid, const AVal* v, Buf* buf, int64_t off, int counted, int32_t wt) {
     if (!counted) {
-        put(c, tid, v, buf, off);
+        put(c, tid, v, buf, off, wt);
         return;
     }
     const Rules* r = rulesOf(&c->b, tid);
     if (!r->cr) {
-        fail(c, "a counted part of a type the reader counts not");
+        warn(c, &c->dec, "counted array not counted in this build (its elements left out)");
+        put(c, tid, v, buf, off, wt);
         return;
     }
     const StType* t = ty(&c->b, tid);
@@ -2437,16 +3281,12 @@ static void putElement(Ctx* c, int32_t tid, const AVal* v, Buf* buf, int64_t off
         fail(c, "a counted array that is not an array in the reader");
         return;
     }
-    const char* key = arrayKey(c, &c->b, tid, r->ca);
+    const char* key = countedSource(c, tid, wt, r);
     AVal av, firstv;
-    int found = structGet(c, v, key, r->ca, &av);
+    int found = key && structGet(c, v, key, r->ca, &av);
     int64_t es = tsize(&c->b, at->of), base = off + a->off;
     AVal first = *v; /* dict(v), its array replaced by its first element */
-    if (found && isDict(&av)) {
-        if (av.kind != AV_HEX && av.kind != AV_SEL) {
-            fail(c, "a counted array holds %s in the state", shapeName(&av));
-            return;
-        }
+    if (found && (av.kind == AV_HEX || av.kind == AV_SEL)) {
         firstv = av;
         firstv.kind = AV_HEX;
         firstv.n = av.n < es ? av.n : es;
@@ -2455,7 +3295,8 @@ static void putElement(Ctx* c, int32_t tid, const AVal* v, Buf* buf, int64_t off
         firstv = av;
         firstv.n = av.n < 1 ? av.n : 1;
     } else {
-        fail(c, "a counted array missing from the state");
+        warn(c, &c->dec, "counted array not in the state (left zero)");
+        put(c, tid, v, buf, off, wt);
         return;
     }
     if (first.kind == AV_STRUCT) {
@@ -2463,12 +3304,17 @@ static void putElement(Ctx* c, int32_t tid, const AVal* v, Buf* buf, int64_t off
         first.ov[first.nov].val = &firstv;
         first.nov++;
     }
-    put(c, tid, &first, buf, off);
+    put(c, tid, &first, buf, off, wt);
     if (av.kind == AV_LIST) {
+        /* the writer's counted array's elements (counted_rule of the writer's type) */
+        const StType* wtt = c->self ? NULL : ty(&c->a, wt);
+        const Rules* wr = wtt && wtt->kind == ST_STRUCT ? rulesOf(&c->a, wt) : NULL;
+        const StType* wat = wr && wr->cr ? ty(&c->a, wtt->fields[wr->ca].type) : NULL;
+        int32_t wof = wat ? wat->of : ST_NONE;
         for (int64_t j = 0; j < av.n && !c->failed; j++) {
             AVal e;
             makeVal(c, av.tid, av.m, av.off + j * av.es, 0, &e);
-            put(c, at->of, &e, buf, base + j * es);
+            put(c, at->of, &e, buf, base + j * es, wof);
         }
     } else {
         const uint8_t* x;
@@ -2543,7 +3389,7 @@ static void putParts(Ctx* c, const ABlock* rec, const LPart* lay, Buf* buf, int6
             for (int64_t k = 0; k < p->size && !c->failed; k += 8) {
                 AVal v;
                 makeVal(c, c->a.otag, p->mem, p->moff + k, 0, &v);
-                put(c, c->b.otag, &v, buf, off + k);
+                put(c, c->b.otag, &v, buf, off + k, c->a.otag);
             }
         } else if (p->spec == PS_PRIMS) {
             putPrims(c, p, buf, off);
@@ -2553,7 +3399,7 @@ static void putParts(Ctx* c, const ABlock* rec, const LPart* lay, Buf* buf, int6
                 AVal v, ov;
                 if (!bufZero(c, &tmp, tsize(&c->b, l->tid))) return;
                 elementVal(c, p, 0, &v, &ov);
-                put(c, l->tid, &v, &tmp, 0);
+                put(c, l->tid, &v, &tmp, 0, p->tid);
                 int64_t a = 0, e = l->size;
                 pySlice(tmp.n, &a, &e);
                 bufSet(c, buf, off, off + l->size, tmp.p + a, e - a);
@@ -2564,7 +3410,7 @@ static void putParts(Ctx* c, const ABlock* rec, const LPart* lay, Buf* buf, int6
             for (int32_t j = 0; j < n && !c->failed; j++) {
                 AVal v, ov;
                 elementVal(c, p, j, &v, &ov);
-                putElement(c, l->tid, &v, buf, off + l->eo[j], p->counted);
+                putElement(c, l->tid, &v, buf, off + l->eo[j], p->counted, p->tid);
             }
         }
     }
@@ -2600,7 +3446,7 @@ static void decodeHeap(Ctx* c, Buf* buf, int64_t size) {
         /* the caller field (a code address of the saving build) is left zero */
         intOut(pyUint(((uint64_t)rec->user << 21) | ((uint64_t)rec->pinned << 25) | ((uint64_t)rec->type << 26)), b, 4);
         bufSet(c, buf, hdr + 8, hdr + 12, b, 4);
-        intOut(pyUint(rec->pctype), b, 4);
+        intOut(pyUint(remapHash(c, rec->pctype)), b, 4);
         bufSet(c, buf, hdr + 12, hdr + 16, b, 4);
         putParts(c, rec, l->parts, buf, (int64_t)(l->data - lo));
     }
@@ -2626,7 +3472,7 @@ static void putArena(Ctx* c, Buf* buf, int64_t off, int64_t size) {
         bufSet(c, buf, h + 8, h + 16, b, 8);
         intOut(pyUint(nxt), b, 8);
         bufSet(c, buf, h + 16, h + 24, b, 8);
-        intOut(pyUint(r->pctype), b, 4);
+        intOut(pyUint(remapHash(c, r->pctype)), b, 4);
         bufSet(c, buf, h + 24, h + 28, b, 4);
         putParts(c, r, l->parts, buf, h + ARENA_HEADER);
     }
@@ -2975,14 +3821,56 @@ static void applyRaw(Ctx* c, const ARaw* r, Buf* buf, Buf* scratch) {
 
 static const char* const STACK_CHUNKS[] = {"mem.stack.sp", "mem.stack.low", "mem.stack", "mem.guard"};
 
+/* put_variable: a reader's variable from the writer's record (its identity wid there): the rules' values, a
+ * game variable's PS1 bytes where its type changed, else the value as the reader's type. */
+static void putVariable(Ctx* c, const StVar* v, const ARec* r, const char* wid, Buf* buf, int64_t off) {
+    const StVar* wv = stateSchemaVarAt(c->a.s, r->var);
+    int32_t wt = wv->type;
+    AVal val;
+    makeVal(c, wt, &c->acMem[r->chunk], r->off, 0, &val);
+    CRules* R = rulesOn(c);
+    if (strcmp(wid, v->id) != 0) warn(c, &c->notes, "renamed by a state rule");
+    if (R) {
+        const StRule* rs[MAX_RULES];
+        int32_t nr = history(c, R, ST_NONE, NULL, R->forward ? v->id : wid, rs, MAX_RULES);
+        if (nr) {
+            AVal mapped;
+            if (ruleValues(c, rs, nr, &val, wt, &mapped)) {
+                varLost(c, v, buf, off, LOST_RESET);
+                return;
+            }
+            val = mapped;
+            for (int32_t k = 0; k < nr; k++) {
+                if (rs[k]->kind == ST_RULE_VALUES) {
+                    warn(c, &c->notes, "values mapped by a state rule");
+                    break;
+                }
+            }
+        }
+    }
+    if (wt != ST_NONE && v->module && v->retail != ST_NO_RETAIL && bytesDiffer(c, wt, v->type) &&
+        plainType(c, &c->a, wt) && plainType(c, &c->b, v->type)) {
+        carryBytes(c, v->type, &val, buf, off, wt); /* a game variable's PS1 bytes */
+        return;
+    }
+    if (put(c, v->type, &val, buf, off, wt)) varLost(c, v, buf, off, LOST_TYPE);
+}
+
 static void decodeBody(Ctx* c, const uint8_t* tbody, size_t tsize_, int stackless, Buf* out) {
     Chunk* tc = NULL;
     int32_t ntc = 0;
     if (!parseChunks(c, tbody, tsize_, &tc, &ntc)) return;
+    if (c->R.unknown) { /* rules a later build may know: ignored, never refused */
+        warn(c, &c->dec, "state rule this build cannot read (ignored)");
+        c->dec.rows[c->dec.n - 1].count += c->R.unknown - 1;
+    }
+    CRules* R = rulesOn(c);
     if (c->heap.present) decodeHeapLayout(c);
     for (int32_t i = 0; i < c->nrec && !c->failed; i++) {
         if (c->recs[i].kind != R_ARENA) continue;
-        int32_t vb = stateSchemaVarById(c->b.s, stateSchemaVarAt(c->a.s, c->recs[i].var)->id);
+        const char* id = stateSchemaVarAt(c->a.s, c->recs[i].var)->id;
+        const char* rid = R ? nameTarget(R, &R->varWas, id) : id;
+        int32_t vb = rid ? stateSchemaVarById(c->b.s, rid) : ST_NONE;
         if (vb != ST_NONE) decodeArenaLayout(c, stateSchemaVarAt(c->b.s, vb));
     }
     const StateSchema* s = c->b.s;
@@ -3005,11 +3893,15 @@ static void decodeBody(Ctx* c, const uint8_t* tbody, size_t tsize_, int stackles
         }
         if (!bufZero(c, &buf, k->size)) break;
         StRange sec = {NULL, 0, 0};
-        if (sectionTag(k->tag, k->tagLen, module, sizeof module, &kind)) {
+        int section = sectionTag(k->tag, k->tagLen, module, sizeof module, &kind);
+        if (section) {
             char name[300];
             snprintf(name, sizeof name, "%s.%s", module, kind);
             sec = stateSchemaSection(s, name);
         }
+        char own[260];
+        snprintf(own, sizeof own, "%.*s", k->tagLen, (const char*)k->tag);
+        const char* ptag = R && !section ? nameSource(R, &R->tagWas, own) : own;
         const ARec* part;
         const ARaw* raw;
         if (sec.name) {
@@ -3038,22 +3930,23 @@ static void decodeBody(Ctx* c, const uint8_t* tbody, size_t tsize_, int stackles
                     if (e > o) bufSet(c, &buf, o, e, tbody + k->off + o, e - o);
                     continue;
                 }
-                int32_t ai = stateSchemaVarById(c->a.s, v->id);
+                const char* wid = R ? nameSource(R, &R->varWas, v->id) : v->id;
+                int32_t ai = wid ? stateSchemaVarById(c->a.s, wid) : ST_NONE;
                 int32_t ri = ai != ST_NONE ? c->byVar[ai] : -1;
+                int64_t at = (int64_t)(v->addr - sec.lo);
                 if (ri < 0) {
-                    warn(c, &c->dec, "variable not in the state (left zero)");
+                    varLost(c, v, &buf, at, LOST_MISSING);
                     continue;
                 }
                 const ARec* r = &c->recs[ri];
                 if (r->kind == R_ARENA) {
-                    putArena(c, &buf, (int64_t)(v->addr - sec.lo), v->size);
+                    putArena(c, &buf, at, v->size);
                     continue;
                 }
-                AVal val;
-                makeVal(c, stateSchemaVarAt(c->a.s, r->var)->type, &c->acMem[r->chunk], r->off, 0, &val);
-                put(c, v->type, &val, &buf, (int64_t)(v->addr - sec.lo));
+                putVariable(c, v, r, wid, &buf, at);
             }
-        } else if ((part = lastPart(c, k->tag, k->tagLen)) != NULL) {
+        } else if (ptag && (part = lastPart(c, (const uint8_t*)ptag, (int)strlen(ptag))) != NULL) {
+            if (strcmp(ptag, own) != 0) warn(c, &c->notes, "renamed by a state rule");
             PartTarget pt;
             int has = partTarget(&c->b, k->tag, k->tagLen, &pt);
             const Mem* data = &c->acMem[part->chunk];
@@ -3067,14 +3960,15 @@ static void decodeBody(Ctx* c, const uint8_t* tbody, size_t tsize_, int stackles
                 for (int64_t q = 0; et != ST_NONE && q < part->n && !c->failed; q++) {
                     AVal val;
                     makeVal(c, part->tid, data, q * part->es, 0, &val);
-                    put(c, et, &val, &buf, q * es);
+                    put(c, et, &val, &buf, q * es, part->tid);
                 }
             } else if (has) {
                 AVal val;
                 makeVal(c, part->tid, data, 0, 0, &val);
-                put(c, pt.tid, &val, &buf, 0);
+                put(c, pt.tid, &val, &buf, 0, part->tid);
             }
-        } else if ((raw = lastRaw(c, k->tag, k->tagLen)) != NULL) {
+        } else if (ptag && (raw = lastRaw(c, (const uint8_t*)ptag, (int)strlen(ptag))) != NULL) {
+            if (strcmp(ptag, own) != 0) warn(c, &c->notes, "renamed by a state rule");
             applyRaw(c, raw, &buf, &scratch);
         } else {
             warn(c, &c->dec, "chunk not in the state (left zero)");
@@ -3113,6 +4007,14 @@ static Ctx* ctxNew(char* err, size_t errSize) {
 static void ctxFree(Ctx* c) {
     freeWarnings(&c->enc);
     freeWarnings(&c->dec);
+    freeWarnings(&c->notes);
+    if (c->defaults) {
+        for (int32_t i = 0; i < c->b.ntypes; i++) free(c->defaults[i].e);
+    }
+    free(c->defaults);
+    free(c->defaultsState);
+    free(c->plainA);
+    free(c->plainB);
     sideFree(&c->a);
     sideFree(&c->b);
     while (c->pool) {
@@ -3160,7 +4062,19 @@ int stateConvert(const StateConvertSide* writer, const StateConvertSide* reader,
     if (!c) return 0;
     Buf body = {0};
     if (sideInit(c, &c->a, writer->schema, writer->strings) && sideInit(c, &c->b, reader->schema, reader->strings)) {
-        encodeWriter(c, writer);
+        /* the decoder's caches per type (plain, defaults), and the state rules between the two builds */
+        c->plainA = malloc((size_t)c->a.ntypes + 1);
+        c->plainB = malloc((size_t)c->b.ntypes + 1);
+        c->defaultsState = calloc((size_t)c->b.ntypes + 1, 1);
+        c->defaults = calloc((size_t)c->b.ntypes + 1, sizeof *c->defaults);
+        if (!c->plainA || !c->plainB || !c->defaultsState || !c->defaults) {
+            fail(c, "out of memory");
+        } else {
+            memset(c->plainA, -1, (size_t)c->a.ntypes + 1);
+            memset(c->plainB, -1, (size_t)c->b.ntypes + 1);
+            rulesInit(c);
+        }
+        if (!c->failed) encodeWriter(c, writer);
     }
     if (!c->failed) {
         out->safePoint = safePointOf(c);
@@ -3178,6 +4092,7 @@ int stateConvert(const StateConvertSide* writer, const StateConvertSide* reader,
         out->size = (size_t)body.n;
         takeWarnings(&c->enc, &out->encodeWarnings, &out->encodeWarningCount);
         takeWarnings(&c->dec, &out->decodeWarnings, &out->decodeWarningCount);
+        takeWarnings(&c->notes, &out->ruleNotes, &out->ruleNoteCount);
     } else {
         free(body.p);
     }
@@ -3266,8 +4181,10 @@ void stateConvertResultFree(StateConvertResult* r) {
     free(r->body);
     for (int32_t i = 0; i < r->encodeWarningCount; i++) free(r->encodeWarnings[i].text);
     for (int32_t i = 0; i < r->decodeWarningCount; i++) free(r->decodeWarnings[i].text);
+    for (int32_t i = 0; i < r->ruleNoteCount; i++) free(r->ruleNotes[i].text);
     free(r->encodeWarnings);
     free(r->decodeWarnings);
+    free(r->ruleNotes);
     memset(r, 0, sizeof *r);
 }
 

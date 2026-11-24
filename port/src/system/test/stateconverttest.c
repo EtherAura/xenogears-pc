@@ -450,6 +450,211 @@ static void convertChecks(void) {
     stateSchemaFree(sb);
 }
 
+/* ---- the state rules (docs/CANONICAL_STATES.md 17.2): one layout before and after a set of changes ---- */
+
+static uint64_t get64(const uint8_t* p);
+static uint32_t get32(const uint8_t* p);
+
+static uint32_t nameHash(const char* s) { /* pcStateTypeId */
+    uint32_t h = 0x811C9DC5u;
+    for (; *s; s++) {
+        if (*s != ' ') h = (h ^ (uint8_t)*s) * 0x01000193u;
+    }
+    return h ? h : 1;
+}
+
+/* Before (revision 1, no rules) or after (revision 2, a rule for each change): a struct's member renamed
+ * (pcOld -> pcNew), one whose values changed meaning (0 1 2 -> 5 7 9), one removed (pcGone: 4 before it), one
+ * reset (pcMood), one added with a default (pcLevel: 3); a variable renamed; a function renamed; a game member
+ * retyped (u8[4] -> s32: its PS1 bytes); a heap type renamed (its blocks' type hash too); a host part's tag
+ * renamed; and a rule of a kind no converter knows yet. */
+static char* rulesSchema(int after) {
+    char* out = malloc(16384);
+    const char* keep = after
+        ? "{\"name\": \"pcNew\", \"off\": 0, \"type\": \"20\", \"retail\": null}, {\"name\": \"pcMode\", \"off\": 4, \"type\": \"20\", \"retail\": null},"
+          " {\"name\": \"pcMood\", \"off\": 8, \"type\": \"20\", \"retail\": null}, {\"name\": \"pcLevel\", \"off\": 12, \"type\": \"20\", \"retail\": null}"
+        : "{\"name\": \"pcOld\", \"off\": 0, \"type\": \"20\", \"retail\": null}, {\"name\": \"pcMode\", \"off\": 4, \"type\": \"20\", \"retail\": null},"
+          " {\"name\": \"pcGone\", \"off\": 8, \"type\": \"20\", \"retail\": null}, {\"name\": \"pcMood\", \"off\": 12, \"type\": \"20\", \"retail\": null}";
+    const char* game = after ? "{\"name\": \"m0_a\", \"off\": 0, \"type\": \"20\", \"retail\": 0}"
+                             : "{\"name\": \"m0\", \"off\": 0, \"type\": \"62\", \"retail\": 0}";
+    const char* thing = after ? "NewThing" : "OldThing";
+    const char* var = after ? "pcNewVar" : "pcOldVar";
+    const char* fn = after ? "tickNew" : "tickOld";
+    const char* tag = after ? "newTag" : "oldTag";
+    const char* rules = after
+        ? "{\"language\": 1, \"revision\": 2, \"list\": ["
+          " {\"kind\": \"was\", \"rev\": 2, \"type\": \"Keep\", \"member\": \"pcNew\", \"tids\": [\"10\"], \"field\": \"pc:pcNew\", \"old\": \"pc:pcOld\"},"
+          " {\"kind\": \"values\", \"rev\": 2, \"type\": \"Keep\", \"tids\": [\"10\"], \"field\": \"pc:pcMode\", \"map\": [[0, 5], [1, 7], [2, 9]]},"
+          " {\"kind\": \"removed\", \"rev\": 2, \"type\": \"Keep\", \"tids\": [\"10\"], \"fields\": [\"pc:pcGone\"], \"value\": 4},"
+          " {\"kind\": \"reset\", \"rev\": 2, \"type\": \"Keep\", \"tids\": [\"10\"], \"field\": \"pc:pcMood\"},"
+          " {\"kind\": \"default\", \"type\": \"Keep\", \"tids\": [\"10\"], \"field\": \"pc:pcLevel\", \"value\": 3},"
+          " {\"kind\": \"was\", \"rev\": 2, \"var\": \"main:pc:pcNewVar\", \"old\": \"main:pc:pcOldVar\"},"
+          " {\"kind\": \"was\", \"rev\": 2, \"fn\": \"tickNew\", \"old\": \"tickOld\"},"
+          " {\"kind\": \"was\", \"rev\": 2, \"typename\": \"NewThing\", \"old\": \"OldThing\"},"
+          " {\"kind\": \"was\", \"rev\": 2, \"tag\": \"hw.newTag\", \"old\": \"hw.oldTag\"},"
+          " {\"kind\": \"values\", \"rev\": 2, \"var\": \"main:pc:pcModeVar\", \"map\": [[0, 5], [1, 7]]},"
+          " {\"kind\": \"reset\", \"rev\": 2, \"var\": \"main:pc:pcReset\"},"
+          " {\"kind\": \"default\", \"var\": \"main:pc:pcAdded\", \"value\": 12},"
+          " {\"kind\": \"removed\", \"rev\": 2, \"vars\": [\"main:pc:pcDropped\"], \"value\": 21},"
+          " {\"kind\": \"someday\", \"rev\": 2, \"var\": \"main:pc:pcNewVar\"}]}"
+        : "{\"language\": 1, \"revision\": 1, \"list\": []}";
+    snprintf(out, 16384,
+        "{\"version\": \"us\", \"exe\": \"\","
+        " \"types\": {\"10\": {\"k\": \"struct\", \"size\": 16, \"name\": \"Keep\", \"owner\": \"port\", \"fields\": [%s]},"
+        "  \"11\": {\"k\": \"struct\", \"size\": 8, \"name\": \"Game\", \"owner\": \"game\", \"fields\": [%s,"
+        "    {\"name\": \"m4_b\", \"off\": 4, \"type\": \"20\", \"retail\": 4}]},"
+        "  \"12\": {\"k\": \"struct\", \"size\": 16, \"name\": \"%s\", \"owner\": \"port\", \"fields\": ["
+        "    {\"name\": \"m0_a\", \"off\": 0, \"type\": \"20\", \"retail\": 0}, {\"name\": \"m8_self\", \"off\": 8, \"type\": \"31\", \"retail\": 8}]},"
+        "  \"20\": {\"k\": \"int\", \"size\": 4, \"signed\": true, \"name\": \"s32\"},"
+        "  \"60\": {\"k\": \"int\", \"size\": 1, \"signed\": false, \"name\": \"u8\"},"
+        "  \"62\": {\"k\": \"arr\", \"of\": \"60\", \"n\": 4, \"size\": 4},"
+        "  \"31\": {\"k\": \"ptr\", \"size\": 8, \"fn\": false, \"to\": \"12\"},"
+        "  \"40\": {\"k\": \"ptr\", \"size\": 8, \"fn\": true},"
+        "  \"80\": {\"k\": \"ptr\", \"size\": 8, \"fn\": false}},"
+        " \"type_names\": {\"Keep\": \"10\", \"Game\": \"11\", \"%s\": \"12\"},"
+        " \"variables\": ["
+        "  {\"name\": \"keep\", \"addr\": 4096, \"size\": 16, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"10\"},"
+        "  {\"name\": \"%s\", \"addr\": 4112, \"size\": 4, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"20\"},"
+        "  {\"name\": \"pcFn\", \"addr\": 4120, \"size\": 8, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"40\"},"
+        "  {\"name\": \"D_80100000\", \"addr\": 4128, \"size\": 8, \"module\": \"main\", \"section\": \"data\", \"retail\": 2148532224, \"platform\": null, \"tid\": \"11\"},"
+        "  {\"name\": \"safePointId\", \"addr\": 4136, \"size\": 4, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"20\"},"
+        "  {\"name\": \"heapFirstBlockData\", \"addr\": 4144, \"size\": 8, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"80\"},"
+        "  {\"name\": \"pcThing\", \"addr\": 4152, \"size\": 8, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"31\"},"
+        "  {\"name\": \"pcModeVar\", \"addr\": 4160, \"size\": 4, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"20\"},"
+        "  {\"name\": \"pcReset\", \"addr\": 4164, \"size\": 4, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"20\"},"
+        "  {\"name\": \"%s\", \"addr\": 4168, \"size\": 4, \"module\": \"main\", \"section\": \"data\", \"retail\": null, \"platform\": null, \"tid\": \"20\"},"
+        "  {\"name\": \"%s\", \"addr\": 20480, \"size\": 4, \"module\": null, \"section\": null, \"retail\": null, \"platform\": \"system/hw.c\", \"tid\": \"20\"}],"
+        " \"functions\": [{\"name\": \"%s\", \"addr\": 4194304, \"side\": \"port\", \"retail\": null}],"
+        " \"symbols\": [[\"%s\", 4194304, 16, \"T\"]], \"ro\": [],"
+        " \"sections\": {\"main.data\": [4096, 4352]},"
+        " \"regions\": {\"heapArena\": [65536, 65792], \"gameStack\": [131072, 131328], \"pcScratchpad\": [196608, 197632]},"
+        " \"parts\": {\"hw\": \"system/hw.c\"},"
+        " \"heap_types\": {\"%08x\": {\"name\": \"%s\", \"spec\": {\"tid\": \"12\"}}},"
+        " \"counted\": {}, \"unions\": {}, \"rules\": %s}",
+        keep, game, thing, thing, var, after ? "pcAdded" : "pcDropped", tag, fn, fn, nameHash(thing), thing, rules);
+    return out;
+}
+
+/* A state of that layout (its own values): keep, the variable, the function pointer, the game struct, the
+ * safe point, the heap with its one block, the host part. */
+static void rulesBody(Bytes* b, int after, int mode, int mood, int level) {
+    uint8_t data[0x100], heap[0x100] = {0}, part[4] = {0x0D, 0x0C, 0x0B, 0x0A};
+    memset(data, 0xEE, sizeof data); /* outside every variable: the reader's own */
+    put32(data + 0, 11);
+    put32(data + 4, (uint32_t)mode);
+    put32(data + 8, after ? (uint32_t)mood : 4);
+    put32(data + 12, after ? (uint32_t)level : (uint32_t)mood);
+    put32(data + 16, 41);
+    put32(data + 20, 0xEEEEEEEE);
+    put64(data + 24, 0x400000);
+    put32(data + 32, 0x12345678);   /* +0: an s32 after, the u8[4] {78 56 34 12} before: the same bytes */
+    put32(data + 36, 9);
+    put32(data + 40, 5);            /* safePointId */
+    put32(data + 44, 0xEEEEEEEE);
+    put64(data + 48, 0x10010);      /* heapFirstBlockData */
+    put64(data + 56, 0x10010);      /* pcThing */
+    put32(data + 64, after ? 7 : 1); /* pcModeVar: 1 -> 7 */
+    put32(data + 68, after ? 8 : 9); /* pcReset */
+    put32(data + 72, after ? 12 : 5); /* pcAdded (default 12) after, pcDropped before (21 from a later build) */
+    put64(heap + 0, 0x10030);
+    put32(heap + 8, 2u << 21);
+    put32(heap + 12, nameHash(after ? "NewThing" : "OldThing"));
+    put32(heap + 16, 6);
+    put64(heap + 24, 0x10010);      /* m8_self */
+    put32(heap + 40, 1u << 21);     /* the end */
+    chunk(b, "mem.main.data", data, sizeof data);
+    chunk(b, "mem.heap", heap, sizeof heap);
+    chunk(b, after ? "hw.newTag" : "hw.oldTag", part, 4);
+}
+
+static void rulesChecks(void) {
+    char err[300];
+    char* tb = rulesSchema(0);
+    char* ta = rulesSchema(1);
+    StateSchema* before = stateSchemaParse(tb, strlen(tb), err, sizeof err);
+    StateSchema* after = stateSchemaParse(ta, strlen(ta), err, sizeof err);
+    free(tb);
+    free(ta);
+    check(before && after && stateSchemaRevision(after) == 2, "rules: the two layouts' schemas parse");
+    if (!before || !after) {
+        printf("  %s\n", err);
+        stateSchemaFree(before);
+        stateSchemaFree(after);
+        return;
+    }
+    StateStrings none = {NULL, NULL, NULL};
+    for (int dir = 0; dir < 2; dir++) { /* 0: before's state into after (forward), 1: after's into before (backward) */
+        Bytes w = {0}, t = {0};
+        rulesBody(&w, dir, dir ? 7 : 1, dir ? 6 : 7, 3);
+        rulesBody(&t, !dir, 0, 0, 0);
+        StateConvertSide ws = {w.p, w.n, dir ? after : before, none};
+        StateConvertSide rs = {t.p, t.n, dir ? before : after, none};
+        StateConvertResult r;
+        int ok = stateConvert(&ws, &rs, 1, &r, err, sizeof err);
+        check(ok, dir ? "rules: backward converts" : "rules: forward converts");
+        if (!ok) {
+            printf("  %s\n", err);
+            free(w.p);
+            free(t.p);
+            continue;
+        }
+        /* the reader's chunks: its data at 4 + 13 + 4, its heap after, its part last */
+        const uint8_t* d = r.body + 1 + 13 + 4;
+        const uint8_t* h = d + 0x100 + 1 + 8 + 4;
+        const uint8_t* part = h + 0x100 + 1 + 9 + 4;
+        if (!dir) {
+            check(get32(d + 0) == 11 && get32(d + 4) == 7 && get32(d + 8) == 0 && get32(d + 12) == 3,
+                  "forward: a member renamed, a value mapped (1 -> 7), a reset member not carried, a default given");
+        } else {
+            check(get32(d + 0) == 11 && get32(d + 4) == 1 && get32(d + 8) == 4 && get32(d + 12) == 0,
+                  "backward: by the newer writer's rules: renamed, mapped back (7 -> 1), the removed member's value, reset");
+        }
+        check(get32(d + 16) == 41 && get64(d + 24) == 0x400000, dir ? "backward: a renamed variable and function"
+                                                                     : "forward: a renamed variable and function");
+        check(memcmp(d + 32, "\x78\x56\x34\x12", 4) == 0 && get32(d + 36) == 9 && get32(d + 40) == 5,
+              "the game member retyped, by its PS1 bytes");
+        check(get32(h + 12) == nameHash(dir ? "OldThing" : "NewThing") && get32(h + 16) == 6 && get64(h + 24) == 0x10010,
+              "a heap block of a renamed type: its part found, its header's hash the reader's name's");
+        check(memcmp(part, "\x0D\x0C\x0B\x0A", 4) == 0, "a host part whose tag was renamed");
+        check(get32(d + 64) == (dir ? 1u : 7u) && get32(d + 68) == 0 && get32(d + 72) == (dir ? 21u : 12u),
+              dir ? "backward: a variable's value mapped back, a reset one not carried, a removed one its rule's value"
+                  : "forward: a variable's value mapped, a reset one not carried, an added one its default");
+        check(warningCount(r.decodeWarnings, r.decodeWarningCount, "variable reset by a state rule (not carried)") == 1 &&
+                  warningCount(r.decodeWarnings, r.decodeWarningCount,
+                               dir ? "variable removed by a later build (given the value its rule names)"
+                                   : "variable not in the state (given its default)") == 1,
+              "the variables' rules, warned");
+        check(warningCount(r.decodeWarnings, r.decodeWarningCount, "state rule this build cannot read (ignored)") == 1,
+              "a rule of a kind this converter does not know: ignored, counted, not refused");
+        check(warningCount(r.decodeWarnings, r.decodeWarningCount, "field reset by a state rule (not carried)") == 1 &&
+                  warningCount(r.ruleNotes, r.ruleNoteCount, "values mapped by a state rule") == 2 &&
+                  warningCount(r.ruleNotes, r.ruleNoteCount, "carried by its PS1 bytes") == 1 &&
+                  warningCount(r.ruleNotes, r.ruleNoteCount, "type hash remapped by a state rule") == 1 &&
+                  warningCount(r.ruleNotes, r.ruleNoteCount, "renamed by a state rule") == 4,
+              "what the rules did, counted");
+        check(warningCount(r.decodeWarnings, r.decodeWarningCount, dir ? "field removed by a later build (given the value its rule names)"
+                                                                        : "field missing in the state (given its default)") == 1,
+              dir ? "backward: the removed member, warned" : "forward: the added member, warned");
+        stateConvertResultFree(&r);
+        free(w.p);
+        free(t.p);
+    }
+    /* the same revision both sides: no history rule, the reader's own default still there */
+    Bytes w = {0}, t = {0};
+    rulesBody(&w, 1, 7, 6, 3);
+    rulesBody(&t, 1, 0, 0, 0);
+    StateConvertSide ws = {w.p, w.n, after, none}, rs = {t.p, t.n, after, none};
+    StateConvertResult r;
+    int ok = stateConvert(&ws, &rs, 1, &r, err, sizeof err);
+    check(ok && r.ruleNoteCount == 0 && r.decodeWarningCount == 0 && get32(r.body + 18 + 4) == 7 && get32(r.body + 18 + 8) == 6,
+          "the same revision: nothing applies, nothing ignored");
+    if (ok) stateConvertResultFree(&r);
+    free(w.p);
+    free(t.p);
+    stateSchemaFree(before);
+    stateSchemaFree(after);
+}
+
 /* ---- real states ---------------------------------------------------------------------------------- */
 
 static uint8_t* readFile(const char* path, size_t* size) {
@@ -646,6 +851,7 @@ static int convertFiles(int argc, char** argv) {
            (double)(t2 - t1) / CLOCKS_PER_SEC, before, after);
     printWarnings("encode", r.encodeWarnings, r.encodeWarningCount);
     printWarnings("decode", r.decodeWarnings, r.decodeWarningCount);
+    printWarnings("rule", r.ruleNotes, r.ruleNoteCount);
     stateConvertResultFree(&r);
     exeStringsFree(&ea);
     exeStringsFree(&eb);
@@ -663,6 +869,7 @@ int main(int argc, char** argv) {
         return convertFiles(argc, argv);
     }
     convertChecks();
+    rulesChecks();
     if (failures) {
         printf("stateconverttest: %d checks failed\n", failures);
         return 1;

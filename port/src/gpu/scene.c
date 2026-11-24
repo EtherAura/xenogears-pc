@@ -155,6 +155,13 @@ static const float cloudDark[] = {0, 0.24f, 0.38f, 0.52f};
 #define CLOUD_DRIFT_ALONG 0.016
 #define CLOUD_DRIFT_ACROSS 0.012
 #define CLOUD_PERIOD 512.0
+/* Flickering firelight (xg-rgcf.5.20): how deep per level of Lighting (or
+ * of Glow, when Lighting is off), and its character: carl chose "Torch" from
+ * the prototypes (work/hd2d/light/proto20.py), about two flickers a second,
+ * somewhat irregular. */
+static const float flickerDepth[] = {0, 0.25f, 0.4f, 0.6f};
+#define FLICKER_SPEED 1.8f
+#define FLICKER_IRREGULAR 0.6f
 /* The focus a room starts with is not yet its own (a field's first frame
  * carries a default): a cloud's size follows the focus for this many vblanks
  * of a room (its fade-in), then stays. */
@@ -185,6 +192,7 @@ static struct {
     int tiltShift;                           /* the tilt-shift's level, 0 off */
     int shafts;                              /* light shafts' level, 0 off */
     int clouds;                              /* cloud shadows' level, 0 off */
+    int firelightPart;                       /* lighting_firelight: fires flicker, as part of lighting */
     int frameRows;                           /* the scene's frame's rows (its drawing area) */
     int shadePart, bouncePart;
     int characterPart; /* lighting_characters: the sprites take the lighting too */
@@ -330,6 +338,10 @@ static void load(void) {
     sc.shadePart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     s = settingsGet("lighting_bounce");
     sc.bouncePart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
+    settingsDescribe("lighting_firelight", "lighting_firelight: on (default) or off: fires, torches and lamps flicker, "
+                                           "and so do the light they cast and their glow, as part of lighting and glow");
+    s = settingsGet("lighting_firelight");
+    sc.firelightPart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     settingsDescribe("lighting_characters", "lighting_characters: on (default) or off: the characters take the lighting "
                                             "too (the sun on their sunward side, shade at their feet, glow), as part of lighting");
     s = settingsGet("lighting_characters");
@@ -471,6 +483,18 @@ int sceneCloudShadows(void) {
 
 void sceneSetCloudShadows(int level) { setLevel("cloud_shadows", &sc.clouds, level); }
 
+int sceneFirelight(void) {
+    load();
+    return sc.firelightPart;
+}
+
+void sceneSetFirelight(int on) {
+    load();
+    sc.firelightPart = on != 0;
+    settingsSet("lighting_firelight", sc.firelightPart ? "on" : "off");
+    settingsSave();
+}
+
 int sceneParticleSize(void) {
     load();
     return sc.particleSize;
@@ -537,6 +561,14 @@ static void params(SceneParams* p) {
     int outdoors = sc.place == PC_SCENE_WORLDMAP || (sc.place == PC_SCENE_FIELD && fieldOutdoors(sc.sunRoomId));
     int clouds = outdoors ? sceneCloudShadows() : 0;
     sc.lightStatus = NULL;
+    /* Firelight: it flickers the bounce light and the glow, so it goes with
+     * them, as deep as the stronger of the two is set. */
+    int firelight = sceneFirelight() ? (lighting > glow ? lighting : glow) : 0;
+    /* Only where it is dim: fields indoors or at night (not on the outdoor
+     * list, which is by day) and battles. In daylight a warm, bright surface
+     * (Lahan's roofs and sunlit walls on the world map) would pass for a
+     * flame, and a fire's flicker would not show in the sun anyway. */
+    if (sc.place == PC_SCENE_WORLDMAP || (sc.place == PC_SCENE_FIELD && fieldOutdoors(sc.sunRoomId))) firelight = 0;
     if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette && !shafts && !clouds) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
@@ -563,6 +595,13 @@ static void params(SceneParams* p) {
     l->vignette = vignetteAmount[vignette];
     l->shafts = shaftAmount[shafts];
     l->shaftTime = (float)(hwVSyncCount() % 216000u) / 60.0f; /* seconds, over an hour that repeats */
+    if (firelight) {
+        l->flicker = flickerDepth[firelight];
+        l->flickerTime = (float)(hwVSyncCount() % 216000u) / 60.0f;
+        l->flickerSpeed = FLICKER_SPEED;
+        l->flickerIrregular = FLICKER_IRREGULAR;
+        memcpy(l->roomTrans, sc.trans, sizeof(l->roomTrans));
+    }
     if (clouds) {
         /* A cloud's size from the focus as the room starts (CLOUD_SETTLE),
          * then kept, so a moving camera does not change it. */

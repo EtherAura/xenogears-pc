@@ -4,7 +4,7 @@ pair of states, the writer's a.xgs and the reader's template t.xgs, both convert
 same byte for byte, with the same warnings.
 
     test_stateconvert_c.py [PAIR_DIR ...] [--a BUILD] [--b BUILD] [--converter BUILD] [--reverse] [--mutate]
-                           [--cross] [--bias] [--all]
+                           [--cross] [--bias] [--rules] [--all]
 
 A PAIR_DIR holds a.xgs and t.xgs, or run/a.xgs and run/t.xgs (work/canon/resume_e2e.py's output): layout A's state
 saved at a safe point, and layout B's at the same one. Default: every pair under $XG_CONVERT_PAIRS
@@ -21,7 +21,11 @@ converts stackless (statecanon convert) and with its stack (statecanon decode wi
   --bias      load biases on both sides: A's schema linked BIAS_W below where its state ran (the state's header
               saying so, a PIE's case), B's linked BIAS_R above (a negative bias, modulo 2^64); besides being
               identical to the reference, the body must be the one the unbiased conversion writes
-  --all       all four
+  --rules     the state rules (docs/CANONICAL_STATES.md 17.2): B's schema as a later build's (revision 2) that renamed
+              members, variables and functions, with the rules that say so: A's state into it and its own into A
+              (forward and backward) must give the bodies the conversions without them give; and one that also
+              renamed heap types and maps values, resets, defaults, removes, and has a rule of an unknown kind
+  --all       all five
 Skips (exit 0) when a build, a schema or the pairs are missing. On a difference it names the first differing chunk
 and offset, and the variable and field, or the heap block and part, there."""
 import argparse, copy, gzip, json, os, re, struct, subprocess, sys, tempfile, time
@@ -51,7 +55,7 @@ def reference(a_state: Path, sa: cn.Schema, t_state: Path, sb: cn.Schema, stackl
         cache.clear()  # one document at a time: they are large
         cache[key] = (json.loads(json.dumps(doc)), dict(enc.warn))
     doc, ew = cache[key]
-    body, dec = cn.decode(doc, sb, t_state, stackless=stackless)
+    body, dec = cn.decode(doc, sb, t_state, stackless=stackless, writer=sa)
     cn.write_state(t_state, body, out)
     return body, ew, dict(dec.warn), dec, doc
 
@@ -61,11 +65,11 @@ def c_convert(exe: Path, a_state: Path, ja: Path, t_state: Path, jb: Path, stack
     t0 = time.time()
     r = subprocess.run(cmd, capture_output=True, text=True)
     took = time.time() - t0
-    ew, dw = {}, {}
+    ew, dw, rw = {}, {}, {}
     for line in r.stdout.splitlines()[1:]:
         side, n, text = line.split(" ", 2)
-        (ew if side == "encode" else dw)[text] = int(n)
-    return r, ew, dw, took
+        {"encode": ew, "decode": dw, "rule": rw}[side][text] = int(n)
+    return r, ew, dw, rw, took
 
 
 def where(tag: str, i: int, sb: cn.Schema, dec, doc) -> str:
@@ -188,6 +192,85 @@ def mutate(raw: dict) -> dict:
     return s
 
 
+def with_rules(raw: dict, everything: bool) -> dict:
+    """B's schema as a later build's that renamed things and says so in its rules (revision 2): the last member of
+    every 7th struct (not one a counted array or a union rule names), every 11th game variable with a retail address
+    (another one now), every 13th function; with everything, also every 5th heap type, values maps (swapping 0 and 1)
+    on every 9th struct's first integer member, a reset, a default, removed members and a rule of a kind no converter
+    knows."""
+    s = copy.deepcopy(raw)
+    types = s["types"]; rules = []
+    ruled = {r["name"] for r in list(s.get("counted", {}).values()) + list(s.get("unions", {}).values())}
+    # the structs a converter reads by their members' names in its own schema (statecanon state_ranges): a rename
+    # there is the converter's to follow, not a rule's
+    by_name = set()
+    for v in s["variables"]:
+        if v["name"] == "pcStateRanges" and v.get("tid") in types:
+            by_name.add(v["tid"])
+            by_name.update(types[f["type"]].get("of") for f in types[v["tid"]].get("fields", [])
+                           if types.get(f["type"], {}).get("k") == "arr")
+    for k, tid in enumerate(sorted(types)):
+        t = types[tid]
+        if t["k"] != "struct" or not t["fields"] or t.get("name") in ruled or tid in by_name:
+            continue
+        keys = lambda: [cn.Encoder.field_key(None, x, se) for se in [set()] for x in t["fields"]]  # noqa: E731
+        if k % 7 == 0:
+            old = keys()[-1]; f = t["fields"][-1]
+            if f.get("retail") is not None:
+                f["retail"] += 0x100000
+            else:
+                f["name"] += "_renamed"
+            new = keys()[-1]
+            if new != old and len(set(keys())) == len(keys()):
+                rules.append({"kind": "was", "rev": 2, "type": t.get("name", ""), "tids": [tid], "field": new, "old": old})
+        if everything and k % 9 == 0:
+            ints = [(key, f) for key, f in zip(keys(), t["fields"]) if types.get(f["type"], {}).get("k") == "int"]
+            if ints:
+                rules.append({"kind": "values", "rev": 2, "type": t.get("name", ""), "tids": [tid], "field": ints[0][0],
+                              "map": [[0, 1], [1, 0]]})
+            if len(ints) > 1:
+                rules.append({"kind": "reset", "rev": 2, "type": t.get("name", ""), "tids": [tid], "field": ints[1][0]})
+            if len(ints) > 2:
+                rules.append({"kind": "default", "type": t.get("name", ""), "tids": [tid], "field": ints[2][0], "value": 3})
+            rules.append({"kind": "removed", "rev": 2, "type": t.get("name", ""), "tids": [tid],
+                          "fields": ["pc:gone", keys()[0]], "value": 2})
+    keyed, _ = cn.keyed_variables(copy.deepcopy(s["variables"]))
+    taken = {v["id"] for v in keyed}
+    by_addr = {v["addr"]: v["id"] for v in keyed}
+    for k, v in enumerate(s["variables"]):
+        old = by_addr.get(v["addr"])
+        if v.get("module") and v.get("retail") is not None and k % 11 == 0 and v["name"] != "safePointId" and \
+                old == cn.var_identity(v):
+            v["retail"] += 0x100000
+            new = cn.var_identity(v)
+            if new in taken:
+                v["retail"] -= 0x100000; continue
+            rules.append({"kind": "was", "rev": 2, "var": new, "old": old})
+    renamed = {}
+    for k, f in enumerate(s["functions"]):
+        if k % 13 == 0 and f["name"] not in renamed:
+            renamed[f["name"]] = f["name"] + "_renamed"
+    for f in s["functions"]:
+        f["name"] = renamed.get(f["name"], f["name"])
+    s["symbols"] = [[renamed.get(n, n), a, z, t] for n, a, z, t in s.get("symbols", [])]
+    rules += [{"kind": "was", "rev": 2, "fn": new, "old": old} for old, new in renamed.items()]
+    if everything:
+        for k, (h, e) in enumerate(sorted(s.get("heap_types", {}).items())):
+            if k % 5 or not isinstance(e.get("spec"), dict) or e["name"] not in s.get("type_names", {}) or \
+                    e["name"].endswith("[1]"):
+                continue
+            new = e["name"] + "Renamed"
+            tid = s["type_names"].pop(e["name"])
+            s["type_names"][new] = tid
+            types[tid]["name"] = new
+            del s["heap_types"][h]
+            s["heap_types"][f"{cn.type_hash(new):08x}"] = {**e, "name": new}
+            rules.append({"kind": "was", "rev": 2, "typename": new, "old": e["name"]})
+        rules.append({"kind": "someday", "rev": 2, "var": "main:pc:x"})
+    s["rules"] = {"language": 1, "revision": 2, "list": rules}
+    return s
+
+
 BIAS_W, BIAS_R = 0x100000, 0x7F00_0000_0000  # --bias: the writer's load bias, the reader's (below 0)
 
 
@@ -217,11 +300,11 @@ def main() -> int:
     ap.add_argument("--a", type=Path, default=ROOT / "build/pc/schema")
     ap.add_argument("--b", type=Path, default=ROOT / "build/pc/schema2")
     ap.add_argument("--converter", type=Path, help="the build holding stateconverttest (default A's)")
-    for flag in ("reverse", "mutate", "cross", "bias", "all"):
+    for flag in ("reverse", "mutate", "cross", "bias", "rules", "all"):
         ap.add_argument(f"--{flag}", action="store_true")
     args = ap.parse_args()
     if args.all:
-        args.reverse = args.mutate = args.cross = args.bias = True
+        args.reverse = args.mutate = args.cross = args.bias = args.rules = True
     A, B = args.a.resolve(), args.b.resolve()
     C = (args.converter or args.a).resolve()
     exe = C / "stateconverttest"
@@ -286,7 +369,17 @@ def main() -> int:
         for k, (name, (a, t)) in enumerate(pairs):
             wa = with_bias(a, BIAS_W, tmp / "states" / f"{k}a.xgs")
             wt = with_bias(t, -BIAS_R, tmp / "states" / f"{k}t.xgs")
-            cases.append((f"{name} at load biases {BIAS_W:#x} and {-BIAS_R & cn.MASK64:#x}", wa, AW, wt, BR, (a, t)))
+            cases.append((f"{name} at load biases {BIAS_W:#x} and {-BIAS_R & cn.MASK64:#x}", wa, AW, wt, BR, (a, A, t, B)))
+    if args.rules:
+        RN, RA = tmp / "b-renamed", tmp / "b-rules"
+        raw = json.load(gzip.open(B / "state_schema.json.gz", "rt"))
+        write_schema(RN, with_rules(raw, False))
+        write_schema(RA, with_rules(raw, True))
+        for name, (a, t) in pairs:
+            cases.append((f"{name} into B renamed (its rules forward)", a, A, t, RN, (a, A, t, B)))
+            cases.append((f"{name} B renamed into A (its rules backward)", t, RN, a, A, (t, B, a, A)))
+            cases.append((f"{name} into B with every kind of rule", a, A, t, RA))
+            cases.append((f"{name} B with every kind of rule into A", t, RA, a, A))
     bad = compared = 0
     total = 0
     cache = {}
@@ -302,8 +395,8 @@ def main() -> int:
                 why = None
             except (Exception, SystemExit) as e:  # noqa: BLE001 (the reference's own failure is a result too)
                 why = f"{type(e).__name__}: {e}"
-            r, cew, cdw, took = c_convert(exe, a_state, wa / "state_schema.json", t_state, wb / "state_schema.json",
-                                          stackless, got)
+            r, cew, cdw, crw, took = c_convert(exe, a_state, wa / "state_schema.json", t_state, wb / "state_schema.json",
+                                               stackless, got)
             compared += 1
             if why is not None:
                 if r.returncode:
@@ -319,21 +412,23 @@ def main() -> int:
             same = ref.read_bytes() == got.read_bytes()
             total += len(body)
             line = f"  {label}: {len(body)} bytes {'identical' if same else 'DIFFER'}; C {took:.2f} s"
-            if plain:  # the same conversion without the biases (C, fast): the same body
+            if plain:  # the same conversion without the biases or the renames (C, fast): the same body
                 unbiased = tmp / "plain.xgs"
-                rp, *_ = c_convert(exe, plain[0][0], A / "state_schema.json", plain[0][1], B / "state_schema.json",
-                                   stackless, unbiased)
+                ps, pw, pt, pr = plain[0]
+                rp, *_ = c_convert(exe, ps, pw / "state_schema.json", pt, pr / "state_schema.json", stackless, unbiased)
                 if rp.returncode or body_of(unbiased) != body:
                     bad += 1
-                    line += "; NOT the unbiased conversion's body" + (f" (it failed: {rp.stderr.strip()[:200]})"
-                                                                       if rp.returncode else "")
+                    line += "; NOT the plain conversion's body" + (f" (it failed: {rp.stderr.strip()[:200]})"
+                                                                     if rp.returncode else "")
                 else:
-                    line += "; the unbiased conversion's body"
-            if (ew, dw) != (cew, cdw):
-                line += f"; warnings differ: reference encode {ew} decode {dw}, C encode {cew} decode {cdw}"
+                    line += "; the plain conversion's body"
+            rw = dict(dec.applied)
+            if (ew, dw, rw) != (cew, cdw, crw):
+                line += (f"; warnings differ: reference encode {ew} decode {dw} rules {rw}, C encode {cew} decode {cdw} "
+                         f"rules {crw}")
                 bad += 1
-            elif dw or any(not k.startswith("union ") for k in ew):
-                line += f"; warnings alike: encode {ew}, decode {dw}"
+            elif dw or rw or any(not k.startswith("union ") for k in ew):
+                line += f"; warnings alike: encode {ew}, decode {dw}" + (f", rules {rw}" if rw else "")
             print(line, flush=True)
             if not same:
                 bad += 1

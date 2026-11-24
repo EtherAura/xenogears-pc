@@ -230,7 +230,13 @@ struct StateSchema {
     StUnion* unions;
     int32_t unionCount;
     Map unionByType, unionByName;
+    Map fnByRetail;  /* a retail address -> the function index with it, FN_AMBIGUOUS where several addresses have it */
+    int64_t rulesLanguage, revision;
+    StRule* rules;
+    int32_t ruleCount;
 };
+
+#define FN_AMBIGUOUS (-2)
 
 static uint32_t tidOf(const char* hex) {
     return (uint32_t)strtoul(hex, NULL, 16);
@@ -491,6 +497,14 @@ static int loadFuncs(StateSchema* s, const JsonDoc* d, JsonRef funcs) {
         if (!putFuncId(s, f->id, f->addr)) return 0;
         snprintf(buf, sizeof buf, "fn:%s", f->name);
         if (!putFuncId(s, buf, f->addr)) return 0;
+        if (f->retail != ST_NO_RETAIL) { /* statecanon fn_by_retail: one address, else none */
+            int32_t k = mapGet(&s->fnByRetail, (uint64_t)f->retail, NULL);
+            if (k == ST_NONE) {
+                if (!mapPut(&s->fnByRetail, (uint64_t)f->retail, NULL, i, 0)) return 0;
+            } else if (k != FN_AMBIGUOUS && s->funcs[k].addr != f->addr) {
+                if (!mapPut(&s->fnByRetail, (uint64_t)f->retail, NULL, FN_AMBIGUOUS, 1)) return 0;
+            }
+        }
     }
     s->funcCount = n;
     return 1;
@@ -714,6 +728,130 @@ static int loadUnions(StateSchema* s, const JsonDoc* d, JsonRef obj) {
     return 1;
 }
 
+static int isType(const JsonDoc* d, JsonRef r, int type) { return r != JSON_NONE && jsonType(d, r) == type; }
+
+/* A JSON array of strings (statecanon rule_target's strs), copied into *out; 0 if it is not one. */
+static int stringList(StateSchema* s, const JsonDoc* d, JsonRef r, const char*** out, int32_t* n) {
+    if (!isType(d, r, JSON_ARRAY)) return 0;
+    for (JsonRef e = jsonFirst(d, r); e != JSON_NONE; e = jsonNext(d, e)) {
+        if (jsonType(d, e) != JSON_STRING) return 0;
+    }
+    *n = jsonCount(d, r);
+    *out = arenaAlloc(&s->arena, (size_t)*n * sizeof **out + 1);
+    if (!*out) return -1;
+    int32_t i = 0;
+    for (JsonRef e = jsonFirst(d, r); e != JSON_NONE; e = jsonNext(d, e), i++) {
+        (*out)[i] = arenaString(&s->arena, jsonString(d, e));
+        if (!(*out)[i]) return -1;
+    }
+    return 1;
+}
+
+/* One rule as statecanon rule_target reads it: readable or not. 0 when memory ran out. */
+static int loadRule(StateSchema* s, const JsonDoc* d, JsonRef r, StRule* out) {
+    static const char* const kinds[] = {"was", "values", "reset", "removed", "default", "hashes"};
+    static const char* const keys[] = {"field", "var", "typename", "tag", "fn", "fields", "vars"};
+    /* RULE_TARGETS: each kind's keys, in the order a rule's first present one is taken */
+    static const int order[6][6] = {{ST_ON_FIELD, ST_ON_VAR, ST_ON_TYPENAME, ST_ON_TAG, ST_ON_FN, -1},
+                                    {ST_ON_FIELD, ST_ON_VAR, -1},
+                                    {ST_ON_FIELD, ST_ON_VAR, -1},
+                                    {ST_ON_VARS, ST_ON_FIELDS, -1},
+                                    {ST_ON_VAR, ST_ON_FIELD, -1},
+                                    {ST_ON_FIELD, -1}};
+    memset(out, 0, sizeof *out);
+    out->at = stringOr(&s->arena, d, r, "at");
+    if (!isType(d, r, JSON_OBJECT)) return 1;
+    JsonRef k = jsonGet(d, r, "kind");
+    out->kind = -1;
+    for (int i = 0; i < 6 && isType(d, k, JSON_STRING); i++) {
+        if (strcmp(jsonString(d, k), kinds[i]) == 0) out->kind = i;
+    }
+    if (out->kind < 0) return 1;
+    if (out->kind != ST_RULE_DEFAULT && out->kind != ST_RULE_HASHES) {
+        JsonRef rev = jsonGet(d, r, "rev");
+        if (!isType(d, rev, JSON_INT)) return 1;
+        out->rev = jsonInt(d, rev);
+    }
+    JsonRef target = JSON_NONE;
+    out->on = -1;
+    for (int i = 0; order[out->kind][i] >= 0; i++) {
+        target = jsonGet(d, r, keys[order[out->kind][i]]);
+        if (target != JSON_NONE) {
+            out->on = order[out->kind][i];
+            break;
+        }
+    }
+    if (out->on < 0) return 1;
+    if (out->on == ST_ON_FIELDS || out->on == ST_ON_VARS) {
+        int ok = stringList(s, d, target, &out->names, &out->nameCount);
+        if (ok <= 0) return ok < 0 ? 0 : 1;
+    } else {
+        if (!isType(d, target, JSON_STRING)) return 1;
+        out->name = arenaString(&s->arena, jsonString(d, target));
+        if (!out->name) return 0;
+    }
+    if (out->on == ST_ON_FIELD || out->on == ST_ON_FIELDS) {
+        int ok = stringList(s, d, jsonGet(d, r, "tids"), &out->tids, &out->tidCount);
+        if (ok <= 0) return ok < 0 ? 0 : 1;
+        out->types = arenaAlloc(&s->arena, (size_t)out->tidCount * sizeof *out->types + 1);
+        if (!out->types) return 0;
+        for (int32_t i = 0; i < out->tidCount; i++) out->types[i] = getName(&s->typeByTid, out->tids[i]);
+    }
+    if (out->kind == ST_RULE_WAS) {
+        JsonRef old = jsonGet(d, r, "old");
+        if (!isType(d, old, JSON_STRING)) return 1;
+        out->old = arenaString(&s->arena, jsonString(d, old));
+        if (!out->old) return 0;
+    }
+    if (out->kind == ST_RULE_VALUES) {
+        JsonRef map = jsonGet(d, r, "map");
+        if (!isType(d, map, JSON_ARRAY)) return 1;
+        for (JsonRef e = jsonFirst(d, map); e != JSON_NONE; e = jsonNext(d, e)) {
+            JsonRef a = jsonFirst(d, e);
+            JsonRef b = a == JSON_NONE ? JSON_NONE : jsonNext(d, a);
+            if (!isType(d, e, JSON_ARRAY) || jsonCount(d, e) != 2 || !isType(d, a, JSON_INT) || !isType(d, b, JSON_INT)) {
+                return 1;
+            }
+        }
+        out->mapCount = jsonCount(d, map);
+        out->map = arenaAlloc(&s->arena, (size_t)out->mapCount * sizeof *out->map + 1);
+        if (!out->map) return 0;
+        int32_t i = 0;
+        for (JsonRef e = jsonFirst(d, map); e != JSON_NONE; e = jsonNext(d, e), i++) {
+            JsonRef a = jsonFirst(d, e);
+            out->map[i][0] = jsonInt(d, a);
+            out->map[i][1] = jsonInt(d, jsonNext(d, a));
+        }
+    }
+    if (out->kind == ST_RULE_REMOVED || out->kind == ST_RULE_DEFAULT) {
+        JsonRef v = jsonGet(d, r, "value");
+        if (!isType(d, v, JSON_INT)) return 1;
+        out->value = jsonInt(d, v);
+    }
+    out->readable = 1;
+    return 1;
+}
+
+/* "rules": {"language", "revision", "list"}; absent (a schema from before rules): revision 0, none. */
+static int loadRules(StateSchema* s, const JsonDoc* d, JsonRef obj) {
+    s->rulesLanguage = 0;
+    s->revision = 0;
+    if (!isType(d, obj, JSON_OBJECT)) return 1;
+    JsonRef lang = jsonGet(d, obj, "language"), rev = jsonGet(d, obj, "revision"), list = jsonGet(d, obj, "list");
+    if (isType(d, lang, JSON_INT)) s->rulesLanguage = jsonInt(d, lang);
+    if (isType(d, rev, JSON_INT)) s->revision = jsonInt(d, rev);
+    if (!isType(d, list, JSON_ARRAY)) return 1;
+    int32_t n = jsonCount(d, list);
+    s->rules = arenaAlloc(&s->arena, (size_t)n * sizeof *s->rules + 1);
+    if (!s->rules) return 0;
+    int32_t i = 0;
+    for (JsonRef r = jsonFirst(d, list); r != JSON_NONE; r = jsonNext(d, r), i++) {
+        if (!loadRule(s, d, r, &s->rules[i])) return 0;
+    }
+    s->ruleCount = n;
+    return 1;
+}
+
 StateSchema* stateSchemaParseAt(const char* json, size_t n, uint64_t bias, char* err, size_t errSize) {
     JsonDoc* d = jsonParse(json, n, err, errSize);
     if (!d) {
@@ -740,7 +878,7 @@ StateSchema* stateSchemaParseAt(const char* json, size_t n, uint64_t bias, char*
              loadRanges(s, d, jsonGet(d, root, "sections"), &s->sections, &s->sectionCount) &&
              loadRanges(s, d, jsonGet(d, root, "regions"), &s->regions, &s->regionCount) &&
              loadHeapTypes(s, d, jsonGet(d, root, "heap_types")) && loadCounted(s, d, jsonGet(d, root, "counted")) &&
-             loadUnions(s, d, jsonGet(d, root, "unions"));
+             loadUnions(s, d, jsonGet(d, root, "unions")) && loadRules(s, d, jsonGet(d, root, "rules"));
     }
     if (ok) {
         JsonRef ro = jsonGet(d, root, "ro");
@@ -825,7 +963,7 @@ void stateSchemaFree(StateSchema* s) {
     if (!s) return;
     Map* maps[] = {&s->typeByTid, &s->typeNames, &s->varById, &s->varByName, &s->varPlatform, &s->funcByAddr,
                    &s->funcById, &s->retailByName, &s->symAddr, &s->textByAddr, &s->heapByHash, &s->countedByType,
-                   &s->countedByName, &s->unionByType, &s->unionByName};
+                   &s->countedByName, &s->unionByType, &s->unionByName, &s->fnByRetail};
     for (size_t i = 0; i < sizeof maps / sizeof maps[0]; i++) {
         mapFree(maps[i]);
     }
@@ -932,7 +1070,20 @@ int stateSchemaFnFind(const StateSchema* s, const char* identity, uint64_t* addr
         *addr = s->funcIdAddr[i];
         return 1;
     }
-    return stateSchemaSymbolFind(s, name, addr);
+    if (stateSchemaSymbolFind(s, name, addr)) return 1;
+    /* a game function renamed: "fn:<8 hex digits>:...", its retail address where one function has it */
+    if (strncmp(identity, "fn:", 3) != 0 || strlen(identity) < 12 || identity[11] != ':') return 0;
+    uint64_t retail = 0;
+    for (int k = 3; k < 11; k++) {
+        char ch = identity[k];
+        int v = ch >= '0' && ch <= '9' ? ch - '0' : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10 : -1;
+        if (v < 0) return 0;
+        retail = retail * 16 + (uint64_t)v;
+    }
+    int32_t f = mapGet(&s->fnByRetail, retail, NULL);
+    if (f < 0) return 0;
+    *addr = s->funcs[f].addr;
+    return 1;
 }
 
 uint64_t stateSchemaFnAddress(const StateSchema* s, const char* identity) {
@@ -1053,4 +1204,11 @@ const StUnion* stateSchemaUnion(const StateSchema* s, int32_t type) {
 const StUnion* stateSchemaUnionNamed(const StateSchema* s, const char* name) {
     int32_t i = getName(&s->unionByName, name);
     return i == ST_NONE ? NULL : &s->unions[i];
+}
+
+int64_t stateSchemaRulesLanguage(const StateSchema* s) { return s->rulesLanguage; }
+int64_t stateSchemaRevision(const StateSchema* s) { return s->revision; }
+int32_t stateSchemaRuleCount(const StateSchema* s) { return s->ruleCount; }
+const StRule* stateSchemaRuleAt(const StateSchema* s, int32_t i) {
+    return i >= 0 && i < s->ruleCount ? &s->rules[i] : NULL;
 }

@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "card/card.h"
+#include "card/saves.h"
 #include "cd/cd.h"
 #include "common.h"
 #include "main/game_state.h"
@@ -259,30 +260,19 @@ int xgBestiaryGameProgress(void) {
     return gameState.m1930_fieldVarsBackup[0];
 }
 
+/* Both regions' saves (the card module's reader, card/saves.h). */
 int xgBestiarySaves(XgBestiarySave* out, int max) {
-    int n = 0;
-    for (int slot = 0; slot < 2; slot++) {
-        if (!cards[slot].present || !cardIsFormatted(cards[slot].data)) continue;
-        CardSave saves[CARD_BLOCKS];
-        int count = cardListSaves(cards[slot].data, saves, CARD_BLOCKS);
-        for (int i = 0; i < count && n < max; i++) {
-            int region = !strncmp(saves[i].name, "BASLUS-00664", 12) ? 'U' : !strncmp(saves[i].name, "BISLPS-01160", 12) ? 'J' : 0;
-            if (!region || saves[i].block < 1 || saves[i].block >= CARD_BLOCKS) continue;
-            const uint8_t* b = cards[slot].data + saves[i].block * CARD_BLOCK;
-            unsigned sum = 0;
-            for (int k = 0x100; k < 0x1FFF; k++) sum += b[k];
-            if ((sum & 0xFF) != b[0x1FFF]) continue; /* not a complete save */
-            XgBestiarySave* s = &out[n++];
-            s->slot = slot;
-            s->block = saves[i].block;
-            s->region = region;
-            s->progress = b[0x1234] | b[0x1235] << 8;
-            s->disc = (b[0x1234 + 2 * 82] | b[0x1235 + 2 * 82] << 8) ? 2 : 1;
-            s->id = memcmp(b + 0x1F00, "XGID", 4) == 0
-                        ? (unsigned)b[0x1F04] | (unsigned)b[0x1F05] << 8 | (unsigned)b[0x1F06] << 16 | (unsigned)b[0x1F07] << 24
-                        : 0;
-            snprintf(s->title, sizeof(s->title), "%s", saves[i].title);
-        }
+    CardGameSave saves[2 * CARD_BLOCKS];
+    int n = cardGameSaves(saves, max < 2 * CARD_BLOCKS ? max : 2 * CARD_BLOCKS, 0);
+    for (int i = 0; i < n; i++) {
+        XgBestiarySave* s = &out[i];
+        s->slot = saves[i].card;
+        s->block = saves[i].block;
+        s->region = saves[i].region;
+        s->progress = saves[i].progress;
+        s->disc = saves[i].disc;
+        s->id = saves[i].id;
+        snprintf(s->title, sizeof(s->title), "%s", saves[i].title);
     }
     return n;
 }

@@ -142,8 +142,9 @@ bool slotRow(int i, bool selected) {
         ImGui::Text(tr("Play time %u:%02u:%02u"), t / 3600, t / 60 % 60, t % 60);
         // Saved without what another build needs to convert it (during a movie or a prompt, or by a build
         // without a state schema: system/stateportable.h): no other build loads it. Another build's that
-        // loads here (it converts) says whose.
-        if (!s.info.otherBuild && !s.info.portable) {
+        // loads here (it converts) says whose. A build without portable slots marks none: every slot is
+        // this version's only there, and the section's hint says so.
+        if (!s.info.otherBuild && !s.info.portable && stateSlotsPortable()) {
             ImGui::SameLine();
             ImGui::TextDisabled("%s", tr("This version only"));
         } else if (s.info.otherBuild) {

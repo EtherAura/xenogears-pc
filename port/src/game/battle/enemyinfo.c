@@ -56,6 +56,21 @@
  * and region, with the key the battle reports (set currentBattleConfig[0],
  * type battleMonsterMapping - 1, pcBestiaryBattle). A build without the
  * extras has no record: every HP stays out while the option is on.
+ *
+ * A versus battle (include/pc_arena.h; the user's rule, xg-htn.35.143): the
+ * match's own setting decides, not the Enemy info one: with "Opponent's HP
+ * and EP" (arena_opponent_hp, off by default; online the host's for both
+ * players) Select toggles the window and it lists the opponent's members
+ * with their HP and, under each, their EP (m50/m52 as the ether menu's
+ * readout has it, "EP" in the dialogue font; not for a Gear or a member
+ * without EP, as many enemies are), every HP
+ * shown (no bestiary rule); without it there is no window at all, so no
+ * opponent HP or EP shows. The opponent is the other side from the one this
+ * screen shows (mirror.c pcVersusInfoFirst): in a mirror match player 2's
+ * copy ("Fei (P2)") on player 1's screen, the party ("Fei", the mirror's
+ * strings) on player 2's; in a versus battle against a formation the
+ * enemies. Select is read from the pad of the player whose screen this is
+ * (both pads on one screen).
  */
 #include "common.h"
 #include "psyq.h"
@@ -64,12 +79,15 @@
 #include "battle/battle.h"
 #include "pc_wide.h"
 #include "pc_bestiary.h"
+#include "pc_arena.h"
+#include "versus.h"
 
 int pcGameplayEnemyInfo(void); /* port/src/system/gameplay.c */
 int pcGameplayEnemyInfoKnown(void);
 int pcGameplaySelectTap(int previous, int held, int* chord);
 extern u8 currentBattleConfig[0x20]; /* [0]: the enemy set */
 s32 pcPadHeldRemapped(void);   /* src/main/pad.c */
+s32 pcPadHeldRemappedPort(s32 port);
 extern BattleBss_800CCCE8* pBattleEntities;
 extern u8* battleAttackNameStrings;
 extern u8* currentBattleSpecificStrings; /* this battle's strings: the enemies' names */
@@ -96,6 +114,7 @@ void drawBattleDialogWindow(u8 idx, u16 x, u16 y, u16 w, u16 h);
 #define STATUS_INDENT 8
 #define ENEMIES 8         /* entities 3..10 */
 #define FIRST_ENEMY 3
+#define PARTY 3           /* a versus battle on player 2's screen: entities 0..2 */
 #define STATUSES 4        /* status lines per enemy at most */
 #define NAME_UNITS 0x23   /* renderString width (4-pixel units): 140 pixels */
 #define STRIDE ((NAME_UNITS | 1) + 3)
@@ -119,17 +138,27 @@ typedef struct {
     u16 statusImage[STATUSES][STRIDE * ROWS];
 } EnemyText;
 
+/* A readout: a value and its maximum, as digits. */
+typedef struct {
+    u8 digits[HP_DIGITS]; /* the value's then the maximum's */
+    s32 hpCount;          /* the value's digits */
+    s32 maxCount;
+} Readout;
+
 typedef struct {
     u8 slot;
     u8 statusCount; /* shown (dropped when the window would not fit) */
     u8 hpShown;     /* the HP readout (not before a win, under the option) */
-    u8 digits[HP_DIGITS]; /* hp's then max's */
-    s32 hpCount;
-    s32 maxCount;
+    u8 epShown;     /* the EP line (a versus battle's opponent) */
+    Readout hp;
+    Readout ep;
 } Row;
 
 static EnemyText texts[ENEMIES];
 static POLY_FT4 slashPolys[ENEMIES][2];
+static POLY_FT4 epSlashPolys[ENEMIES][2];
+static u16 epImage[STRIDE * ROWS]; /* "EP" */
+static s32 epWidth = -1;          /* -1: to render */
 static TILE tiles[2][TILES];
 static sBattleDialogWindow frame;
 static DR_MODE restoreMode[2];
@@ -262,8 +291,8 @@ static s32 drawImage(OTag* ot, s32 used, const u16* img, s32 stride, s32 width, 
     return used;
 }
 
-/* The HP readout's digits, hp's then max's, most significant first. */
-static void hpDigits(u32 hp, u32 maxHp, Row* r) {
+/* A readout's digits, the value's then the maximum's, most significant first. */
+static void hpDigits(u32 hp, u32 maxHp, Readout* r) {
     u32 values[2];
     s32 counts[2];
     s32 n = 0;
@@ -288,13 +317,17 @@ static void hpDigits(u32 hp, u32 maxHp, Row* r) {
     r->maxCount = counts[1];
 }
 
-static s32 hpWidthOf(const Row* r) {
-    return r->hpShown ? (r->hpCount + r->maxCount) * HP_CELL + HP_SLASH : 0;
+static s32 readoutWidth(const Readout* r) {
+    return (r->hpCount + r->maxCount) * HP_CELL + HP_SLASH;
 }
 
-/* The readout at x, y (the digits' top), as the EP readout is drawn; the
- * tiles used so far, updated. */
-static s32 drawHp(OTag* ot, s32 odd, s32 used, const Row* r, s32 row, s32 x, s32 y) {
+static s32 hpWidthOf(const Row* r) {
+    return r->hpShown ? readoutWidth(&r->hp) : 0;
+}
+
+/* The readout at x, y (the digits' top), as the EP readout is drawn, its
+ * slash in slash; the tiles used so far, updated. */
+static s32 drawHp(OTag* ot, s32 odd, s32 used, const Readout* r, POLY_FT4 (*slash)[2], s32 x, s32 y) {
     s32 k;
     s32 made;
 
@@ -305,11 +338,11 @@ static s32 drawHp(OTag* ot, s32 odd, s32 used, const Row* r, s32 row, s32 x, s32
         }
         x += HP_CELL;
         if (k == r->hpCount - 1) {
-            made = battleSetupStringInPolyFT4Large(0x71, &slashPolys[row], (s16)(x + HP_SLASH_DX), (s16)(y + HP_SLASH_DY));
+            made = battleSetupStringInPolyFT4Large(0x71, slash, (s16)(x + HP_SLASH_DX), (s16)(y + HP_SLASH_DY));
             for (made--; made >= 0; made--) {
-                pcWidePrim(&slashPolys[row][made * 2 + odd], pcWideView, 0);
+                pcWidePrim(&slash[0][made * 2 + odd], pcWideView, 0);
             }
-            battleRenderPolyArray(slashPolys[row], 1, odd);
+            battleRenderPolyArray(slash[0], 1, odd);
             x += HP_SLASH;
         }
     }
@@ -365,22 +398,42 @@ void pcBattleEnemyInfo(void) {
     s32 nameWidth = 0;
     s32 hpWidth = 0;
     s32 statusLines = 0;
+    s32 epLines = 0;
     s32 innerW;
     s32 innerH;
     s32 x;
     s32 y;
     s32 used;
-    s32 only = -1; /* the one marked target, else every enemy */
+    s32 only = -1; /* the one marked target, else every one listed */
     s32 knownOnly;
+    s32 versus;
+    s32 view;
+    s32 first = FIRST_ENEMY; /* the side listed: its first slot, how many, their bits */
+    s32 slots = ENEMIES;
+    u16 side = 0x7F8;
     u16 marked;
     s32 i;
     s32 j;
 
-    if (!pcGameplayEnemyInfo() || battleVar0 == NULL || battleVar1 == NULL || battleFont == NULL ||
-        battleAttackNameStrings == NULL || currentBattleSpecificStrings == NULL) {
+    versus = pcVersusSession() == PC_VERSUS_IN;
+    if (!(versus ? pcVersusOpponentHpSetting() : pcGameplayEnemyInfo()) || battleVar0 == NULL || battleVar1 == NULL ||
+        battleFont == NULL || battleAttackNameStrings == NULL || currentBattleSpecificStrings == NULL) {
         return;
     }
-    held = pcPadHeldRemapped();
+    if (versus) {
+        /* Select on the pad of the player whose screen this is */
+        view = pcVersusPerspective();
+        held = view == 2 ? pcPadHeldRemappedPort(1)
+               : view == 1 ? pcPadHeldRemappedPort(0)
+                           : pcPadHeldRemappedPort(0) | pcPadHeldRemappedPort(1);
+        first = pcVersusInfoFirst();
+        if (first == 0) {
+            slots = PARTY;
+            side = 0x7;
+        }
+    } else {
+        held = pcPadHeldRemapped();
+    }
     if (pcGameplaySelectTap(previousHeld, held, &selectChord)) {
         shown ^= 1;
     }
@@ -398,35 +451,38 @@ void pcBattleEnemyInfo(void) {
             texts[i].nameId = NO_NAME;
             texts[i].statusCount = 0;
         }
+        epWidth = -1;
     }
     lastDrawn = g_playTimeInVsync;
 
     knownOnly = pcGameplayEnemyInfoKnown();
     marked = updateTargetSelectionMarkerSub0_var0;
-    if ((marked & 7) == 0 && (marked & 0x7F8) != 0 && (marked & (marked - 1)) == 0) {
-        for (only = FIRST_ENEMY; !(marked & (1 << only)); only++) {
+    if ((marked & ~side & 0x7FF) == 0 && (marked & side) != 0 && (marked & (marked - 1)) == 0) {
+        for (only = first; !(marked & (1 << only)); only++) {
         }
     }
 
     /* The rows: who, with what rendered. */
-    for (i = 0; i < ENEMIES; i++) {
-        s32 slot = FIRST_ENEMY + i;
+    for (i = 0; i < slots; i++) {
+        s32 slot = first + i;
         sBattleEntity* e = &battleEntities.m0_entities[slot];
         EnemyText* t = &texts[i];
         Row* r;
         u8 ids[STATUSES];
+        u8 nameId;
         s32 n;
 
         if (!isBattleSlotFilled.m0_isBattleSlotFilled[slot] || (battleVisualEntities[slot].m3_hidden & 0x80) ||
-            (e->m0_base.m34_monsterFlags & 0x400) || (only >= 0 && slot != only)) {
+            (slot >= FIRST_ENEMY && (e->m0_base.m34_monsterFlags & 0x400)) || (only >= 0 && slot != only)) {
             t->nameId = NO_NAME;
             t->statusCount = 0;
             continue;
         }
         r = &rows[count++];
         r->slot = (u8)slot;
-        if (t->nameId != battleMonsterMapping[slot]) {
-            t->nameId = battleMonsterMapping[slot];
+        nameId = versus ? (u8)pcVersusInfoName(slot) : battleMonsterMapping[slot];
+        if (t->nameId != nameId) {
+            t->nameId = nameId;
             t->nameWidth = renderLine(getDialogParamPointer(currentBattleSpecificStrings, t->nameId), t->nameImage);
         }
         n = collectStatuses(e, ids);
@@ -438,30 +494,45 @@ void pcBattleEnemyInfo(void) {
         }
         t->statusCount = (u8)n;
         r->statusCount = (u8)n;
-        r->hpShown = !knownOnly || (pcBestiaryKnown != NULL && battleMonsterMapping[slot] != 0 &&
-                                    pcBestiaryKnown(currentBattleConfig[0], battleMonsterMapping[slot] - 1));
+        r->hpShown = versus || !knownOnly ||
+                     (pcBestiaryKnown != NULL && battleMonsterMapping[slot] != 0 &&
+                      pcBestiaryKnown(currentBattleConfig[0], battleMonsterMapping[slot] - 1));
         if (e->m15A_flags & 0x80) {
-            hpDigits((u32)(e->mA4_gear.m60_hp < 0 ? 0 : e->mA4_gear.m60_hp), (u32)e->mA4_gear.m64_maxHp, r);
+            hpDigits((u32)(e->mA4_gear.m60_hp < 0 ? 0 : e->mA4_gear.m60_hp), (u32)e->mA4_gear.m64_maxHp, &r->hp);
         } else {
-            hpDigits(e->m0_base.m4C_HP, e->m0_base.m4E_MaxHP, r);
+            hpDigits(e->m0_base.m4C_HP, e->m0_base.m4E_MaxHP, &r->hp);
+        }
+        r->epShown = versus && !(e->m15A_flags & 0x80) && e->m0_base.m52_MaxMP != 0; /* a Gear, and many an enemy, have none */
+        if (r->epShown) {
+            hpDigits(e->m0_base.m50_MP, e->m0_base.m52_MaxMP, &r->ep);
+            if (readoutWidth(&r->ep) > hpWidth) hpWidth = readoutWidth(&r->ep);
+            epLines++;
         }
         if (t->nameWidth > nameWidth) nameWidth = t->nameWidth;
         if (hpWidthOf(r) > hpWidth) hpWidth = hpWidthOf(r);
-        if (!r->hpShown) r->hpCount = r->maxCount = 0;
+        if (!r->hpShown) r->hp.hpCount = r->hp.maxCount = 0;
         statusLines += n;
     }
     if (count == 0) {
         return;
     }
+    if (epLines != 0 && epWidth < 0) {
+        u8 word[VERSUS_LABEL];
+        pcVersusWord(word, "EP");
+        epWidth = renderLine(word, epImage);
+    }
+    if (epLines != 0 && STATUS_INDENT + epWidth > nameWidth) {
+        nameWidth = STATUS_INDENT + epWidth;
+    }
     /* The window's size: statuses, then the last rows, go when it would not fit. */
-    innerH = 2 * WIN_PAD_Y + count * ROW_H + statusLines * STATUS_H;
+    innerH = 2 * WIN_PAD_Y + count * ROW_H + epLines * ROW_H + statusLines * STATUS_H;
     for (i = count - 1; i >= 0 && WIN_BOTTOM - innerH < WIN_TOP_MIN; i--) {
         innerH -= rows[i].statusCount * STATUS_H;
         rows[i].statusCount = 0;
     }
     while (count > 1 && WIN_BOTTOM - innerH < WIN_TOP_MIN) {
         count--;
-        innerH -= ROW_H;
+        innerH -= ROW_H + (rows[count].epShown ? ROW_H : 0);
     }
     innerW = 2 * WIN_PAD_X + nameWidth + (hpWidth ? WIN_GAP + hpWidth : 0);
     if (innerW < 0x40) innerW = 0x40;
@@ -477,14 +548,19 @@ void pcBattleEnemyInfo(void) {
     used = 0;
     for (i = 0, j = y + WIN_PAD_Y; i < count; i++) {
         Row* r = &rows[i];
-        EnemyText* t = &texts[r->slot - FIRST_ENEMY];
+        EnemyText* t = &texts[r->slot - first];
         s32 s;
 
         used = drawText(ot, used, t->nameImage, t->nameWidth, x + WIN_PAD_X, j);
         if (r->hpShown) {
-            used = drawHp(ot, odd, used, r, i, x + innerW - WIN_PAD_X - hpWidthOf(r), j);
+            used = drawHp(ot, odd, used, &r->hp, &slashPolys[i], x + innerW - WIN_PAD_X - hpWidthOf(r), j);
         }
         j += ROW_H;
+        if (r->epShown) { /* "EP", its readout under the HP's */
+            used = drawText(ot, used, epImage, epWidth, x + WIN_PAD_X + STATUS_INDENT, j);
+            used = drawHp(ot, odd, used, &r->ep, &epSlashPolys[i], x + innerW - WIN_PAD_X - readoutWidth(&r->ep), j);
+            j += ROW_H;
+        }
         for (s = 0; s < r->statusCount; s++, j += STATUS_H) {
             used = drawText(ot, used, t->statusImage[s], t->statusWidth[s], x + WIN_PAD_X + STATUS_INDENT, j);
         }

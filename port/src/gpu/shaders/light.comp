@@ -220,6 +220,13 @@ const vec3 SUN_COLOUR = vec3(1.0, 0.94, 0.80);
 // sun's height is taken as at least CLOUD_LOW_SUN when a point is carried up
 // to the clouds.
 const int CLOUD_SLOT = 4 + MAX_FIGURES;
+// Flickering firelight (xg-rgcf.5.20): its settings' place in the block (x:
+// how deep the flicker goes, 0 none; y: the frame's time in seconds; z: its
+// speed, flickers a second; w: how irregular it is, 0..1); fires nearer than
+// FLICKER_CELL view units to each other flicker nearly together. The room's
+// origin is the clouds' (CLOUD_SLOT + 1).
+const int FLICKER_SLOT = 6 + MAX_FIGURES;
+const float FLICKER_CELL = 160.0;
 const float CLOUD_SPREAD = 0.132, CLOUD_EDGE = 0.253, CLOUD_SOFT = 0.6, CLOUD_LOW_SUN = 0.2;
 const float FOG_FAR_FROM = 1.2, FOG_FAR_TO = 3.0;
 const vec3 FOG_NEUTRAL = vec3(0.66, 0.70, 0.76);
@@ -292,6 +299,11 @@ float turn(ivec2 t) {
     return fract(52.9829189 * fract(0.06711056 * float(t.x) + 0.00583715 * float(t.y)));
 }
 
+// Flickering firelight (defined with the clouds' noise, below).
+float warmth(vec3 light);
+float flicker(vec3 p);
+bool flickering();
+
 void prepare(ivec2 t) {
     vec3 sum = vec3(0.0), source = vec3(0.0);
     float count = 0.0;
@@ -316,7 +328,25 @@ void prepare(ivec2 t) {
     count = max(count, 1.0);
     sum /= count;
     imageStore(base, t, vec4(sum, dot(sum, vec3(0.2126, 0.7152, 0.0722))));
-    imageStore(glow, t, vec4(source / count, 0.0));
+    // Firelight: the glow's source flickers where it is a fire-coloured light:
+    // brighter than what is around it (eight samples ten PS1 pixels out), its
+    // colour judged with its halo (eight three PS1 pixels out: a flame's core
+    // is near white).
+    if (flickering() && dot(source, vec3(1.0)) > 0.0) {
+        float around = 0.0, own = dot(sum, vec3(0.2126, 0.7152, 0.0722));
+        vec3 halo = vec3(0.0);
+        for (int k = 0; k < 8; k++) {
+            vec2 d = vec2(cos(float(k) * 0.785398), sin(float(k) * 0.785398));
+            ivec2 l = clamp(middle(t) + ivec2(10.0 * d * float(pc.n)), ivec2(0), pc.size - 1);
+            around += dot(light(imageLoad(color, pc.origin + l).r), vec3(0.2126, 0.7152, 0.0722)) / 8.0;
+            l = clamp(middle(t) + ivec2(3.0 * d * float(pc.n)), ivec2(0), pc.size - 1);
+            halo += light(imageLoad(color, pc.origin + l).r) / 8.0;
+        }
+        float fire = smoothstep(1.6, 2.6, own / max(around, 1.0e-3)) * warmth(0.3 * sum + 0.7 * halo);
+        float code = depthCode(imageLoad(depth, middle(t)).r);
+        if (code > 0.0 && fire > 0.0) source *= mix(1.0, flicker(place(middleAt(t), code)), fire);
+    }
+    imageStore(glow, t, vec4(max(source, 0.0) / count, 0.0));
 
     // The surface at the PS1 pixel's centre: the cross product of the steps
     // to its neighbours in the copy, each taken on the side where the depth
@@ -423,6 +453,13 @@ void sources(ivec2 t) {
         float threshold = max(BOUNCE_RATIO * mean, BOUNCE_FLOOR);
         float peak = max(b.r, max(b.g, b.b));
         e = b.rgb * (clamp((peak - threshold) / threshold, 0.0, 1.0) * backdropFade(code));
+        // Firelight: a warm source's light flickers.
+        if (flickering() && peak > threshold) {
+            vec3 halo = vec3(0.0);
+            for (int k = 0; k < 8; k++)
+                halo += imageLoad(base, inside(t + ivec2(round(3.0 * vec2(cos(float(k) * 0.785398), sin(float(k) * 0.785398)))))).rgb / 8.0;
+            e *= mix(1.0, flicker(place(middleAt(t), code)), warmth(0.3 * b.rgb + 0.7 * halo));
+        }
     }
     imageStore(tempA, t, vec4(e, max(code, 0.0)));
 }
@@ -979,6 +1016,41 @@ float cloudCover(vec2 p) {
     return smoothstep(CLOUD_EDGE - CLOUD_SOFT, CLOUD_EDGE + CLOUD_SOFT, (total / sum - 0.5) / CLOUD_SPREAD);
 }
 
+// Flickering firelight (xg-rgcf.5.20): how fire-coloured a light (squared
+// colour) is, 0 to 1: red leading, well above blue (a flame's core is near
+// white: the callers judge it with the halo around it);
+// whether the firelight is on; and the flicker at a point of the room (view
+// space): sines of three speeds and a noise in time, their phases from where
+// the point is on the ground (axes fixed in the room, as the clouds'), so
+// fires apart flicker apart and each keeps its rhythm as the camera moves.
+float warmth(vec3 light) {
+    vec3 c = sqrt(max(light, 0.0));
+    if (c.r <= 1.0e-3 || c.r < c.g || c.r < c.b) return 0.0;
+    return smoothstep(0.18, 0.38, (c.r - c.b) / c.r);
+}
+
+bool flickering() {
+    int b = int(pc.lens.w);
+    return b >= 0 && block[b + FLICKER_SLOT].x > 0.0;
+}
+
+float flicker(vec3 p) {
+    int b = int(pc.lens.w);
+    vec4 s = block[b + FLICKER_SLOT];
+    vec3 up = pc.view.xyz, sun = block[b].xyz;
+    vec3 along = sun - up * dot(sun, up);
+    if (dot(along, along) < 1.0e-6) along = cross(up, abs(up.z) < 0.9 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0));
+    along = normalize(along);
+    vec3 across = cross(up, along);
+    vec3 rel = p - block[b + CLOUD_SLOT + 1].xyz;
+    vec2 g = vec2(dot(rel, along), dot(rel, across)) / FLICKER_CELL + 0.37 * dot(rel, up) / FLICKER_CELL;
+    float phase = 40.0 * cloudNoise(g, 21u);
+    float t = s.y * s.z * 6.2831853;
+    float wave = 0.5 * sin(t + phase) + 0.3 * sin(2.31 * t + 1.7 * phase) + 0.2 * sin(5.37 * t + 2.9 * phase);
+    float noise = 2.0 * cloudNoise(vec2(s.y * s.z * 2.7, phase), 22u) - 1.0;
+    return max(1.0 + s.x * mix(wave, noise, 0.5 * s.w), 0.0);
+}
+
 // The cloud between a point of the frame (at, PS1 pixels; z its view depth)
 // and the sun: the point is carried up along the sun to the cloud layer and
 // read there, on axes fixed in the room as the sun is (along its way across
@@ -1178,7 +1250,7 @@ void composite(ivec2 l) {
 // their order, those nearer than what is drawn there. Nothing over a pixel
 // where nothing or a kept picture is drawn.
 const int PARTICLES_MAX = 2048, PARTICLE_EMBERS = 1536; // embers from this index on
-const int PART_SLOT = 6 + MAX_FIGURES;                // after the clouds' settings (vk.c LIGHT_BLOCK_BYTES)
+const int PART_SLOT = 7 + MAX_FIGURES;                // after the firelight's settings (vk.c LIGHT_BLOCK_BYTES)
 const int PART_REC = PART_SLOT + 5, PART_MASK = PART_REC + 3 * PARTICLES_MAX;
 const int PARTICLE_TILES = 64 * 16; // the masks' room (vk.c PARTICLE_TILES)
 

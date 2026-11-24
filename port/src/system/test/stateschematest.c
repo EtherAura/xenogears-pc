@@ -229,6 +229,75 @@ static void schemaChecks(void) {
     stateSchemaFree(s);
 }
 
+/* The state rules: each kind and target read as statecanon rule_target reads it, an unreadable one kept but
+ * marked, the revision; a renamed game function by its retail address. */
+static void ruleChecks(void) {
+    static const char* const rules =
+        ", \"rules\": {\"language\": 1, \"revision\": 3, \"list\": ["
+        " {\"kind\": \"was\", \"rev\": 2, \"type\": \"Pair\", \"member\": \"m0_a\", \"tids\": [\"10\", \"77\"],"
+        "  \"field\": \"+0\", \"old\": \"pc:first\", \"at\": \"a.c:1\"},"
+        " {\"kind\": \"was\", \"rev\": 3, \"var\": \"main:pc:pcNew\", \"name\": \"pcNew\", \"old\": \"main:pc:pcOld\"},"
+        " {\"kind\": \"was\", \"rev\": 2, \"typename\": \"Pair\", \"old\": \"OldPair\"},"
+        " {\"kind\": \"was\", \"rev\": 2, \"tag\": \"hw.b\", \"old\": \"hw.a\"},"
+        " {\"kind\": \"was\", \"rev\": 2, \"fn\": \"tick\", \"old\": \"tock\"},"
+        " {\"kind\": \"values\", \"rev\": 2, \"var\": \"x\", \"map\": [[0, 5], [-1, 9223372036854775807]]},"
+        " {\"kind\": \"reset\", \"rev\": 2, \"type\": \"Pair\", \"tids\": [\"10\"], \"field\": \"+4\"},"
+        " {\"kind\": \"removed\", \"rev\": 2, \"vars\": [\"main:80001000\", \"main:pc:gone\"], \"value\": -4},"
+        " {\"kind\": \"removed\", \"rev\": 2, \"type\": \"Pair\", \"tids\": [\"10\"], \"fields\": [\"pc:x\"], \"value\": 1},"
+        " {\"kind\": \"default\", \"type\": \"Pair\", \"tids\": [\"10\"], \"field\": \"+4\", \"value\": 3},"
+        " {\"kind\": \"hashes\", \"type\": \"Pair\", \"tids\": [\"10\"], \"field\": \"+0\"},"
+        " {\"kind\": \"someday\", \"rev\": 2, \"var\": \"x\"},"
+        " {\"kind\": \"values\", \"rev\": 2, \"var\": \"x\", \"map\": [[0, 1.5]]},"
+        " {\"kind\": \"default\", \"var\": 7, \"field\": \"+4\", \"tids\": [\"10\"], \"value\": 1}]}}";
+    size_t n = strlen(SCHEMA);
+    char* text = malloc(n + strlen(rules) + 1);
+    if (!text) {
+        check(0, "memory for a schema with rules");
+        return;
+    }
+    memcpy(text, SCHEMA, n - 1);
+    strcpy(text + n - 1, rules);
+    char err[200];
+    StateSchema* s = stateSchemaParse(text, strlen(text), err, sizeof err);
+    free(text);
+    check(s != NULL, "a schema with rules parses");
+    if (!s) {
+        printf("  %s\n", err);
+        return;
+    }
+    check(stateSchemaRulesLanguage(s) == 1 && stateSchemaRevision(s) == 3 && stateSchemaRuleCount(s) == 14,
+          "the rules' language, the revision, the rules");
+    const StRule* r = stateSchemaRuleAt(s, 0);
+    check(r->readable && r->kind == ST_RULE_WAS && r->on == ST_ON_FIELD && r->rev == 2 && strcmp(r->name, "+0") == 0 &&
+              strcmp(r->old, "pc:first") == 0 && r->tidCount == 2 && r->types[0] == stateSchemaType(s, "10") &&
+              r->types[1] == ST_NONE && strcmp(r->at, "a.c:1") == 0,
+          "a member's rename: its key, its types (one this schema has not), the old key");
+    check(stateSchemaRuleAt(s, 1)->on == ST_ON_VAR && stateSchemaRuleAt(s, 2)->on == ST_ON_TYPENAME &&
+              stateSchemaRuleAt(s, 3)->on == ST_ON_TAG && stateSchemaRuleAt(s, 4)->on == ST_ON_FN &&
+              strcmp(stateSchemaRuleAt(s, 4)->old, "tock") == 0,
+          "renames of a variable, a type, a tag, a function");
+    r = stateSchemaRuleAt(s, 5);
+    check(r->kind == ST_RULE_VALUES && r->mapCount == 2 && r->map[1][0] == -1 && r->map[1][1] == INT64_MAX,
+          "a values rule's pairs, negative and 64-bit");
+    r = stateSchemaRuleAt(s, 7);
+    check(r->kind == ST_RULE_REMOVED && r->on == ST_ON_VARS && r->nameCount == 2 && r->value == -4 &&
+              stateSchemaRuleAt(s, 8)->on == ST_ON_FIELDS && stateSchemaRuleAt(s, 8)->tidCount == 1,
+          "removed variables (by identity) and members (by key)");
+    check(stateSchemaRuleAt(s, 9)->kind == ST_RULE_DEFAULT && stateSchemaRuleAt(s, 9)->value == 3 &&
+              stateSchemaRuleAt(s, 9)->rev == 0 && stateSchemaRuleAt(s, 10)->kind == ST_RULE_HASHES,
+          "the properties: a default, type hashes");
+    check(!stateSchemaRuleAt(s, 11)->readable && !stateSchemaRuleAt(s, 12)->readable && !stateSchemaRuleAt(s, 13)->readable,
+          "unreadable: an unknown kind, a value not an integer, a default whose first target is not a string");
+    uint64_t at = 0;
+    check(stateSchemaFnFind(s, "fn:80002000:renamedSince", &at) && at == 65536 && !stateSchemaFnFind(s, "fn:80002001:x", &at)
+              && !stateSchemaFnFind(s, "fn:8000200:x", &at),
+          "a renamed game function by its retail address alone");
+    stateSchemaFree(s);
+    s = stateSchemaParse(SCHEMA, strlen(SCHEMA), err, sizeof err);
+    check(s && stateSchemaRevision(s) == 0 && stateSchemaRuleCount(s) == 0, "a schema from before rules: revision 0");
+    stateSchemaFree(s);
+}
+
 /* ---- the indexes of a real schema, for tools/test_stateschema_c.py ---------------------------------- */
 
 static void dump(const char* path, uint64_t bias) {
@@ -277,6 +346,28 @@ static void dump(const char* path, uint64_t bias) {
     for (int32_t i = 0; i < stateSchemaFuncCount(s); i++) {
         const StFunc* f = stateSchemaFuncAt(s, i);
         printf("fnaddr %s %llu\n", f->id, (unsigned long long)stateSchemaFnAddress(s, f->id));
+        if (f->retail != ST_NO_RETAIL) { /* renamed since: by its retail address alone, where one function has it */
+            snprintf(id, sizeof id, "fn:%08llx:__renamed__", (unsigned long long)f->retail);
+            printf("fnretail %s %llu\n", id, (unsigned long long)stateSchemaFnAddress(s, id));
+        }
+    }
+    static const char* const kinds[] = {"was", "values", "reset", "removed", "default", "hashes"};
+    static const char* const ons[] = {"field", "var", "typename", "tag", "fn", "fields", "vars"};
+    printf("rules %lld %lld %d\n", (long long)stateSchemaRulesLanguage(s), (long long)stateSchemaRevision(s),
+           stateSchemaRuleCount(s));
+    for (int32_t i = 0; i < stateSchemaRuleCount(s); i++) {
+        const StRule* r = stateSchemaRuleAt(s, i);
+        if (!r->readable) {
+            printf("rule %d -\n", i);
+            continue;
+        }
+        printf("rule %d %s %s %lld %s %s", i, kinds[r->kind], ons[r->on], (long long)r->rev, r->name ? r->name : "-",
+               r->old ? r->old : "-");
+        for (int32_t k = 0; k < r->tidCount; k++) printf(" t=%s:%d", r->tids[k], r->types[k] != ST_NONE);
+        for (int32_t k = 0; k < r->nameCount; k++) printf(" n=%s", r->names[k]);
+        for (int32_t k = 0; k < r->mapCount; k++) printf(" m=%lld,%lld", (long long)r->map[k][0], (long long)r->map[k][1]);
+        if (r->kind == ST_RULE_REMOVED || r->kind == ST_RULE_DEFAULT) printf(" v=%lld", (long long)r->value);
+        printf("\n");
     }
     stateSchemaFree(s);
 }
@@ -288,6 +379,7 @@ int main(int argc, char** argv) {
     }
     jsonChecks();
     schemaChecks();
+    ruleChecks();
     if (failures == 0) {
         printf("stateschematest: all checks passed\n");
     }

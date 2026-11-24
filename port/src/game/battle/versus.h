@@ -20,5 +20,11 @@ void pcVersusHideLabel(void);
 void pcVersusMirrorSetup(void); /* pcVersusBattleSetup: the formation as the mirror wants it */
 void pcVersusMirrorEnd(void);   /* pcVersusBattleEnd: what the mirror loaded, freed */
 int pcVersusMirrorForfeit(void); /* player 2 chose Escape: player 1 won */
+void pcVersusMirrorLabel(void); /* pcVersusDraw, each frame: player 2's name label kept up for its turn */
+/* the enemy info window in a versus battle (enemyinfo.c): the first slot of
+ * the side it lists (3 player 2's, 0 the party on player 2's screen), and a
+ * slot's name in currentBattleSpecificStrings */
+int pcVersusInfoFirst(void);
+int pcVersusInfoName(int slot);
 
 #endif

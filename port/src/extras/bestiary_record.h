@@ -66,7 +66,8 @@ unsigned xgBestiaryCarryPending(void); /* the id, or XG_BESTIARY_CARRY_NONE */
 int xgBestiaryGameProgress(void);
 
 /* This game's saves on the two memory cards (port/src/card: the images the
- * game uses), for "catch up from a save" and for viewing a save's record:
+ * game uses; card/saves.h reads them), for "catch up from a save" and for
+ * viewing a save's record:
  * the save block's copy of the game state (MenuSaveGame +0x1124 holds
  * gameState +0x1920 on, so field variable n is at block +0x1234 + 2n;
  * checksum byte 0x1FFF the sum of 0x100-0x1FFE, src/menu/m_801C8D78.c), and

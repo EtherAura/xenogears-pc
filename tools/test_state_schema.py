@@ -164,6 +164,155 @@ def clang_checks(base: Path, check) -> None:
           f"clang: no compile commands: not portable ({bad.get('portable_why')})")
 
 
+# The state rules' macros (include/pc_state.h; docs/CANONICAL_STATES.md 17.2), as the scan reads them: a file of a
+# host part (port/src/system/hw.c: its part "hw" from savestate.c's list) and one of game data.
+RULES_HW = r"""
+#define PC_STATE_TAG_WAS(rev, tag, old)
+#define PC_STATE_FN_WAS(rev, fn, old)
+#define PC_STATE_VAR_WAS(rev, var, old)
+#define PC_STATE_VAR_DEFAULT(var, value)
+static int newTag;
+void hwStateIo(void* s) { (void)s; newTag++; }
+PC_STATE_TAG_WAS(2, "hw.newTag", "hw.oldTag")
+static void tick(void) {}
+void (*hwTick)(void) = tick;
+PC_STATE_FN_WAS(2, tick, "tock")
+"""
+RULES_GAME = r"""
+#define PC_STATE_REVISION 2
+#define PC_STATE_WAS(rev, T, member, old)
+#define PC_STATE_VAR_WAS(rev, var, old)
+#define PC_STATE_TYPE_WAS(rev, T, old)
+#define PC_STATE_VALUES(rev, T, member, map)
+#define PC_STATE_VAR_VALUES(rev, var, map)
+#define PC_STATE_RESET(rev, T, member)
+#define PC_STATE_VAR_RESET(rev, var)
+#define PC_STATE_REMOVED(rev, T, value, names)
+#define PC_STATE_VAR_REMOVED(rev, value, identities)
+#define PC_STATE_DEFAULT(T, member, value)
+#define PC_STATE_VAR_DEFAULT(var, value)
+#define PC_STATE_HASHES(T, member)
+typedef struct Thing {
+    int m0_a;
+    short m4_b;
+    unsigned char m6_flags : 3;
+    struct { short pcLevel; int pcKind; } m8_in;
+    union { int pcWord; short pcHalf[2]; } m10_u;
+    unsigned char m14_kinds[4];
+} Thing;
+PC_STATE_WAS(2, Thing, m4_b, "m2_b")
+PC_STATE_WAS(2, Thing, m8_in.pcLevel, "pcLvl")
+PC_STATE_WAS(2, Thing, m10_u.pcHalf, "pcPair")
+PC_STATE_VALUES(2, Thing, m6_flags, ((0, 7), (1, 3)))
+PC_STATE_VALUES(2, Thing, m14_kinds, ((0x10, 0x20), (-0, 1)))
+PC_STATE_RESET(1, Thing, m8_in.pcKind)
+PC_STATE_REMOVED(2, Thing, -1, ("m18_gone", "+1c"))
+PC_STATE_DEFAULT(Thing, m8_in.pcKind, 5)
+PC_STATE_HASHES(Thing, m0_a)
+PC_STATE_TYPE_WAS(2, Thing, "OldThing")
+__attribute__((section("xgdata_testmod"), used)) Thing D_80123456;
+__attribute__((section("xgdata_testmod"), used)) int pcCount = 1;
+PC_STATE_VAR_WAS(2, pcCount, "pcTally")
+PC_STATE_VAR_VALUES(2, pcCount, ((1, 2)))
+PC_STATE_VAR_RESET(2, D_80123456)
+PC_STATE_VAR_REMOVED(1, 9, ("testmod:80123500", "testmod:pc:pcOldCount"))
+PC_STATE_VAR_DEFAULT(pcCount, 1)
+int main(void) { return D_80123456.m0_a + pcCount; }
+"""
+RULES_BAD = [  # each one alone: what the gate refuses, and what it says
+    ("PC_STATE_SOMEDAY(2, Thing, m0_a)", "not a state macro this tool knows"),
+    ("PC_STATE_WAS(2, Thing, m0_a)", "3 arguments, it takes 4"),
+    ("PC_STATE_WAS(3, Thing, m0_a, \"pcA\")", "revision 3 is not from 1"),
+    ("PC_STATE_WAS(2, Thing, pcNope, \"pcA\")", "Thing has no member pcNope"),
+    ("PC_STATE_WAS(2, Thing, m0_a, \"m4_old\")", "the old key +4 is a member of Thing"),
+    ("PC_STATE_WAS(2, Nothing, m0_a, \"pcA\")", "no struct or union Nothing"),
+    ("PC_STATE_VALUES(2, Thing, m6_flags, ((0, 8)))", "does not fit 0..7"),
+    ("PC_STATE_VALUES(2, Thing, m8_in, ((0, 1)))", "not an integer member"),
+    ("PC_STATE_VALUES(2, Thing, m0_a, ((0, NAME)))", "integer literals"),
+    ("PC_STATE_DEFAULT(Thing, m14_kinds, 256)", "does not fit 0..255"),
+    ("PC_STATE_VAR_WAS(2, pcCount, \"main:pc:a:b:c\")", "is not one"),
+    ("PC_STATE_VAR_WAS(2, pcCount, \"pcOther\")", "two renames of one thing at one revision"),
+    ("PC_STATE_VAR_WAS(2, pcCount, \"testmod:80123456\")", "a variable of this build"),
+    ("PC_STATE_VAR_WAS(2, D_80123456, \"x\")", "is a retail address"),
+    ("PC_STATE_TYPE_WAS(2, Thing, \"Thing\")", "the old name Thing"),
+    ("PC_STATE_REMOVED(2, Thing, 0, (\"m0_a\"))", "Thing still has +0"),
+    ("PC_STATE_VAR_REMOVED(2, 0, (\"testmod:pc:pcCount\"))", "is a variable of this build"),
+    ("PC_STATE_HASHES(Thing, m4_b)", "32-bit integer member"),
+    ("PC_STATE_WAS(2, Thing, m0_a, \"m2_b\")", "old name of two things"),
+    ("PC_STATE_WAS(2, Thing, m8_in.pcLevel, \"pcLevel2\")", "two renames of one thing at one revision"),
+]
+
+
+def rules_checks(base: Path, check) -> None:
+    """The state rules' macros: each kind read into the schema with its target resolved (a member through an
+    unnamed struct, a union's view by name, a bitfield, an integer array, a variable, a type, a function, a host
+    part's tag), and each kind of mistake refused (the gate fails, naming it)."""
+    d = base / "rules"
+    (d / "port/src/system").mkdir(parents=True)
+    (d / "CMakeCache.txt").write_text("XG_VERSION:STRING=US\n")
+    (d / "game.c").write_text(RULES_GAME)
+    (d / "port/src/system/hw.c").write_text(RULES_HW)
+
+    def run(extra=""):
+        # (under #if 0: the compiler leaves a broken use out, the scan reads the text)
+        (d / "game.c").write_text(RULES_GAME.replace("int main(void)", f"#if 0\n{extra}\n#endif\nint main(void)"
+                                                     if extra else "int main(void)"))
+        subprocess.run(["cc", "-g", "-O0", "-w", "-o", str(d / "xenogears"), str(d / "game.c"),
+                        str(d / "port/src/system/hw.c")], check=True)
+        return subprocess.run([sys.executable, str(ROOT / "tools/state_schema.py"), str(d), "--source", str(d)],
+                              capture_output=True, text=True)
+
+    r = run()
+    check(r.returncode == 0, f"rules: the schema builds ({r.stdout[-1500:]})")
+    schema = json.load(gzip.open(d / "state_schema.json.gz", "rt"))
+    rules = schema["rules"]
+    check(rules["language"] == 1 and rules["revision"] == 2 and len(rules["list"]) == 17,
+          f"rules: the language, the revision, every rule ({len(rules['list'])})")
+    T = schema["types"]
+    by = {}
+    for x in rules["list"]:
+        by.setdefault((x["kind"], x.get("member") or x.get("var") or x.get("typename") or x.get("tag") or x.get("fn") or
+                       tuple(x.get("fields") or x.get("vars") or ())), x)
+    w = by[("was", "m4_b")]
+    check(w["field"] == "+4" and w["old"] == "+2" and w["rev"] == 2 and w["type"] == "Thing" and
+          all(T[t]["name"] == "Thing" for t in w["tids"]) and w["at"].endswith("game.c:23"),
+          f"a member's rename by its offset tags, the type's entries, where it is ({w})")
+    w = by[("was", "m8_in.pcLevel")]
+    check(w["field"] == "pc:pcLevel" and w["old"] == "pc:pcLvl" and all(T[t]["k"] == "struct" and
+          [f["name"] for f in T[t]["fields"]] == ["pcLevel", "pcKind"] for t in w["tids"]),
+          f"a member through an unnamed struct: the unnamed struct's entries ({w})")
+    w = by[("was", "m10_u.pcHalf")]
+    check(w["field"] == "pcHalf" and w["old"] == "pcPair" and all(T[t]["k"] == "union" for t in w["tids"]),
+          f"a union's view, by its name ({w})")
+    check(by[("values", "m6_flags")]["map"] == [[0, 7], [1, 3]] and by[("values", "m14_kinds")]["map"] == [[16, 32], [0, 1]],
+          "values rules on a bitfield and an integer array (hex, -0)")
+    check(by[("reset", "m8_in.pcKind")]["rev"] == 1 and by[("default", "m8_in.pcKind")]["value"] == 5 and
+          "rev" not in by[("default", "m8_in.pcKind")], "a reset rule; a default (no revision: the reader's own)")
+    rm = by[("removed", ("+18", "+1c"))]
+    check(rm["value"] == -1 and rm["tids"] == w["tids"] or rm["type"] == "Thing", f"removed members, by keys ({rm})")
+    check(by[("hashes", "m0_a")]["field"] == "+0" and by[("was", "Thing")]["old"] == "OldThing",
+          "type hashes; a type's rename")
+    v = by[("was", "testmod:pc:pcCount")]
+    check(v["old"] == "testmod:pc:pcTally" and v["name"] == "pcCount", f"a variable's rename by an old name ({v})")
+    check(by[("values", "testmod:pc:pcCount")]["map"] == [[1, 2]] and by[("reset", "testmod:80123456")]["rev"] == 2
+          and by[("default", "testmod:pc:pcCount")]["value"] == 1 and
+          by[("removed", ("testmod:80123500", "testmod:pc:pcOldCount"))]["value"] == 9,
+          "a variable's values, reset, default; removed variables by identity")
+    check(by[("was", "hw.newTag")]["old"] == "hw.oldTag" and by[("was", "tick")]["old"] == "tock",
+          "a host part's tag and a function renamed")
+    for macro, says in RULES_BAD:
+        r = run(macro)
+        check(r.returncode == 1 and says in r.stdout, f"the gate refuses {macro}: {says!r} ({r.stdout[-700:]})")
+    (d / "game.c").write_text(RULES_GAME.replace("#define PC_STATE_REVISION 2", ""))
+    subprocess.run(["cc", "-g", "-O0", "-w", "-o", str(d / "xenogears"), str(d / "game.c"),
+                    str(d / "port/src/system/hw.c")], check=True)
+    r = subprocess.run([sys.executable, str(ROOT / "tools/state_schema.py"), str(d), "--source", str(d)],
+                       capture_output=True, text=True)
+    check(r.returncode == 1 and "is not from 1 to PC_STATE_REVISION (0)" in r.stdout,
+          "without PC_STATE_REVISION every history rule is refused")
+    shutil.rmtree(d)  # (the other checks read the folder above as their source)
+
+
 def main() -> int:
     if not shutil.which("cc") or not (shutil.which("llvm-dwarfdump") or list(Path.home().glob("Android/sdk/ndk/*"))):
         print("state-schema tests: skipped (no C compiler or llvm-dwarfdump)")
@@ -249,6 +398,9 @@ def main() -> int:
               "a location in a block of merged globals (AArch64's clang) is its address")
         check(schema.get("portable") is True and not (d / "state_schema_gcc").exists(),
               "a GCC image: portable, its own declarations (no GCC step)")
+        check(schema.get("rules") == {"language": 1, "revision": 0, "list": []},
+              f"a source without state rules: none, revision 0 ({schema.get('rules')})")
+        rules_checks(d, check)
         if shutil.which("clang") and shutil.which("gcc"):
             clang_checks(d, check)
         else:

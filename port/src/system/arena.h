@@ -26,9 +26,15 @@
  *                           the game's own, n the game's music ID n - 1
  *                           (1..ARENA_MUSIC_IDS; the menu lists the
  *                           jukebox's songs by title)
+ *   arena_opponent_hp       1: in a versus battle the Enemy info window
+ *                           (Select) lists the opponent's HP and EP, whatever
+ *                           the Enemy info setting; 0 (default): no window
+ *                           there (online the host's)
  * XG_ARENA=1: asked from the start (headless runs).
  * XG_VERSUS=<table>,<config>: a versus battle asked from the start;
  * XG_VERSUS=mirror: a mirror match.
+ * XG_VERSUS_VIEW=1|2: this window shows that player's side in a mirror match
+ * (as an online session's player does), not the side whose turn it is.
  */
 
 #ifdef __cplusplus
@@ -64,6 +70,12 @@ int pcVersusRequest(int table, int config);
 int pcVersusRequestMirror(void); /* a mirror match (include/pc_arena.h): player 2 commands a copy of the party */
 int pcVersusGearsSetting(void); /* the party in its Gears (those who have one) */
 void pcVersusSetGears(int on);
+/* What each player sees (include/pc_arena.h): this machine's player, set by
+ * netplay (1 host, 2 joiner; 0 one screen); the opponent's HP and EP. */
+void pcVersusSetPerspective(int player);
+int pcVersusPerspective(void);
+int pcVersusOpponentHpSetting(void);
+void pcVersusSetOpponentHp(int on);
 void pcVersusCancel(void);
 int pcVersusPhase(int* table, int* config);
 

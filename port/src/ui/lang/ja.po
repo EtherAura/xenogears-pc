@@ -3896,6 +3896,19 @@ msgid "Mirror match"
 msgstr "ミラーマッチ"
 
 #: port/src/ui/arena.cpp
+msgid "Opponent's HP and EP"
+msgstr "相手の HP と EP"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"In battle, Select shows the opponent's members with their HP and EP (the "
+"Enemy info window). Off, neither player sees the other's. Online, the host's "
+"choice holds for both players."
+msgstr ""
+"バトル中に SELECT で相手のメンバーとその HP と EP を表示します(敵の情報ウィンドウ)。"
+"オフでは、どちらのプレイヤーにも相手の分は見えません。オンラインではホストの選択が両方のプレイヤーに適用されます。"
+
+#: port/src/ui/arena.cpp
 msgid ""
 "Player 2 commands a copy of your party, on foot: on each of its members' "
 "turns pad 2 has that member's own command ring, with everything the member "
@@ -7606,6 +7619,12 @@ msgstr "フィールドで、だれかが話しているあいだ、ピントが
 msgid "Lighting"
 msgstr "ライティング"
 
+msgid "Firelight flicker"
+msgstr "火のゆらめき"
+
+msgid "Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is around them and their glow rise and fall, each fire in its own rhythm. Windows, the sky and white or blue lights stay steady. On by default, with Lighting or Glow."
+msgstr "室内、夜、戦闘で、たき火、たいまつ、ランプがゆらめきます。まわりを照らす光とその輝きが、火ごとにそれぞれの調子で強まったり弱まったりします。窓、空、白や青の光はゆらぎません。ライティングかグローと合わせて、初期設定はオンです。"
+
 msgid "Light on characters"
 msgstr "キャラクターへの光"
 
@@ -9040,3 +9059,161 @@ msgstr "この場面ではゲームの視点がありません"
 
 msgid "being prepared (shaders compiling)"
 msgstr "準備中です(シェーダーをコンパイルしています)"
+
+#: port/src/ui/arena_saves.cpp
+msgid "This save is not complete any more: read the memory cards again."
+msgstr "このセーブはもう完全ではありません。メモリーカードを読み直してください。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "The disc's text could not be read, and the members' names come from it."
+msgstr "ディスクのテキストを読めませんでした。メンバーの名前はそこから読みます。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s has not joined in this save."
+msgstr "このセーブでは %s はまだパーティに加わっていません。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "This party could not be made from the save."
+msgstr "このセーブからはこのパーティを作れませんでした。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "This save is of the other region's game."
+msgstr "このセーブはもう一方の地域のゲームのものです。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Choose one to three different members."
+msgstr "ちがうメンバーを 1 人から 3 人選んでください。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's record is not one the game makes (its command loadout)."
+msgstr "%s の記録はゲームが作るものではありません(コマンドの割り当て)。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's Gear number is outside the game's range."
+msgstr "%s のギア番号がゲームの範囲外です。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Billy's loaded rounds are outside the game's range."
+msgstr "ビリーのこめた弾がゲームの範囲外です。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's HP is outside the game's range (at most its maximum, a maximum of 1 to 999)."
+msgstr "%s の HP がゲームの範囲外です(最大値以下、最大値は 1 から 999)。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's EP is outside the game's range (at most its maximum, a maximum of up to 99)."
+msgstr "%s の EP がゲームの範囲外です(最大値以下、最大値は 99 まで)。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's level is outside the game's range (1 to 99)."
+msgstr "%s のレベルがゲームの範囲外です(1 から 99)。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's AP per turn is outside the game's range (1 to 7)."
+msgstr "%s の 1 ターンの AP がゲームの範囲外です(1 から 7)。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's name has characters the game's names cannot have."
+msgstr "%s の名前に、ゲームの名前には使えない文字があります。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "The save's items are outside the game's ranges (1 to 99 of each)."
+msgstr "セーブのアイテムがゲームの範囲外です(それぞれ 1 から 99 個)。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "The save's ammunition is outside the game's ranges (1 to 99 of each)."
+msgstr "セーブの弾がゲームの範囲外です(それぞれ 1 から 99 個)。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "The rounds left in the save's ammunition are outside the game's range (0 to 100)."
+msgstr "セーブの弾の残りの数がゲームの範囲外です(0 から 100)。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "Slot %d, No.%02d: %s"
+msgstr "スロット %d、No.%02d: %s"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Members (one to three; the first leads)"
+msgstr "メンバー(1 人から 3 人。最初のメンバーが先頭)"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s: level %d, HP %d/%d"
+msgstr "%s: レベル %d、HP %d/%d"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Choose one to three of its members; the first leads."
+msgstr "メンバーを 1 人から 3 人選んでください。最初のメンバーが先頭です。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "In this order: %s."
+msgstr "この順番: %s。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Your party, from a save"
+msgstr "あなたのパーティ(セーブから)"
+
+#: port/src/ui/arena_saves.cpp
+msgid "No saves of this game on the memory cards (F1 > Saves > Memory cards)."
+msgstr "メモリーカードにこのゲームのセーブがありません(F1 > セーブ > メモリーカード)。"
+
+#: port/src/ui/arena_saves.cpp
+msgid ""
+"Choose a save: your members come as it has them (levels, equipment, "
+"abilities), with its items."
+msgstr "セーブを選んでください。メンバーはそのセーブのとおり(レベル、装備、技)で、そのアイテムを持って戦います。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "Story %d: %s. Disc %d, %u:%02u:%02u played."
+msgstr "ストーリー %d: %s。ディスク %d、プレイ時間 %u:%02u:%02u。"
+
+#: port/src/ui/arena_saves.cpp
+msgid ""
+"Edited saves are accepted: only values outside the game's own ranges are "
+"refused."
+msgstr "編集したセーブも使えます。使えないのは、ゲーム本来の範囲を外れた値があるときだけです。"
+
+#: port/src/ui/arena_saves.cpp
+msgid ""
+"The other player's party comes from their own save, on their own machine: "
+"this game cannot verify it."
+msgstr "相手のパーティは、相手のマシンにある相手のセーブから来ます。このゲームでは確かめられません。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Read the memory cards again"
+msgstr "メモリーカードを読み直す"
+
+#: port/src/ui/arena.cpp
+msgid "Party vs party"
+msgstr "パーティ対パーティ"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"Each player brings a party from a memory-card save on their own machine, on "
+"foot. Choose your save and its members."
+msgstr "それぞれのプレイヤーが、自分のマシンにあるメモリーカードのセーブからパーティを持ってきます(生身で戦います)。セーブとそのメンバーを選んでください。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "%s (level %d)"
+msgstr "%s(レベル %d)"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Your party: %s, with %d kinds of items and %d kinds of rounds."
+msgstr "あなたのパーティ: %s。アイテム %d 種類と弾 %d 種類を持っていきます。"
+
+#: port/src/ui/arena.cpp
+msgid "Party vs party matches are not ready yet: this is the party you would bring."
+msgstr "パーティ対パーティの対戦はまだできません。これは持っていくパーティです。"

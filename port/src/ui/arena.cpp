@@ -1,7 +1,8 @@
 // F1 > Extras > Battle arena (port/src/system/arena.h; xg-htn.35.16): Battling's own
 // two-player bouts from wherever the game is, who plays on what, and where
 // the match is; the battle music; versus battles (a formation, or a mirror
-// match: a copy of the party) and their party; and
+// match: a copy of the party, or party vs party: each player's party from a
+// save, arena_saves.cpp) and their party; and
 // Online: a session with a player elsewhere (port/src/system/netplay_launch.c),
 // in a window of its own. A match's end (Rematch or Leave) is the game's own,
 // in its own windows (port/src/game/main/arena.c, versus.c, battling/arena.c).
@@ -16,6 +17,7 @@
 #include <string>
 #include <vector>
 
+#include "arena_saves.h"
 #include "imgui.h"
 #include "imgui_internal.h" // NavActivateId: a choice made with the keyboard or a gamepad
 #include "l10n.h"
@@ -31,6 +33,8 @@ extern "C" {
 #include "system/pad.h"
 #include "system/settings.h"
 }
+
+extern "C" void pcArenaLog(const char* fmt, ...); // include/pc_arena.h: XG_ARENA_LOG=1
 
 // The extras' formation list (none in a build without them).
 extern "C" XgVersusScan* xgVersusScanBegin(void) __attribute__((weak));
@@ -246,6 +250,7 @@ struct {
     int selected = -1; // in list
     char filter[48] = "";
     bool mirror = false; // a mirror match rather than a formation
+    bool party = false;  // party vs party (xg-htn.35.143) rather than a formation
 } V;
 
 bool matches(const XgVersusFormation& f, const char* filter) {
@@ -317,8 +322,47 @@ void mirrorBlock() {
     availability(available, why);
 }
 
+// Party vs party (xg-htn.35.143): each player's party from a memory-card save
+// on their own machine (arena_saves.cpp). For now the save browser and the
+// party record it makes, shown here and logged (XG_ARENA_LOG=1); the match
+// itself is to come.
+void partyBlock() {
+    static XgPartyRecord record, logged;
+    static bool haveLogged = false;
+    textLines("Each player brings a party from a memory-card save on their own machine, on foot. Choose your "
+              "save and its members.");
+    if (!arenaSavesPanel(&record)) {
+        haveLogged = false;
+        return;
+    }
+    std::string members, english; // shown, and for the log
+    char line[96];
+    XgPartyMember m;
+    for (int k = 0; xgPartyMemberInfo(&record, k, &m); k++) {
+        snprintf(line, sizeof line, tr("%s (level %d)"), tr(memberNames[m.id]), m.level);
+        if (k > 0) members += " / ";
+        members += line;
+        snprintf(line, sizeof line, "%s%s %d, HP %d/%d, EP %d/%d", k > 0 ? "; " : "", memberNames[m.id], m.level,
+                 m.hp, m.maxHp, m.ep, m.maxEp);
+        english += line;
+    }
+    int items = 0, rounds = 0;
+    while (items < XG_PARTY_ITEMS && record.m298_itemIds[items] != 0) items++;
+    while (rounds < XG_PARTY_ITEMS && record.m2F8_ammoIds[rounds] != 0) rounds++;
+    hint("Your party: %s, with %d kinds of items and %d kinds of rounds.", members.c_str(), items, rounds);
+    hint("Party vs party matches are not ready yet: this is the party you would bring.");
+    if (!haveLogged || memcmp(&logged, &record, sizeof record) != 0) {
+        uint32_t h = 2166136261u; // FNV-1a of the record's bytes: the same on every machine
+        for (size_t i = 0; i < sizeof record; i++) h = (h ^ ((const uint8_t*)&record)[i]) * 16777619u;
+        pcArenaLog("party vs party: party record (%u bytes, fnv1a %08x): %s; %d items, %d ammo",
+                   (unsigned)sizeof record, (unsigned)h, english.c_str(), items, rounds);
+        logged = record;
+        haveLogged = true;
+    }
+}
+
 // Versus battles: player 2 commands an enemy formation, or a copy of the
-// party (a mirror match) (include/pc_arena.h).
+// party (a mirror match) (include/pc_arena.h), or party vs party.
 void versusBlock() {
     ImGui::Dummy(ImVec2(0, 6 * scale()));
     ImGui::SeparatorText(tr("Versus battle"));
@@ -342,17 +386,46 @@ void versusBlock() {
         ImGui::TextUnformatted(tr("In a versus battle."));
         return;
     }
-    if (ImGui::RadioButton(tr("An enemy formation##versus"), !V.mirror)) {
-        if (V.mirror) sfx::play(sfx::CHOOSE);
-        V.mirror = false;
+    if (ImGui::RadioButton(tr("An enemy formation##versus"), !V.mirror && !V.party)) {
+        if (V.mirror || V.party) sfx::play(sfx::CHOOSE);
+        V.mirror = V.party = false;
     }
     ImGui::SameLine();
     if (ImGui::RadioButton(tr("Mirror match"), V.mirror)) {
         if (!V.mirror) sfx::play(sfx::CHOOSE);
         V.mirror = true;
+        V.party = false;
     }
+    // on the same line when it fits (the Japanese labels do), else below
+    const char* partyLabel = tr("Party vs party");
+    const ImGuiStyle& style = ImGui::GetStyle();
+    float need = style.ItemSpacing.x + ImGui::GetFrameHeight() + style.ItemInnerSpacing.x +
+                 ImGui::CalcTextSize(partyLabel, nullptr, true).x;
+    if (ImGui::GetItemRectMax().x + need <= ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x) {
+        ImGui::SameLine();
+    }
+    if (ImGui::RadioButton(partyLabel, V.party)) {
+        if (!V.party) sfx::play(sfx::CHOOSE);
+        V.party = true;
+        V.mirror = false;
+    }
+    // Each player sees their own side's HP and EP; the opponent's only with this
+    // (system/arena.c; the Enemy info window, port/src/game/battle/enemyinfo.c).
+    bool opponentHp = pcVersusOpponentHpSetting() != 0;
+    ImGui::BeginDisabled(settingsPinned("arena_opponent_hp") != 0);
+    if (ImGui::Checkbox(tr("Opponent's HP and EP"), &opponentHp)) {
+        sfx::play(sfx::CHOOSE);
+        pcVersusSetOpponentHp(opponentHp);
+    }
+    ImGui::EndDisabled();
+    hint("In battle, Select shows the opponent's members with their HP and EP (the Enemy info window). Off, "
+         "neither player sees the other's. Online, the host's choice holds for both players.");
     if (V.mirror) {
         mirrorBlock();
+        return;
+    }
+    if (V.party) {
+        partyBlock();
         return;
     }
     textLines("Player 2 commands an enemy formation in a normal battle: on each enemy's turn, pad 2 picks what "

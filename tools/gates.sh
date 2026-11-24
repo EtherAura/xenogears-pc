@@ -48,6 +48,8 @@
 #   statecanon-tests canonical states' reference converter (tools/statecanon.py) on a
 #               small program built twice 16 MiB apart: decoded across the layouts
 #               as the other build has it, and a round trip unchanged (with the tests)
+#   state-compat-tests the state corpus' manifest, the canonical set, the release tarball cache
+#               and the gate's verdicts, without the game (tools/test_state_compat.py)
 #   statevars   every writable static of the platform layer in $XG_TEST_BUILD
 #               is classified for save states (port/src/system/
 #               savestate_inventory.txt; tools/statecheck.py inventory):
@@ -78,6 +80,18 @@
 #               on first use like the US one): it links; skipped when an
 #               explicit one is missing
 #   payload-enhanced  the payload gate on that executable
+#   state-compat save states between releases (tools/state_compat.py, xg-htn.60.5): every
+#               earlier canonical release's corpus ($XG_STATE_CORPORA, default
+#               work/state-corpus: made by tools/state_corpus.py release) loads in the
+#               US, Enhanced and JP builds above, and those builds' own corpus (made in
+#               $XG_STATE_COMPAT_WORK) loads in each earlier release's executables (its
+#               Linux tarball, cached in /mnt/Games/scratch/xg-release-cache): no refusal,
+#               no crash, the invariant and sweep logs of 600 vblanks the writer's. Passes
+#               vacuously, saying so, while no release is canonical; about 1.5 min plus
+#               1-1.5 min per earlier release run in full: the first canonical release and the
+#               $XG_STATE_COMPAT_FULL (3) most recent, the ones between sampled
+#               ($XG_STATE_COMPAT_SAMPLE, 8 cases per configuration and direction, about 15 s
+#               each); skipped when no build has a state schema
 #   payload-android  the payload gate on each Android game library built in
 #               build/android (tools/build_android.sh); skipped when none is
 #   beetle-capture frame-boundary capture regressions, without a core or discs
@@ -228,6 +242,7 @@ if [ "$TESTS" = 1 ]; then
     gate state-runner "$PY" tools/test_statecheck.py
     gate state-schema-tests "$PY" tools/test_state_schema.py
     gate statecanon-tests "$PY" tools/test_statecanon.py
+    gate state-compat-tests "$PY" tools/test_state_compat.py
     gate art-tags "$PY" tools/test_art_tags.py
     gate chapter-row "$PY" tools/test_chapter_row.py
     gate doll-queue "$PY" tools/test_doll_queue.py
@@ -337,6 +352,32 @@ if [ "$TESTS" = 1 ] && [ -f "$ENHANCED_BUILD/CMakeCache.txt" ]; then
     fi
 elif [ "$TESTS" = 1 ]; then
     record enhanced 0 "skipped: no configured build in $ENHANCED_BUILD"
+fi
+
+# Canonical save states between releases: the builds above (each with its state_schema.json) against
+# every earlier canonical release's corpus, both ways. Its runs and the builds' corpus in scratch of
+# this output folder's own, off the root disk when there is room for it elsewhere.
+if [ "$TESTS" = 1 ]; then
+    compat_new=()
+    for b in "$TEST_BUILD" "$ENHANCED_BUILD" "$TEST_BUILD_JP"; do
+        [ -f "$b/state_schema.json" ] && compat_new+=(--new "$b")
+    done
+    compat_work="${XG_STATE_COMPAT_WORK:-}"
+    if [ -z "$compat_work" ]; then
+        if [ -d /mnt/Games/scratch ] && [ -w /mnt/Games/scratch ]; then
+            compat_work="/mnt/Games/scratch/xg-state-compat/$(printf '%s' "$OUT" | sha1sum | cut -c1-12)"
+        else
+            compat_work="$OUT/state-compat"
+        fi
+    fi
+    if [ ${#compat_new[@]} -gt 0 ]; then
+        gate state-compat "$PY" tools/state_compat.py --corpora "${XG_STATE_CORPORA:-work/state-corpus}" \
+            "${compat_new[@]}" --work "$compat_work" --sample "${XG_STATE_COMPAT_SAMPLE:-8}" \
+            --full "${XG_STATE_COMPAT_FULL:-3}" \
+            --report "$OUT/state-compat.json"
+    else
+        record state-compat 0 "skipped: no build with a state schema in $TEST_BUILD, $ENHANCED_BUILD or $TEST_BUILD_JP"
+    fi
 fi
 
 # The Android game libraries (tools/build_android.sh), when built in this tree: what an APK

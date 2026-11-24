@@ -105,6 +105,30 @@ typedef struct {
     const char** views;
 } StUnion;
 
+/* A state rule (include/pc_state.h; docs/CANONICAL_STATES.md 17.2), as the schema keeps it. A rule this reader
+ * cannot read (a kind it does not know, a key missing or of another type: statecanon rule_target None) has
+ * readable 0 and is ignored by the converter, which counts it; it never refuses a state. */
+enum { ST_RULE_WAS, ST_RULE_VALUES, ST_RULE_RESET, ST_RULE_REMOVED, ST_RULE_DEFAULT, ST_RULE_HASHES };
+enum { ST_ON_FIELD, ST_ON_VAR, ST_ON_TYPENAME, ST_ON_TAG, ST_ON_FN, ST_ON_FIELDS, ST_ON_VARS };
+
+typedef struct {
+    int readable;
+    int kind;            /* ST_RULE_* */
+    int on;              /* ST_ON_*: what it names (the first of its kind's keys it has) */
+    int64_t rev;         /* history rules: from which revision on (0 for default, hashes) */
+    const char* name;    /* field: the member's key; var: the identity; typename, tag, fn: the name */
+    const char* old;     /* was: the old key, identity or name */
+    int32_t tidCount;    /* field, fields: the struct's type entries */
+    const char** tids;   /* their keys */
+    int32_t* types;      /* their indexes in this schema (ST_NONE: not one of its types) */
+    int32_t nameCount;   /* fields: the removed members' keys; vars: the removed variables' identities */
+    const char** names;
+    int32_t mapCount;    /* values: (old, new) pairs */
+    int64_t (*map)[2];
+    int64_t value;       /* removed, default */
+    const char* at;      /* where the macro is (informative) */
+} StRule;
+
 typedef struct StateSchema StateSchema;
 
 /* The schema in a JSON text (n bytes); NULL on an error, described in err. */
@@ -151,7 +175,8 @@ int32_t stateSchemaFuncCount(const StateSchema* s);
 const StFunc* stateSchemaFuncAt(const StateSchema* s, int32_t i);
 /* A code address's identity (statecanon fn_identity) into out; 0 if none. */
 int stateSchemaFnIdentity(const StateSchema* s, uint64_t addr, char* out, size_t size);
-/* An identity's address in this build (statecanon fn_address); 0 if none. */
+/* An identity's address in this build (statecanon fn_address: by identity, by name, by symbol, and a game
+ * function's by its retail address alone where one function has it); 0 if none. */
 uint64_t stateSchemaFnAddress(const StateSchema* s, const char* identity);
 
 int32_t stateSchemaSymbolCount(const StateSchema* s);
@@ -188,6 +213,13 @@ const StCounted* stateSchemaCounted(const StateSchema* s, int32_t type);        
 const StCounted* stateSchemaCountedNamed(const StateSchema* s, const char* name);
 const StUnion* stateSchemaUnion(const StateSchema* s, int32_t type);
 const StUnion* stateSchemaUnionNamed(const StateSchema* s, const char* name);
+
+/* The state rules: their language, this build's state revision (0 for a schema from before rules), and the
+ * rules in the schema's order. */
+int64_t stateSchemaRulesLanguage(const StateSchema* s);
+int64_t stateSchemaRevision(const StateSchema* s);
+int32_t stateSchemaRuleCount(const StateSchema* s);
+const StRule* stateSchemaRuleAt(const StateSchema* s, int32_t i);
 
 #ifdef __cplusplus
 }

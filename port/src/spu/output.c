@@ -463,6 +463,11 @@ void spuOutputStateLoaded(uint64_t dumpFrames) {
     }
     if (dump != NULL) {
         long long at = (long long)dumpFrames * (long long)(sizeof(int16_t) * 2);
+        if (dumpFrames < dumped) {
+            /* A load or the arena's return: what the dump held past here is gone (xg-htn.35.152) */
+            fprintf(stderr, "spu: XG_AUDIO_DUMP cut back from %.2f s to %.2f s (a state loaded)\n",
+                    (double)dumped / SPU_RATE, (double)dumpFrames / SPU_RATE);
+        }
         fflush(dump);
 #ifdef _WIN32
         if (dumpFrames < dumped) {

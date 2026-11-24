@@ -264,6 +264,8 @@ int sceneLightShafts(void);      /* light_shafts: 0 off (default) .. 3 strong (f
 void sceneSetLightShafts(int level);
 int sceneCloudShadows(void);     /* cloud_shadows: 0 off (default) .. 3 strong (the world map, fields outdoors) */
 void sceneSetCloudShadows(int level);
+int sceneFirelight(void);        /* lighting_firelight: 1 on (default), 0 off: fires flicker, with lighting and glow */
+void sceneSetFirelight(int on);
 const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class

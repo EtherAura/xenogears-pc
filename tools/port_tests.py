@@ -336,7 +336,7 @@ EXTRAS = {
 
 # Tests that take no arguments.
 PLAIN = [
-    "orderedgputest", "gameidtest",
+    "orderedgputest", "gameidtest", "card_savestest",
     "autoresolutiontest",
     "netplaytest", "interpolationtest",
     "cd_drivetest", "disc_setuptest", "disc_verifytest", "distortiontest", "extras_battlefxtest",

@@ -930,6 +930,17 @@ void displaySection() {
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("lighting");
     }
+    // Flickering firelight (xg-rgcf.5.20): part of Lighting and Glow.
+    if (row("Firelight flicker", "lighting_firelight", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneLighting() == 0 && sceneGlow() == 0);
+        bool on = sceneFirelight() != 0;
+        if (offOnList("##lighting_firelight", &on)) sceneSetFirelight(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is "
+             "around them and their glow rise and fall, each fire in its own rhythm. Windows, the sky and white or blue "
+             "lights stay steady. On by default, with Lighting or Glow.");
+        overrideNote("lighting_firelight");
+    }
     // The characters in the light (xg-rgcf.5.19): part of Lighting.
     if (row("Light on characters", "lighting_characters", opt::ENHANCED)) {
         ImGui::BeginDisabled(sceneLighting() == 0);

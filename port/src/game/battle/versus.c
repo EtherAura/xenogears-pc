@@ -563,6 +563,7 @@ static u8 text[(PAGE + 2) * (LABEL + 1) + 2];
 
 /* drawBattleMode1/2 (src/battle/b_800728B8.c), after the dialogue windows. */
 void pcVersusDraw(void) {
+    pcVersusMirrorLabel(); /* a mirror match: player 2's name label (mirror.c) */
     if (shown) {
         updateAndRenderTextForDialogWindow(&window, D_800CCB04.m0_pCurrentBattleOT + 1, D_800CCB04.m30_battleOddOrEven);
     }

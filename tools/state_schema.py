@@ -98,29 +98,55 @@ def macro_args(text: str, start: int) -> list[str] | None:
     return None
 
 
-STATE_MACRO = re.compile(r"\b(PC_HEAP_OF|PC_HEAP_ONE|PC_STATE_AT|PC_STATE_NAME|PC_STATE_COUNTED|PC_STATE_TAIL|PC_STATE_UNION)\s*\(")
+STATE_MACRO = re.compile(r"\b(PC_HEAP_OF|PC_HEAP_ONE|PC_STATE_[A-Z_]+)\s*\(")
+# The state rules' macros (include/pc_state.h; docs/CANONICAL_STATES.md 17.2) and their argument counts. The set
+# is closed: the rules language is fixed in the first canonical release, so any other PC_STATE_* macro fails the
+# gate here, before a schema could carry a rule some release's converter does not know.
+RULE_MACROS = {
+    "PC_STATE_WAS": 4, "PC_STATE_VAR_WAS": 3, "PC_STATE_TYPE_WAS": 3, "PC_STATE_TAG_WAS": 3, "PC_STATE_FN_WAS": 3,
+    "PC_STATE_VALUES": 4, "PC_STATE_VAR_VALUES": 3, "PC_STATE_RESET": 3, "PC_STATE_VAR_RESET": 2,
+    "PC_STATE_REMOVED": 4, "PC_STATE_VAR_REMOVED": 3, "PC_STATE_DEFAULT": 3, "PC_STATE_VAR_DEFAULT": 2,
+    "PC_STATE_HASHES": 2,
+}
+OTHER_STATE_MACROS = {"PC_STATE_AT", "PC_STATE_NAME", "PC_STATE_COUNTED", "PC_STATE_TAIL", "PC_STATE_UNION",
+                      "PC_STATE_MEMBER", "PC_STATE_VARIABLE"}
+REVISION_DEFINE = re.compile(r"^\s*#\s*define\s+PC_STATE_REVISION\s+(\d+)\s*$", re.M)
 
 
 def state_annotations(roots: list[Path]):
     """include/pc_state.h's annotations in the C a build compiles: the heap type names (PC_HEAP_OF,
-    PC_STATE_AT, PC_STATE_NAME) and the counted arrays (PC_STATE_COUNTED), each with where it is."""
+    PC_STATE_AT, PC_STATE_NAME), the counted arrays (PC_STATE_COUNTED), the union rules, and the state rules
+    (RULE_MACROS, with the macro's arguments), each with where it is; the state revision (PC_STATE_REVISION's
+    values found, pc_state.h's own too); and the PC_STATE_* macros this tool does not know."""
     names = defaultdict(list); counted = []; unions = []
+    rules = []; revisions = set(); unknown = []
     for root in roots:
         for f in sorted(list(root.rglob("*.c")) + list(root.rglob("*.h"))):
+            text = f.read_text(errors="replace")
+            if "PC_STATE_REVISION" in text:
+                revisions.update(int(v) for v in REVISION_DEFINE.findall(text))
             if f.name == "pc_state.h":
                 continue
-            text = f.read_text(errors="replace")
             if "PC_HEAP_OF" not in text and "PC_STATE_" not in text:
                 continue
             for m in STATE_MACRO.finditer(text):
                 line = text.count("\n", 0, m.start()) + 1
                 if text[text.rfind("\n", 0, m.start()) + 1:m.start()].lstrip().startswith(("#define", "*", "//")):
                     continue
+                where = f"{f.relative_to(ROOT).as_posix() if ROOT in f.parents else f}:{line}"
+                kind = m.group(1)
+                if kind.startswith("PC_STATE_") and kind not in RULE_MACROS and kind not in OTHER_STATE_MACROS:
+                    unknown.append(f"{kind} ({where}): not a state macro this tool knows (include/pc_state.h)")
+                    continue
                 args = macro_args(text, m.end() - 1)
                 if not args:
                     continue
-                where = f"{f.relative_to(ROOT).as_posix() if ROOT in f.parents else f}:{line}"
-                kind = m.group(1)
+                if kind in RULE_MACROS:
+                    if len(args) != RULE_MACROS[kind]:
+                        unknown.append(f"{kind} ({where}): {len(args)} arguments, it takes {RULE_MACROS[kind]}")
+                    else:
+                        rules.append({"macro": kind, "args": args, "at": where, "file": f.resolve()})
+                    continue
                 if kind == "PC_STATE_COUNTED" and len(args) == 4:
                     counted.append({"type": args[0], "array": args[1], "count": args[2], "extra": int(args[3], 0),
                                     "at": where})
@@ -135,10 +161,326 @@ def state_annotations(roots: list[Path]):
                     names[args[0]].append(where)
                 elif kind == "PC_HEAP_ONE" and args:  # one T, then bytes: its name says so (#T "[1]")
                     names[args[0] + "[1]"].append(where)
-    return names, counted, unions
+    return names, counted, unions, rules, revisions, unknown
 
 
 DWARFDUMP = None  # --dwarfdump
+
+
+INT_LITERAL = re.compile(r"\s*([-+]?)\s*(0[xX][0-9a-fA-F]+|\d+)[uUlL]*\s*$")
+STRING_LITERAL = re.compile(r'\s*"([^"\\]*)"\s*$')
+ID_MODULE = re.compile(r"^\w+:(?:[0-9a-f]{8}|pc:\w+)(?::\w+)?$")  # field:800adc04, main:pc:name (:name: a collision)
+ID_PLATFORM = re.compile(r"^pc:[\w./\-]+:\w+$")                   # pc:system/hw.c:name
+
+
+def int_arg(text: str):
+    m = INT_LITERAL.match(text)
+    return None if m is None else (-1 if m.group(1) == "-" else 1) * int(m.group(2), 0)
+
+
+def string_arg(text: str):
+    m = STRING_LITERAL.match(text)
+    return None if m is None else m.group(1)
+
+
+def list_arg(text: str, item) -> list | None:
+    """A parenthesized list of items: ("a", "b"), ((0, 1), (2, 3)); None when it does not parse."""
+    t = text.strip()
+    if not (t.startswith("(") and t.endswith(")")):
+        return None
+    inner = t[1:-1]
+    out = []; depth = 0; cur = 0
+    for i, c in enumerate(inner + ","):
+        if c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+        elif c == "," and depth == 0:
+            part = inner[cur:i].strip(); cur = i + 1
+            if not part:
+                if i < len(inner):
+                    return None
+                continue
+            v = item(part)
+            if v is None:
+                return None
+            out.append(v)
+    return out if out else None
+
+
+def pair_arg(text: str):
+    """(old, new): two integer literals."""
+    t = text.strip()
+    if not (t.startswith("(") and t.endswith(")")):
+        return None
+    parts = t[1:-1].split(",")
+    if len(parts) != 2:
+        return None
+    a, b = int_arg(parts[0]), int_arg(parts[1])
+    return None if a is None or b is None else [a, b]
+
+
+def old_key(text: str) -> str:
+    """A member's key from its name as statecanon's field_key makes it (an offset tag: +<hex>, else pc:<name>), or
+    the key itself ("+1c", "pc:name", "+1c:name")."""
+    if text.startswith(("+", "pc:")):
+        return text
+    m = FIELD_TAG.match(text)
+    return f"+{int(m.group(1), 16):x}" if m else f"pc:{text}"
+
+
+def state_rules(raw: list, revisions: set, table: dict, variables: list, part_files: dict, type_names: dict,
+                struct_keys: dict, fn_names: set) -> tuple[dict, list[str]]:
+    """The state rules (include/pc_state.h's RULE_MACROS; docs/CANONICAL_STATES.md 17.2) as the schema keeps them,
+    each target resolved against this build's types and variables, and the problems found: an unknown name, a
+    member a rule cannot apply to, a revision out of range, an old identity this build still has (no identity is
+    used twice: a rule's old name must name nothing now), two rules giving one name at one revision.
+
+    struct_keys: a struct's name (its own or a typedef's) -> the schema type keys of its DWARF entries (one per
+    compile unit). A field rule names every entry: the converter finds a type's rules by the entry it holds."""
+    import statecanon as cn
+    problems = []
+    revision = max(revisions) if revisions else 0
+    if len(revisions) > 1:
+        problems.append(f"PC_STATE_REVISION has several values: {sorted(revisions)}")
+    keyed, _ = cn.keyed_variables([dict(v) for v in variables])
+    ids = {v["id"] for v in keyed}
+    by_name = defaultdict(list)
+    for v in keyed:
+        by_name[v["name"]].append(v)
+
+    def kind_of(tid):
+        return table.get(tid, {}).get("k")
+
+    def int_like(tid, bits=None):
+        """An integer (an enum too), a bitfield, or a one-dimensional array of integers: what values and defaults
+        apply to; (low, high) of what it holds per element, or None."""
+        t = table.get(tid, {})
+        if bits is not None:
+            return 0, (1 << bits) - 1
+        if t.get("k") == "arr" and kind_of(t.get("of")) == "int":
+            t = table[t["of"]]
+        if t.get("k") != "int" or not t.get("size") or t["size"] > 8:
+            return None
+        n = 8 * t["size"]  # (and within 64-bit signed: what the schema's JSON carries to the C reader)
+        return (-(1 << (n - 1)), (1 << (n - 1)) - 1) if t.get("signed") else (0, min((1 << n) - 1, (1 << 63) - 1))
+
+    def member(tname, path, where):
+        """(type keys, key, field) of T's member path through unnamed structs, the same in every entry of T."""
+        keys = sorted(struct_keys.get(tname, ()))
+        if not keys:
+            problems.append(f"{where}: no struct or union {tname} in this build")
+            return None
+        out, last = [], None
+        for k in keys:
+            tid, f = k, None
+            names = path.split(".")
+            for i, n in enumerate(names):
+                t = table.get(tid, {})
+                if t.get("k") not in ("struct", "union"):
+                    f = None; break
+                f = next((x for x in t["fields"] if x["name"] == n), None)
+                if f is None:
+                    break
+                if i < len(names) - 1:
+                    tid = f["type"]
+            if f is None:
+                problems.append(f"{where}: {tname} has no member {path}")
+                return None
+            seen = set(); key = None
+            for x in table[tid]["fields"]:
+                kx = cn.Encoder.field_key(None, x, seen)
+                if x is f:  # (a union's views go by their names)
+                    key = x["name"] if table[tid]["k"] == "union" else kx
+            if last is not None and (key, f.get("bits")) != (last[0], last[1].get("bits")):
+                problems.append(f"{where}: {tname}.{path} is not the same member in every compile unit")
+                return None
+            last = (key, f)
+            out.append(tid)
+        return sorted(set(out)), last[0], last[1]
+
+    def variable(name, file, where):
+        found = by_name.get(name, [])
+        if len(found) > 1:  # statics of one name in several files: the macro's own
+            found = [v for v in found if v.get("file") and Path(v["file"]).resolve() == file] or found
+        if len(found) != 1:
+            problems.append(f"{where}: {'no' if not found else 'more than one'} saved variable {name} in this build")
+            return None
+        return found[0]
+
+    def fits(rng, values, where, what):
+        bad = [x for x in values if not rng[0] <= x <= rng[1]]
+        if bad:
+            problems.append(f"{where}: {what} {bad[0]} does not fit {rng[0]}..{rng[1]}")
+            return False
+        return True
+
+    out = []
+    for r in raw:
+        mac, a, where = r["macro"], r["args"], r["at"]
+        hist = mac not in ("PC_STATE_DEFAULT", "PC_STATE_VAR_DEFAULT", "PC_STATE_HASHES")
+        rule = {}
+        if hist:
+            rev = int_arg(a[0])
+            if rev is None or not 1 <= rev <= revision:
+                problems.append(f"{mac} ({where}): revision {a[0]} is not from 1 to PC_STATE_REVISION ({revision})")
+                continue
+            rule["rev"] = rev; a = a[1:]
+        kind = {"PC_STATE_WAS": "was", "PC_STATE_VAR_WAS": "was", "PC_STATE_TYPE_WAS": "was", "PC_STATE_TAG_WAS": "was",
+                "PC_STATE_FN_WAS": "was",
+                "PC_STATE_VALUES": "values", "PC_STATE_VAR_VALUES": "values", "PC_STATE_RESET": "reset",
+                "PC_STATE_VAR_RESET": "reset", "PC_STATE_REMOVED": "removed", "PC_STATE_VAR_REMOVED": "removed",
+                "PC_STATE_DEFAULT": "default", "PC_STATE_VAR_DEFAULT": "default", "PC_STATE_HASHES": "hashes"}[mac]
+        rule = {"kind": kind, **rule}
+        label = f"{mac} ({where})"
+        if mac in ("PC_STATE_WAS", "PC_STATE_VALUES", "PC_STATE_RESET", "PC_STATE_DEFAULT", "PC_STATE_HASHES"):
+            tname, path = a[0].strip(), re.sub(r"\s+", "", a[1])
+            m = member(tname, path, label)
+            if m is None:
+                continue
+            tids, key, f = m
+            rule.update({"type": tname, "member": path, "tids": tids, "field": key})
+            rng = int_like(f["type"], f.get("bits"))
+            if mac == "PC_STATE_WAS":
+                old = string_arg(a[2])
+                if not old:
+                    problems.append(f"{label}: the old name is not a string"); continue
+                union = table[tids[0]]["k"] == "union"
+                ok = old if union else old_key(old)
+                taken = {x["name"] for x in table[tids[0]]["fields"]} if union else \
+                    {cn.Encoder.field_key(None, x, s) for s in [set()] for x in table[tids[0]]["fields"]}
+                if ok == key or ok in taken:
+                    problems.append(f"{label}: the old key {ok} is a member of {tname} in this build (no key names two "
+                                    "members)"); continue
+                rule["old"] = ok
+            elif mac == "PC_STATE_VALUES":
+                pairs = list_arg(a[2], pair_arg)
+                if rng is None or pairs is None:
+                    problems.append(f"{label}: " + ("not an integer member" if rng is None else
+                                                    "the values are not ((old, new), ...) of integer literals"))
+                    continue
+                if not fits(rng, [x for p in pairs for x in p], label, "the value"):
+                    continue
+                rule["map"] = pairs
+            elif mac == "PC_STATE_DEFAULT":
+                v = int_arg(a[2])
+                if rng is None or v is None:
+                    problems.append(f"{label}: " + ("not an integer member" if rng is None else
+                                                    "the default is not an integer literal"))
+                    continue
+                if not fits(rng, [v], label, "the default"):
+                    continue
+                rule["value"] = v
+            elif mac == "PC_STATE_HASHES" and (f.get("bits") is not None or table.get(f["type"], {}).get("k") != "int"
+                                               or table[f["type"]]["size"] != 4):
+                problems.append(f"{label}: type hashes are a 32-bit integer member"); continue
+        elif mac in ("PC_STATE_VAR_WAS", "PC_STATE_VAR_VALUES", "PC_STATE_VAR_RESET", "PC_STATE_VAR_DEFAULT"):
+            v = variable(a[0].strip(), r["file"], label)
+            if v is None:
+                continue
+            rule.update({"var": v["id"], "name": v["name"]})
+            rng = int_like(v["tid"])
+            if mac == "PC_STATE_VAR_WAS":
+                old = string_arg(a[1])
+                if not old:
+                    problems.append(f"{label}: the old identity is not a string"); continue
+                if ":" not in old:  # a PC variable's old name: its identity in the same module or file
+                    if v.get("module") and v.get("retail") is not None:
+                        problems.append(f"{label}: {v['id']} is a retail address: give the old identity"); continue
+                    old = v["id"].rsplit(":", 1)[0] + ":" + old
+                if not (ID_MODULE.match(old) or ID_PLATFORM.match(old)) or old == v["id"] or old in ids:
+                    problems.append(f"{label}: the old identity {old} is " + (
+                        "a variable of this build (no identity names two variables)" if old in ids else "not one"))
+                    continue
+                rule["old"] = old
+            elif mac == "PC_STATE_VAR_VALUES":
+                pairs = list_arg(a[1], pair_arg)
+                if rng is None or pairs is None:
+                    problems.append(f"{label}: " + ("not an integer variable" if rng is None else
+                                                    "the values are not ((old, new), ...) of integer literals"))
+                    continue
+                if not fits(rng, [x for p in pairs for x in p], label, "the value"):
+                    continue
+                rule["map"] = pairs
+            elif mac == "PC_STATE_VAR_DEFAULT":
+                d = int_arg(a[1])
+                if rng is None or d is None:
+                    problems.append(f"{label}: " + ("not an integer variable" if rng is None else
+                                                    "the default is not an integer literal"))
+                    continue
+                if not fits(rng, [d], label, "the default"):
+                    continue
+                rule["value"] = d
+        elif mac == "PC_STATE_TYPE_WAS":
+            tname, old = a[0].strip(), string_arg(a[1])
+            if tname not in struct_keys or tname not in type_names:
+                problems.append(f"{label}: no struct or union {tname} in this build"); continue
+            if not old or old in type_names or old == tname:
+                problems.append(f"{label}: the old name {old} is " + (
+                    "a type of this build (no name names two types)" if old in type_names else "not one"))
+                continue
+            rule.update({"typename": tname, "old": old})
+        elif mac == "PC_STATE_TAG_WAS":
+            tag, old = string_arg(a[0]), string_arg(a[1])
+            if not tag or not old or tag == old or tag.partition(".")[0] not in part_files or "." not in old:
+                problems.append(f"{label}: a tag is \"part.expression\" of a part this build saves"); continue
+            rule.update({"tag": tag, "old": old})
+        elif mac == "PC_STATE_FN_WAS":
+            name, old = a[0].strip(), string_arg(a[1])
+            if name not in fn_names:
+                problems.append(f"{label}: no function {name} in this build"); continue
+            if not old or old == name or old in fn_names:
+                problems.append(f"{label}: the old name {old} is " + (
+                    "a function of this build (no name names two functions)" if old in fn_names else "not one"))
+                continue
+            rule.update({"fn": name, "old": old})
+        elif mac == "PC_STATE_REMOVED":
+            tname, value, olds = a[0].strip(), int_arg(a[1]), list_arg(a[2], string_arg)
+            keys = sorted(struct_keys.get(tname, ()))
+            if not keys or value is None or not olds:
+                problems.append(f"{label}: " + ("no struct or union " + tname if not keys else
+                                                "the value is not an integer literal" if value is None else
+                                                "the names are not (\"name\", ...)"))
+                continue
+            taken = {cn.Encoder.field_key(None, x, s) for s in [set()] for x in table[keys[0]]["fields"]}
+            fields = [old_key(o) for o in olds]
+            if any(k in taken for k in fields):
+                problems.append(f"{label}: {tname} still has {next(k for k in fields if k in taken)}"); continue
+            rule.update({"type": tname, "tids": keys, "fields": fields, "value": value})
+        elif mac == "PC_STATE_VAR_REMOVED":
+            value, olds = int_arg(a[0]), list_arg(a[1], string_arg)
+            if value is None or not olds or any(not (ID_MODULE.match(o) or ID_PLATFORM.match(o)) for o in olds):
+                problems.append(f"{label}: (value, (\"identity\", ...)) with identities like field:800adc04"); continue
+            if any(o in ids for o in olds):
+                problems.append(f"{label}: {next(o for o in olds if o in ids)} is a variable of this build"); continue
+            rule.update({"vars": olds, "value": value})
+        rule["at"] = where
+        out.append(rule)
+
+    # No identity names two things at any revision: a rename's old name is free from the rename on (above), and two
+    # renames never give one old name to two targets that both had it at once.
+    space = defaultdict(list)  # (namespace, old) -> [(rev, target)]
+    for rule in out:
+        if rule["kind"] != "was":
+            continue
+        ns = ("field", tuple(rule["tids"])) if "field" in rule else ("var",) if "var" in rule else \
+            ("type",) if "typename" in rule else ("fn",) if "fn" in rule else ("tag",)
+        target = rule.get("field") or rule.get("var") or rule.get("typename") or rule.get("fn") or rule.get("tag")
+        space[ns + (rule["old"],)].append((rule["rev"], target, rule["at"]))
+    for (*ns, old), uses in space.items():
+        if len({t for _, t, _ in uses}) > 1:
+            problems.append(f"PC_STATE_*WAS ({uses[0][2]}, {uses[1][2]}): {old} is the old name of two things")
+    by_target = defaultdict(list)
+    for rule in out:
+        if rule["kind"] == "was":
+            t = (rule.get("field"), tuple(rule.get("tids", ())), rule.get("var"), rule.get("typename"), rule.get("tag"),
+                 rule.get("fn"))
+            by_target[t].append(rule)
+    for rs in by_target.values():
+        revs = [x["rev"] for x in rs]
+        if len(set(revs)) != len(revs):
+            problems.append(f"PC_STATE_*WAS ({rs[0]['at']}): two renames of one thing at one revision")
+    return {"language": cn.RULES_LANGUAGE, "revision": revision, "list": out}, problems
 
 
 def dwarfdump() -> str:
@@ -1412,8 +1754,9 @@ def main() -> int:
     # ---- what the heap's blocks hold (include/pc_state.h), from the source this build compiles ---------
     engine = (re.search(r"^XG_ENGINE:\w+=(\w+)", cache, re.M) or [None, "original"])[1]
     game_root = ROOT / "engine" if engine == "enhanced" else ROOT
-    heap_names, counted_src, unions_src = state_annotations([r.resolve() for r in args.source] if args.source else
-                                                [game_root / "src", game_root / "include", ROOT / "port" / "src"])
+    heap_names, counted_src, unions_src, rules_src, revisions, unknown_macros = state_annotations(
+        [r.resolve() for r in args.source] if args.source else
+        [game_root / "src", game_root / "include", ROOT / "port" / "src"])
     any_named = dict(named_types)  # typedefs and base types too (u8, OTag, uptr)
     for off, d in dies.items():
         if d["tag"] in ("DW_TAG_typedef", "DW_TAG_base_type"):
@@ -1498,6 +1841,31 @@ def main() -> int:
         for row in syms:
             if not row[2]:
                 row[2] = sized.get((re.sub(r"\.lto_priv\.\d+$", "", row[0]), row[1]), 0)
+    # ---- the state rules (include/pc_state.h; docs/CANONICAL_STATES.md 17.2) ---------------------------------
+    # each struct's schema entries by its names (its own, its typedefs'), one entry per compile unit
+    struct_keys = defaultdict(set)
+    for key, t in table.items():
+        if t.get("k") in ("struct", "union"):
+            if t.get("name") and "<anon>" not in t["name"]:
+                struct_keys[t["name"]].add(key)
+            if re.fullmatch(r"[0-9a-f]+", key) and dies.get(int(key, 16), {}).get("attrs", {}).get("DW_AT_name"):
+                struct_keys[dies[int(key, 16)]["attrs"]["DW_AT_name"]].add(key)
+    for off, d in dies.items():
+        if d["tag"] == "DW_TAG_typedef" and d["attrs"].get("DW_AT_name"):
+            t = types.strip(d["attrs"].get("DW_AT_type"))
+            td = dies.get(t)
+            if td is None or td["tag"] not in ("DW_TAG_structure_type", "DW_TAG_union_type"):
+                continue
+            if "DW_AT_declaration" in td["attrs"] or not td["children"]:
+                t = complete.get((td["tag"], td["attrs"].get("DW_AT_name")), t)
+            if f"{t:x}" in table:
+                struct_keys[d["attrs"]["DW_AT_name"]].add(f"{t:x}")
+    fn_names = {f["name"] for f in funcs} | {r[0] for r in syms if r[3] in "tTwW"}
+    rules, rule_problems = state_rules(rules_src, revisions, table,
+                                       [v for v in variables if (v["module"] or v["platform"]) and v.get("tid")],
+                                       part_files, type_names, struct_keys, fn_names)
+    heap_problems += unknown_macros + rule_problems
+
     schema = {"version": version, "exe": str(exe), "image": image_identity(exe), "variables": [
         # "const": the build's own constant (no state carries it: a reader keeps its own bytes)
         {**{k: v.get(k) for k in ("name", "addr", "size", "module", "section", "retail", "platform", "tid")},
@@ -1513,6 +1881,9 @@ def main() -> int:
         "heap_types": heap_types, "counted": counted,
         # a union member's live view by another member's value (PC_STATE_UNION): struct tid -> rule
         "unions": union_rules,
+        # how states convert across changes of saved data (include/pc_state.h's rules): the language, this source's
+        # state revision, the rules (docs/CANONICAL_STATES.md 17.2)
+        "rules": rules,
         # whether another build may convert this one's states (False: clang without GCC's declarations: portable_why)
         "portable": portable_why is None, **({"portable_why": portable_why} if portable_why else {}),
         # what statecanon.py once read from the executable: symbol names and addresses, constant data's ranges
@@ -1533,7 +1904,7 @@ def main() -> int:
     print(f"  schema: {out} ({out.stat().st_size} bytes), {plain.name} ({plain.stat().st_size} bytes){shipped}; "
           f"image {schema['image']['format']} {schema['image']['id']}")
     print(f"  heap types named in the source (include/pc_state.h): {len(heap_types)}; counted arrays: {len(counted)}; "
-          f"unions with a selector: {len(union_rules)}")
+          f"unions with a selector: {len(union_rules)}; state rules: {len(rules['list'])} (revision {rules['revision']})")
     for p_ in heap_problems:
         print(f"    PROBLEM {p_}")
     game_untagged = sum(len(set(v)) for (o, _), v in untagged.items() if o == "game")

@@ -348,6 +348,8 @@ system/arena.c keyboardOn derived set from the restored session on load
 system/arena.c on host environment and settings
 system/arena.c parsed host environment (XG_ARENA_MATCH)
 system/arena.c pending state
+system/arena.c perspective host this machine's player in an online session (netplay.c): which side's bar it shows, never the game's
+system/arena.c perspectiveEnv host environment (XG_VERSUS_VIEW)
 system/arena.c versusConfig state
 system/arena.c versusEnvRead host environment and settings
 system/arena.c versusMirror state

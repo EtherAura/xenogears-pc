@@ -43,6 +43,25 @@ def reference(build: Path, bias: int = 0) -> list[str]:
     for f in raw["functions"]:
         fid = cn.Schema.func_identity(f)
         out.append(f"fnaddr {fid} {s.fn_address(fid) or 0}")
+        if f.get("retail") is not None:  # renamed since: by its retail address alone
+            rid = f"fn:{f['retail']:08x}:__renamed__"
+            out.append(f"fnretail {rid} {s.fn_address(rid) or 0}")
+    rules = raw.get("rules") if isinstance(raw.get("rules"), dict) else {}
+    lst = rules.get("list") if isinstance(rules.get("list"), list) else []
+    num = lambda x: x if cn.rule_int(x) else 0  # noqa: E731
+    out.append(f"rules {num(rules.get('language', 0))} {num(rules.get('revision', 0))} {len(lst)}")
+    for i, r in enumerate(lst):  # each as the converters read it (statecanon rule_target)
+        on = cn.rule_target(r)
+        if on is None:
+            out.append(f"rule {i} -"); continue
+        line = (f"rule {i} {r['kind']} {on} {r.get('rev', 0) if r['kind'] not in ('default', 'hashes') else 0} "
+                f"{r[on] if isinstance(r[on], str) else '-'} {r['old'] if r['kind'] == 'was' else '-'}")
+        line += "".join(f" t={t}:{int(t in s.types)}" for t in (r.get("tids", []) if on in ("field", "fields") else []))
+        line += "".join(f" n={n}" for n in (r[on] if on in ("fields", "vars") else []))
+        line += "".join(f" m={a},{b}" for a, b in (r["map"] if r["kind"] == "values" else []))
+        if r["kind"] in ("removed", "default"):
+            line += f" v={r['value']}"
+        out.append(line)
     return out
 
 

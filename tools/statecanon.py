@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import statecheck as sc  # noqa: E402 (the raw format's reader)
 
 FORMAT = 1
+RULES_LANGUAGE = 1  # the state rules' language (docs 17.2): fixed in the first canonical release
 MASK64 = (1 << 64) - 1
 P1, P2, P3 = 0x9E3779B185EBCA87, 0xC2B2AE3D27D4EB4F, 0x165667B19E3779F9
 
@@ -68,6 +69,38 @@ def state_hash(data: bytes, seed: int = 0) -> int:
 
 
 # ---- the schema -----------------------------------------------------------------------------------
+
+def var_identity(v: dict) -> str:
+    """A variable's stable identity (docs section 2): <module>:<retail address> or <module>:pc:<name> in a game
+    module, pc:<platform file>:<name> for a platform static."""
+    if v.get("module"):
+        return f"{v['module']}:{v['retail']:08x}" if v.get("retail") is not None else f"{v['module']}:pc:{v['name']}"
+    return f"pc:{v.get('platform')}:{v['name']}"
+
+
+def keyed_variables(variables: list) -> tuple[list, int]:
+    """A schema's typed variables, one per address (DWARF can describe one twice: a definition and LTO's copy;
+    the larger is kept), in address order, each with its identity in "id"; and how many identities collided (an
+    alias at one retail address: the name tells them apart). tools/state_schema.py names a rule's variable so."""
+    seen_addr = {}
+    for v in variables:
+        if not v.get("tid"):
+            continue
+        o = seen_addr.get(v["addr"])
+        if o is None or v["size"] > o["size"]:
+            seen_addr[v["addr"]] = v
+    out = sorted(seen_addr.values(), key=lambda v: v["addr"])
+    collisions = 0
+    taken = set()
+    for v in out:
+        i = var_identity(v)
+        if i in taken:
+            i = f"{i}:{v['name']}"
+            collisions += 1
+        taken.add(i)
+        v["id"] = i
+    return out, collisions
+
 
 def state_bias(state: Path) -> int:
     """The load bias of the process that saved a state (its header's image field, statefile.c H_IMAGE)."""
@@ -121,27 +154,12 @@ class Schema:
         for name, t in sorted(self.type_names.items()):
             if self.types.get(t, {}).get("name") == name or t not in self.tid_name:
                 self.tid_name[t] = name
-        # one object per address (DWARF can describe one twice: a definition and LTO's copy)
-        seen_addr = {}
-        for v in s["variables"]:
-            if not v.get("tid"):
-                continue
-            o = seen_addr.get(v["addr"])
-            if o is None or v["size"] > o["size"]:
-                seen_addr[v["addr"]] = v
-        self.vars = sorted(seen_addr.values(), key=lambda v: v["addr"])
+        self.vars, self.collisions = keyed_variables(s["variables"])
         self.sections = {k: tuple(v) for k, v in s["sections"].items()}
         self.regions = {k: tuple(v) for k, v in s["regions"].items()}
         self.parts = s["parts"]
-        self.collisions = 0
-        taken = set()
-        for v in self.vars:
-            i = self.identity(v)
-            if i in taken:  # two objects, one identity (an alias at one retail address): the name tells them apart
-                i = f"{i}:{v['name']}"
-                self.collisions += 1
-            taken.add(i)
-            v["id"] = i
+        # the state rules (docs/CANONICAL_STATES.md 17.2): absent in a schema from before them (revision 0)
+        self.rules = s.get("rules") or {"language": RULES_LANGUAGE, "revision": 0, "list": []}
         self.by_id = {v["id"]: v for v in self.vars}
         spans = sorted((v["addr"], v["addr"] + max(v["size"], 1), i) for i, v in enumerate(self.vars))
         self.span_lo = [s0 for s0, _, _ in spans]
@@ -155,9 +173,14 @@ class Schema:
                 self.scratch.append((v["addr"], v["addr"] + v["size"]))
         self.funcs = {f["addr"]: f for f in s["functions"]}
         self.func_by_id = {}
+        by_retail = defaultdict(set)
         for f in s["functions"]:
             self.func_by_id.setdefault(self.func_identity(f), f["addr"])
             self.func_by_id.setdefault("fn:" + f["name"], f["addr"])
+            if f.get("retail") is not None:
+                by_retail[f["retail"]].add(f["addr"])
+        # a game function by its retail address alone, where one function has it (a renamed one: docs 17.2)
+        self.fn_by_retail = {r: next(iter(a)) for r, a in by_retail.items() if len(a) == 1}
         self.platform = {}
         for v in self.vars:
             if v.get("platform"):
@@ -262,13 +285,15 @@ class Schema:
         if a is None:
             name = ident.rsplit(":", 1)[-1]
             a = self.func_by_id.get("fn:" + name, self.sym_addr.get(name))
+        if a is None:  # a game function renamed: its retail address, when one function of this build has it
+            m = re.fullmatch(r"fn:([0-9a-f]{8}):.*", ident, re.S)
+            if m:
+                a = self.fn_by_retail.get(int(m.group(1), 16))
         return a
 
     @staticmethod
     def identity(v):
-        if v.get("module"):
-            return f"{v['module']}:{v['retail']:08x}" if v.get("retail") is not None else f"{v['module']}:pc:{v['name']}"
-        return f"pc:{v.get('platform')}:{v['name']}"
+        return var_identity(v)
 
     @staticmethod
     def func_identity(f):
@@ -316,6 +341,230 @@ class Schema:
                     i += 1
             self._gaps[tid] = g
         return g
+
+
+# ---- the state rules (docs/CANONICAL_STATES.md 17.2) ----------------------------------------------
+
+RULE_KINDS = ("was", "values", "reset", "removed", "default", "hashes")
+# what each kind names, the first of these keys a rule has
+RULE_TARGETS = {"was": ("field", "var", "typename", "tag", "fn"), "values": ("field", "var"), "reset": ("field", "var"),
+                "removed": ("vars", "fields"), "default": ("var", "field"), "hashes": ("field",)}
+
+
+def rule_int(x) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool) and -(1 << 63) <= x < (1 << 63)
+
+
+def rule_target(r) -> str | None:
+    """Which thing a rule names (the first of its kind's RULE_TARGETS it has), or None when the converter cannot
+    read it: a kind it does not know, or a key missing or of another type. Such a rule is ignored, never refused."""
+    if not isinstance(r, dict) or r.get("kind") not in RULE_KINDS:
+        return None
+    k = r["kind"]
+    if k not in ("default", "hashes") and not rule_int(r.get("rev")):
+        return None
+    on = next((x for x in RULE_TARGETS[k] if x in r), None)
+    strs = lambda x: isinstance(x, list) and all(isinstance(y, str) for y in x)  # noqa: E731
+    if on is None or not (strs(r[on]) if on in ("fields", "vars") else isinstance(r[on], str)):
+        return None
+    if on in ("field", "fields") and not strs(r.get("tids")):
+        return None
+    if k == "was" and not isinstance(r.get("old"), str):
+        return None
+    if k == "values" and not (isinstance(r.get("map"), list) and all(
+            isinstance(m, list) and len(m) == 2 and rule_int(m[0]) and rule_int(m[1]) for m in r["map"])):
+        return None
+    if k in ("removed", "default") and not rule_int(r.get("value")):
+        return None
+    return on
+
+
+def type_hash(name: str) -> int:
+    """pcStateTypeId (port/src/game/main/statetypes.c): FNV-1a of a type's name without its blanks; never 0."""
+    h = 0x811C9DC5
+    for c in name.encode():
+        if c not in b" \t\n":
+            h = ((h ^ c) * 0x01000193) & 0xFFFFFFFF
+    return h or 1
+
+
+def map_value(v: int, pairs: list, forward: bool) -> int:
+    """A values rule on one integer: forward old -> new, else new -> old; the first pair that matches, else v."""
+    for old, new in pairs:
+        if (old if forward else new) == v:
+            return new if forward else old
+    return v
+
+
+class Rules:
+    """The rules that apply between a writer's schema and a reader's. Only the newer one's history rules count (its
+    revision is the higher; it carries every rule since the older one's), those with older < rev <= newer, applied
+    forward (a newer reader) or backward (a newer writer); the reader's own properties (default, hashes) always.
+    Each history rule names the newer build's own thing: a variable by identity, a struct's member by the newer
+    build's type entries and the member's key there, a type by name, a host part's chunk tag."""
+
+    def __init__(self, writer: dict, reader: dict):
+        rev = lambda x: x.get("revision", 0) if isinstance(x, dict) and rule_int(x.get("revision", 0)) else 0  # noqa
+        wr, rr = rev(writer), rev(reader)
+        self.forward = wr < rr
+        self.backward = wr > rr
+        self.older = min(wr, rr)
+        newer = reader if self.forward else writer if self.backward else {}
+        listed = lambda x: x.get("list") if isinstance(x, dict) and isinstance(x.get("list"), list) else []  # noqa
+        self.unknown = 0  # rules this converter cannot read (a kind it does not know, a damaged one): ignored
+        hist = []
+        for r in listed(newer):
+            on = rule_target(r)
+            if on is None:
+                self.unknown += 1
+            elif r["kind"] not in ("default", "hashes") and self.older < r["rev"] <= max(wr, rr):
+                hist.append((r, on))
+        hist.sort(key=lambda x: x[0]["rev"])  # stable: one revision's rules in the schema's order
+        self.var_was, self.field_was, self.type_was, self.tag_was, self.fn_was = {}, {}, {}, {}, {}
+        self.var_rules, self.field_rules = defaultdict(list), defaultdict(list)  # values, reset in revision order
+        self.removed_vars, self.removed_fields = {}, {}
+        named = {"var": self.var_was, "typename": self.type_was, "tag": self.tag_was, "fn": self.fn_was}
+        for r, on in hist:
+            if r["kind"] == "was":
+                if on == "field":
+                    for t in r["tids"]:
+                        self.field_was.setdefault((t, r["field"]), r["old"])  # the earliest after the older's
+                else:
+                    named[on].setdefault(r[on], r["old"])
+            elif r["kind"] in ("values", "reset"):
+                if on == "field":
+                    for t in r["tids"]:
+                        self.field_rules[(t, r["field"])].append(r)
+                else:
+                    self.var_rules[r["var"]].append(r)
+            elif r["kind"] == "removed":
+                if on == "vars":
+                    for v in r["vars"]:
+                        self.removed_vars.setdefault(v, r["value"])
+                else:
+                    for t in r["tids"]:
+                        for f in r["fields"]:
+                            self.removed_fields.setdefault((t, f), r["value"])
+        # a newer writer's things by what the older reader calls them; and those it calls otherwise now
+        self.var_back = {old: cur for cur, old in self.var_was.items()}
+        self.field_back = {(t, old): cur for (t, cur), old in self.field_was.items()}
+        self.type_back = {old: cur for cur, old in self.type_was.items()}
+        self.tag_back = {old: cur for cur, old in self.tag_was.items()}
+        self.fn_back = {old: cur for cur, old in self.fn_was.items()}
+        self.defaults_var, self.defaults_field, self.hashes = {}, {}, set()
+        for r in listed(reader):  # the reader's own properties, whatever the revisions
+            on = rule_target(r)
+            if on is None or r["kind"] not in ("default", "hashes"):
+                continue
+            if r["kind"] == "default" and on == "var":
+                self.defaults_var.setdefault(r["var"], r["value"])
+            elif r["kind"] == "default":
+                for t in r["tids"]:
+                    self.defaults_field.setdefault((t, r["field"]), r["value"])
+            else:
+                for t in r["tids"]:
+                    self.hashes.add((t, r["field"]))
+        self.active = bool(hist or self.defaults_var or self.defaults_field or self.hashes)
+
+    def source(self, ident: str, was: dict, back: dict):
+        """What the writer calls the reader's thing ident: forward, its name before the newer reader's renames;
+        backward, the newer writer's thing the older reader calls ident (none if the writer renamed its own
+        ident since: that is another thing)."""
+        if self.forward:
+            return was.get(ident, ident)
+        if self.backward:
+            if ident in back:
+                return back[ident]
+            return None if ident in was else ident
+        return ident
+
+    def var_source(self, ident):
+        return self.source(ident, self.var_was, self.var_back)
+
+    def target(self, ident, was: dict, back: dict):
+        """source the other way: the reader's name of the writer's thing ident (None: the reader has it not)."""
+        if self.forward:
+            if ident in back:
+                return back[ident]
+            return None if ident in was else ident
+        if self.backward:
+            return was.get(ident, ident)
+        return ident
+
+    def var_target(self, ident):
+        return self.target(ident, self.var_was, self.var_back)
+
+    def fn_target(self, ident: str) -> str:
+        """The reader's identity of the writer's function ("fn:<retail>:<name>" or "fn:<name>"): its name as the
+        reader calls it (a renamed function: PC_STATE_FN_WAS)."""
+        head, _, name = ident.rpartition(":")
+        new = self.target(name, self.fn_was, self.fn_back)
+        return ident if new is None or new == name else f"{head}:{new}"
+
+    def tag_source(self, tag):
+        return self.source(tag, self.tag_was, self.tag_back)
+
+    def type_name(self, name):
+        """The reader's name of the writer's type name (heap parts, type hashes)."""
+        if self.forward:
+            if name in self.type_back:
+                return self.type_back[name]
+            return None if name in self.type_was else name
+        if self.backward:
+            return self.type_was.get(name, name)
+        return name
+
+    def field_source(self, rtid, wtid, key):
+        """The writer's key of the reader's member key (of the reader's type rtid, the writer's value of wtid)."""
+        if self.forward:
+            return self.field_was.get((rtid, key), key)
+        if self.backward:
+            if (wtid, key) in self.field_back:
+                return self.field_back[(wtid, key)]
+            return None if (wtid, key) in self.field_was else key
+        return key
+
+    def field_target(self, rtid, wtid, wkey):
+        """The reader's key of the writer's member key: field_source the other way (a union's selected view)."""
+        if self.forward:
+            if (rtid, wkey) in self.field_back:
+                return self.field_back[(rtid, wkey)]
+            return None if (rtid, wkey) in self.field_was else wkey
+        if self.backward:
+            return self.field_was.get((wtid, wkey), wkey)
+        return wkey
+
+    def history(self, var=None, field=None):
+        """The values and reset rules of the newer build's variable or (type entry, key), in the order they apply."""
+        rs = self.var_rules.get(var, []) if var is not None else self.field_rules.get(field, [])
+        return rs if self.forward else rs[::-1]
+
+
+    def values(self, rules: list, val, wtype: dict | None, schema_w) -> tuple[object, bool]:
+        """A value through history() rules: whether a reset rule drops it, else the value through each values
+        rule: an integer, or an integer array's elements ({"x", "w"}, read as the writer's element type is
+        signed). Another shape of value is left as it is."""
+        if any(r["kind"] == "reset" for r in rules):
+            return val, True
+        vs = [r["map"] for r in rules if r["kind"] == "values"]
+        if not vs:
+            return val, False
+        if isinstance(val, int):
+            for m in vs:
+                val = map_value(val, m, self.forward)
+            return val, False
+        if isinstance(val, dict) and "x" in val and val.get("w") and val["w"] <= 8:
+            w = val["w"]; b = bytes.fromhex(val["x"])
+            signed = bool(wtype and wtype.get("k") == "arr" and schema_w.types.get(wtype.get("of"), {}).get("signed"))
+            out = bytearray()
+            for i in range(0, len(b) - len(b) % w, w):
+                e = int.from_bytes(b[i:i + w], "little", signed=signed)
+                for m in vs:
+                    e = map_value(e, m, self.forward)
+                out += (e & ((1 << (8 * w)) - 1)).to_bytes(w, "little")
+            out += b[len(b) - len(b) % w:]
+            return {**val, "x": bytes(out).hex()}, False
+        return val, False
 
 
 # ---- encoding -------------------------------------------------------------------------------------
@@ -548,42 +797,278 @@ class Encoder:
 
 # ---- decoding -------------------------------------------------------------------------------------
 
+def type_class(t: dict) -> str:
+    k = t.get("k")
+    return k if k in ("int", "float", "addr", "ptr", "otag", "scratch", "arr", "struct", "union") else "bytes"
+
+
+def plain(schema: "Schema", tid) -> bool:
+    """Whether a type holds no pointer (nor an ordering-table link, an address or a scratch word): its bytes are
+    the same in every build, the PS1's for the game's types. Cached per schema; a type that holds itself (only a
+    damaged schema's) is not plain."""
+    cache = schema.__dict__.setdefault("_plain", {})
+    if tid in cache:
+        return cache[tid] is True
+    t = schema.types.get(tid)
+    if t is None:
+        return False
+    cache[tid] = None  # (being decided)
+    k = t["k"]
+    if k in ("ptr", "addr", "otag", "scratch"):
+        r = False
+    elif k == "arr":
+        r = t.get("of") not in schema.types or t["n"] == 0 or plain(schema, t["of"])
+    elif k in ("struct", "union"):
+        r = all(plain(schema, f["type"]) for f in t["fields"])
+    else:
+        r = True
+    cache[tid] = r
+    return r
+
+
+def bytes_differ(sw: "Schema", wt, sr: "Schema", rt) -> bool:
+    """Whether a member's type in the writer and the reader give its bytes another meaning: another kind, size, or
+    an array's elements of another size (where a game member's PS1 bytes are what carries)."""
+    a, b = sw.types.get(wt), sr.types.get(rt)
+    if a is None or b is None:
+        return False
+    if type_class(a) != type_class(b) or a.get("size") != b.get("size"):
+        return True
+    return a["k"] == "arr" and sw.size(a.get("of")) != sr.size(b.get("of"))
+
+
 class Decoder:
-    def __init__(self, schema: Schema):
+    def __init__(self, schema: Schema, writer: Schema | None = None, rules: Rules | None = None):
+        """schema: the reader's. writer: the writer's schema (a conversion: the types of what the state holds, so
+        a value of another type than the reader's is carried by its bytes or left out, not refused; docs 17.2),
+        rules: the state rules between the two (Rules)."""
         self.s = schema
+        self.w = writer
+        self.rules = rules if rules is not None and rules.active else None
         self.warn = Counter()
+        self.applied = Counter()  # what the rules and the type changes did (not losses: those are warnings)
         self.heap = None  # the target layout's blocks (decode_heap_layout)
         self.arena = None  # the sound arena's (decode_arena_layout)
+        self._defaults = {}
 
-    def offset_of(self, tid, path):
+    # ---- types changed between the builds, and the rules ----
+
+    def writer_type(self, wt):
+        return self.w.types.get(wt) if self.w is not None and wt is not None else None
+
+    def writer_bytes(self, wt, val) -> bytes:
+        """A writer's value as its own build lays it out (a decode with its schema, no rules)."""
+        tmp = bytearray(self.w.size(wt))
+        Decoder(self.w).put(wt, val, tmp, 0)
+        return bytes(tmp)
+
+    def mismatch(self, wt, tid, val) -> bool:
+        """Whether the writer's value of type wt cannot be put as the reader's type tid by value."""
+        a, b = self.writer_type(wt), self.s.types.get(tid)
+        if a is None or b is None:
+            return False
+        ca, cb = type_class(a), type_class(b)
+        if cb == "scratch":
+            return False
+        if ca == cb:
+            if ca == "float":
+                return a["size"] != b["size"]
+            if ca == "arr" and isinstance(val, dict) and "x" in val:  # integers (or bytes) into other elements
+                et = self.s.types.get(b.get("of"))
+                return et is not None and b["n"] > 0 and type_class(et) not in ("int", "bytes")
+            return False
+        if {ca, cb} == {"int", "addr"}:  # an address as a number, a number as an address
+            return cb == "int" and not isinstance(val, int)
+        return True
+
+    def carry_bytes(self, tid, val, buf, off, wt) -> None:
+        b = self.writer_bytes(wt, val)
+        n = min(len(b), self.s.size(tid))
+        buf[off:off + n] = b[:n]
+        self.applied["value of another type carried as its bytes"] += 1
+
+    def reshape(self, tid, val, buf, off, wt) -> bool:
+        """A value of another kind of type: by its bytes when neither type holds a pointer, else not carried (the
+        reader's defaults inside it)."""
+        if plain(self.w, wt) and plain(self.s, tid):
+            self.carry_bytes(tid, val, buf, off, wt)
+            return True
+        self.warn["value of another type in the state (not carried)"] += 1
+        self.put_defaults(tid, buf, off)
+        return False
+
+    def defaults_in(self, tid) -> list:
+        """The reader's defaults inside a type (its struct members', arrays of structs' too; not through pointers or
+        unions): (offset of the struct, member, value), cached (a type that holds itself: none)."""
+        if self.rules is None or not self.rules.defaults_field:
+            return []
+        if tid in self._defaults:
+            return self._defaults[tid] or []
+        self._defaults[tid] = None
+        out = []
+        t = self.s.types.get(tid, {})
+        if t.get("k") == "struct":
+            seen = set()
+            for f in t["fields"]:
+                key = Encoder.field_key(None, f, seen)
+                d = self.rules.defaults_field.get((tid, key))
+                if d is not None:
+                    out.append((0, f, d))
+                elif f.get("bits") is None:
+                    out += [(f["off"] + o, g, v) for o, g, v in self.defaults_in(f["type"])]
+        elif t.get("k") == "arr" and t.get("of") in self.s.types and t["n"]:
+            sub = self.defaults_in(t["of"])
+            es = self.s.size(t["of"])
+            out = [(i * es + o, g, v) for i in range(t["n"]) for o, g, v in sub] if sub else []
+        self._defaults[tid] = out
+        return out
+
+    def put_defaults(self, tid, buf, off) -> int:
+        n = 0
+        for o, f, v in self.defaults_in(tid):
+            self.put_int(f, v, buf, off + o); n += 1
+        return n
+
+    def put_int(self, f, value, buf, base) -> None:
+        """An integer into a member (f: a struct's field, or {"off": 0, "type": a variable's}): a bitfield's bits,
+        an integer, or each element of an integer array."""
+        if f.get("bits") is not None:
+            bit = f["bit"]; nb = f["bits"]; b0 = bit // 8; span = (bit % 8 + nb + 7) // 8
+            raw = int.from_bytes(buf[base + b0:base + b0 + span], "little")
+            m = ((1 << nb) - 1) << (bit % 8)
+            raw = (raw & ~m) | ((value << (bit % 8)) & m)
+            buf[base + b0:base + b0 + span] = raw.to_bytes(span, "little")
+            return
+        t = self.s.types.get(f["type"], {}); at = base + f["off"]
+        if t.get("k") == "arr":
+            es = self.s.size(t.get("of"))
+            for i in range(t["n"] if es else 0):
+                buf[at + i * es:at + (i + 1) * es] = (value & ((1 << (8 * es)) - 1)).to_bytes(es, "little")
+        elif t.get("k") == "int":
+            n = t["size"]
+            buf[at:at + n] = (value & ((1 << (8 * n)) - 1)).to_bytes(n, "little")
+
+    def remap_hash(self, h: int) -> int:
+        """A heap type hash of the writer (a block's header, a recorded range's: PC_HEAP_OF's name) as the reader
+        names that type, where a rule renamed it and the reader knows the hash; else as it is."""
+        R = self.rules
+        if R is None or not h or not (R.type_was or R.type_back) or self.w is None:
+            return h
+        e = self.w.heap_types.get(h)
+        if e is None:
+            return h
+        name = e["name"]
+        base = name[:-3] if name.endswith("[1]") else name.rstrip("*")
+        new = R.type_name(base)
+        if new is None or new == base:
+            return h
+        h2 = type_hash(new + name[len(base):])
+        if h2 not in self.s.heap_types:
+            return h
+        self.applied["type hash remapped by a state rule"] += 1
+        return h2
+
+    def writer_fields(self, wt) -> dict:
+        """The writer struct's fields by key, the last of a key (what its dict holds)."""
+        t = self.writer_type(wt)
+        if t is None or t.get("k") not in ("struct", "union"):
+            return {}
+        seen = set(); out = {}
+        for f in t["fields"]:
+            out[Encoder.field_key(None, f, seen)] = f
+        return out
+
+    def retail_carry(self, f, val, wt, buf, off) -> bool:
+        """A game member (an offset tag) the writer has not as a value of its type: its PS1 bytes, from the writer's
+        members of the same struct that cover them and hold no pointer. Whether any byte came."""
+        wtt = self.writer_type(wt)
+        if f.get("retail") is None or f.get("bits") is not None or wtt is None or wtt.get("k") != "struct" or \
+                not isinstance(val, dict) or not plain(self.s, f["type"]):
+            return False
+        lo = f["retail"]; size = self.s.size(f["type"]); hi = lo + size
+        if size <= 0:
+            return False
+        got = bytearray(size); cover = bytearray(size)
+        for key, g in self.writer_fields(wt).items():
+            if g.get("retail") is None or g.get("bits") is not None or key not in val or not plain(self.w, g["type"]):
+                continue
+            a, b = max(lo, g["retail"]), min(hi, g["retail"] + self.w.size(g["type"]))
+            if a >= b:
+                continue
+            gb = self.writer_bytes(g["type"], val[key])
+            got[a - lo:b - lo] = gb[a - g["retail"]:b - g["retail"]]
+            cover[a - lo:b - lo] = b"\1" * (b - a)
+        if not any(cover):
+            return False
+        base = off + f["off"]; i = 0
+        while i < size:
+            if not cover[i]:
+                i += 1; continue
+            j = i
+            while j < size and cover[j]:
+                j += 1
+            buf[base + i:base + j] = got[i:j]; i = j
+        self.applied["carried by its PS1 bytes"] += 1
+        return True
+
+    def field_lost(self, tid, wt, key, f, buf, off, why) -> None:
+        """A reader's member the state does not carry (why: "missing", "reset", "type"): a newer writer's removed
+        value, else the member's default or those inside it, else zero."""
+        R = self.rules
+        if R is not None and why == "missing" and R.backward and (wt, key) in R.removed_fields:
+            self.put_int(f, R.removed_fields[(wt, key)], buf, off)
+            self.warn["field removed by a later build (given the value its rule names)"] += 1
+            return
+        d = R.defaults_field.get((tid, key)) if R is not None else None
+        if d is not None:
+            self.put_int(f, d, buf, off); n = 1
+        else:
+            n = self.put_defaults(f["type"], buf, off + f["off"]) if f.get("bits") is None and why != "type" else 0
+        if why == "missing":
+            self.warn["field missing in the state (given its default)" if n else "field missing in the state (left zero)"] += 1
+        elif why == "reset":
+            self.warn["field reset by a state rule (not carried)"] += 1
+
+    def offset_of(self, tid, path, wtid=None):
+        """A field path's offset from a value of type tid; the path's keys are the writer's, of its type wtid
+        (followed alongside: a renamed member's key by the rules)."""
         off = 0
+        R = self.rules
         for step in path:
             t = self.s.types.get(tid)
             if t is None:
                 return None
+            wtt = self.writer_type(wtid)
             if isinstance(step, dict):  # a union's view
-                f = next((f for f in t.get("fields", []) if f["name"] == step["u"]), None)
+                name = R.field_target(tid, wtid, step["u"]) if R is not None else step["u"]
+                f = next((f for f in t.get("fields", []) if f["name"] == name), None)
                 if t["k"] != "union" or f is None:
                     return None
-                tid = f["type"]
+                wv = next((g for g in wtt.get("fields", []) if g["name"] == step["u"]), None) if wtt else None
+                tid = f["type"]; wtid = wv["type"] if wv else None
                 continue
             if isinstance(step, int):
                 if t["k"] != "arr":
                     return None
                 off += step * self.s.size(t["of"])
-                tid = t["of"]
+                tid = t["of"]; wtid = wtt.get("of") if wtt and wtt.get("k") == "arr" else None
             else:
                 if t["k"] != "struct":
                     return None
+                key = R.field_target(tid, wtid, step) if R is not None else step
                 seen = set(); hit = None
                 for f in t["fields"]:
-                    if Encoder.field_key(None, f, seen) == step:
+                    if Encoder.field_key(None, f, seen) == key:
                         hit = f
                         break
                 if hit is None:
                     return None
+                wf = None
+                if wtt is not None and wtt.get("k") == "struct":
+                    seen = set()
+                    wf = next((g for g in wtt["fields"] if Encoder.field_key(None, g, seen) == step), None)
                 off += hit["off"]
-                tid = hit["type"]
+                tid = hit["type"]; wtid = wf["type"] if wf else None
         return off
 
     def pointer(self, p):
@@ -612,7 +1097,7 @@ class Decoder:
                 if lay.get("tid") is None:
                     self.warn["heap pointer path not in this build"] += 1
                     return base
-                o = self.offset_of(lay["tid"], p.get("p", []))
+                o = self.offset_of(lay["tid"], p.get("p", []), t.get("tid") if self.w is not None else None)
                 if o is None:
                     self.warn["heap pointer path not in this build"] += 1
                     o = 0
@@ -640,25 +1125,35 @@ class Decoder:
                 return 0
             return a
         if "fn" in p:
-            a = self.s.fn_address(p["fn"])
+            ident = self.rules.fn_target(p["fn"]) if self.rules is not None else p["fn"]
+            a = self.s.fn_address(ident)
             if a is None:
                 self.warn["function not in this build"] += 1
                 return 0
             return a
-        var = self.s.by_id.get(p["v"])
+        vid = self.rules.var_target(p["v"]) if self.rules is not None else p["v"]
+        var = self.s.by_id.get(vid) if vid is not None else None
         if var is None:
             self.warn["pointer to a variable not in this build"] += 1
             return 0
-        o = self.offset_of(var["tid"], p.get("p", []))
+        wv = self.w.by_id.get(p["v"]) if self.w is not None else None
+        o = self.offset_of(var["tid"], p.get("p", []), wv["tid"] if wv else None)
         if o is None:
             self.warn["pointer path not in this build"] += 1
             o = 0
         return var["addr"] + o + p.get("b", 0)
 
-    def put(self, tid, val, buf, off):
+    def put(self, tid, val, buf, off, wt=None):
+        """The reader's bytes of a canonical value at off of buf, as type tid. wt: the writer's type of the value
+        (a conversion's: Decoder(writer=...)): a value of another kind is carried by its bytes or left out."""
         t = self.s.types.get(tid)
-        if t is None or val is None and t["k"] not in ("ptr",):
-            return
+        if t is None:
+            return None
+        if self.w is not None and wt is not None and self.mismatch(wt, tid, val):
+            return self.reshape(tid, val, buf, off, wt)
+        if val is None and t["k"] not in ("ptr",):
+            return None
+        wtt = self.writer_type(wt)
         k = t["k"]
         if k == "int":
             n = t["size"]
@@ -680,11 +1175,22 @@ class Decoder:
             if isinstance(val, dict) and "z" in val:
                 buf[off:off + t["size"]] = bytes(t["size"])
             elif isinstance(val, dict):
-                b = bytes.fromhex(val["x"]); n = min(len(b), t["size"]); buf[off:off + n] = b[:n]
+                b = bytes.fromhex(val["x"])
+                w = val.get("w", 0); et = self.s.types.get(t.get("of"), {}); es = et.get("size", 0)
+                if wtt is not None and w and es and w != es and et.get("k") == "int":
+                    # integers of another width: each element by its value (as the writer's elements are signed)
+                    signed = bool(wtt.get("k") == "arr" and self.w.types.get(wtt.get("of"), {}).get("signed"))
+                    for i in range(min(len(b) // w, t["n"])):
+                        e = int.from_bytes(b[i * w:(i + 1) * w], "little", signed=signed)
+                        buf[off + i * es:off + (i + 1) * es] = (e & ((1 << (8 * es)) - 1)).to_bytes(es, "little")
+                    self.applied["integers of another width carried by value"] += 1
+                else:
+                    n = min(len(b), t["size"]); buf[off:off + n] = b[:n]
             else:
                 es = self.s.size(t["of"])
+                wof = wtt.get("of") if wtt is not None and wtt.get("k") == "arr" else None
                 for i, e in enumerate(val[:t["n"]]):
-                    self.put(t["of"], e, buf, off + i * es)
+                    self.put(t["of"], e, buf, off + i * es, wof)
         elif k == "struct":
             seen = set()
             if "pad" in val:  # the saving build's bytes outside every field, where this build has the same layout
@@ -692,36 +1198,75 @@ class Decoder:
                 if sum(h - l for l, h in gaps) == len(pad):
                     for lo_, hi_ in gaps:
                         buf[off + lo_:off + hi_] = pad[at:at + hi_ - lo_]; at += hi_ - lo_
+            wf = self.writer_fields(wt) if wtt is not None else {}
+            R = self.rules
             for f in t["fields"]:
                 key = Encoder.field_key(None, f, seen)
-                if key not in val:
-                    self.warn["field missing in the state (left zero)"] += 1
+                src = R.field_source(tid, wt, key) if R is not None else key
+                if src is None or src not in val:
+                    if not self.retail_carry(f, val, wt, buf, off):
+                        self.field_lost(tid, wt, key, f, buf, off, "missing")
                     continue
+                if src != key:
+                    self.applied["renamed by a state rule"] += 1
+                child = val[src]
+                cwt = wf[src]["type"] if src in wf else None
+                if R is not None:
+                    rs = R.history(field=(tid, key) if R.forward else (wt, src))
+                    if rs:
+                        child, reset = R.values(rs, child, self.writer_type(cwt), self.w)
+                        if reset:
+                            self.field_lost(tid, wt, key, f, buf, off, "reset")
+                            continue
+                        if any(r["kind"] == "values" for r in rs):
+                            self.applied["values mapped by a state rule"] += 1
+                    if (tid, key) in R.hashes and isinstance(child, int) and 0 <= child <= 0xFFFFFFFF:
+                        child = self.remap_hash(child)
                 if f.get("bits") is not None:
+                    if self.w is not None and not isinstance(child, int):
+                        self.warn["value of another type in the state (not carried)"] += 1
+                        self.field_lost(tid, wt, key, f, buf, off, "type")
+                        continue
                     bit = f["bit"]; nb = f["bits"]; base = bit // 8; span = (bit % 8 + nb + 7) // 8
                     raw = int.from_bytes(buf[off + base:off + base + span], "little")
                     m = ((1 << nb) - 1) << (bit % 8)
-                    raw = (raw & ~m) | ((val[key] << (bit % 8)) & m)
+                    raw = (raw & ~m) | ((child << (bit % 8)) & m)
                     buf[off + base:off + base + span] = raw.to_bytes(span, "little")
                     continue
-                if isinstance(val[key], dict) and "sel" in val[key]:
-                    v = val[key]; n = self.s.size(f["type"]); x = bytes.fromhex(v["x"])[:n]
+                if isinstance(child, dict) and "sel" in child:
+                    v = child; n = self.s.size(f["type"]); x = bytes.fromhex(v["x"])[:n]
                     buf[off + f["off"]:off + f["off"] + len(x)] = x
-                    view = next((m for m in self.s.types.get(f["type"], {}).get("fields", []) if m["name"] == v["sel"]), None)
+                    sel = v["sel"]
+                    if R is not None:  # the writer's view by the reader's name
+                        wut = self.writer_type(cwt)
+                        sel = R.field_target(f["type"], cwt, sel) if wut is not None else sel
+                    view = next((m for m in self.s.types.get(f["type"], {}).get("fields", []) if m["name"] == sel), None)
                     if view is None:
                         self.warn["union view not in this build (bytes kept)"] += 1
                     else:
-                        self.put(view["type"], v["v"], buf, off + f["off"] + view["off"])
+                        if sel != v["sel"]:
+                            self.applied["renamed by a state rule"] += 1
+                        wv = next((m for m in (self.writer_type(cwt) or {}).get("fields", []) if m["name"] == v["sel"]), None)
+                        self.put(view["type"], v["v"], buf, off + f["off"] + view["off"], wv["type"] if wv else None)
                     continue
-                self.put(f["type"], val[key], buf, off + f["off"])
+                if cwt is not None and f.get("retail") is not None and bytes_differ(self.w, cwt, self.s, f["type"]) and \
+                        self.retail_carry(f, val, wt, buf, off):
+                    continue
+                if self.put(f["type"], child, buf, off + f["off"], cwt) is False:
+                    self.field_lost(tid, wt, key, f, buf, off, "type")
         elif k == "union" and isinstance(val, dict) and "u" in val:
+            wv = {f["name"]: f for f in (wtt or {}).get("fields", [])} if wtt is not None else {}
             for f in union_views(self.s, t):  # least typed first: the fully typed view writes last
-                if f["name"] not in val["u"]:
+                name = self.rules.field_source(tid, wt, f["name"]) if self.rules is not None else f["name"]
+                if name is None or name not in val["u"]:
                     self.warn["union view not in the state"] += 1
                     continue
-                self.put(f["type"], val["u"][f["name"]], buf, off + f["off"])
+                if name != f["name"]:
+                    self.applied["renamed by a state rule"] += 1
+                self.put(f["type"], val["u"][name], buf, off + f["off"], wv[name]["type"] if name in wv else None)
         else:
             b = bytes.fromhex(val["x"]); n = min(len(b), t["size"]); buf[off:off + n] = b[:n]
+        return None
 
 
 def typed_bytes(schema: "Schema", tid, depth=0) -> int:
@@ -899,24 +1444,77 @@ def safe_point_of(doc: dict) -> int:
     return r["v"] if r is not None and isinstance(r.get("v"), int) else 0
 
 
-def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -> tuple[bytes, Decoder]:
+def var_lost(dec: "Decoder", v: dict, buf, off: int, why: str) -> None:
+    """A reader's variable the state does not carry (why: "missing", "reset", "type"): a newer writer's removed
+    value, else its default or those inside it, else zero."""
+    R = dec.rules
+    whole = {"off": 0, "type": v["tid"]}
+    if R is not None and why == "missing" and R.backward and v["id"] in R.removed_vars:
+        dec.put_int(whole, R.removed_vars[v["id"]], buf, off)
+        dec.warn["variable removed by a later build (given the value its rule names)"] += 1
+        return
+    d = R.defaults_var.get(v["id"]) if R is not None else None
+    if d is not None:
+        dec.put_int(whole, d, buf, off); n = 1
+    else:
+        n = dec.put_defaults(v["tid"], buf, off) if why != "type" else 0
+    if why == "missing":
+        dec.warn["variable not in the state (given its default)" if n else "variable not in the state (left zero)"] += 1
+    elif why == "reset":
+        dec.warn["variable reset by a state rule (not carried)"] += 1
+
+
+def put_variable(dec: "Decoder", v: dict, r: dict, wid: str, buf, off: int) -> None:
+    """A reader's variable from the writer's record (its identity wid there): the rules' values, a game
+    variable's PS1 bytes where its type changed, else the value as the reader's type."""
+    val = r["v"]
+    wv = dec.w.by_id.get(wid) if dec.w is not None else None
+    wt = wv["tid"] if wv is not None else None
+    R = dec.rules
+    if wid != v["id"]:
+        dec.applied["renamed by a state rule"] += 1
+    if R is not None:
+        rs = R.history(var=v["id"] if R.forward else wid)
+        if rs:
+            val, reset = R.values(rs, val, dec.writer_type(wt), dec.w)
+            if reset:
+                var_lost(dec, v, buf, off, "reset")
+                return
+            if any(x["kind"] == "values" for x in rs):
+                dec.applied["values mapped by a state rule"] += 1
+    if wt is not None and v.get("module") and v.get("retail") is not None and bytes_differ(dec.w, wt, dec.s, v["tid"]) \
+            and plain(dec.w, wt) and plain(dec.s, v["tid"]):
+        dec.carry_bytes(v["tid"], val, buf, off, wt)  # a game variable's PS1 bytes
+        return
+    if dec.put(v["tid"], val, buf, off, wt) is False:
+        var_lost(dec, v, buf, off, "type")
+
+
+def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False,
+           writer: Schema | None = None) -> tuple[bytes, Decoder]:
     """The raw body for this build, chunk by chunk in the template's order (P1: the template is a raw state
     of the same build; later the order comes from the build's own part list). stackless: without the game's
     frames, which no other build can take (a state saved at a safe point: the load starts the game again
-    there, include/pc_state.h)."""
+    there, include/pc_state.h). writer: the writing build's schema (a conversion): its types and state rules
+    (docs/CANONICAL_STATES.md 17.2) apply; without it, the document's values go in as they are."""
     if stackless and not safe_point_of(doc):
         raise SystemExit("statecanon: a stackless state needs one saved at a safe point (XG_STATE_SAVE_SAFE)")
     th, tbody = sc.read_state(template)
     same_bias(template, th, schema)
-    dec = Decoder(schema)
+    rules = Rules(writer.rules, schema.rules) if writer is not None else None
+    dec = Decoder(schema, writer, rules)
+    if rules is not None and rules.unknown:
+        dec.warn["state rule this build cannot read (ignored)"] += rules.unknown
+    R = dec.rules
     by_id = {r["id"]: r for r in doc["records"] if "part" not in r}
     by_part = {r["part"]: r for r in doc["records"] if "part" in r}
     raws = {r["tag"]: r for r in doc["raw"]}
     if doc.get("heap"):
         decode_heap_layout(doc["heap"], schema, dec)
     for r in doc["records"]:
-        if "arena" in r and r["id"] in schema.by_id:
-            decode_arena_layout(r["arena"], schema, schema.by_id[r["id"]], dec)
+        rid = R.var_target(r["id"]) if R is not None and "arena" in r else r["id"]
+        if "arena" in r and rid in schema.by_id:
+            decode_arena_layout(r["arena"], schema, schema.by_id[rid], dec)
     out = bytearray()
     for tag, at, size in sc.chunks(tbody):
         if stackless and tag in STACK_CHUNKS:  # no frames: stack.sp 0 says so (savestate.c memoryRegions)
@@ -931,6 +1529,7 @@ def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -
             out += bytes([len(t)]) + t + struct.pack("<I", size) + buf
             continue
         m = re.fullmatch(r"mem\.(\w+)\.(data|bss)", tag)
+        ptag = R.tag_source(tag) if R is not None and not m else tag
         if m and f"{m.group(1)}.{m.group(2)}" in schema.sections:
             lo, hi = schema.sections[f"{m.group(1)}.{m.group(2)}"]
             if m.group(2) == "data":
@@ -950,21 +1549,26 @@ def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -
                         o = v["addr"] - lo
                         buf[o:o + v["size"]] = tbody[at + o:at + min(o + v["size"], size)]
                         continue
-                    r = by_id.get(v["id"])
+                    wid = R.var_source(v["id"]) if R is not None else v["id"]
+                    r = by_id.get(wid) if wid is not None else None
                     if r is None:
-                        dec.warn["variable not in the state (left zero)"] += 1
+                        var_lost(dec, v, buf, v["addr"] - lo, "missing")
                         continue
                     if "arena" in r:
                         put_arena(dec, r["arena"], buf, v["addr"] - lo, v["size"])
                         continue
-                    dec.put(v["tid"], r["v"], buf, v["addr"] - lo)
-        elif tag in by_part:
-            r = by_part[tag]
+                    put_variable(dec, v, r, wid, buf, v["addr"] - lo)
+        elif ptag is not None and ptag in by_part:
+            r = by_part[ptag]
+            if ptag != tag:
+                dec.applied["renamed by a state rule"] += 1
             pt = part_target(schema, tag)
+            wpt = part_target(writer, ptag) if writer is not None else None
             if pt is not None and "arr" in r:
                 # of the element this build's variable points at: "arr" names the writer's, by its DWARF offset when
                 # it has no name (hw.c's Pending: MinGW's LTO drops the typedef), which only the same build has
                 et = pointed_struct(schema, pt[2])
+                wet = pointed_struct(writer, wpt[2]) if wpt is not None else None
                 if et is None:
                     dec.warn["array part not a struct pointer in this build (left empty)"] += 1
                     buf = bytearray()
@@ -972,11 +1576,13 @@ def decode(doc: dict, schema: Schema, template: Path, stackless: bool = False) -
                     es = schema.size(et)
                     buf = bytearray(len(r["v"]) * es)
                     for k, v in enumerate(r["v"]):
-                        dec.put(et, v, buf, k * es)
+                        dec.put(et, v, buf, k * es, wet)
             elif pt is not None:
-                dec.put(pt[2], r["v"], buf, 0)
-        elif tag in raws:
-            b = base64.b64decode(raws[tag]["b64"]); buf[:len(b)] = b[:size]
+                dec.put(pt[2], r["v"], buf, 0, wpt[2] if wpt is not None else None)
+        elif ptag is not None and ptag in raws:
+            if ptag != tag:
+                dec.applied["renamed by a state rule"] += 1
+            b = base64.b64decode(raws[ptag]["b64"]); buf[:len(b)] = b[:size]
         else:
             dec.warn["chunk not in the state (left zero)"] += 1
         t = tag.encode()
@@ -1077,7 +1683,7 @@ def crosscheck(a_state: Path, a: Schema, b_state: Path, b: Schema, limit=25) -> 
     every chunk P1 encodes must come out as B has it. The raw chunks (heap, stack: P2, P3/P4) are left out."""
     doc, enc = encode(a_state, a)
     doc = json.loads(json.dumps(doc))
-    body, dec = decode(doc, b, b_state)
+    body, dec = decode(doc, b, b_state, writer=a)
     _, bbody = sc.read_state(b_state)
     body, bbody = masked_heap(b, body), masked_heap(b, bbody)
     raw_tags = {r["tag"] for r in doc["raw"] if r["why"].startswith(("same build", "part not"))}
@@ -1650,12 +2256,15 @@ def stable_name(schema: Schema, tid):
 
 
 def part_tid(schema: Schema, t: dict, dec: "Decoder"):
-    """A struct part's type in this build: by its name; an unnamed one by the saving build's DWARF offset, which
-    only the same build has."""
+    """A struct part's type in this build: by its name (a renamed type's: the rules); an unnamed one by the saving
+    build's DWARF offset, which only the same build has."""
     if t.get("name"):
-        tid = schema.type_names.get(t["name"])
+        name = dec.rules.type_name(t["name"]) if dec.rules is not None else t["name"]
+        tid = schema.type_names.get(name) if name is not None else None
         if tid is None:
             dec.warn["heap part type not in this build (left zero)"] += 1
+        elif name != t["name"]:
+            dec.applied["renamed by a state rule"] += 1
         return tid
     return t["tid"] if t.get("tid") in schema.types else None
 
@@ -1671,19 +2280,25 @@ def part_size(schema: Schema, part: dict, dec: "Decoder", tid=None) -> tuple[int
         return part["size"], []
     if tid is None:
         return part.get("size", 0), []
+    wt = t.get("tid") if dec.w is not None and isinstance(t, dict) else None  # (the writer's type of the part)
     if "upto" in part:
         if part["upto"] is None:
             return part["size"], [0]
-        o = Decoder.offset_of(dec, tid, [part["upto"]])
+        o = Decoder.offset_of(dec, tid, [part["upto"]], wt)
         return (o if o is not None else part.get("size", 0)), [0]
     eo, o = [], 0
-    cr = counted_rule(schema, tid) if part.get("counted") else None
+    cs = counted_source(dec, tid, wt) if part.get("counted") else None
     for v in part["v"]:
         eo.append(o)
-        if cr:
-            r, a, _ = cr
-            key = array_key(schema, tid, a); av = v.get(key)
-            n = (len(bytes.fromhex(av["x"])) // av["w"]) if isinstance(av, dict) else len(av or [])
+        if cs:
+            (r, a, _), key = cs
+            av = v.get(key) if key is not None else None
+            if isinstance(av, list):
+                n = len(av)
+            elif isinstance(av, dict) and "x" in av and av.get("w"):
+                n = len(bytes.fromhex(av["x"])) // av["w"]
+            else:
+                n = 0  # (put_element warns)
             o += a["off"] + n * schema.size(schema.types[a["type"]]["of"])
         else:
             o += schema.size(tid)
@@ -1710,24 +2325,47 @@ def decode_heap_layout(h: dict, schema: Schema, dec: "Decoder") -> None:
     dec.heap = layout
 
 
-def put_element(dec: "Decoder", tid, v, buf, off, counted):
+def counted_source(dec: "Decoder", tid, wt):
+    """The reader's counted array of struct tid (its rule, field) and the writer's key of it (a renamed member's by
+    the rules), or None when the reader does not count tid."""
+    cr = counted_rule(dec.s, tid)
+    if cr is None:
+        return None
+    key = array_key(dec.s, tid, cr[1])
+    return cr, (dec.rules.field_source(tid, wt, key) if dec.rules is not None else key)
+
+
+def put_element(dec: "Decoder", tid, v, buf, off, counted, wt=None):
+    """One struct element of a part (wt: the writer's type of it). A counted array the reader does not count, or
+    the state does not hold as an array, leaves the element's own members only (warned)."""
     if counted:
-        r, a, _ = counted_rule(dec.s, tid)
-        key = array_key(dec.s, tid, a); av = v.get(key)
+        cs = counted_source(dec, tid, wt)
+        if cs is None:
+            dec.warn["counted array not counted in this build (its elements left out)"] += 1
+            dec.put(tid, v, buf, off, wt)
+            return
+        (r, a, _), key = cs
+        av = v.get(key) if key is not None else None
+        if not (isinstance(av, list) or isinstance(av, dict) and "x" in av):
+            dec.warn["counted array not in the state (left zero)"] += 1
+            dec.put(tid, v, buf, off, wt)
+            return
         of = dec.s.types[a["type"]]["of"]; es = dec.s.size(of); base = off + a["off"]
         first = dict(v)
         if isinstance(av, dict):
             first[key] = {"x": av["x"][:2 * es], "w": es}
         else:
             first[key] = av[:1]
-        dec.put(tid, first, buf, off)
+        dec.put(tid, first, buf, off, wt)
         if isinstance(av, dict):
             b = bytes.fromhex(av["x"]); buf[base:base + len(b)] = b
         else:
+            wcr = counted_rule(dec.w, wt) if dec.w is not None and wt is not None else None
+            wof = dec.w.types.get(wcr[1]["type"], {}).get("of") if wcr is not None else None
             for j, e in enumerate(av):
-                dec.put(of, e, buf, base + j * es)
+                dec.put(of, e, buf, base + j * es, wof)
         return
-    dec.put(tid, v, buf, off)
+    dec.put(tid, v, buf, off, wt)
 
 
 def decode_heap(h: dict, schema: Schema, dec: "Decoder", heap_size: int) -> bytearray:
@@ -1751,7 +2389,7 @@ def decode_heap(h: dict, schema: Schema, dec: "Decoder", heap_size: int) -> byte
         # the caller field (a code address of the saving build) is left zero: the heap's own debugging uses it
         bits = (rec["u"] << 21) | (rec["pin"] << 25) | (rec["ty"] << 26)
         buf[hdr + 8:hdr + 12] = bits.to_bytes(4, "little")
-        buf[hdr + 12:hdr + 16] = rec.get("pct", 0).to_bytes(4, "little")
+        buf[hdr + 12:hdr + 16] = dec.remap_hash(rec.get("pct", 0)).to_bytes(4, "little")
         put_parts(dec, rec["parts"], b["parts"], buf, b["data"] - heap_lo)
     return buf
 
@@ -1769,17 +2407,18 @@ def put_parts(dec: "Decoder", parts: list, layout: list, buf, base: int) -> None
                 buf[off + i * 8:off + i * 8 + 8] = (dec.pointer(v) & MASK64).to_bytes(8, "little")
         elif t == "otags":
             for i, v in enumerate(part["v"]):
-                dec.put("OTag", v, buf, off + i * 8)
+                dec.put("OTag", v, buf, off + i * 8, "OTag" if dec.w is not None else None)
         elif t == "prims":
             put_prims(dec, part["v"], buf, off, part["size"])
         elif lay.get("tid") is not None:
             tid = lay["tid"]
+            wt = t.get("tid") if dec.w is not None else None  # (the writer's type of the part)
             if "upto" in part:
-                tmp = bytearray(schema.size(tid)); dec.put(tid, part["v"][0], tmp, 0)
+                tmp = bytearray(schema.size(tid)); dec.put(tid, part["v"][0], tmp, 0, wt)
                 buf[off:off + lay["size"]] = tmp[:lay["size"]]
                 continue
             for e, v in zip(lay["eo"], part["v"]):
-                put_element(dec, tid, v, buf, off + e, part.get("counted"))
+                put_element(dec, tid, v, buf, off + e, part.get("counted"), wt)
 
 
 def layout_parts(schema: Schema, parts: list, dec: "Decoder") -> tuple[list, int]:
@@ -1837,7 +2476,7 @@ def put_arena(dec: "Decoder", arena: dict, buf, off: int, size: int) -> None:
                         (r["m4"] & 0xFFFFFFFF).to_bytes(4, "little"))
         buf[h + 8:h + 16] = (b["data"] + b["size"]).to_bytes(8, "little")
         buf[h + 16:h + 24] = nxt.to_bytes(8, "little")
-        buf[h + 24:h + 28] = r.get("pct", 0).to_bytes(4, "little")
+        buf[h + 24:h + 28] = dec.remap_hash(r.get("pct", 0)).to_bytes(4, "little")
         put_parts(dec, r["parts"], b["parts"], buf, h + ARENA_HEADER)
 
 
@@ -1900,12 +2539,14 @@ def main() -> int:
     u.add_argument("b_state", type=Path); u.add_argument("b_build", type=Path)
     a = ap.parse_args()
     if a.cmd == "convert":
-        doc, enc = encode(a.state, Schema(a.from_build.resolve(), state_bias(a.state)))
+        sw = Schema(a.from_build.resolve(), state_bias(a.state))
+        doc, enc = encode(a.state, sw)
         doc = json.loads(json.dumps(doc))
-        body, dec = decode(doc, Schema(a.to_build.resolve(), state_bias(a.template)), a.template, stackless=True)
+        body, dec = decode(doc, Schema(a.to_build.resolve(), state_bias(a.template)), a.template, stackless=True,
+                           writer=sw)
         write_state(a.template, body, a.out)
         print(f"statecanon convert: safe point {safe_point_of(doc)}; wrote {a.out} ({len(body)} bytes); "
-              f"encode {dict(enc.warn)}; decode {dict(dec.warn)}")
+              f"encode {dict(enc.warn)}; decode {dict(dec.warn)}; rules {dict(dec.applied)}")
         return 0
     if a.cmd == "untyped":
         found = untyped(a.a_state, Schema(a.a_build.resolve(), state_bias(a.a_state)), a.b_state,

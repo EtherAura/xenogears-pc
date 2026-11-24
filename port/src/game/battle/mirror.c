@@ -59,15 +59,57 @@
  * the save). Player 2 has a copy of it as the battle began (p2Items), put
  * in for each of its turns and taken out again after: its items are its
  * own, and what it uses never leaves player 1's.
+ * Billy's guns are player 2's own too: the battle's ammo list
+ * (battleAmmoItemIds and Counts, from inventory 1 at the start), the rounds
+ * loaded (gameState m22B8_ammoCounts, spent by spendBillyAmmo) and Billy's
+ * gun records (gameState m26C_party[4]: its first 0x24 bytes and
+ * m6F_equipment, which loadBillyAmmo and the turn's ammo test use) are put
+ * in with the items; a reload's battle entities are the copy's (loadBillyAmmo
+ * through AMMO_SLOT: pcVersusPartySlot).
+ * Its speed is the party's (battleGetSlotStatusSub through PARTY_SPEED: its
+ * agility less its last command's penalty, from its rows of
+ * m1058_partyBattleStats), not an enemy's (agility alone).
  * Escape is player 2 giving up: player 1 wins. Deathblow learning is the
  * party's alone (startBattleAttackAnimation: attacker < 3), so the copy's
  * hits teach player 1's save nothing; and the whole battle is inside the
  * versus checkpoint anyway (port/src/game/main/arena.c), put back after.
  * The copy's character ids are its members' own, so the gameState rows the
  * party's code reads by character id (m16C0_abilities, m26C_party,
- * m978_gears: learned deathblows and ethers, Billy's weapons) are already
- * the copy's: nothing is swapped in a mirror match (a party from another
- * save, the next step, will swap them around its turns).
+ * m978_gears: learned deathblows and ethers) are already the copy's: only
+ * Billy's guns are swapped in a mirror match (a party from another save,
+ * the next step, will swap the rest around its turns).
+ *
+ * The name label: the item and ether lists and the combo menu render their
+ * text where the label's is (VRAM 0x3C0,0: their names and descriptions),
+ * so while one of the menus' dialogue windows (0-3) is up the label is put
+ * away, and when they are all down it is rendered and shown again
+ * (pcVersusMirrorLabel, each frame): "Fei (P2)" for the whole turn but under
+ * a menu.
+ *
+ * What each player sees (the user's choice): their own side's status bar, as
+ * though they were player 1. On one screen the bar is the side's whose turn
+ * began last (a party member's: the party's; a copy's: player 2's three, as
+ * though player 2 were player 1); online each machine its own player's
+ * (pcVersusPerspective: netplay's player number, or XG_VERSUS_VIEW=1|2).
+ * Player 2's bar is the battle's own: its code (updatePolyArray3A88,
+ * renderGearHP, updatePortraits, battleRenderPortraitSelection,
+ * battleRenderPlayerPortraits, the fills in battleDrawAPBar, the turn gauge
+ * in wideBattleHud) runs again on a HUD of player 2's (p2Hud0/p2Hud1, as
+ * battleVar0/battleVar1: the HUD pointers swapped around it), its slots'
+ * numbers read through HUD_SLOT (src/battle/b_800728B8.c: slots 3-5). The
+ * copy's turn has the party's marks of a turn in that HUD: the portrait's
+ * pulse (battleTickMain's highlight, its pulse in battleUpdateInputs_mode1:
+ * pcVersusViewTick), the time bar flying to the turn gauge at the left
+ * (setupTurnRenderLoop's status 3, which the turn waits for as the party's
+ * does) and the AP marks on it.
+ * Display only: player 2's HUD is built every frame of a mirror match,
+ * whichever bar is shown (so the turn's wait on its gauge is the same on
+ * both screens of a session); the view only picks which HUD's packets are
+ * linked. Its build writes its own HUD and nothing the battle reads: the
+ * display numbers the bar's code leaves behind (currentEntity*,
+ * printIntegerToStringBattleBuffer) and the GTE are put back after, and the
+ * work is in hwClockHold (no time on the stepped clock, nothing delivered),
+ * so the game's frames and their vblanks are the same whichever is shown.
  *
  * Without a mirror match every hook returns at once.
  */
@@ -79,6 +121,7 @@
 #include "main/memory.h"
 #include "main/sprite.h"
 #include "battle/battle.h"
+#include "gte_pc.h"
 #include "pc_arena.h"
 #include "versus.h"
 
@@ -115,6 +158,32 @@ void removeCurrentMonsterNameString(void);
 s32 getCurrentDirectory(s32* directory, s32* offset);
 u16 bitmaskCharacterCheck(u16 mask, u8 i);
 u32 hwVSyncCount(void); /* port/src/system: the log's vblank */
+void hwClockHold(int on); /* port/src/system/hw.c */
+/* the status bar (src/battle/b_800728B8.c, b_80079674.c) */
+extern u8 battlePartyLayoutType;
+extern u16 partyMemberSpritesOffset[3 * 3];
+void updatePolyArray3A88(void);
+void renderGearHP(void);
+void updatePortraits(void);
+void battleRenderPortraitSelection(void);
+void battleRenderPlayerPortraits(void);
+void battleRenderPolyArray(POLY_FT4* p, s32 count, s32 oddOrEven);
+void setAPMarksPositions(u8 maxAP, u8 remainingAP);
+/* the numbers its code leaves behind (b_800728B8.c, b_8008A274.c) */
+extern s16 currentEntityMaxHpCopy;
+extern s16 currentEntityMaxHpForDisplay;
+extern s16 currentEntityHpCopy;
+extern s16 currentEntityHpForDisplay;
+extern s32 currentEntityGearHpCopy;
+extern s32 currentEntityGearMaxHpForDisplay;
+extern s32 currentEntityGearHpForDisplay;
+extern u8 currentEntityHpForDisplayBuffer[3];
+extern u8 currentEntityMaxHpForDisplayBuffer[3];
+extern u8 currentEntityGearMaxHpForDisplayBuffer[5];
+extern u8 printIntegerToStringBattleBuffer[9];
+/* Billy's ammo (the battle loader's list, from inventory 1) */
+extern u8 battleAmmoItemIds[];
+extern u8 battleAmmoItemCounts[];
 
 #define MIRROR_SPRITE_X 0x180 /* the copy's VRAM column (the header) */
 #define MIRROR_SPRITE_Y 0x1C0
@@ -128,15 +197,73 @@ static s32 p2Turn;       /* the entity whose turn player 2 plays now, 0 none */
 static s32 forfeit;
 static u8 emptyScript[4] = {0xFF, 0xFF, 0xFF, 0xFF}; /* a monster script that does nothing */
 static u8 p2Items[2][0x30]; /* player 2's inventory: battleEffectBF's counts and ids (the header) */
-/* The names the copy's turns and the enemy info show ("Fei (P2)"), as the
- * battle's own strings: a dialogue parameter block (getDialogParamPointer:
- * 4 bytes, then each string's offset from the block's start). */
-static u8 mirrorStrings[4 + 2 * 4 + 4 * (VERSUS_LABEL + 1)];
+/* player 2's Billy's guns (the header): the ammo list (ids, counts), the
+ * rounds loaded, Billy's gun records and his equipment */
+static u8 p2AmmoItems[2][0x30];
+static u8 p2Ammo[sizeof(gameState.m22B8_ammoCounts)];
+#define GUN_BYTES 0x24 /* a character's weapon records: m0..m4_weaponSlots[3] */
+static u8 p2Gun[GUN_BYTES];
+static u8 p2GunEquipment[sizeof(gameState.m26C_party[4].m6F_equipment)];
+/* The names the copy's turns and the enemy info show ("Fei (P2)"), and the
+ * party's for player 2's enemy info ("Fei"), as the battle's own strings: a
+ * dialogue parameter block (getDialogParamPointer: 4 bytes, then each
+ * string's offset from the block's start). String 1 + k is copy k's, 4 + k
+ * party member k's (NAME_PARTY), 0 empty. */
+#define NAMES 7
+#define NAME_PARTY 4
+static u8 mirrorStrings[4 + 2 * NAMES + NAMES * (VERSUS_LABEL + 1)];
+/* the name label of player 2's turn (pcVersusMirrorLabel) */
+static s32 labelOn;
+static u8 p2Label[VERSUS_LABEL];
+/* what each player sees (the header) */
+static sBattleVar0 p2Hud0; /* player 2's status bar: battleVar0 and battleVar1 as its code uses them */
+static sBattleVar1 p2Hud1;
+static s32 p2HudReady;
+static sBattleVar0* hudSaved0;
+static sBattleVar1* hudSaved1;
+static s32 hudPass;  /* the bar's code is on player 2's HUD: HUD_SLOT reads slots 3-5 */
+static s32 viewSide; /* the side whose turn began last: 1 player 1's, 2 player 2's */
 
 int pcVersusMirror(void);
 
 int pcVersusMirrorSlot(s32 entity) {
     return mirrorOn && entity >= 3 && entity < 6 && mirrorChar[entity - 3] != 0x7F;
+}
+
+/* HUD_SLOT (src/battle/b_800728B8.c): the slot whose numbers the bar's code
+ * reads for its box `slot`. */
+int pcBattleHudSlot(int slot) {
+    return hudPass ? slot + 3 : slot;
+}
+
+/* battleGetSlotStatusSub (src/battle/b_800941A4.c): an entity's wait to its
+ * next turn as its speed gives it (before the game's jitter), for the log;
+ * the copy's by the party's formula (PARTY_SPEED: its agility less its last
+ * command's penalty), as its member's. */
+void pcVersusSpeedLog(int entity, int wait) {
+    u8 row;
+
+    if (!mirrorOn || entity >= 6) {
+        return;
+    }
+    row = battleEntities.m5FC2_battleGetSlotStatusSub_current28Index;
+    pcArenaLog("mirror match: entity %d's wait %d (agility %d, command row %d, its penalty %d; vblank %u)", entity, wait,
+               battleEntities.m0_entities[entity].m0_base.m5A_agility, row,
+               (s8)battleEntities.m1058_partyBattleStats[entity][row].m27_agilityPenalty, hwVSyncCount());
+}
+
+/* AMMO_SLOT (src/battle/b_800941A4.c loadBillyAmmo): the battle entity of
+ * the acting side's party slot `slot`: on player 2's turn its copy's. */
+int pcVersusPartySlot(int slot) {
+    return p2Turn != 0 && slot < 3 ? slot + 3 : slot;
+}
+
+/* The bar to show: the player's own online (or XG_VERSUS_VIEW), else the
+ * side whose turn began last. */
+static s32 viewShown(void) {
+    s32 p = pcVersusPerspective();
+
+    return p == 1 || p == 2 ? p : viewSide;
 }
 
 /* BATTLE_CHARACTER (include/battle/battle.h): the party's code asks for a
@@ -172,6 +299,10 @@ void pcVersusMirrorSetup(void) {
     mirrorOn = pcVersusMirror();
     forfeit = 0;
     p2Turn = 0;
+    labelOn = 0;
+    p2HudReady = 0;
+    hudPass = 0;
+    viewSide = 1; /* the party's bar until a copy's turn */
     for (i = 0; i < 3; i++) {
         mirrorChar[i] = 0x7F;
         mirrorSprite[i] = NULL;
@@ -197,8 +328,9 @@ void pcVersusMirrorSetup(void) {
 /* ---- the copy (battleMain, after the loader) ---- */
 
 static void buildNames(void) {
-    s32 at = 4 + 2 * 4;
+    s32 at = 4 + 2 * NAMES;
     s32 k;
+    u8 c;
     u8 name[VERSUS_LABEL];
     u8 tag[8];
     s32 n;
@@ -206,17 +338,18 @@ static void buildNames(void) {
 
     __builtin_memset(mirrorStrings, 0, sizeof(mirrorStrings));
     pcVersusWord(tag, " (P2)");
-    for (k = 0; k < 4; k++) {
+    for (k = 0; k < NAMES; k++) {
         *(u16*)(mirrorStrings + 4 + 2 * k) = (u16)at;
-        if (k == 0 || mirrorChar[k - 1] == 0x7F) {
+        c = k == 0 ? 0x7F : k < NAME_PARTY ? mirrorChar[k - 1] : battleCharacters[k - NAME_PARTY];
+        if (c == 0x7F) {
             mirrorStrings[at++] = 0;
             continue;
         }
-        pcVersusGameText(name, gameState.m0_names[mirrorChar[k - 1]], VERSUS_LABEL - 7);
+        pcVersusGameText(name, gameState.m0_names[c], VERSUS_LABEL - 7);
         for (n = 0; name[n] != 0; n++) {
             mirrorStrings[at++] = name[n];
         }
-        for (i = 0; tag[i] != 0; i++) {
+        for (i = 0; k < NAME_PARTY && tag[i] != 0; i++) {
             mirrorStrings[at++] = tag[i];
         }
         mirrorStrings[at++] = 0;
@@ -271,24 +404,37 @@ void pcVersusBattleLoaded(void) {
     }
     buildNames();
     currentBattleSpecificStrings = mirrorStrings;
-    /* player 2's items: player 1's as the battle begins */
+    /* player 2's items and Billy's guns: player 1's as the battle begins */
     __builtin_memcpy(p2Items[0], battleEffectBF.m12_counts, sizeof(p2Items[0]));
     __builtin_memcpy(p2Items[1], battleEffectBF.m42_ids, sizeof(p2Items[1]));
+    __builtin_memcpy(p2AmmoItems[0], battleAmmoItemIds, sizeof(p2AmmoItems[0]));
+    __builtin_memcpy(p2AmmoItems[1], battleAmmoItemCounts, sizeof(p2AmmoItems[1]));
+    __builtin_memcpy(p2Ammo, gameState.m22B8_ammoCounts, sizeof(p2Ammo));
+    __builtin_memcpy(p2Gun, &gameState.m26C_party[4], sizeof(p2Gun));
+    __builtin_memcpy(p2GunEquipment, gameState.m26C_party[4].m6F_equipment, sizeof(p2GunEquipment));
 }
 
-/* Player 2's inventory in, player 1's out, or back (the header). */
-static void swapItems(void) {
+static void swapBytes(u8* a, u8* b, s32 n) {
     u8 t;
     s32 i;
 
-    for (i = 0; i < 0x30; i++) {
-        t = battleEffectBF.m12_counts[i];
-        battleEffectBF.m12_counts[i] = p2Items[0][i];
-        p2Items[0][i] = t;
-        t = battleEffectBF.m42_ids[i];
-        battleEffectBF.m42_ids[i] = p2Items[1][i];
-        p2Items[1][i] = t;
+    for (i = 0; i < n; i++) {
+        t = a[i];
+        a[i] = b[i];
+        b[i] = t;
     }
+}
+
+/* Player 2's inventory and Billy's guns in, player 1's out, or back (the
+ * header). */
+static void swapItems(void) {
+    swapBytes(battleEffectBF.m12_counts, p2Items[0], sizeof(p2Items[0]));
+    swapBytes(battleEffectBF.m42_ids, p2Items[1], sizeof(p2Items[1]));
+    swapBytes(battleAmmoItemIds, p2AmmoItems[0], sizeof(p2AmmoItems[0]));
+    swapBytes(battleAmmoItemCounts, p2AmmoItems[1], sizeof(p2AmmoItems[1]));
+    swapBytes(gameState.m22B8_ammoCounts, p2Ammo, sizeof(p2Ammo));
+    swapBytes((u8*)&gameState.m26C_party[4], p2Gun, sizeof(p2Gun));
+    swapBytes(gameState.m26C_party[4].m6F_equipment, p2GunEquipment, sizeof(p2GunEquipment));
 }
 
 /* ---- the sprites (createBattlePlayerSpriteActors) ---- */
@@ -355,9 +501,243 @@ void pcVersusMirrorEnd(void) {
     }
     mirrorOn = 0;
     p2Turn = 0;
+    labelOn = 0;
+    p2HudReady = 0;
+}
+
+/* ---- what each player sees: player 2's status bar (the header) ---- */
+
+/* Player 2's HUD in place of the party's (the bar's code then builds and
+ * draws player 2's), and back. */
+static void hudIn(void) {
+    hudSaved0 = battleVar0;
+    hudSaved1 = battleVar1;
+    battleVar0 = &p2Hud0;
+    battleVar1 = &p2Hud1;
+    hudPass = 1;
+}
+
+static void hudOut(void) {
+    battleVar0 = hudSaved0;
+    battleVar1 = hudSaved1;
+    hudPass = 0;
+}
+
+/* Player 2's HUD as the party's is set up (the battle loader's frames,
+ * labels, portraits, textures: the same members, so the same), with no turn
+ * in it and every box's numbers to make. */
+static void hudReady(void) {
+    s32 k;
+
+    if (p2HudReady || battleVar0 == NULL || battleVar1 == NULL) {
+        return;
+    }
+    __builtin_memcpy(&p2Hud0, battleVar0, sizeof(p2Hud0));
+    __builtin_memcpy(&p2Hud1, battleVar1, sizeof(p2Hud1));
+    for (k = 0; k < 3; k++) {
+        p2Hud1.m90_perPCTimeBarStatus[k] = 0;
+        p2Hud1.m7C_hpDisplayDirty[k] = 1;
+        p2Hud1.mE0_hpDigitCounts[k] = 0;
+        p2Hud1.mEC_apFuelDigitCounts[k] = 0;
+    }
+    for (k = 0; k < 4; k++) {
+        p2Hud1.m74_timeBarsLengths[k] = 0;
+        p2Hud1.m7F_drawTimeBarFill[k] = 0;
+    }
+    p2Hud1.m97_apMarkCount = 0;
+    p2Hud1.mAF_drawApCounter = 0;
+    p2Hud0.m6415_drawHighlight = 0;
+    p2Hud0.m6416_highlightFadingOut = 0;
+    p2HudReady = 1;
+}
+
+/* What the bar's code leaves behind outside the HUD, put back after
+ * player 2's bar is built: the display numbers and the GTE. */
+typedef struct {
+    s16 maxHpCopy, maxHp, hpCopy, hp;
+    s32 gearHpCopy, gearMaxHp, gearHp;
+    u8 hpDigits[3], maxHpDigits[3], gearDigits[5], integer[9];
+    GteState gte;
+} HudScratch;
+
+static void scratchSave(HudScratch* s) {
+    s->maxHpCopy = currentEntityMaxHpCopy;
+    s->maxHp = currentEntityMaxHpForDisplay;
+    s->hpCopy = currentEntityHpCopy;
+    s->hp = currentEntityHpForDisplay;
+    s->gearHpCopy = currentEntityGearHpCopy;
+    s->gearMaxHp = currentEntityGearMaxHpForDisplay;
+    s->gearHp = currentEntityGearHpForDisplay;
+    __builtin_memcpy(s->hpDigits, currentEntityHpForDisplayBuffer, sizeof(s->hpDigits));
+    __builtin_memcpy(s->maxHpDigits, currentEntityMaxHpForDisplayBuffer, sizeof(s->maxHpDigits));
+    __builtin_memcpy(s->gearDigits, currentEntityGearMaxHpForDisplayBuffer, sizeof(s->gearDigits));
+    __builtin_memcpy(s->integer, printIntegerToStringBattleBuffer, sizeof(s->integer));
+    gteSave(&s->gte);
+}
+
+static void scratchLoad(const HudScratch* s) {
+    currentEntityMaxHpCopy = s->maxHpCopy;
+    currentEntityMaxHpForDisplay = s->maxHp;
+    currentEntityHpCopy = s->hpCopy;
+    currentEntityHpForDisplay = s->hp;
+    currentEntityGearHpCopy = s->gearHpCopy;
+    currentEntityGearMaxHpForDisplay = s->gearMaxHp;
+    currentEntityGearHpForDisplay = s->gearHp;
+    __builtin_memcpy(currentEntityHpForDisplayBuffer, s->hpDigits, sizeof(s->hpDigits));
+    __builtin_memcpy(currentEntityMaxHpForDisplayBuffer, s->maxHpDigits, sizeof(s->maxHpDigits));
+    __builtin_memcpy(currentEntityGearMaxHpForDisplayBuffer, s->gearDigits, sizeof(s->gearDigits));
+    __builtin_memcpy(printIntegerToStringBattleBuffer, s->integer, sizeof(s->integer));
+    gteLoad(&s->gte);
+}
+
+/* drawBattleMode1, after the party's bar is built (the battle's own code,
+ * as on the PS1): player 2's built too, every frame of a mirror match; then
+ * 1 when player 2's is the bar to show (drawn here, the party's not), else
+ * 0 (the party's drawn by the caller). */
+int pcVersusViewBar(void) {
+    HudScratch scratch;
+    s32 shows2;
+
+    if (!mirrorOn || battleVar0 == NULL || battleVar1 == NULL) {
+        return 0;
+    }
+    shows2 = viewShown() == 2;
+    hwClockHold(1);
+    hudReady();
+    scratchSave(&scratch);
+    /* what the battle changes in the party's (a Gear's bar mode; the ring
+     * up, which shows the turn gauge's fill) */
+    __builtin_memcpy(p2Hud0.m835C_apFuelLabels, battleVar0->m835C_apFuelLabels, sizeof(p2Hud0.m835C_apFuelLabels));
+    p2Hud1.mCB_drawCommandRing = battleVar1->mCB_drawCommandRing;
+    p2Hud1.mAF_drawApCounter = 0; /* the AP counter is the turn's (the party's HUD's), below */
+    hudIn();
+    updatePolyArray3A88();
+    renderGearHP();
+    updatePortraits();
+    if (shows2) {
+        battleRenderPortraitSelection();
+        battleRenderPlayerPortraits();
+    }
+    hudOut();
+    scratchLoad(&scratch);
+    if (shows2 && battleVar1->mAF_drawApCounter) {
+        /* the turn's AP counter, which battleRenderPlayerPortraits draws with the party's bar */
+        battleRenderPolyArray(battleVar0->m9C8_APCounterDisplayPolys[0], battleVar1->m7B_apCounterLength,
+                              battleVar1->mA4_oddOrEven7B);
+    }
+    hwClockHold(0);
+    return shows2;
+}
+
+/* battleDrawAPBar's time bar fills and wideBattleHud's turn gauge: player
+ * 2's HUD in (1) while its bar is the one shown, then back (0). */
+static s32 viewSwapped;
+void pcVersusViewSwap(int in) {
+    if (in) {
+        if (mirrorOn && p2HudReady && !hudPass && viewShown() == 2) {
+            hudIn();
+            viewSwapped = 1;
+        }
+    } else if (viewSwapped) {
+        hudOut();
+        viewSwapped = 0;
+    }
+}
+
+/* battleUpdateInputs_mode1, each vblank: what it does for the party's HUD,
+ * for player 2's (the time bar's flight to the gauge, the portrait's pulse). */
+void pcVersusViewTick(void) {
+    sBattleVar0* p = &p2Hud0;
+
+    if (!mirrorOn || !p2HudReady) {
+        return;
+    }
+    p2Hud1.mA9_timeBarNumMoveSteps += 6;
+    p2Hud1.mAB_timeBarNumAnimationSteps++;
+    if (p->m6415_drawHighlight != 0) {
+        if (p->m6416_highlightFadingOut == 0) {
+            p->m6410_highlightLevel += 4;
+            if (p->m6410_highlightLevel > 0x80) {
+                p->m6410_highlightLevel = 0x7C;
+                p->m6416_highlightFadingOut = 1;
+            }
+        } else {
+            p->m6410_highlightLevel -= 4;
+            if (p->m6410_highlightLevel < 0) {
+                p->m6410_highlightLevel = 4;
+                p->m6416_highlightFadingOut = 0;
+            }
+        }
+    }
+}
+
+/* copyBattleVar1_m7C (battleTickMain, a turn's end): the party's bar shows
+ * the numbers the turn changed now, not as the damage is dealt (its HP
+ * marked changed); player 2's then too (all three made again, from the
+ * numbers as they are). */
+void pcVersusViewHpShown(void) {
+    s32 k;
+
+    if (!mirrorOn || !p2HudReady) {
+        return;
+    }
+    for (k = 0; k < 3; k++) {
+        p2Hud1.m7C_hpDisplayDirty[k] = 1;
+    }
+}
+
+/* battleTickMain: entity's turn begins. */
+void pcVersusViewTurn(u8 entity) {
+    if (!mirrorOn) {
+        return;
+    }
+    if (entity < 3) {
+        viewSide = 1;
+    } else if (pcVersusMirrorSlot(entity)) {
+        viewSide = 2;
+    }
+    pcArenaLog("mirror match: entity %d's turn (vblank %u), side %d; party time bar states %d %d %d", entity,
+               hwVSyncCount(), viewSide, battleVar1 != NULL ? battleVar1->m90_perPCTimeBarStatus[0] : -1,
+               battleVar1 != NULL ? battleVar1->m90_perPCTimeBarStatus[1] : -1,
+               battleVar1 != NULL ? battleVar1->m90_perPCTimeBarStatus[2] : -1);
+}
+
+/* ---- the enemy info window in a versus battle (enemyinfo.c) ---- */
+
+/* The first slot of the side it lists: the opponent of the side shown,
+ * player 2's copy (3) or, on player 2's screen, the party (0). */
+int pcVersusInfoFirst(void) {
+    return mirrorOn && viewShown() == 2 ? 0 : 3;
+}
+
+/* Slot's name in this battle's strings (currentBattleSpecificStrings). */
+int pcVersusInfoName(int slot) {
+    return mirrorOn && slot >= 0 && slot < 3 ? NAME_PARTY + slot : battleMonsterMapping[slot];
 }
 
 /* ---- player 2's turn (battleTickMain) ---- */
+
+/* pcVersusDraw (versus.c), each frame: player 2's name label up for its
+ * turn, but under the menus that render their text where its is (the
+ * header). */
+void pcVersusMirrorLabel(void) {
+    s32 menus;
+    s32 up;
+
+    if (!labelOn || battleVar1 == NULL) {
+        return;
+    }
+    menus = battleVar1->mB0_isDialogWindowInitialized[0] | battleVar1->mB0_isDialogWindowInitialized[1] |
+            battleVar1->mB0_isDialogWindowInitialized[2] | battleVar1->mB0_isDialogWindowInitialized[3];
+    up = battleVar1->mB0_isDialogWindowInitialized[5] && previousEntityTurn.m8_nameLabels[0].m5D_monsterNameIsDisplayed;
+    hwClockHold(1); /* work the PS1 has none of: no time on the stepped clock */
+    if (menus && up) {
+        pcVersusHideLabel();
+    } else if (!menus && !up) {
+        pcVersusShowLabel(p2Label); /* its text again: the menu's was where its is */
+    }
+    hwClockHold(0);
+}
 
 /* The ring for menu `menu`, as setupTurnRenderLoop draws it, RING_DY lower. */
 static void drawRing(u8 entity, u8 menu) {
@@ -379,12 +759,13 @@ static void drawRing(u8 entity, u8 menu) {
     battleVar1->mCB_drawCommandRing = 1;
 }
 
-/* setupTurnRenderLoop for player 2's member: the same, without the party's
- * time bar (it waits for the party's HUD) and its HUD bits. */
+/* setupTurnRenderLoop for player 2's member: the same, its time bar and AP
+ * marks in player 2's HUD (the header). */
 static void turnLoop(u8 entity) {
     sBattleVar2Sub* menu = &battleVar2->m0_entityMenus[entity];
     sBattleEntity* self = &battleEntities.m0_entities[entity];
     u8 c = mirrorChar[entity - 3];
+    u8 box = entity - 3;
     u8 target;
     s32 i;
 
@@ -398,13 +779,18 @@ static void turnLoop(u8 entity) {
     battleVar2->m2E4_deathblowCompleted = 0;
     battleVar2->m2DC_attackIndex = 0;
     battleVar2->m2D4_remainingAP = battleVar2->m2D5_maxAP = apConfigArray[entity].m4_currentAP;
+    p2Hud1.m90_perPCTimeBarStatus[box] = 3;
     battleVar2->m2E7_gearAttackCount = 0;
     newBattleInputButton2 = 0xFF;
     battleBssBlock.mA79 = 0;
-    /* the party waits here for its time bar's HUD (a frame or more), which
-     * also reads the pads again: the last turn's end left 0xFF (its end) */
+    /* the wait for its time bar to reach the turn gauge, as the party's
+     * (player 2's HUD moves it on every screen: the header), which also
+     * reads the pads again: the last turn's end left 0xFF (its end) */
     battleInputButton = 8;
-    battleRenderDebugAndMain();
+    for (i = 0; i < 120 && p2Hud1.m90_perPCTimeBarStatus[box] != 1; i++) {
+        battleRenderDebugAndMain();
+    }
+    pcArenaLog("mirror match: player 2's time bar at the gauge after %d frames (vblank %u)", i, hwVSyncCount());
     startCharacterJumpToEnemyVar0 = 1;
     battleSoundEffect2(0x5A);
     startCharacterJumpToEnemyVar0 = 0;
@@ -439,9 +825,10 @@ static void turnLoop(u8 entity) {
     updateCharacterBlinkingTask(characterIdToTargetBitmask(target));
     while (battleVar2->m2DE_actionDone == 0 && performAttackSub3_var0.m2_battleRunningVar1 == 0 &&
            battleVar2->m2DB_turnEnded == 0) {
-        /* no AP marks: they mark the party's time bar, turned into the
-         * gauge at the left for the member whose turn it is (updatePortraits);
-         * player 2 has no status box (its AP count shows under the ring) */
+        /* the AP marks on the turn gauge, in player 2's HUD */
+        hudIn();
+        setAPMarksPositions(battleVar2->m2D5_maxAP, battleVar2->m2D4_remainingAP);
+        hudOut();
         if (battleVar2->m2E2_previousActiveBattleMenu != battleVar2->m2DD_currentActiveBattleMenu) {
             battleVar2->m2F6_doublePressPending = 0;
             battleVar2->m2E2_previousActiveBattleMenu = battleVar2->m2DD_currentActiveBattleMenu;
@@ -500,6 +887,9 @@ static void turnLoop(u8 entity) {
     }
     battleVar1->mCB_drawCommandRing = 0;
     battleVar1->mAF_drawApCounter = 0;
+    p2Hud1.m90_perPCTimeBarStatus[box] = 0;
+    p2Hud1.m7F_drawTimeBarFill[box] = 0;
+    p2Hud1.m7C_hpDisplayDirty[box] = 1; /* its AP stored, as setupTurnRenderLoop's end */
     if (battleVar2->m2E3_hasAttacked) {
         apConfigArray[entity].m0_storedAP += battleVar2->m2D4_remainingAP;
         if (apConfigArray[entity].m0_storedAP > 0x1C) {
@@ -531,7 +921,15 @@ int pcVersusMirrorTurn(u8 entity) {
     pcArenaLog("mirror match: player 2's %d (entity %d), HP %d, AP %d, status %x %x %x (vblank %u)", mirrorChar[k], entity,
                self->m0_base.m4C_HP, apConfigArray[entity].m4_currentAP, self->m0_base.m7C_statusFlags[0],
                self->m0_base.m7C_statusFlags[1], self->m0_base.m7C_statusFlags[2], hwVSyncCount());
+    /* its portrait's highlight in player 2's bar, where battleTickMain puts
+     * the party's (its pulse: pcVersusViewTick) */
+    hudReady();
+    setXYWH(&p2Hud0.m63C8_portraitHighlight[D_800CCB04.m30_battleOddOrEven],
+            k * 0x60 + 0x10 + partyMemberSpritesOffset[battlePartyLayoutType * 3 + k], 8, 0x18, 0x18);
+    p2Hud0.m6414_highlightOddOrEven = D_800CCB04.m30_battleOddOrEven;
+    p2Hud0.m6415_drawHighlight = 1;
     if ((self->m0_base.m7C_statusFlags[0] & 0x2080) || (self->m0_base.m7C_statusFlags[2] & 0x1000)) {
+        p2Hud0.m6415_drawHighlight = 0;
         return 1; /* asleep, stopped...: no turn (as the party's) */
     }
     /* its attacks, deathblows and ethers where an enemy's attack resolves */
@@ -540,6 +938,8 @@ int pcVersusMirrorTurn(u8 entity) {
     pcVersusGameText(label, getDialogParamPointer(currentBattleSpecificStrings, battleMonsterMapping[entity]),
                      VERSUS_LABEL - 1);
     pcVersusShowLabel(label);
+    __builtin_memcpy(p2Label, label, sizeof(p2Label));
+    labelOn = 1; /* kept up for the turn (pcVersusMirrorLabel) */
     p2Turn = entity;
     swapItems(); /* its own items */
     if (self->m0_base.m7C_statusFlags[2] & 0x2000) {
@@ -553,13 +953,16 @@ int pcVersusMirrorTurn(u8 entity) {
                battleEffectBF.m42_ids[0], battleEffectBF.m12_counts[0], battleEffectBF.m42_ids[1],
                battleEffectBF.m12_counts[1], battleEffectBF.m42_ids[2], battleEffectBF.m12_counts[2], p2Items[1][0],
                p2Items[0][0], p2Items[1][1], p2Items[0][1], p2Items[1][2], p2Items[0][2]);
+    labelOn = 0;
     pcVersusHideLabel();
     previousEntityTurn.m0_lastEntityTurn = entity;
     battleVar1->m97_apMarkCount = 0;
+    p2Hud1.m97_apMarkCount = 0;
     updateCharacterBlinkingTask(0);
     loadMonsterAttackName();
     displayAndWaitMonsterAttackName();
     removeCurrentMonsterNameString();
+    p2Hud0.m6415_drawHighlight = 0; /* where battleTickMain ends the party's */
     pcArenaLog("mirror match: player 2's turn over: P1 HP %d %d %d, P2 HP %d %d %d", battleEntities.m0_entities[0].m0_base.m4C_HP,
                battleEntities.m0_entities[1].m0_base.m4C_HP, battleEntities.m0_entities[2].m0_base.m4C_HP,
                battleEntities.m0_entities[3].m0_base.m4C_HP, battleEntities.m0_entities[4].m0_base.m4C_HP,

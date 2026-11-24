@@ -464,6 +464,10 @@ typedef struct {
     /* The sprites take the lighting too (xg-rgcf.5.19): their own sun, rim,
      * shade at their feet and glow (light.comp pass 24, CHARACTERS). */
     int figureLight;
+    /* Flickering firelight (xg-rgcf.5.20): how deep (0: none), the time
+     * (seconds), the speed (flickers a second) and how irregular (0..1);
+     * the room's origin is roomTrans. */
+    float flicker, flickerTime, flickerSpeed, flickerIrregular;
     /* Ambient particles (xg-rgcf.5.10): their level (0: none) and size scale,
      * the time they drift by (seconds), the room's frame they keep their
      * places in (view = roomRot * room + roomTrans, the room in view units),
