@@ -59,6 +59,11 @@ def main() -> int:
         check("Thing: 1 (pcExtra)" in report, "the untagged field is named")
         check(re.search(r"pointer fields: game 1 data, 1 function", report) is not None, "pointer fields")
         check(any(f["name"] == "tick" for f in schema["functions"]), "functions listed")
+        # what a build converting this one's states needs without its executable (statecanon.py)
+        sym = {r[0]: r for r in schema.get("symbols", [])}
+        check("tick" in sym and sym["tick"][3] in "tT" and sym["tick"][1] == next(
+            f["addr"] for f in schema["functions"] if f["name"] == "tick"), "symbols: a function's name, address and kind")
+        check(len(schema.get("ro", [])) > 0 and all(lo < hi for lo, hi, _ in schema["ro"]), "read-only ranges")
     print(f"state-schema tests: {checks} checks passed")
     return 0
 

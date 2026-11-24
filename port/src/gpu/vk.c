@@ -8508,6 +8508,31 @@ static void presentPicture(const GpuDisplay* d, uint32_t vblank, int menu, const
     }
 }
 
+/* XG_HOST_STEP=1 (headless captures: the channel's videos, tools/publish/reel.py): on the stepped
+ * clock, where host presentation stays at the native rate ("Native rate during deterministic
+ * playback"), each vblank's picture is followed by those a 120 or 240 Hz display would show before
+ * the next vblank: interpolation_hz / 60 of them, sampled at vblank + k / n (k = 0 .. n-1) as
+ * gpuHostPoll samples between vblanks, each dumped as <XG_DUMP_PRESENT>/step_<vblank>_<k>.png
+ * (dump_host must be on, XG_DUMP_HOST=1). The picture at k = 0 is the vblank's own. 144 Hz has no
+ * whole number of pictures a vblank and is left out. Only the dumps change: nothing is shown. */
+static void steppedHostPictures(const GpuDisplay* d, uint32_t vblank) {
+    static int on = -1;
+    if (on < 0) {
+        const char* e = getenv("XG_HOST_STEP");
+        on = e != NULL && e[0] == '1';
+    }
+    if (!on || hostPresent.realtime || !hostPresent.dump || !interpolationEnabled() || !dumpPresentWanted(vblank))
+        return;
+    int rate = presentationRate();
+    if (rate != 120 && rate != 240) return;
+    int n = rate / 60;
+    for (int k = 0; k < n; k++) {
+        char shot[64];
+        snprintf(shot, sizeof(shot), "step_%06u_%d", (unsigned)vblank, k);
+        presentPicture(d, vblank, 0, shot, (double)vblank + (double)k / n, 1, 1);
+    }
+}
+
 void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
     cpuResolveFlush();
     if (vk.device == VK_NULL_HANDLE) return;
@@ -8575,6 +8600,7 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
         uint64_t began = SDL_GetTicksNS();
         presentPicture(d, vblank, 0, NULL, (double)vblank, 0, 1);
         if (ready) hostPresent.cost = (hostPresent.cost + SDL_GetTicksNS() - began) / 2;
+        steppedHostPictures(d, vblank);
     }
     hostPresent.nativeShown = vk.framesShown;
     hostPresent.nativeSequence = hostPresent.sequence;

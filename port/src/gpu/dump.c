@@ -140,6 +140,37 @@ static void deflateFixed(Out* o, const uint8_t* in, size_t n) {
     free(prev);
 }
 
+/* XG_DUMP_STORED=1 (headless captures whose pictures are read once and deleted: the channel's videos,
+ * tools/publish/reel.py): the same PNG, its deflate stream in stored (uncompressed) blocks, so a 4K picture
+ * is written without the search above, at the cost of its size. */
+static void deflateStored(Out* o, const uint8_t* in, size_t n) {
+    size_t i = 0;
+    do {
+        size_t len = n - i > 65535 ? 65535 : n - i;
+        outByte(o, i + len >= n ? 1 : 0); /* BFINAL, BTYPE 00 (stored), then the byte boundary */
+        outByte(o, (uint8_t)len);
+        outByte(o, (uint8_t)(len >> 8));
+        outByte(o, (uint8_t)~len);
+        outByte(o, (uint8_t)(~len >> 8));
+        if (o->len + len > o->cap) {
+            while (o->len + len > o->cap) o->cap = o->cap ? o->cap * 2 : 65536;
+            o->data = realloc(o->data, o->cap);
+        }
+        memcpy(o->data + o->len, in + i, len);
+        o->len += len;
+        i += len;
+    } while (i < n);
+}
+
+static int dumpStored(void) {
+    static int stored = -1;
+    if (stored < 0) {
+        const char* e = getenv("XG_DUMP_STORED");
+        stored = e != NULL && e[0] == '1';
+    }
+    return stored;
+}
+
 static uint32_t crcTable[256];
 
 static uint32_t crc32Update(uint32_t crc, const uint8_t* p, size_t n) {
@@ -195,7 +226,11 @@ int pngWrite(const char* path, int w, int h, const uint8_t* rgb) {
     Out z = {0};
     outByte(&z, 0x78);
     outByte(&z, 0x01);
-    deflateFixed(&z, raw, rawLen);
+    if (dumpStored()) {
+        deflateStored(&z, raw, rawLen);
+    } else {
+        deflateFixed(&z, raw, rawLen);
+    }
     uint32_t a = 1, b = 0;
     for (size_t i = 0; i < rawLen; i++) {
         a = (a + raw[i]) % 65521;

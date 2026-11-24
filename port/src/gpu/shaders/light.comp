@@ -880,8 +880,10 @@ void composite(ivec2 l) {
 
 // Ambient particles (xg-rgcf.5.10), after the blur: dust where the place is
 // lit, embers where it is dark (how bright the room is on the whole: the fog
-// pass's w). Each keeps its place in the room's frame, in a box around the
-// focus that wraps as the camera moves, and drifts by the frame's time: dust
+// pass's w). Each keeps its place in the room, in a cell of a grid fixed to
+// the room (only cells the frame can see hold any), so a turning camera sees
+// each one move exactly as the scenery at its depth (xg-dkkh); it drifts by
+// the frame's time, around its cell: dust
 // rises and wavers, embers wander. Pass 20 places each one (its record), as
 // blurred as the depth of field would make it at its depth, and marks the
 // tiles it may cover (particleTiles; 2048 bits a tile; atomicOr: the same bits whatever the
@@ -912,6 +914,11 @@ uint particleHash(uint x) {
 }
 float particleRandom(uint i, uint k) { return float(particleHash(i * 16u + k) >> 8) / 16777216.0; }
 
+// A cell's number for its hash: the same cell, the same number, wherever the camera is.
+uint particleCell(ivec3 c, uint salt) {
+    return particleHash(uint(c.x) * 73856093u ^ uint(c.y) * 19349663u ^ uint(c.z) * 83492791u ^ salt);
+}
+
 void particleRecord(int i) {
     int b = int(pc.lens.w);
     int rec = b + PART_REC + 3 * i;
@@ -920,9 +927,16 @@ void particleRecord(int i) {
     int level = int(setting.w);
     bool ember = i >= PARTICLE_EMBERS;
     int k = ember ? i - PARTICLE_EMBERS : i;
+    // The densities: so many in a box shaped to the view (a tenth wider than
+    // the frame at the farthest depth they take, depths 0.35 to 1.6 of the
+    // room's first focus), as the design had them.
     int count = ember ? (level == 1 ? 40 : level == 2 ? 70 : 110) : (level == 1 ? 500 : level == 2 ? 900 : 1400);
     block[rec + 1] = vec4(0.0);
-    if (k >= count || level <= 0) return;
+    if (level <= 0 || k >= 2 * count) return; // the frame holds well under twice the box's
+    float focus = pc.lens.z, box = setting.x, time = setting.y;
+    float focus0 = box / 2.5;          // the focus the room started with
+    float unit = focus0 / pc.view.w;   // a PS1 pixel at that focus, in view units
+    vec3 span = vec3(1.1 * 1.6 * focus0 * vec2(pc.work) / pc.view.w, 1.25 * focus0);
     float grey = block[b + FOG_SLOT].w; // how bright the room is shown
     float weight = ember ? 1.0 - smoothstep(0.10, 0.24, grey) : smoothstep(0.08, 0.22, grey);
     if (weight <= 0.0) return;
@@ -931,26 +945,63 @@ void particleRecord(int i) {
     vec3 trans = vec3(block[b + PART_SLOT].w, block[b + PART_SLOT + 1].w, block[b + PART_SLOT + 2].w);
     mat3 toRoom = mat3(r0, r1, r2); // its columns are the view's rows: the transpose
     mat3 toView = transpose(toRoom);
-    float focus = pc.lens.z, box = setting.x, time = setting.y;
-    float focus0 = box / 2.5;          // the focus the room started with
-    float unit = focus0 / pc.view.w;   // a PS1 pixel at that focus, in view units
-    // They wrap in a box shaped to the view (a tenth wider than the frame at
-    // the farthest depth they take, depths 0.35 to 1.6 of that focus), with
-    // places fixed in the room: as the camera moves they keep theirs, and one
-    // that leaves the box comes back at its other side.
-    vec3 span = vec3(1.1 * 1.6 * focus0 * vec2(pc.work) / pc.view.w, 1.25 * focus0);
-    vec3 middle = vec3((vec2(pc.work) * 0.5 - pc.lens.xy) * focus0 / pc.view.w, 0.975 * focus0); // the frame's middle
+
+    // Each lives in a cell of a grid fixed to the room (a quarter of the first
+    // focus a side), so as the camera turns or moves it keeps its place and
+    // moves on the frame exactly as the scenery at its depth. (Folded into a
+    // box in the view's frame instead, a far place moved with a turning camera
+    // by its true distance, drawn near: they raced across the frame, xg-dkkh.)
+    // A cell holds the design's density, the last of its share present in
+    // some cells by the cell's hash, and only cells the frame can see (with a
+    // cell's half-diagonal to spare: depths 0.35 to 1.6, the frame's sides)
+    // take a share of the budget: this one finds its cell by walking them in
+    // order. Each drifts inside its cell and comes back at its other side.
+    float cell = 0.25 * focus0, spare = 0.87 * cell;
+    // 0.57: the frame's density the design was tuned at (the view-shaped box
+    // kept over 40% of its share out of the frame: measured, xg-dkkh).
+    float perCell = 0.57 * float(count) * cell * cell * cell / (span.x * span.y * span.z);
+    float near = 0.35 * focus0, far = 1.6 * focus0;
+    vec2 sideLo = -pc.lens.xy / pc.view.w, sideHi = (vec2(pc.work) - pc.lens.xy) / pc.view.w; // the frame's sides per depth
+    vec3 rmin = vec3(1.0e30), rmax = vec3(-1.0e30);
+    for (int c = 0; c < 8; c++) {
+        float z = (c & 1) != 0 ? far : near;
+        vec2 xy = vec2((c & 2) != 0 ? sideHi.x : sideLo.x, (c & 4) != 0 ? sideHi.y : sideLo.y) * z;
+        vec3 corner = toRoom * (vec3(xy, z) - trans);
+        rmin = min(rmin, corner);
+        rmax = max(rmax, corner);
+    }
+    ivec3 c0 = ivec3(floor((rmin - spare) / cell)), c1 = ivec3(floor((rmax + spare) / cell));
+    uint salt = ember ? 0x9E3779B9u : 0x85EBCA6Bu;
+    int seen = 0, slot = -1;
+    ivec3 home = ivec3(0);
+    for (int z = c0.z; z <= c1.z && slot < 0; z++)
+        for (int y = c0.y; y <= c1.y && slot < 0; y++)
+            for (int x = c0.x; x <= c1.x && slot < 0; x++) {
+                ivec3 cc = ivec3(x, y, z);
+                vec3 vc = toView * ((vec3(cc) + 0.5) * cell) + trans;
+                if (vc.z < near - spare || vc.z > far + spare) continue;
+                if (vc.x < sideLo.x * vc.z - spare || vc.x > sideHi.x * vc.z + spare ||
+                    vc.y < sideLo.y * vc.z - spare || vc.y > sideHi.y * vc.z + spare) continue;
+                int n = int(perCell) + (float(particleCell(cc, salt) >> 8) / 16777216.0 < fract(perCell) ? 1 : 0);
+                if (k < seen + n) {
+                    home = cc;
+                    slot = k - seen;
+                }
+                seen += n;
+            }
+    if (slot < 0) return;
+
     vec3 up = toRoom * pc.view.xyz, right = toRoom * vec3(1.0, 0.0, 0.0), ahead = toRoom * vec3(0.0, 0.0, 1.0);
-    uint id = uint(i);
-    vec3 at0 = vec3(particleRandom(id, 0u), particleRandom(id, 1u), particleRandom(id, 2u)) * 8.0 * max(span.x, max(span.y, span.z));
+    uint id = particleCell(home, salt ^ (uint(slot + 1) * 0x27D4EB2Du)); // this one's own numbers
+    vec3 at0 = vec3(particleRandom(id, 0u), particleRandom(id, 1u), particleRandom(id, 2u));
     vec3 ph = 6.2831853 * vec3(particleRandom(id, 3u), particleRandom(id, 4u), particleRandom(id, 5u));
     float sp = 0.6 + 0.8 * particleRandom(id, 6u);
     vec3 drift = ember ? right * (5.0 * sin(0.9 * time * sp + ph.x) + sin(2.3 * time + ph.z)) +
                          up * (4.0 * sin(0.6 * time * sp + ph.y) + 0.8 * time) + ahead * (3.0 * sin(0.3 * time + ph.z))
                        : right * (3.0 * sin(0.7 * time * sp + ph.x)) + up * (2.2 * time * sp + 1.5 * sin(0.5 * time + ph.y)) +
                          ahead * (2.0 * sin(0.4 * time * sp + ph.z));
-    vec3 anchored = toView * (at0 + drift * unit) + trans; // its place in the room, in this view
-    vec3 v = middle + (fract((anchored - middle) / span + 0.5) - 0.5) * span;
+    vec3 placed = (vec3(home) + fract(at0 + drift * unit / cell)) * cell;
+    vec3 v = toView * placed + trans;
     if (v.z < 0.3 * focus0) return;
     vec2 at = v.xy * pc.view.w / v.z + pc.lens.xy;
     if (any(isnan(at)) || any(isinf(at))) return;

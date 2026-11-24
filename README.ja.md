@@ -35,12 +35,15 @@ Linux と Windows の両方で、ディスク 1 とディスク 2 のどちら�
 
 移植版はゲームデータをお手元のディスクイメージから読み込みます。ゲームデータは何も同梱していません。追加機能はすべて任意で、標準設定では PlayStation 版の見た目と演出を保ちます。GitHub の CI ではゲームデータを必要としない検査だけを行い、完全なビルドと製品版との照合はローカルで行います。
 
+<a id="original-work"></a>
+**独自の成果物。** 移植版のコードは、AI（Claude）の支援を受けながら、文書化されたハードウェアの動作と私たち自身の計測をもとに、このプロジェクトのために書いたものです。ゲームロジックは[逆コンパイル](https://github.com/EtherAura/xenogears)の C です。エミュレーターやほかのプロジェクトは、事実を調べるためだけに参照しました。実際に動かして出力を比べましたが、そのコード、テーブル、定数は移植版に一切取り込んでいません。`port/third_party/` のライブラリは、それぞれのライセンスに従います。
+
 ## 対応プラットフォーム
 
 - **Linux x86-64 と Windows x64。** [ダウンロード](https://github.com/EtherAura/xenogears-pc/releases/latest)を公開しています。
 - **FreeBSD 15 amd64。** 北米版と日本版のディスクに対応し、オリジナルエンジンと強化エンジンを含む[ネイティブパッケージ](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.20-freebsd)があります。ソフトウェア Vulkan を使う VM 上の FreeBSD 15.1 amd64 で、インストールと起動を確認しました。
 - **Android 13 以降、arm64 と x86-64。** すべての[リリース](https://github.com/EtherAura/xenogears-pc/releases/latest)に、それぞれ向けの署名済み APK があります。どちらを使うかとインストール方法は [Android のページ](docs/android-ja.md)にあります。Pixel 10 Pro XL（arm64）と Android 17 x86-64 のエミュレーターでテストしました。
 
-[開発への参加](CONTRIBUTING.ja.md) · [セキュリティ](SECURITY.ja.md) · [ディスカッション](https://github.com/EtherAura/xenogears-pc/discussions)
+[開発への参加](CONTRIBUTING.ja.md) · [セキュリティ](SECURITY.ja.md) · [行動規範](CODE_OF_CONDUCT.ja.md) · [ディスカッション](https://github.com/EtherAura/xenogears-pc/discussions)
 
 <sub>本プロジェクトの成果物: GPL-3.0 以降。サードパーティのライブラリはそれぞれのライセンスに従います。Xenogears © Square Enix。非公式であり、権利者とは関係ありません。</sub>

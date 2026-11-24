@@ -508,6 +508,8 @@ system/pad.c scriptKeys host devices, bindings, scripts (re-positioned on load)
 system/pad.c selectedProfile host devices, bindings, scripts (re-positioned on load)
 system/pad.c strings host devices, bindings, scripts (re-positioned on load)
 system/pad.c camIn host the free camera's stick and keys this frame
+system/pad.c cameraScript host XG_CAMERA_SCRIPT's lines (a harness script, found by the vblank count)
+system/pad.c cameraScriptCount host XG_CAMERA_SCRIPT's lines (a harness script, found by the vblank count)
 system/pad.c chordHeld host the first-person look chord's edge (Enhanced builds; live input, as camIn)
 system/pad.c padLog host the pad log file
 system/pad.c padLogChecked host the pad log file

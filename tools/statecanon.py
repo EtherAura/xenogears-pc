@@ -132,12 +132,7 @@ class Schema:
         self.text_syms = {}   # address -> [names]: static functions and identical bodies folded into one
         self.sym_addr = {}    # name -> address
         ro_named = []
-        for line in subprocess.run(["nm", "-n", "-S", "--defined-only", str(self.exe)], capture_output=True,
-                                   text=True).stdout.splitlines():
-            m = re.match(r"([0-9a-f]+) (?:([0-9a-f]+) )?(\S) (\S+)$", line)
-            if not m:
-                continue
-            a, size, typ, name = int(m.group(1), 16), int(m.group(2) or "0", 16), m.group(3), m.group(4)
+        for name, a, size, typ in s.get("symbols") or self.nm_symbols():  # (older schemas: from the executable)
             self.sym_addr.setdefault(name, a)
             if typ in "tTwW":
                 self.text_syms.setdefault(a, []).append(name)
@@ -148,17 +143,25 @@ class Schema:
         ro_named.sort()
         self.ro_named = ro_named; self.ro_lo = [r[0] for r in ro_named]
         self.retail_fn = retail
-        self.ro = []  # (lo, hi, file offset) of the read-only sections, and the file
-        for line in subprocess.run(["readelf", "-SW", str(self.exe)], capture_output=True, text=True).stdout.splitlines():
-            m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+\S+\s+(\S*)", line)
-            # file-backed data: .rodata, and the writable .data that holds the game's string tables (xgsrc_*,
-            # .LC*: constant in practice; read from the file, as the build starts them)
-            if m and m.group(2) == "PROGBITS" and "A" in m.group(6) and "X" not in m.group(6):
-                lo = int(m.group(3), 16)
-                if lo:
-                    self.ro.append((lo, lo + int(m.group(5), 16), int(m.group(4), 16)))
+        # (lo, hi, file offset) of the file-backed data that does not change: .rodata, and the writable .data
+        # that holds the game's string tables (xgsrc_*, .LC*: constant in practice; read from the file)
+        self.ro = [tuple(r) for r in (s.get("ro") or self.readelf_ro())]
         self._file = None
         self._strings = None
+
+    def nm_symbols(self):
+        for line in subprocess.run(["nm", "-n", "-S", "--defined-only", str(self.exe)], capture_output=True,
+                                   text=True).stdout.splitlines():
+            m = re.match(r"([0-9a-f]+) (?:([0-9a-f]+) )?(\S) (\S+)$", line)
+            if m:
+                yield m.group(4), int(m.group(1), 16), int(m.group(2) or "0", 16), m.group(3)
+
+    def readelf_ro(self):
+        for line in subprocess.run(["readelf", "-SW", str(self.exe)], capture_output=True, text=True).stdout.splitlines():
+            m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+\S+\s+(\S*)", line)
+            if m and m.group(2) == "PROGBITS" and "A" in m.group(6) and "X" not in m.group(6) and int(m.group(3), 16):
+                lo = int(m.group(3), 16)
+                yield lo, lo + int(m.group(5), 16), int(m.group(4), 16)
 
     def file(self):
         if self._file is None:

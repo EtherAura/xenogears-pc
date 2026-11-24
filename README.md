@@ -39,12 +39,15 @@ The port reads game data from your images; none is included.
 The extras are optional, and default settings preserve the PlayStation presentation.
 GitHub CI covers checks that need no game data; full builds and retail checks run locally.
 
+<a id="original-work"></a>
+**Original work.** The port's code was written for this project, with AI assistance (Claude), from documented hardware behaviour and our own measurements, and the game logic is the C of the [decompilation](https://github.com/EtherAura/xenogears). Emulators and other projects were references for facts only: we ran them and compared what came out, and none of their code, tables or constants went into the port. The libraries in `port/third_party/` keep their own licences.
+
 ## Platforms
 
 - **Linux x86-64 and Windows x64.** [Public downloads](https://github.com/EtherAura/xenogears-pc/releases/latest) are available.
 - **FreeBSD 15 amd64.** [Native package](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.20-freebsd) with Original and Enhanced engines for US and Japanese discs. Install and launch passed on FreeBSD 15.1 amd64 in a VM with software Vulkan.
 - **Android 13 or later, arm64 and x86-64.** Every [release](https://github.com/EtherAura/xenogears-pc/releases/latest) has a signed APK for each; the [Android page](docs/android.md) says which to take and how to install it. Tested on a Pixel 10 Pro XL (arm64) and in an Android 17 x86-64 emulator.
 
-[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Discussions](https://github.com/EtherAura/xenogears-pc/discussions)
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [Discussions](https://github.com/EtherAura/xenogears-pc/discussions)
 
 <sub>Project work: GPL-3.0 or later; third-party libraries retain their licences. Xenogears © Square Enix. Unofficial and unaffiliated.</sub>

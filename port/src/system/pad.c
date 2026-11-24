@@ -56,6 +56,15 @@
  * PLAYER1 VS PLAYER2, the Battle arena, port/src/system/arena.h); with it
  * port 2 is connected and reads only the script.
  *
+ * XG_CAMERA_SCRIPT=file: scripted camera input for headless runs (the
+ * channel's videos, tools/publish/reel.py), as XG_PAD_SCRIPT is the pad's:
+ * each line is "<vsync> <turn> <tilt> <zoom>", and from that vblank on the
+ * free camera and the first-person view (freecam.c) get those values as from
+ * the right stick (-1..1: turn right, tilt up and zoom out positive, as the
+ * keys L, I and O give them); "<vsync> recenter" returns to the game's view.
+ * '#' starts a comment. The line is found by the vblank count each time, so
+ * a state load or a rewind replays it.
+ *
  * padSetKeyboardPort(1): the keyboard plays on port 2 instead of port 1 (the
  * Battle arena's second player on the keyboard while the first has the
  * gamepad); port 2 is connected then. Not saved; padSetKeyboardPort(0) puts
@@ -81,6 +90,7 @@
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "cd/cd.h"
 #include "common.h"
@@ -1045,8 +1055,59 @@ static int keyBound(SDL_Scancode key) {
             if (bind.keys[i][k] == key) return 1;
     return 0;
 }
+/* XG_CAMERA_SCRIPT (above). */
+static struct CameraLine { int64_t vsync; float turn, tilt, zoom; int recenter; } *cameraScript;
+static int cameraScriptCount = -1;
+static void loadCameraScript(void) {
+    if (cameraScriptCount >= 0) return;
+    cameraScriptCount = 0;
+    const char* path = getenv("XG_CAMERA_SCRIPT");
+    if (path == NULL || path[0] == '\0') return;
+    FILE* f = fopen(path, "r");
+    if (f == NULL) {
+        fprintf(stderr, "pad: cannot read XG_CAMERA_SCRIPT %s\n", path);
+        return;
+    }
+    char line[256];
+    int cap = 0;
+    while (fgets(line, sizeof(line), f) != NULL) {
+        char* hash = strchr(line, '#');
+        if (hash != NULL) *hash = '\0';
+        struct CameraLine c = {0};
+        long long v;
+        char word[16];
+        if (sscanf(line, "%lld %15s", &v, word) == 2 && strcmp(word, "recenter") == 0) {
+            c.recenter = 1;
+        } else if (sscanf(line, "%lld %f %f %f", &v, &c.turn, &c.tilt, &c.zoom) != 4) {
+            continue;
+        }
+        c.vsync = v;
+        if (cameraScriptCount == cap) {
+            cap = cap ? cap * 2 : 64;
+            cameraScript = realloc(cameraScript, (size_t)cap * sizeof(*cameraScript));
+        }
+        cameraScript[cameraScriptCount++] = c;
+    }
+    fclose(f);
+}
+/* The camera script's line in force at a vblank (the last at or before it), or NULL. */
+static const struct CameraLine* cameraScriptAt(int64_t vsync) {
+    const struct CameraLine* at = NULL;
+    for (int i = 0; i < cameraScriptCount && cameraScript[i].vsync <= vsync; i++) at = &cameraScript[i];
+    return at;
+}
 static void sampleCamera(int live, u16 held) {
     float turn = 0, tilt = 0, zoom = 0; int rc = 0;
+    loadCameraScript();
+    if (cameraScriptCount > 0) {
+        const struct CameraLine* c = cameraScriptAt((int64_t)hwVSyncCount());
+        if (c != NULL) {
+            turn += c->turn;
+            tilt += c->tilt;
+            zoom += c->zoom;
+            rc |= c->recenter && c->vsync == (int64_t)hwVSyncCount();
+        }
+    }
     int zoomHeld = held & BTN_L2;
 #if XG_ENGINE_ENHANCED
     if (pcFirstPersonActive()) zoomHeld = 0;

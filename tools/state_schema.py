@@ -193,6 +193,30 @@ def sections(exe: Path) -> dict[str, tuple[int, int]]:
     return out
 
 
+def symbols(exe: Path) -> list[list]:
+    """Every defined symbol, [name, address, size, nm kind]: a state names functions and constants by them,
+    and a build converting another build's state has only that build's schema (no executable)."""
+    rows = []
+    for line in subprocess.run(["nm", "-n", "-S", "--defined-only", str(exe)], capture_output=True,
+                               text=True).stdout.splitlines():
+        m = re.match(r"([0-9a-f]+) (?:([0-9a-f]+) )?(\S) (\S+)$", line)
+        if m:
+            rows.append([m.group(4), int(m.group(1), 16), int(m.group(2) or "0", 16), m.group(3)])
+    return rows
+
+
+def read_only(exe: Path) -> list[list[int]]:
+    """The file-backed data that does not change: [start, end, file offset] of .rodata and the writable
+    .data sections that hold the game's string tables (allocated PROGBITS, not code)."""
+    out = []
+    for line in subprocess.run(["readelf", "-SW", str(exe)], capture_output=True, text=True).stdout.splitlines():
+        m = re.match(r"\s*\[\s*\d+\]\s+(\S+)\s+(\S+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+([0-9a-f]+)\s+\S+\s+(\S*)", line)
+        if m and m.group(2) == "PROGBITS" and "A" in m.group(6) and "X" not in m.group(6) and int(m.group(3), 16):
+            lo = int(m.group(3), 16)
+            out.append([lo, lo + int(m.group(5), 16), int(m.group(4), 16)])
+    return out
+
+
 def retail_symbols(version: str) -> dict[str, dict[str, int]]:
     """module -> name -> retail address, from config/<ver>/symbols/<module>.txt."""
     out = {}
@@ -728,7 +752,9 @@ def main() -> int:
         # PC_HEAP_OF and PC_STATE_AT's types by the hash a block's header (HeapBlock mC_pcType) or a range keeps
         "heap_types": heap_types, "counted": counted,
         # a union member's live view by another member's value (PC_STATE_UNION): struct tid -> rule
-        "unions": union_rules}
+        "unions": union_rules,
+        # what statecanon.py once read from the executable: symbol names and addresses, constant data's ranges
+        "symbols": symbols(exe), "ro": read_only(exe)}
     with gzip.open(out, "wt") as fh:
         json.dump(schema, fh)
     print(f"  schema: {out} ({out.stat().st_size} bytes)")
