@@ -898,9 +898,9 @@ void displaySection() {
         int chosen = listChoice("##tilt_shift", levels, IM_COUNTOF(levels), level);
         ImGui::EndDisabled();
         if (chosen != level) sceneSetTiltShift(chosen);
-        hint("In fields and on the world map, a thin strip along the top and the bottom of the picture blurs, most "
-             "at the edge, the miniature look. With Depth of field on too, the stronger blur of the two shows. "
-             "Dialogue, portraits and the HUD stay sharp. Off by default.");
+        hint("In fields and on the world map, the picture blurs toward its edges, faintly at first and most at the "
+             "edge, the miniature look. With Depth of field on too, the stronger blur of the two shows. Dialogue, "
+             "portraits and the HUD stay sharp. Off by default.");
         overrideNote("tilt_shift");
     }
     // Scene lighting (docs/PORT_HD2D.md section 15): Lighting is the top

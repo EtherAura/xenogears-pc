@@ -1233,7 +1233,11 @@ static void fillBuffer(int port, int connected, u16 buttons) {
     }
     p[0] = 0x00;
     p[1] = 0x41;
-    buttons = (u16)pcPadRegionalButtons(buttons);
+    if (!netplayActive()) {
+        /* In a session each player's own convention is applied before the input is sent
+         * (padVBlank): the other player's may differ from this side's (xg-htn.35.139). */
+        buttons = (u16)pcPadRegionalButtons(buttons);
+    }
     p[2] = (u8)~(buttons >> 8);
     p[3] = (u8)~buttons;
 }
@@ -1319,9 +1323,10 @@ void padVBlank(void) {
         live1 = (u16)selectChordFilter(live1); /* ... and Select in one is not the game's (selectchord.h) */
     }
     if (netplayActive()) {
-        /* netplay: this side's input out, both players' in (netplay.c) */
+        /* netplay: this side's input out, both players' in (netplay.c), each in the game's
+         * layout already: this player's button convention (jp_controls_us) applied here */
         unsigned a, b;
-        netplayFrame(port1 | live1 | port2 | live2, &a, &b);
+        netplayFrame(pcPadRegionalButtons(port1 | live1 | port2 | live2), &a, &b);
         fillBuffer(0, 1, (u16)a);
         fillBuffer(1, 1, (u16)b);
     } else if (!slowdownBiosMissed()) { /* a replay: the PS1's BIOS pad handler skipped this vblank */

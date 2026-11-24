@@ -57,7 +57,8 @@
  * (settingsPin: the settings menu shows them locked, a change is ignored,
  * nothing is written). Both also play without what one may have and the
  * other not: no memory cards (card1/card2 none), the game's own text and
- * battle voices (no other release's text or Japanese voices). Save states
+ * battle voices (no other release's text or Japanese voices), and no free
+ * camera (its heading is game state, its stick is not in the pads). Save states
  * are off in a session (savestate.c stateAvailable): a load on one side
  * alone would part the two games, and a state is the machine's whole memory,
  * not something to take from the other player.
@@ -127,6 +128,8 @@
 int pcWideGetMode(void); /* include/pc_wide.h: 4 while Battling runs */
 u32 portRandSeed(void);  /* libc.c */
 void srand(u32 seed);
+/* spu/output.c: a stall taken out of the clock (weak: the protocol's test links no sound output). */
+extern void spuOutputClockGap(void) __attribute__((weak));
 extern BattlingGear battlingGear1;
 extern BattlingGear battlingGear2;
 
@@ -213,6 +216,10 @@ static void logicList(NpSession* s) {
 static void logicPin(const NpTerms* t) {
     static const char* const fixed[][2] = {
         {"card1", "none"}, {"card2", "none"}, {"japanese_battle_voices", "0"}, {"japanese_cutscene_audio", "0"},
+        /* The free camera writes its heading into the game's state (freecam.c: m10E_cameraTan,
+         * m10C_camera2Tan; a field script reads it: a desync at vblank 669 in field 22), and its
+         * right-stick turns are not in the pad bytes the sides exchange (xg-htn.35.139). */
+        {"free_camera", "0"},
         {"text_dialogue", "disc"}, {"text_battle", "disc"}, {"text_menus", "disc"}, {"text_names", "disc"},
     };
     for (int i = 0; i < logicCount; i++) {
@@ -659,6 +666,11 @@ void netplayPace(void) {
         SDL_DelayPrecise((Uint64)(ahead * 1e9));
     } else if (ahead < -0.1) {
         N.wall0 = wall - (uint64_t)((emu - N.emu0) * 1e9); /* after a stall: on from now, no rush to catch up */
+        /* So nothing that comes is late: the sound output must not skip what
+         * the device's silence through the stall "owed" (spu/output.c). The
+         * game never catches up here, so that debt would grow as fast as the
+         * sound arrives and the session would stay silent (xg-htn.35.145). */
+        if (spuOutputClockGap) spuOutputClockGap();
     }
 }
 

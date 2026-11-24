@@ -23,12 +23,38 @@
  * enemy can do now as its script allows it now (its phases, counters, HP
  * tests...): the action lists it can build. Player 2 picks one of the actions
  * (named as the game names them: the attack's name from the battle's
- * strings), then one of its targets, in the battle's dialogue window on pad 2;
+ * strings; an attack without one by what it is, Physical or Ether, its power
+ * and "all", from the entry its damage uses: xg-htn.35.140), then one of its
+ * targets, on pad 2;
  * then the turn's script runs for real (every op, as executeMonsterScript
  * runs it) with the draws that make that choice. "Auto" leaves the turn to
  * the game's random draws; so does a turn with only one outcome, and a
  * missing pad 2. The enemies' reactions (when attacked, at the end of the
  * party's turn) stay the game's.
+ *
+ * Where player 2 picks (xg-htn.35.141): in the party's own command ring,
+ * borrowed for the enemy's turn (drawn as setupTurnRenderLoop draws it, from
+ * the enemy's command slots: updateBattleMenuSpriteForMenu; the Gear ring
+ * when the party is in its Gears). Its Right, Down and Left slots are the
+ * enemy's actions, Up is Auto, an empty slot has no word; the words stay the
+ * ring's own (Attack, Item, Defend, Ether: the ring has no others), and the
+ * highlighted slot's action is named in the acting monster's name label
+ * (previousEntityTurn's first, in dialogue window 5, widened to the right for
+ * a long name), with the ring 16 pixels lower than the party's so the label
+ * leaves its Up slot clear. The acting enemy has the game's target marker
+ * (and blinks) while the ring is up. Then the target, as the party picks
+ * one: the game's marker on the targets of each outcome of that action in
+ * turn, the four red arrows where the D-pad leads (selectNewSlotByDirection,
+ * as abilitySelectTarget steps; outcomes whose targets the directions cannot
+ * tell apart, or reach, go in a row instead: Right and Down next, Left and
+ * Up back), confirm picks it, cancel goes back to the ring. An action with
+ * one outcome needs no target. The buttons are the party's in its ring
+ * (battleHandleInput, after the game's button remapping): the three that
+ * confirm (4, 6 and 7) and the one that cancels (5). Everything the ring and
+ * the target step borrow (the enemy's command slots, the ring, the arrows,
+ * the marker, the name label) is put back after. More than three actions
+ * keep the battle's dialogue window instead: a list of the actions, then of
+ * the targets, Up and Down, confirm.
  *
  * The end: whoever wins, a line in the same window says so ("Player 1 wins",
  * "Player 2 wins"), then the battle ends the way that gives nothing and costs
@@ -68,16 +94,23 @@ void skipScriptIfFalse(sBattleScriptExecutionContext* ctx);
 void advanceBattleScript(sBattleScriptExecutionContext* ctx);
 void executeMonsterScript(u8 entity, s32 unused);
 u16 bitmaskCharacterCheck(u16 mask, u8 i);
+u8 selectNewSlotByDirection(u8 inputSlot, u8 direction);
+void initBattleG3Array(void);
+void removeTargetSelectionCursors(void);
+void drawBattleDialogWindow(u8 idx, u16 x, u16 y, u16 w, u16 h);
+void loadImageSync(RECT* rect, void* data);
 void* allocateBattleHeap(s32 size, s32 flags);
 s32 getCurrentDirectory(s32* directory, s32* offset);
 s32 isControllerConnected(s32 port);
 s32 pcPadHeldRemappedPort(s32 port); /* src/main/pad.c */
 u32 portRandSeed(void);               /* port/src/system/libc.c */
+u32 hwVSyncCount(void);               /* port/src/system: the log's vblank */
 void srand(u32 seed);
 extern u8* currentBattleSpecificStrings;
 extern u8 battleMonsterMapping[11];
 extern u8 battleConfigs[0x220];
 extern u8 requestedBattleConfig;
+extern u8 targetsPerPriority[12];
 
 #define MAX_DRAWS 24     /* draws a turn's script makes (a target op redraws) */
 #define MAX_RUNS 6000    /* probe runs a turn */
@@ -347,6 +380,54 @@ static void actionLabel(u8* out, const sBattleScriptContext* c) {
             }
         }
     }
+#if !VERSION_JP
+    /* No name in the battle's strings: what the attack is, from the entry the
+     * damage uses (battleEntities.m35D8_enemiesBattleStats[operand]: the
+     * attack's index + 0xFF, performAttackSub3): Ether for attack formula 1
+     * or attack flag 0x100 (b_800941A4.c: the ether stat, ether defence and
+     * immunity), else Physical; the damage's multiplier, power / 20 ("x1.5");
+     * "all" for a mask of more than one target. The JP narrow font has no H:
+     * there it stays ACTION. */
+    for (k = 0; k < 32; k++) {
+        if (c[k].m0_attackType == 1 && c[k].m1_operand < 200) {
+            const sBattle800CDD40Sub* a = &battleEntities.m35D8_enemiesBattleStats[c[k].m1_operand];
+            s32 ether = a->m1A_attackFormula == 1 || (a->mA_attackFlags & 0x100);
+            /* power / 20 scales the damage: formulas 0 and 1 at the end
+             * (startBattleAttackAnimationVar8_0 and the Gears' _var8_0:
+             * attack flag 0x400 makes it 20), formula 2 in the attack */
+            s32 power = a->m1A_attackFormula != 2 && (a->mA_attackFlags & 0x400) ? 20 : a->m11_power;
+            s32 targets = 0;
+            s32 i;
+            char s[LABEL];
+            s32 n = 0;
+            const char* p;
+
+            for (i = 0; i < 11; i++) {
+                targets += bitmaskCharacterCheck(c[k].m6_mask, i) != 0;
+            }
+            /* By hand: a libc call here would get a pc_link stub (game C). */
+            for (p = ether ? "Ether" : "Physical"; *p != 0; p++) s[n++] = *p;
+            if (power != 20) {
+                s32 h = power * 5; /* power / 20 in hundredths: at most 1275 */
+                s[n++] = ' ';
+                s[n++] = 'x';
+                if (h >= 1000) s[n++] = (char)('0' + h / 1000);
+                s[n++] = (char)('0' + h / 100 % 10);
+                if (h % 100 != 0) {
+                    s[n++] = '.';
+                    s[n++] = (char)('0' + h / 10 % 10);
+                    if (h % 10 != 0) s[n++] = (char)('0' + h % 10);
+                }
+            }
+            if (targets > 1) {
+                for (p = " all"; *p != 0; p++) s[n++] = *p;
+            }
+            s[n] = 0; /* at most "Physical x12.7 all": 18 of LABEL */
+            word(out, s);
+            return;
+        }
+    }
+#endif
     for (k = 0; k < 32; k++) {
         if (c[k].m0_attackType == 1 || c[k].m0_attackType == 2) {
 #if VERSION_JP
@@ -374,15 +455,12 @@ static void actionLabel(u8* out, const sBattleScriptContext* c) {
 #endif
 }
 
-static void targetLabel(u8* out, const sBattleScriptContext* c) {
+/* An action list's targets: an attack's or an ability's (types 1, 2, 13),
+ * else the first entry's (a type 15 animation also names the actor itself). */
+static u16 targetMask(const sBattleScriptContext* c) {
     s32 k;
-    s32 i;
-    s32 count = 0;
-    s32 first = -1;
     u16 mask = 0;
 
-    /* an attack's or an ability's targets (types 1, 2, 13), else the first
-     * entry's (a type 15 animation also names the actor itself) */
     for (k = 0; k < 32 && mask == 0; k++) {
         if (c[k].m0_attackType == 1 || c[k].m0_attackType == 2 || c[k].m0_attackType == 13) {
             mask = c[k].m6_mask;
@@ -393,6 +471,15 @@ static void targetLabel(u8* out, const sBattleScriptContext* c) {
             mask = c[k].m6_mask;
         }
     }
+    return mask;
+}
+
+static void targetLabel(u8* out, const sBattleScriptContext* c) {
+    s32 i;
+    s32 count = 0;
+    s32 first = -1;
+    u16 mask = targetMask(c);
+
     for (i = 0; i < 11; i++) {
         if (bitmaskCharacterCheck(mask, i)) {
             if (first < 0) {
@@ -587,6 +674,377 @@ static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel
 static u8 labels[MAX_CHOICES][LABEL];
 static s32 actionOf[MAX_CHOICES]; /* the outcome each action choice stands for */
 
+/* ---- player 2's ring: the party's command ring, borrowed (xg-htn.35.141) ---- */
+
+#define RING_ACTIONS 3 /* Right, Down and Left */
+#define RING_AUTO 3    /* Up */
+#define BUTTON_EXECUTE (0x20 | 0x80 | 0x10) /* battleHandleInput's 4, 6 and 7 */
+
+/* battleInputButton's directions 0..3 (Right, Down, Left, Up): the ring's
+ * slots 0..3, selectNewSlotByDirection's directions, the arrows' order. */
+static const u16 directionBits[4] = {0x2000, 0x4000, 0x8000, 0x1000};
+
+/* The ring's words, glyphs of the battle font as the party's command slots
+ * hold them (battleCommandsSetups, retail data, the same on US and JP): on
+ * foot Attack, Item, Defend, Ether (0x24, the plain Ether of the setups);
+ * in a Gear the Gear ring's four (setup 16, every Gear's but Elly's):
+ * Attack, Item, Charge and its Ether word. */
+static const u8 footWords[4] = {0x1E, 0x1C, 0x22, 0x24};
+static const u8 gearWords[4] = {0x1F, 0x1D, 0x23, 0x2B};
+
+/* The acting monster's name label (battleTickMain: previousEntityTurn's
+ * first, in dialogue window 5 as setupStringsForMonsterNames sets it up),
+ * centred where drawMonsterNames centres it. */
+#if VERSION_JP
+#define NAME_CENTER 0x3A
+#else
+#define NAME_CENTER 0x40
+#endif
+#define NAME_X 8
+#define NAME_W ((NAME_CENTER - NAME_X) * 2)
+#define NAME_Y 0x2A
+#define NAME_H 0x12
+
+static s32 choosing; /* pcVersusChoosing */
+static s32 ringGear; /* the Gear ring (the party's ring in a Gear battle) */
+static s32 nameWide; /* window 5 widened for a long label */
+
+/* What the ring and the target step borrow, put back after. */
+static struct {
+    sBattleVar2Sub menu;
+    u8 names[4];
+    u8 drawRing;
+    u8 ringOddOrEven;
+    s32 ringLength[2];
+    u8 menuDisabled;
+    u8 targetConfirmed;
+    u8 arrows;
+    u8 targets[12];
+    sBattle800c3e24 g3;
+} borrowed;
+
+/* 1 while player 2 picks in the ring: the mouse's targeting (mouse_battle.c)
+ * stays out of it (the arrows are up, but the choice is pad 2's). */
+int pcVersusChoosing(void) {
+    return choosing;
+}
+
+/* The label: the game centres it on NAME_CENTER (drawMonsterNames); one
+ * longer than the window gets leading spaces until it starts where the
+ * window's text starts, and the window grows to the right for it. */
+static void showLabel(const u8* s) {
+    sMonsterTurnSub* l = &previousEntityTurn.m8_nameLabels[0];
+    u8 text[LABEL + 40];
+    s32 t = renderString((u8*)s, l->m58_ramBufferFromMonsterName, 0x39, 0);
+    s32 w = t;
+    s32 pad;
+    s32 n;
+
+    for (pad = 1; t + 16 > NAME_W && NAME_CENTER + w / 2 - t < NAME_X + 8 && pad < 40 && w < 0x39 * 4 - 8; pad++) {
+        for (n = 0; n < pad; n++) {
+            text[n] = 0x10; /* a space */
+        }
+        for (; s[n - pad] != 0 && n < (s32)sizeof(text) - 1; n++) {
+            text[n] = s[n - pad];
+        }
+        text[n] = 0;
+        w = renderString(text, l->m58_ramBufferFromMonsterName, 0x39, 0);
+    }
+    l->m5E_currentMonsterNameStringWidth = w;
+    loadImageSync(&l->m50_monsterNameVRamRect, l->m58_ramBufferFromMonsterName);
+    if (t + 16 > NAME_W) {
+        n = NAME_CENTER + w / 2 + 8 - NAME_X; /* to the text's end, and a margin */
+        drawBattleDialogWindow(5, NAME_X, NAME_Y, n > 0x140 - 2 * NAME_X ? 0x140 - 2 * NAME_X : n, NAME_H);
+        nameWide = 1;
+    } else if (nameWide) {
+        drawBattleDialogWindow(5, NAME_X, NAME_Y, NAME_W, NAME_H);
+        nameWide = 0;
+    }
+    battleVar1->mB0_isDialogWindowInitialized[5] = 1;
+    l->m5D_monsterNameIsDisplayed = 1;
+}
+
+static void hideLabel(void) {
+    if (nameWide) {
+        drawBattleDialogWindow(5, NAME_X, NAME_Y, NAME_W, NAME_H);
+        nameWide = 0;
+    }
+    battleVar1->mB0_isDialogWindowInitialized[5] = 0;
+    previousEntityTurn.m8_nameLabels[0].m5D_monsterNameIsDisplayed = 0;
+}
+
+/* The ring with slot `slot` highlighted (sets 1..4, as the party's Attack,
+ * Item, Defend and Ether menus draw it), RING_DY lower than the party's: its
+ * Up slot would be under the name label (window 5 is where the ring's top
+ * is; the game never shows both). */
+#define RING_DY 16
+static void drawRing(u8 entity, s32 slot) {
+    POLY_FT4* p;
+    s32 i;
+    s32 k;
+
+    battleVar1->mCB_drawCommandRing = 0;
+    battleVar1->mA3_641COddOrEven = updateBattleMenuSpriteForMenu(entity, (ringGear ? 0x10 : 1) + slot, 0);
+    for (i = 0; i < 2; i++) {
+        for (k = 0; k < battleVar1->mD0_battleCommandLength[i]; k++) {
+            p = &battleVar0->m641C_commandGlyphs[i][k * 2 + battleVar1->mA3_641COddOrEven];
+            p->y0 += RING_DY;
+            p->y1 += RING_DY;
+            p->y2 += RING_DY;
+            p->y3 += RING_DY;
+        }
+    }
+    battleVar1->mCB_drawCommandRing = 1;
+}
+
+static s32 padPressed(s32* previous) {
+    s32 held = pcPadHeldRemappedPort(1);
+    s32 pressed = held & ~*previous;
+
+    *previous = held;
+    return pressed;
+}
+
+static s32 pressedDirection(s32 pressed) {
+    s32 d;
+
+    for (d = 0; d < 4 && !(pressed & directionBits[d]); d++) {
+    }
+    return d;
+}
+
+/* From target `cur` in direction d: the game's own step among the targets'
+ * entities (spatial), else the next or the one before. */
+static s32 stepTarget(s32 cur, s32 d, const u8* focus, s32 count, s32 spatial) {
+    s32 i;
+    u8 n;
+
+    if (spatial) {
+        n = selectNewSlotByDirection(focus[cur], d);
+        for (i = 0; i < count; i++) {
+            if (focus[i] == n) {
+                return i;
+            }
+        }
+        return cur;
+    }
+    return count < 2 ? cur : (cur + (d == 0 || d == 1 ? 1 : count - 1)) % count;
+}
+
+/* Player 2 picks one of `count` outcomes (targetOf, their targets maskOf):
+ * the outcome, or -1 for cancel. */
+static s32 pickTarget(u8 entity, const s32* targetOf, const u16* maskOf, s32 count) {
+    u8 focus[MAX_CHOICES];
+    u8 reached[MAX_CHOICES];
+    s32 queue[MAX_CHOICES];
+    s32 spatial = count <= 11;
+    s32 cur = -1;
+    s32 shown = -1;
+    s32 previous = pcPadHeldRemappedPort(1);
+    s32 pressed;
+    s32 head;
+    s32 tail;
+    s32 i;
+    s32 j;
+    s32 d;
+    s32 n;
+
+    /* each outcome's entity: the directions tell them apart when each has
+     * one target, a different one */
+    for (i = 0; i < count; i++) {
+        focus[i] = 0xFF;
+        for (j = 0; j < 11; j++) {
+            if (bitmaskCharacterCheck(maskOf[i], j)) {
+                if (focus[i] != 0xFF) {
+                    spatial = 0; /* more than one */
+                } else {
+                    focus[i] = j;
+                }
+            }
+        }
+        for (j = 0; j < i; j++) {
+            spatial &= focus[j] != focus[i];
+        }
+        spatial &= focus[i] != 0xFF;
+        if (cur < 0 && focus[i] == borrowed.menu.m3C_currentTarget) {
+            cur = i; /* the one the enemy faces first (the party's selectDefaultTarget) */
+        }
+    }
+    if (cur < 0) {
+        cur = 0;
+    }
+    if (spatial) {
+        for (i = 0; i < 12; i++) {
+            targetsPerPriority[i] = i < count ? focus[i] : 0xFF;
+        }
+        /* every target reachable from the first by the directions */
+        __builtin_memset(reached, 0, sizeof(reached));
+        reached[cur] = 1;
+        queue[0] = cur;
+        for (head = 0, tail = 1; head < tail; head++) {
+            for (d = 0; d < 4; d++) {
+                n = stepTarget(queue[head], d, focus, count, 1);
+                if (!reached[n]) {
+                    reached[n] = 1;
+                    queue[tail++] = n;
+                }
+            }
+        }
+        spatial = tail == count;
+    }
+    pcArenaLog("  targets: %d, %s", count, spatial ? "by direction" : "in a row");
+    initBattleG3Array(); /* the arrows (mC6_isTargetSelectionCursorVisible) */
+    battleVar2->m2E9_targetConfirmed = 0;
+    for (;;) {
+        if (cur != shown) {
+            updateCharacterBlinkingTask(maskOf[cur]);
+            for (d = 0; d < 4; d++) {
+                battleG3->mE6_isDirectionEnabled[d] = stepTarget(cur, d, focus, count, spatial) != cur;
+            }
+            shown = cur;
+        }
+        battleRenderDebugAndMain();
+        pressed = padPressed(&previous);
+        d = pressedDirection(pressed);
+        if (d < 4) {
+            battleSoundEffect2(0x4C);
+            cur = stepTarget(cur, d, focus, count, spatial);
+        } else if (pressed & BUTTON_EXECUTE) {
+            battleSoundEffect2(0x4D);
+            removeTargetSelectionCursors();
+            return targetOf[cur];
+        } else if (pressed & BUTTON_CANCEL) {
+            battleSoundEffect2(0x4E);
+            removeTargetSelectionCursors();
+            return -1;
+        }
+    }
+}
+
+/* Player 2's turn in the ring: the outcome chosen, or -1 for Auto. */
+static s32 ringTurn(u8 entity, s32 actions) {
+    sBattleVar2Sub* menu = &battleVar2->m0_entityMenus[entity];
+    s32 targetOf[MAX_CHOICES];
+    u16 maskOf[MAX_CHOICES];
+    s32 slot = 0;
+    s32 shown = -1;
+    s32 chosen = -2;
+    s32 previous = pcPadHeldRemappedPort(1);
+    s32 pressed;
+    s32 count;
+    s32 d;
+    s32 i;
+
+    for (i = 0; i < actions; i++) {
+        actionLabel(labels[i], outcomes[actionOf[i]].ctx);
+    }
+    numberSame(labels, actions);
+    word(labels[actions], "AUTO");
+
+    borrowed.menu = *menu;
+    __builtin_memcpy(borrowed.names, battleVar2->m2C0_circleMenuCommandsNames, sizeof(borrowed.names));
+    borrowed.drawRing = battleVar1->mCB_drawCommandRing;
+    borrowed.ringOddOrEven = battleVar1->mA3_641COddOrEven;
+    borrowed.ringLength[0] = battleVar1->mD0_battleCommandLength[0];
+    borrowed.ringLength[1] = battleVar1->mD0_battleCommandLength[1];
+    borrowed.menuDisabled = battleVar2->m2E0_isBattleMenuDisabled;
+    borrowed.targetConfirmed = battleVar2->m2E9_targetConfirmed;
+    borrowed.arrows = battleVar1->mC6_isTargetSelectionCursorVisible;
+    __builtin_memcpy(borrowed.targets, targetsPerPriority, sizeof(borrowed.targets));
+    __builtin_memcpy(&borrowed.g3, battleG3, sizeof(borrowed.g3));
+
+    /* the enemy's command slots: its actions, Auto; the rest without a word
+     * (0xFF: updateBattleMenuSpriteForMenu draws nothing there) */
+    for (i = 0; i < 16; i++) {
+        menu->m1C_isCommandEnabled[i] = 0; /* nonzero: dimmed */
+    }
+    for (i = 0; i < 4; i++) {
+        if (ringGear) {
+            /* the Gear ring's slots 8..11 (sets 0x10..0x13) */
+            menu->m8_extraCommandsMapping[i] = i < actions || i == RING_AUTO ? gearWords[i] : 0xFF;
+        } else {
+            menu->m0_circleMenuBattleCommandsMapping[i] = i < actions || i == RING_AUTO ? footWords[i] : 0xFF;
+        }
+    }
+    battleVar2->m2E0_isBattleMenuDisabled = 0; /* (battle speed: the ring waits for a choice) */
+    choosing = 1;
+    pcArenaLog("  ring: %d actions and Auto (vblank %u)", actions, hwVSyncCount());
+    updateCharacterBlinkingTask(characterIdToTargetBitmask(entity)); /* whose turn it is */
+    while (chosen == -2) {
+        if (slot != shown) {
+            drawRing(entity, slot);
+            showLabel(labels[slot == RING_AUTO ? actions : slot]);
+            shown = slot;
+        }
+        battleRenderDebugAndMain();
+        pressed = padPressed(&previous);
+        d = pressedDirection(pressed);
+        if (d < 4) {
+            if (d < actions || d == RING_AUTO) {
+                battleSoundEffect2(0x4C);
+                slot = d;
+            } else {
+                battleSoundEffect2(0x4F); /* no action there, as a disabled command */
+            }
+        } else if (pressed & BUTTON_EXECUTE) {
+            battleSoundEffect2(0x4D);
+            if (slot == RING_AUTO) {
+                chosen = -1;
+                break;
+            }
+            count = 0;
+            for (i = 0; i < outcomeCount && count < MAX_CHOICES; i++) {
+                if (sameAction(outcomes[actionOf[slot]].ctx, outcomes[i].ctx)) {
+                    maskOf[count] = targetMask(outcomes[i].ctx);
+                    targetOf[count++] = i;
+                }
+            }
+            pcArenaLog("  ring: action %d", slot);
+            if (count == 1) {
+                chosen = targetOf[0];
+            } else {
+                chosen = pickTarget(entity, targetOf, maskOf, count);
+                if (chosen < 0) {
+                    chosen = -2; /* back to the ring */
+                    updateCharacterBlinkingTask(characterIdToTargetBitmask(entity));
+                }
+            }
+        }
+    }
+    hideLabel();
+    updateCharacterBlinkingTask(0);
+    choosing = 0;
+    *menu = borrowed.menu;
+    __builtin_memcpy(battleVar2->m2C0_circleMenuCommandsNames, borrowed.names, sizeof(borrowed.names));
+    battleVar1->mCB_drawCommandRing = borrowed.drawRing;
+    battleVar1->mA3_641COddOrEven = borrowed.ringOddOrEven;
+    battleVar1->mD0_battleCommandLength[0] = borrowed.ringLength[0];
+    battleVar1->mD0_battleCommandLength[1] = borrowed.ringLength[1];
+    battleVar2->m2E0_isBattleMenuDisabled = borrowed.menuDisabled;
+    battleVar2->m2E9_targetConfirmed = borrowed.targetConfirmed;
+    battleVar1->mC6_isTargetSelectionCursorVisible = borrowed.arrows;
+    __builtin_memcpy(targetsPerPriority, borrowed.targets, sizeof(borrowed.targets));
+    __builtin_memcpy(battleG3, &borrowed.g3, sizeof(borrowed.g3));
+    return chosen;
+}
+
+/* Up to three actions: the ring (the Gear ring when a party member is in
+ * a Gear, as setupTurnRenderLoop picks the party's). */
+static int ringFits(s32 actions) {
+    s32 i;
+
+    if (actions > RING_ACTIONS || battleG3 == NULL) {
+        return 0;
+    }
+    ringGear = 0;
+    for (i = 0; i < 3; i++) {
+        if (battleCharacters[i] != 0x7F && apConfigArray[i].m1_gearState != 0) {
+            ringGear = 1;
+        }
+    }
+    return 1;
+}
+
 /* In place of battleTickMain's executeMonsterScript (src/battle/b_80070E2C.c). */
 void pcVersusMonsterTurn(u8 entity, s32 status) {
     u8 title[LABEL];
@@ -617,6 +1075,18 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
         }
     }
     for (i = 0; i < outcomeCount; i++) {
+        for (j = 0; j < 32; j++) { /* the attack the label describes (actionLabel): the first type 1 */
+            if (outcomes[i].ctx[j].m0_attackType == 1 && outcomes[i].ctx[j].m1_operand < 200) {
+                const sBattle800CDD40Sub* e = &battleEntities.m35D8_enemiesBattleStats[outcomes[i].ctx[j].m1_operand];
+                pcArenaLog("  outcome %d's entry %d (context %d): flags %x type %d elements %x attackFlags %x power %d "
+                           "effect %d formula %d/%d chance %d status %d/%x elementFlags %x hit %d/%d",
+                           i, outcomes[i].ctx[j].m1_operand, j, e->m0_flags, e->m2_attackType, e->m8_elements,
+                           (u16)e->mA_attackFlags, e->m11_power, e->m16_effectType, e->m1A_attackFormula,
+                           e->m1B_defenceFormula, e->m1C_chance, e->m1D_statusType, e->m1E_statusMask,
+                           e->m22_elementFlags, e->m15_hitBonus, e->m14_etherHitBonus);
+                break;
+            }
+        }
         pcArenaLog("  outcome %d: type %d op %d anim %d name %d mask %x / type %d op %d anim %d name %d mask %x, %d draws", i,
                    outcomes[i].ctx[0].m0_attackType, outcomes[i].ctx[0].m1_operand, outcomes[i].ctx[0].m2_animationId,
                    outcomes[i].ctx[0].m3_nameIndex, outcomes[i].ctx[0].m6_mask, outcomes[i].ctx[1].m0_attackType,
@@ -624,32 +1094,36 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
                    outcomes[i].ctx[1].m6_mask, outcomes[i].planLen);
     }
     entityName(title, entity);
-    while (outcomeCount > 1 && chosen < 0) {
-        for (i = 0; i < actions; i++) {
-            actionLabel(labels[i], outcomes[actionOf[i]].ctx);
-        }
-        numberSame(labels, actions);
-        word(labels[actions], "AUTO");
-        a = actions > 1 ? choose(title, labels, actions + 1, 0) : 0;
-        if (a < 0 || a == actions) {
-            break; /* Auto (or no window): the game's own draws */
-        }
-        __builtin_memcpy(title, labels[a], LABEL); /* the action, over its targets */
-        targets = 0;
-        for (i = 0; i < outcomeCount && targets < MAX_CHOICES; i++) {
-            if (sameAction(outcomes[actionOf[a]].ctx, outcomes[i].ctx)) {
-                targetLabel(labels[targets], outcomes[i].ctx);
-                targetOf[targets++] = i;
+    if (outcomeCount > 1 && ringFits(actions)) {
+        chosen = ringTurn(entity, actions);
+    } else {
+        while (outcomeCount > 1 && chosen < 0) {
+            for (i = 0; i < actions; i++) {
+                actionLabel(labels[i], outcomes[actionOf[i]].ctx);
             }
-        }
-        numberSame(labels, targets);
-        t = targets > 1 ? choose(title, labels, targets, actions > 1) : 0;
-        entityName(title, entity);
-        if (t == -2) {
-            break;
-        }
-        if (t >= 0) {
-            chosen = targetOf[t];
+            numberSame(labels, actions);
+            word(labels[actions], "AUTO");
+            a = actions > 1 ? choose(title, labels, actions + 1, 0) : 0;
+            if (a < 0 || a == actions) {
+                break; /* Auto (or no window): the game's own draws */
+            }
+            __builtin_memcpy(title, labels[a], LABEL); /* the action, over its targets */
+            targets = 0;
+            for (i = 0; i < outcomeCount && targets < MAX_CHOICES; i++) {
+                if (sameAction(outcomes[actionOf[a]].ctx, outcomes[i].ctx)) {
+                    targetLabel(labels[targets], outcomes[i].ctx);
+                    targetOf[targets++] = i;
+                }
+            }
+            numberSame(labels, targets);
+            t = targets > 1 ? choose(title, labels, targets, actions > 1) : 0;
+            entityName(title, entity);
+            if (t == -2) {
+                break;
+            }
+            if (t >= 0) {
+                chosen = targetOf[t];
+            }
         }
     }
     if (chosen < 0) {

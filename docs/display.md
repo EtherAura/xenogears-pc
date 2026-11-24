@@ -76,8 +76,8 @@ F1 > Display > Depth of field (Off, Subtle, Medium, Strong) and Focus range
 
 ## Tilt-shift
 
-In fields and on the world map, a thin strip along the top and the bottom
-of the picture blurs, most at the edge, so the scene looks like a
+In fields and on the world map, the picture blurs toward its edges,
+faintly at first and most at the edge, so the scene looks like a
 miniature. It adds to the depth of field: where both blur, the stronger
 shows. Dialogue,
 portraits and the HUD stay sharp. The Enhanced engine only (F1 > System >

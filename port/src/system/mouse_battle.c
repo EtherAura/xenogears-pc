@@ -14,7 +14,9 @@
  *     button, as a click is without this setting (the attack the confirm
  *     button makes there).
  * A click beside the targets does nothing. The confirm goes only if the
- * game's choice is then the target clicked (mouseBattleCheck).
+ * game's choice is then the target clicked (mouseBattleCheck). Not while
+ * player 2 picks an enemy's target in a versus battle (the arrows are up,
+ * but pad 2 chooses there: pcVersusChoosing).
  *
  * Where the targets are on the screen: the battle hands over each sprite it
  * draws (battleSpriteRender: pcMouseBattleSprite) with the GTE's matrices set
@@ -39,6 +41,7 @@ extern u8 abilitySelectedTarget;
 u8 selectNewSlotByDirection(u8 inputSlot, u8 direction);
 u16 bitmaskCharacterCheck(u16 mask, u8 id);
 u32 hwVSyncCount(void);
+int pcVersusChoosing(void); /* port/src/game/battle/versus.c: player 2's ring, pad 2's choice */
 
 /* The D-pad bits of battleInputButton's directions 0..3 (Right, Down, Left, Up). */
 static const unsigned short directionBits[4] = {0x2000, 0x4000, 0x8000, 0x1000};
@@ -52,7 +55,7 @@ static struct {
 /* 1: aiming an attack; 2: choosing an ability's target; 0: neither. */
 static int choosing(void) {
     if (pcWideGetMode() != PC_WIDE_BATTLE || battleVar1 == NULL || battleVar2 == NULL ||
-        !battleVar1->mC6_isTargetSelectionCursorVisible) {
+        !battleVar1->mC6_isTargetSelectionCursorVisible || pcVersusChoosing()) {
         return 0;
     }
     if (battleVar2->m2DD_currentActiveBattleMenu == 5 || battleVar2->m2DD_currentActiveBattleMenu == 100) {

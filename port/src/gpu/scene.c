@@ -117,8 +117,8 @@ static const float levelRadius[] = {0, 1.25f, 2.5f, 4.0f};
 static const char* const focusNames[] = {"narrow", "normal", "wide"};
 static const float focusBand[] = {0.05f, 0.10f, 0.18f};
 /* The tilt-shift's radius at the frame's edges per level (PS1 pixels; the
- * blur's sigma is half of it): carl chose Medium from the prototypes, and the
- * blur on 10% of the frame in all (xg-rgcf.5.14). */
+ * blur's sigma is half of it): carl chose Medium from the prototypes
+ * (xg-rgcf.5.14; its shape: tilt_shift.glsl). */
 static const float tiltRadius[] = {0, 6.0f, 12.0f, 20.0f};
 /* Lighting and glow by level (light.comp has the fixed shares). */
 static const float lightTop[] = {0, 0.25f, 0.45f, 0.75f};
@@ -270,9 +270,8 @@ static void load(void) {
     settingsDescribe("vignette", "vignette: off (default), subtle, medium or strong: the frame's edges a little darker in "
                                  "fields, battles and on the world map (the Enhanced engine)");
     sc.vignette = levelOf("vignette");
-    settingsDescribe("tilt_shift", "tilt_shift: off (default), subtle, medium or strong: a thin blurred strip along "
-                                   "the top and bottom of the picture, in fields and on the world map (the Enhanced "
-                                   "engine)");
+    settingsDescribe("tilt_shift", "tilt_shift: off (default), subtle, medium or strong: the picture blurred toward "
+                                   "its edges, in fields and on the world map (the Enhanced engine)");
     sc.tiltShift = levelOf("tilt_shift");
     s = settingsGet("particle_size");
     sc.particleSize = s != NULL && strcmp(s, "medium") == 0 ? 1 : s != NULL && strcmp(s, "large") == 0 ? 2 : 0;

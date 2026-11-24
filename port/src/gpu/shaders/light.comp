@@ -1017,7 +1017,7 @@ void particleRecord(int i) {
     if (lens.w > 0.0) {
         int packed = int(lens.w);
         float most = float(packed >> 10) / 16.0;
-        dim = radius / max(radius, most * tiltRamp(at.y, float(pc.work.y - (packed & 1023))));
+        dim = radius / max(radius, most * tiltRamp(at, vec2(float(pc.work.x), float(pc.work.y - (packed & 1023)))));
     }
     vec3 colour;
     float alpha, glow = 0.0;

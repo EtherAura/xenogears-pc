@@ -179,6 +179,7 @@ typedef struct {
 struct StateSchema {
     Chunk* arena;
     const char* version;
+    const char* exe;
     StType* types;
     int32_t typeCount;
     Map typeByTid;
@@ -719,6 +720,8 @@ StateSchema* stateSchemaParse(const char* json, size_t n, char* err, size_t errS
     if (ok) {
         const char* v = stringOr(&s->arena, d, root, "version");
         s->version = v ? v : "";
+        const char* exe = stringOr(&s->arena, d, root, "exe");
+        s->exe = exe ? exe : "";
         ok = loadTypes(s, d, jsonGet(d, root, "types")) && loadTypeNames(s, d, jsonGet(d, root, "type_names")) &&
              loadVars(s, d, jsonGet(d, root, "variables")) && loadFuncs(s, d, jsonGet(d, root, "functions")) &&
              loadSymbols(s, d, jsonGet(d, root, "symbols")) &&
@@ -888,20 +891,27 @@ int stateSchemaFnIdentity(const StateSchema* s, uint64_t addr, char* out, size_t
     return 0;
 }
 
-uint64_t stateSchemaFnAddress(const StateSchema* s, const char* identity) {
+int stateSchemaFnFind(const StateSchema* s, const char* identity, uint64_t* addr) {
     int32_t i = getName(&s->funcById, identity);
     if (i != ST_NONE) {
-        return s->funcIdAddr[i];
+        *addr = s->funcIdAddr[i];
+        return 1;
     }
-    const char* name = strrchr(identity, ':');
+    const char* name = strrchr(identity, ':'); /* ident.rsplit(":", 1)[-1] */
     name = name ? name + 1 : identity;
     char buf[512];
     snprintf(buf, sizeof buf, "fn:%s", name);
     i = getName(&s->funcById, buf);
     if (i != ST_NONE) {
-        return s->funcIdAddr[i];
+        *addr = s->funcIdAddr[i];
+        return 1;
     }
-    return stateSchemaSymbolAddress(s, name);
+    return stateSchemaSymbolFind(s, name, addr);
+}
+
+uint64_t stateSchemaFnAddress(const StateSchema* s, const char* identity) {
+    uint64_t a = 0;
+    return stateSchemaFnFind(s, identity, &a) ? a : 0;
 }
 
 int32_t stateSchemaSymbolCount(const StateSchema* s) { return s->symbolCount; }
@@ -913,6 +923,17 @@ uint64_t stateSchemaSymbolAddress(const StateSchema* s, const char* name) {
     int32_t i = getName(&s->symAddr, name);
     return i == ST_NONE ? 0 : s->symbols[i].addr;
 }
+
+int stateSchemaSymbolFind(const StateSchema* s, const char* name, uint64_t* addr) {
+    int32_t i = getName(&s->symAddr, name);
+    if (i == ST_NONE) {
+        return 0;
+    }
+    *addr = s->symbols[i].addr;
+    return 1;
+}
+
+const char* stateSchemaExe(const StateSchema* s) { return s->exe; }
 
 const char* stateSchemaSymbolBelow(const StateSchema* s, uint64_t addr, uint64_t* at) {
     int32_t lo = 0, hi = s->byAddrCount;
@@ -949,6 +970,14 @@ int stateSchemaReadOnly(const StateSchema* s, uint64_t addr, uint64_t* fileOffse
         }
     }
     return 0;
+}
+
+int32_t stateSchemaReadOnlyCount(const StateSchema* s) { return s->roCount; }
+
+void stateSchemaReadOnlyAt(const StateSchema* s, int32_t i, uint64_t* lo, uint64_t* hi, uint64_t* fileOffset) {
+    *lo = s->ro[i][0];
+    *hi = s->ro[i][1];
+    *fileOffset = s->ro[i][2];
 }
 
 static StRange findRange(const StRange* r, int32_t n, const char* name) {

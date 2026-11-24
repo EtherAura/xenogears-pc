@@ -5718,7 +5718,8 @@ typedef struct {
     int32_t layerX, layerY;
     float focus, band, gain, radius;
     /* scene_color.glsl; tilt: the tilt-shift's radius in 16ths of a PS1 pixel,
-     * and (<< 16) the layers' rows the display shows, from their top */
+     * and (<< 16) the layers' rows the display shows, from their top (it shows
+     * all their columns) */
     int32_t color, tilt, ditherX, ditherY;
 } DofConstants;
 

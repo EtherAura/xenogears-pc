@@ -422,8 +422,8 @@ typedef struct {
     float radius; /* the largest blur radius, in PS1 pixels */
     int debug;    /* 1: the blur amounts as colours instead, 2: inverted (XG_DOF_DEBUG) */
     int figures;  /* 1: figures (sprites) stay in focus wherever they stand */
-    /* The tilt-shift (xg-rgcf.5.14): the radius at the top and bottom edges of
-     * what the display shows (PS1 pixels; 0: none), and the rows at the
+    /* The tilt-shift (xg-rgcf.5.14): the radius at the edges of what the
+     * display shows (PS1 pixels; 0: none), and the rows at the
      * bottom of the scene's frame that it does not show (a field draws 224,
      * the TV shows 216). */
     float tilt;

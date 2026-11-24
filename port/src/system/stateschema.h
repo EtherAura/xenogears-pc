@@ -149,6 +149,15 @@ const char* stateSchemaSymbolBelow(const StateSchema* s, uint64_t addr, uint64_t
 const StRange* stateSchemaNamedConstant(const StateSchema* s, uint64_t addr);
 /* Whether addr is in the file-backed read-only data (statecanon ro_at), and its file offset. */
 int stateSchemaReadOnly(const StateSchema* s, uint64_t addr, uint64_t* fileOffset);
+/* The file-backed read-only ranges themselves (statecanon Schema.ro, in its order): (lo, hi, file offset). */
+int32_t stateSchemaReadOnlyCount(const StateSchema* s);
+void stateSchemaReadOnlyAt(const StateSchema* s, int32_t i, uint64_t* lo, uint64_t* hi, uint64_t* fileOffset);
+/* Whether a symbol name is defined (statecanon sym_addr), and its first address: a symbol at 0 is found too. */
+int stateSchemaSymbolFind(const StateSchema* s, const char* name, uint64_t* addr);
+/* Whether an identity has an address in this build (statecanon fn_address is not None), and which. */
+int stateSchemaFnFind(const StateSchema* s, const char* identity, uint64_t* addr);
+/* The executable the schema describes (its "exe": where statecanon reads the strings), "" if none. */
+const char* stateSchemaExe(const StateSchema* s);
 
 /* sections ("main.data" ...) and regions ("heapArena" ...): ST_NONE-like {NULL} if absent */
 StRange stateSchemaSection(const StateSchema* s, const char* name);

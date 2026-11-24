@@ -141,6 +141,15 @@ static void schemaChecks(void) {
     check(c && strcmp(c->name, "table") == 0 && !stateSchemaNamedConstant(s, 131201), "named constants (.L and xgsrc_ left out)");
     uint64_t fo = 0;
     check(stateSchemaReadOnly(s, 131080, &fo) && fo == 4104 && !stateSchemaReadOnly(s, 135168, NULL), "read-only data");
+    uint64_t lo = 0, hi = 0;
+    stateSchemaReadOnlyAt(s, 0, &lo, &hi, &fo);
+    check(stateSchemaReadOnlyCount(s) == 1 && lo == 131072 && hi == 135168 && fo == 4096, "the read-only ranges");
+    at = 0;
+    check(stateSchemaSymbolFind(s, "tick_alias", &at) && at == 65536 && !stateSchemaSymbolFind(s, "nothing", &at),
+          "a symbol found, or not");
+    check(stateSchemaFnFind(s, "fn:12345678:helper", &at) && at == 65600 && !stateSchemaFnFind(s, "fn:nothing", &at),
+          "an identity's address found, or not");
+    check(strcmp(stateSchemaExe(s), "x") == 0, "the schema's executable");
     check(stateSchemaSection(s, "main.data").hi == 9000 && stateSchemaRegion(s, "heapArena").lo == 1048576, "sections, regions");
     check(strcmp(stateSchemaPartFile(s, "hw"), "system/hw.c") == 0 && !stateSchemaPartFile(s, "x"), "host parts");
     const StHeapType* h = stateSchemaHeapType(s, 0x479b06ef);
