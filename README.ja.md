@@ -14,7 +14,7 @@
 
 ビルドすると製品版と 1 バイト単位で一致する[マッチング逆コンパイル](https://github.com/EtherAura/xenogears)から作っています。Linux、Windows、FreeBSD、Android でネイティブに動き、画面、ゲームプレイ、演出の追加機能を好みで使えます。**-Project Exodus-** の一部です。
 
-[**ウェブサイト**](https://exodus.agartha.digital/) · [**ビルドとセットアップ**](docs/building-ja.md) · [**Android**](docs/android-ja.md) · [**画面**](docs/display-ja.md) · [**パック**](docs/packs-ja.md) · [**ゲームプレイ**](docs/gameplay-ja.md) · [**おまけ**](docs/extras-ja.md)
+[**ウェブサイト**](https://exodus.agartha.digital/) · [**YouTube**](https://www.youtube.com/@XG-ProjectExodus) · [**ビルドとセットアップ**](docs/building-ja.md) · [**Android**](docs/android-ja.md) · [**画面**](docs/display-ja.md) · [**パック**](docs/packs-ja.md) · [**ゲームプレイ**](docs/gameplay-ja.md) · [**おまけ**](docs/extras-ja.md)
 
 ## PC でゼノギアスを最初から最後まで
 

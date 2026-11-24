@@ -757,7 +757,11 @@ def main() -> int:
         "symbols": symbols(exe), "ro": read_only(exe)}
     with gzip.open(out, "wt") as fh:
         json.dump(schema, fh)
-    print(f"  schema: {out} ({out.stat().st_size} bytes)")
+    # the same, plain, for the game's own reader (port/src/system/stateschema.c: the port has no inflate)
+    plain = out.with_name(out.name.removesuffix(".gz")) if out.name.endswith(".gz") else out.with_name(out.name + ".plain")
+    with plain.open("w") as fh:
+        json.dump(schema, fh)
+    print(f"  schema: {out} ({out.stat().st_size} bytes), {plain.name} ({plain.stat().st_size} bytes)")
     print(f"  heap types named in the source (include/pc_state.h): {len(heap_types)}; counted arrays: {len(counted)}; "
           f"unions with a selector: {len(union_rules)}")
     for p_ in heap_problems:

@@ -43,6 +43,8 @@
 #               cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo; read as it is, not rebuilt): its
 #               coverage, reported (P0 measures, nothing fails yet); skipped without one
 #   state-schema-tests the schema reader on a small program built here (with the tests)
+#   stateschema-c the state schema's C reader (port/src/system/stateschema.c) gives every
+#               index tools/statecanon.py's Schema does, on $SCHEMA_BUILD's schema
 #   statecanon-tests canonical states' reference converter (tools/statecanon.py) on a
 #               small program built twice 16 MiB apart: decoded across the layouts
 #               as the other build has it, and a round trip unchanged (with the tests)
@@ -248,8 +250,11 @@ else
 fi
 if [ -x "$SCHEMA_BUILD/xenogears" ]; then
     gate state-schema "$PY" tools/state_schema.py "$SCHEMA_BUILD"
+    # (after state-schema: its state_schema.json)
+    gate stateschema-c "$PY" tools/test_stateschema_c.py "$SCHEMA_BUILD"
 else
     record state-schema 0 "skipped: no build with debug information in $SCHEMA_BUILD (-DCMAKE_BUILD_TYPE=RelWithDebInfo)"
+    record stateschema-c 0 "skipped: no build with debug information in $SCHEMA_BUILD"
 fi
 
 # The JP executable: pc_link with the JP symbol files and layouts (only a JP

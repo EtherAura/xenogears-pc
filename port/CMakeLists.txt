@@ -222,6 +222,8 @@ target_include_directories(mdectest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "$
 target_compile_definitions(mdectest PRIVATE PLATFORM_PC)
 # Save states (port/src/system/savestate.h): the codec on memory-like data and damaged input.
 add_executable(state_codectest EXCLUDE_FROM_ALL src/system/test/statecodectest.c src/system/statecodec.c)
+add_executable(stateschematest EXCLUDE_FROM_ALL src/system/test/stateschematest.c src/system/stateschema.c
+    src/system/json.c src/system/statecodec.c)
 add_executable(rewindpacktest EXCLUDE_FROM_ALL src/system/test/rewindpacktest.c src/system/statecodec.c)
 # The state file's header (the engine id, region, disc, app version), thumbnail and body round trip.
 add_executable(statefiletest EXCLUDE_FROM_ALL src/system/test/statefiletest.c src/system/statefile.c

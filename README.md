@@ -16,7 +16,7 @@ Built from the [matching decompilation](https://github.com/EtherAura/xenogears).
 Native Linux, Windows, FreeBSD and Android, with optional display, gameplay and presentation extras.
 Part of **-Project Exodus-**.
 
-[**Website**](https://exodus.agartha.digital/) · [**Build and set up**](docs/building.md) · [**Android**](docs/android.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
+[**Website**](https://exodus.agartha.digital/) · [**YouTube**](https://www.youtube.com/@XG-ProjectExodus) · [**Build and set up**](docs/building.md) · [**Android**](docs/android.md) · [**Display**](docs/display.md) · [**Packs**](docs/packs.md) · [**Gameplay**](docs/gameplay.md) · [**Extras**](docs/extras.md)
 
 ## Start your full Xenogears playthrough on PC
 
