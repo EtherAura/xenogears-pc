@@ -28,7 +28,9 @@ and test them.
 
 The format: "XGSTATE\\0", u32 version, u32 header size, a 256-byte header at
 fixed offsets, the packed thumbnail, the packed body (statecodec.h: blocks
-of u32 raw size, u32 packed size, LZ77 sequences).
+of u32 raw size, u32 packed size, LZ77 sequences); a portable slot (flag 2)
+then has a trailer (statefile.h: "XGCANON\\0", the writer's schema hash, its
+safe point, the strings its pointers reach), read by read_trailer.
 """
 
 from __future__ import annotations
@@ -140,6 +142,32 @@ def read_state(path: Path) -> tuple[dict, bytes]:
     return h, body
 
 
+FLAG_PORTABLE = 2  # statefile.h STATE_FLAG_PORTABLE
+
+
+def read_trailer(path: Path) -> dict | None:
+    """A portable slot's trailer (statefile.h): schemaHash, safePoint, strings {address: bytes}; None when the
+    file has none. ValueError when it is damaged."""
+    data = path.read_bytes()
+    if data[:8] != b"XGSTATE\0" or not struct.unpack_from("<I", data, 180)[0] & FLAG_PORTABLE:
+        return None
+    at = HEADER_SIZE + struct.unpack_from("<I", data, 216)[0] + struct.unpack_from("<Q", data, 224)[0]
+    t = data[at:]
+    if len(t) < 48 or t[:8] != b"XGCANON\0" or struct.unpack_from("<II", t, 8) != (1, 0) or \
+            struct.unpack_from("<Q", t, 16)[0] != len(t) - 24:
+        raise ValueError(f"{path}: a damaged trailer")
+    import statecanon  # (its stateHash)
+    if struct.unpack_from("<Q", t, len(t) - 8)[0] != statecanon.state_hash(t[:-8]):
+        raise ValueError(f"{path}: a damaged trailer")
+    schema, safe, count = struct.unpack_from("<QiI", t, 24)
+    strings, ip = {}, 40
+    for _ in range(count):
+        addr, n = struct.unpack_from("<QI", t, ip)
+        strings[addr] = t[ip + 12:ip + 12 + n]
+        ip += 12 + n
+    return {"schemaHash": f"{schema:016x}", "safePoint": safe, "strings": strings}
+
+
 def chunks(body: bytes) -> list[tuple[str, int, int]]:
     """(tag, offset of the data, size) for each chunk."""
     out = []
@@ -161,6 +189,10 @@ def cmd_info(args) -> int:
     for k, v in h.items():
         print(f"{k:11} {v}")
     print(f"{'chunks':11} {len(chunks(body))}")
+    t = read_trailer(Path(args.file))
+    if t is not None:
+        print(f"{'portable':11} schema {t['schemaHash']}, safe point {t['safePoint']:#x}, {len(t['strings'])} strings "
+              f"({sum(len(v) for v in t['strings'].values())} bytes)")
     return 0
 
 
@@ -770,7 +802,7 @@ def cmd_refusals(args) -> int:
     cases = {}
     b = bytearray(data)
     b[16] ^= 0xFF  # the build id
-    cases["build"] = (bytes(b), "saved by another build")
+    cases["build"] = (bytes(b), "saved by (another build|version)")
     b = bytearray(data)
     b[220] ^= 1  # the engine (system/engine.h): the other one's state
     cases["engine"] = (bytes(b), "saved by the (Original|Enhanced) engine")

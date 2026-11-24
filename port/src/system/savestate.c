@@ -40,6 +40,7 @@
 #include "statecodec.h"
 #include "statefile.h"
 #include "stateimage.h"
+#include "stateportable.h"
 #include "system.h"
 #include "world.h"
 
@@ -663,6 +664,8 @@ typedef struct {
     StateHeader header;
     uint8_t* thumb;
     uint8_t* body;
+    int portable; /* taken at a safe point for a slot: with a trailer (stateportable.h), if it can be made */
+    int missed;   /* a slot's, taken when no safe point came in time: for this build only */
 } Job;
 
 static SDL_AtomicInt serial; /* stateSerial */
@@ -673,11 +676,26 @@ static char jobNote[400];
 
 static int workerMain(void* arg) {
     Job* j = arg;
-    char why[300];
-    if (stateFileWrite(j->path, &j->header, j->thumb, j->body, why, sizeof why)) {
-        snprintf(jobNote, sizeof jobNote, "State saved (%s)", j->what);
+    char why[300], local[300] = "";
+    StatePortable portable;
+    int carried = j->portable && statePortableMake(j->body, (size_t)j->header.bodySize, &portable, local, sizeof local);
+    if (j->portable && !carried) {
+        fprintf(stderr, "state: %s for this version only: %s\n", j->what, local);
+    }
+    if (stateFileWritePortable(j->path, &j->header, j->thumb, j->body, carried ? &portable : NULL, why, sizeof why)) {
+        if (j->missed) {
+            snprintf(jobNote, sizeof jobNote, "State saved (%s), for this version only: it was taken during a movie, "
+                     "a prompt or a card access", j->what);
+        } else if (j->portable && !carried) {
+            snprintf(jobNote, sizeof jobNote, "State saved (%s), for this version only: %s", j->what, local);
+        } else {
+            snprintf(jobNote, sizeof jobNote, "State saved (%s)", j->what);
+        }
     } else {
         snprintf(jobNote, sizeof jobNote, "State not saved (%s): %s", j->what, why);
+    }
+    if (carried) {
+        statePortableFree(&portable);
     }
     SDL_AddAtomicInt(&serial, 1);
     SDL_SetAtomicInt(&jobDone, 1);
@@ -711,8 +729,10 @@ static void finishAtExit(void) {
     finishJob(1);
 }
 
-/* Writes in the background (sync: here, before going on). Takes the body. */
-static void writeState(const char* path, const char* what, uint8_t* body, size_t size, int sync) {
+/* Writes in the background (sync: here, before going on). Takes the body. portable: a slot's at a
+ * safe point (a trailer, made on the worker); missed: a slot's that waited for one in vain. */
+static void writeState(const char* path, const char* what, uint8_t* body, size_t size, int sync, int portable,
+                       int missed) {
     static int registered;
     finishJob(1);
     if (!registered) {
@@ -729,6 +749,8 @@ static void writeState(const char* path, const char* what, uint8_t* body, size_t
     fillHeader(&j->header, size, body);
     j->thumb = thumbnail();
     j->body = body;
+    j->portable = portable;
+    j->missed = missed;
     fprintf(stderr, "state: saving %s at vblank %u (audio dump frame %llu)\n", path, j->header.vblank,
             (unsigned long long)j->header.dumpFrames);
     job = j;
@@ -793,47 +815,56 @@ static int putDiscIn(int disc) {
     return 1;
 }
 
-/* Checks a state against this build and the discs; 0 with a note when it
- * cannot load. On success the body is verified chunk by chunk. */
-static int usable(const StateHeader* h, const uint8_t* body, char* why, size_t size) {
+/* A body checked chunk by chunk against what this build reads; 0 with why. */
+static int verified(const StateHeader* h, const uint8_t* body, char* why, size_t size) {
+    XgState s;
+    memset(&s, 0, sizeof s);
+    s.mode = MODE_VERIFY;
+    s.in = body;
+    s.inSize = (size_t)h->bodySize;
+    walk(&s);
+    if (!s.failed && s.pos != s.inSize) {
+        fail(&s, "the state has more than this build reads");
+    }
+    if (s.failed) {
+        snprintf(why, size, "%s", s.why);
+        return 0;
+    }
+    return 1;
+}
+
+enum { LOADS_NOT, LOADS_RAW, LOADS_CONVERTED };
+
+/* Checks a state against this build and the discs: LOADS_RAW when it loads
+ * as it is (with a body: verified chunk by chunk), LOADS_CONVERTED when it is
+ * another build's that this one converts (stateportable.h: its body is
+ * checked once converted), LOADS_NOT with why. path: the state's file (the
+ * trailer of another build's). */
+static int usable(const StateHeader* h, const uint8_t* body, const char* path, char* why, size_t size) {
     if (h->engine != (uint32_t)engineThis()) {
         snprintf(why, size, "saved by the %s engine: load it there (F1 > System > Engine)",
                  engineTitle((int)h->engine));
-        return 0;
-    }
-    if (memcmp(h->buildId, stateBuildId(), 16) != 0) {
-        if (h->appVersion[0] != '\0' && stateAppVersion()[0] != '\0' && strcmp(h->appVersion, stateAppVersion()) != 0) {
-            snprintf(why, size, "saved by version %s of the app; this is %s (a state loads only in the version that "
-                                "saved it)", h->appVersion, stateAppVersion());
-        } else {
-            snprintf(why, size, "saved by another build of the port (states load only in the build that saved them)");
-        }
-        return 0;
+        return LOADS_NOT;
     }
     if (strcmp(h->region, REGION) != 0) {
         snprintf(why, size, "a %s state: this is the %s build", h->region, REGION);
-        return 0;
+        return LOADS_NOT;
     }
     if (!discAvailable((int)h->disc)) {
         snprintf(why, size, "it is on Disc %u: choose that disc's image in F1 > System", h->disc);
-        return 0;
+        return LOADS_NOT;
+    }
+    if (memcmp(h->buildId, stateBuildId(), 16) != 0) {
+        return statePortableCanLoad(h, path, why, size) ? LOADS_CONVERTED : LOADS_NOT;
     }
     if (body != NULL) {
-        XgState s;
-        memset(&s, 0, sizeof s);
-        s.mode = MODE_VERIFY;
-        s.in = body;
-        s.inSize = (size_t)h->bodySize;
-        walk(&s);
-        if (!s.failed && s.pos != s.inSize) {
-            fail(&s, "the state has more than this build reads");
-        }
-        if (s.failed) {
-            snprintf(why, size, "it does not fit this build: %s", s.why);
-            return 0;
+        char fit[300];
+        if (!verified(h, body, fit, sizeof fit)) {
+            snprintf(why, size, "it does not fit this build: %s", fit);
+            return LOADS_NOT;
         }
     }
-    return 1;
+    return LOADS_RAW;
 }
 
 /* ---- the chunk lists of rewind.c (stateimage.h) -------------------------------------- */
@@ -929,7 +960,7 @@ static void restore(const StateHeader* h, const uint8_t* body) {
 
 /* ---- requests ----------------------------------------------------------------------------- */
 
-enum { REQ_NONE, REQ_SAVE, REQ_LOAD, REQ_REWIND };
+enum { REQ_NONE, REQ_SAVE, REQ_LOAD, REQ_REWIND, REQ_RESTART, REQ_RETURN };
 
 static struct {
     int kind;
@@ -938,7 +969,21 @@ static struct {
     int sync;            /* write before going on (the harness) */
     int rewind;          /* REQ_REWIND: REWIND_CAPTURE or REWIND_BACK */
     int safe;            /* REQ_SAVE: only at a safe point (stateSafePark: a canonical state's) */
+    uint32_t until;      /* safe: from this vblank an ordinary save instead (a slot's; 0: wait as long as it takes) */
+    int missed;          /* that came first: the save loads in this build only */
+    int keep;            /* REQ_RESTART: the game kept in memory first (stateimage.h) */
+    void (*entry)(void); /* REQ_RESTART: where the game starts again */
 } req;
+
+/* The game kept in memory while a Battle arena match runs (stateimage.h,
+ * system/arena.c): a whole state, as a save writes it, never on disk. */
+static struct {
+    uint8_t* body;
+    StateHeader header;
+} kept;
+
+/* How long a slot save waits for a safe point: 2 seconds. */
+#define SAFE_WAIT 120
 
 static int selected = 1;
 
@@ -949,6 +994,12 @@ int stateAvailable(const char** why) {
     if (netplayActive != NULL && netplayActive()) {
         /* Both players' games must stay the same: neither side jumps alone. */
         if (why) *why = "Save states are off during an online session";
+        return 0;
+    }
+    if (kept.body != NULL) {
+        /* The game the match came from waits in memory; a state of the match loaded later would have
+         * no game to go back to, a state of before it would leave the match without it. */
+        if (why) *why = "Save states are off during a Battle arena match: Leave at its end brings your game back";
         return 0;
     }
 #if defined(__x86_64__) || defined(__aarch64__)
@@ -968,6 +1019,73 @@ int stateBusy(void) {
     return req.kind != REQ_NONE;
 }
 
+/* ---- the Battle arena's restart and return (stateimage.h) ----------------------------------- */
+
+int stateRestartAvailable(const char** why) {
+    if (why) *why = NULL;
+    if (getenv("XG_SLOWDOWN") != NULL || portOverlayCd()) {
+        if (why) *why = "Not during the slowdown replay or with XG_OVERLAY_CD";
+        return 0;
+    }
+#if defined(__x86_64__) || defined(__aarch64__)
+    if (!gameStackActive() && gameStackBase() == NULL) {
+        if (why) *why = "Needs the game on its own stack (not in this build)";
+        return 0;
+    }
+    return 1;
+#else
+    if (why) *why = "Not available on this platform yet";
+    return 0;
+#endif
+}
+
+void stateRequestRestart(int keep, void (*entry)(void)) {
+    req.kind = REQ_RESTART;
+    req.keep = keep;
+    req.entry = entry;
+}
+
+void stateRequestReturn(void) {
+    if (kept.body != NULL) {
+        req.kind = REQ_RETURN;
+    }
+}
+
+int stateKept(void) {
+    return kept.body != NULL;
+}
+
+void stateKeptDrop(void) {
+    free(kept.body);
+    kept.body = NULL;
+}
+
+static void serveRestart(void) {
+    if (req.keep) {
+        size_t size;
+        free(kept.body);
+        kept.body = capture(&size);
+        fillHeader(&kept.header, size, kept.body);
+        fprintf(stderr, "state: the game kept in memory (%zu bytes) at vblank %u\n", size, kept.header.vblank);
+    }
+    rewindReset(); /* the history is the timeline left behind */
+    gameStackRestart(req.entry); /* the game's frames are dropped: it starts at entry when the host switches back */
+}
+
+static void serveReturn(void) {
+    uint8_t* body = kept.body;
+    kept.body = NULL; /* (stateAvailable while the hooks run) */
+    stackless = 0;
+    restore(&kept.header, body);
+    free(body);
+    if (stackless) {
+        gameStackRestart(pcResumeGame); /* (cannot happen: the kept game has its frames) */
+        stackless = 0;
+    }
+    rewindReset();
+    fprintf(stderr, "state: the kept game is back (vblank %u)\n", kept.header.vblank);
+}
+
 static void request(int kind, int slot, const char* path) {
     const char* why;
     if (!stateAvailable(&why)) {
@@ -978,6 +1096,8 @@ static void request(int kind, int slot, const char* path) {
     req.slot = slot;
     req.sync = 0;
     req.safe = 0;
+    req.until = 0;
+    req.missed = 0;
     if (path != NULL) {
         snprintf(req.path, sizeof req.path, "%s", path);
     } else if (!stateSlotPath(slot, req.path, sizeof req.path)) {
@@ -991,6 +1111,20 @@ void stateRequestSave(int slot) {
         return;
     }
     request(REQ_SAVE, slot, NULL);
+    if (req.kind == REQ_SAVE && statePortableOn()) {
+        /* At the next safe point, which normally comes at once, so that other builds load the slot too
+         * (stateportable.h); if none comes in time (a movie, a prompt, the card's directory scan), as
+         * before, for this build only (stateVBlankPoint). */
+        req.safe = 1;
+        req.until = hwVSyncCount() + SAFE_WAIT;
+        if (req.until == 0) {
+            req.until = 1;
+        }
+    }
+}
+
+int stateSlotsPortable(void) {
+    return statePortableOn();
 }
 
 void stateRequestLoad(int slot) {
@@ -1026,8 +1160,11 @@ static void describe(int slot, char* out, size_t size) {
     strftime(when, sizeof when, "%Y-%m-%d %H:%M", &tmv);
     int other = memcmp(h.buildId, stateBuildId(), 16) != 0;
     int engine = h.engine != (uint32_t)engineThis();
-    snprintf(out, size, "Slot %d: %s, Disc %u, %s%s%s%s", slot, when, h.disc, h.label,
-             engine ? " (" : other ? " (another build: cannot load)" : "",
+    char why[300];
+    const char* mark = !other ? ((h.flags & STATE_FLAG_PORTABLE) ? "" : " (this version only)")
+                       : usable(&h, NULL, path, why, sizeof why) == LOADS_CONVERTED ? " (another build's: it converts)"
+                                                                                     : " (another build: cannot load)";
+    snprintf(out, size, "Slot %d: %s, Disc %u, %s%s%s%s", slot, when, h.disc, h.label, engine ? " (" : mark,
              engine ? engineTitle((int)h.engine) : "", engine ? " engine: cannot load)" : "");
 }
 
@@ -1056,8 +1193,9 @@ int stateSlotInfo(int slot, XgStateInfo* out) {
         return 0;
     }
     out->exists = 1;
-    out->usable = usable(&h, NULL, out->why, sizeof out->why);
+    out->usable = usable(&h, NULL, path, out->why, sizeof out->why) != LOADS_NOT;
     out->otherBuild = memcmp(h.buildId, stateBuildId(), 16) != 0;
+    out->portable = (h.flags & STATE_FLAG_PORTABLE) != 0;
     snprintf(out->appVersion, sizeof out->appVersion, "%s", h.appVersion);
     out->savedAt = h.savedAt;
     out->disc = (int)h.disc;
@@ -1096,6 +1234,15 @@ static struct {
     int loadDone;
     uint32_t every;
     char everyPath[1100];
+    struct {
+        uint32_t vblank;
+        int slot;
+        int done;
+    } slotSaves[16]; /* XG_STATE_SLOT_SAVE: as F7 does */
+    int slotSaveCount;
+    uint32_t slotLoadAt; /* XG_STATE_SLOT_LOAD: as F8 does */
+    int slotLoad;        /* 0: none */
+    int slotLoadDone;
 } harness;
 
 static void harnessParseSaves(const char* e, int safe) {
@@ -1124,6 +1271,27 @@ static void harnessParse(void) {
     if (e != NULL && e[0] != '\0') {
         snprintf(harness.load, sizeof harness.load, "%s", e);
     }
+    for (e = getenv("XG_STATE_SLOT_SAVE"); e != NULL && *e != '\0' && harness.slotSaveCount < 16;) {
+        unsigned long v, slot;
+        int n = 0;
+        if (sscanf(e, "%lu:%lu%n", &v, &slot, &n) < 2 || n == 0) {
+            break;
+        }
+        harness.slotSaves[harness.slotSaveCount].vblank = (uint32_t)v;
+        harness.slotSaves[harness.slotSaveCount].slot = (int)slot;
+        harness.slotSaveCount++;
+        e = e[n] == ',' ? e + n + 1 : NULL;
+    }
+    e = getenv("XG_STATE_SLOT_LOAD");
+    if (e != NULL && e[0] != '\0') {
+        unsigned long v, slot;
+        if (sscanf(e, "%lu:%lu", &v, &slot) == 2) {
+            harness.slotLoadAt = (uint32_t)v;
+            harness.slotLoad = (int)slot;
+        } else if (sscanf(e, "%lu", &slot) == 1) {
+            harness.slotLoad = (int)slot;
+        }
+    }
     e = getenv("XG_STATE_EVERY");
     if (e != NULL && e[0] != '\0') {
         unsigned long v;
@@ -1151,6 +1319,18 @@ static void harnessCheck(uint32_t vblank) {
         req.sync = 1;
         return;
     }
+    if (harness.slotLoad > 0 && !harness.slotLoadDone && vblank >= harness.slotLoadAt) {
+        harness.slotLoadDone = 1;
+        stateRequestLoad(harness.slotLoad);
+        return;
+    }
+    for (int i = 0; i < harness.slotSaveCount; i++) {
+        if (!harness.slotSaves[i].done && vblank >= harness.slotSaves[i].vblank) {
+            harness.slotSaves[i].done = 1;
+            stateRequestSave(harness.slotSaves[i].slot);
+            return;
+        }
+    }
     for (int i = 0; i < harness.saveCount; i++) {
         if (!harness.saves[i].done && vblank >= harness.saves[i].vblank) {
             harness.saves[i].done = 1;
@@ -1176,7 +1356,13 @@ void stateVBlankPoint(void) {
     finishJob(0);
     harnessCheck(hwVSyncCount());
     if (req.kind == REQ_SAVE && req.safe) {
-        return; /* a canonical state's: at the next safe point (stateSafePark), not inside a frame */
+        if (req.until == 0 || (int32_t)(hwVSyncCount() - req.until) < 0) {
+            return; /* a canonical state's: at the next safe point (stateSafePark), not inside a frame */
+        }
+        /* None came in time (a slot's): an ordinary save, which only this build loads. */
+        fprintf(stderr, "state: no safe point in %d vblanks: slot %d saved as it is\n", SAFE_WAIT, req.slot);
+        req.safe = 0;
+        req.missed = 1;
     }
     if (req.kind == REQ_NONE) {
         /* Rewind (rewind.c): a capture due, or the rewind input held. */
@@ -1238,7 +1424,7 @@ static void serveSave(void) {
     if (logOn()) {
         fprintf(stderr, "state: captured %zu bytes in %.2f ms\n", size, (double)(SDL_GetTicksNS() - t0) * 1e-6);
     }
-    writeState(req.path, what, body, size, req.sync);
+    writeState(req.path, what, body, size, req.sync, req.safe && req.slot > 0, req.missed);
 }
 
 static void serveLoad(void) {
@@ -1263,17 +1449,50 @@ static void serveLoad(void) {
         }
         return;
     }
-    if (!usable(&h, body, why, sizeof why)) {
+    int how = usable(&h, body, req.path, why, sizeof why);
+    if (how == LOADS_NOT) {
         note("Cannot load %s: %s", what, why);
         free(body);
         return;
     }
-    /* The game as it is now becomes "before the last load" (Shift+F8). */
+    /* The game as it is now becomes "before the last load" (Shift+F8); for another build's state it
+     * gives the converted one its chunks too (stateportable.h). */
     char undo[1100];
-    if (stateSlotPath(STATE_UNDO, undo, sizeof undo)) {
-        size_t size;
-        uint8_t* now = capture(&size);
-        writeState(undo, "undo", now, size, req.sync);
+    int keepUndo = stateSlotPath(STATE_UNDO, undo, sizeof undo);
+    uint8_t* now = NULL;
+    size_t nowSize = 0;
+    StateConvertResult conv;
+    memset(&conv, 0, sizeof conv);
+    char writer[64];
+    statePortableWriter(&h, writer, sizeof writer);
+    if (how == LOADS_CONVERTED) {
+        finishJob(1); /* (a save's worker may be reading this build's schema) */
+        now = capture(&nowSize);
+        if (!statePortableConvert(&h, body, req.path, now, nowSize, &conv, why, sizeof why)) {
+            note("Cannot load %s: %s", what, why);
+            free(now);
+            free(body);
+            return;
+        }
+        free(body);
+        body = conv.body; /* the converted state, with the writer's header: its label, disc, vblank, play time */
+        conv.body = NULL;
+        memcpy(h.buildId, stateBuildId(), 16);
+        h.bodySize = conv.size;
+        if (!verified(&h, body, why, sizeof why)) {
+            note("Cannot load %s: saved by %s; converted, it does not fit this build: %s", what, writer, why);
+            stateConvertResultFree(&conv);
+            free(now);
+            free(body);
+            return;
+        }
+    } else if (keepUndo) {
+        now = capture(&nowSize);
+    }
+    if (keepUndo && now != NULL) {
+        writeState(undo, "undo", now, nowSize, req.sync, 0, 0);
+    } else {
+        free(now);
     }
     stackless = 0;
     restore(&h, body);
@@ -1283,13 +1502,23 @@ static void serveLoad(void) {
         stackless = 0;
     }
     rewindReset(); /* the history belongs to the timeline left behind */
-    if (req.slot > 0) {
+    int64_t dropped = 0; /* values the converter left zero or could not place in this build */
+    for (int32_t i = 0; i < conv.decodeWarningCount; i++) {
+        dropped += conv.decodeWarnings[i].count;
+    }
+    stateConvertResultFree(&conv);
+    if (req.slot > 0 && how == LOADS_CONVERTED && dropped > 0) {
+        note("Loaded slot %d (%s), converted from %s: %lld values not carried (the log lists them)", req.slot,
+             h.label, writer, (long long)dropped);
+    } else if (req.slot > 0 && how == LOADS_CONVERTED) {
+        note("Loaded slot %d (%s), converted from %s", req.slot, h.label, writer);
+    } else if (req.slot > 0) {
         note("Loaded slot %d (%s)", req.slot, h.label);
     } else if (req.slot == STATE_UNDO) {
         note("Back to the game before the last load (Shift+F8 again: forward)");
     } else {
-        fprintf(stderr, "state: loaded %s: vblank %u (audio dump frame %llu)\n", req.path, h.vblank,
-                (unsigned long long)h.dumpFrames);
+        fprintf(stderr, "state: loaded %s%s: vblank %u (audio dump frame %llu)\n", req.path,
+                how == LOADS_CONVERTED ? " (converted)" : "", h.vblank, (unsigned long long)h.dumpFrames);
     }
     if (logOn()) {
         fprintf(stderr, "state: load took %.2f ms\n", (double)(SDL_GetTicksNS() - t0) * 1e-6);
@@ -1311,6 +1540,12 @@ void stateServe(void) {
     hwPausedFrame();
     if (req.kind == REQ_REWIND) {
         rewindServe(req.rewind);
+    } else if (req.kind == REQ_RESTART) {
+        rewindSettle();
+        serveRestart();
+    } else if (req.kind == REQ_RETURN) {
+        rewindSettle();
+        serveReturn();
     } else if (req.kind == REQ_SAVE) {
         rewindSettle(); /* a capture's late pixels first: they land where a save's snapshot goes */
         serveSave();

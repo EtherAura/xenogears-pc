@@ -3072,60 +3072,19 @@ static void freeWarnings(Warns* w) {
     free(w->rows);
 }
 
-int stateConvert(const StateConvertSide* writer, const StateConvertSide* reader, int stackless,
-                 StateConvertResult* out, char* err, size_t errSize) {
-    memset(out, 0, sizeof *out);
+static Ctx* ctxNew(char* err, size_t errSize) {
     if (err && errSize) err[0] = 0;
     Ctx* c = calloc(1, sizeof *c);
     if (!c) {
         if (err && errSize) snprintf(err, errSize, "out of memory");
-        return 0;
+        return NULL;
     }
     c->err = err;
     c->errSize = errSize;
-    Buf body = {0};
-    if (sideInit(c, &c->a, writer->schema, writer->strings) && sideInit(c, &c->b, reader->schema, reader->strings) &&
-        parseChunks(c, writer->body, writer->size, &c->ac, &c->nac)) {
-        c->acMem = malloc((size_t)(c->nac + 1) * sizeof *c->acMem);
-        c->raws = malloc((size_t)(c->nac + 1) * sizeof *c->raws);
-        c->byVar = malloc((size_t)(stateSchemaVarCount(writer->schema) + 1) * sizeof *c->byVar);
-        if (!c->acMem || !c->raws || !c->byVar) fail(c, "out of memory");
-        for (int32_t i = 0; !c->failed && i < c->nac; i++) {
-            c->acMem[i].p = writer->body + c->ac[i].off;
-            c->acMem[i].n = c->ac[i].size;
-        }
-        for (int32_t i = 0; !c->failed && i < stateSchemaVarCount(writer->schema); i++) c->byVar[i] = -1;
-        int32_t hi = c->failed ? -1 : lastChunk(c, "mem.heap");
-        if (hi >= 0) { /* encode_heap, before the records: their pointers reach its blocks */
-            c->heap.present = 1;
-            c->heap.mem = c->acMem[hi];
-            if (encodeHeap(c)) {
-                for (int32_t i = 0; i < c->heap.n && !c->failed; i++) {
-                    for (int32_t k = 0; k < c->heap.b[i].nparts; k++) walkPart(c, &c->heap.b[i].parts[k]);
-                }
-            }
-        }
-        if (!c->failed) encodeRecords(c);
-        if (!c->failed) {
-            out->safePoint = safePointOf(c);
-            if (stackless && !out->safePoint) {
-                fail(c, "a stackless state needs one saved at a safe point (XG_STATE_SAVE_SAFE)");
-            }
-        }
-        /* the reader's body is about the template's size: room for it at once, not by doubling */
-        if (!c->failed && bufGrow(c, &body, (int64_t)reader->size + (1 << 16))) {
-            decodeBody(c, reader->body, reader->size, stackless, &body);
-        }
-    }
-    int ok = !c->failed;
-    if (ok) {
-        out->body = body.p;
-        out->size = (size_t)body.n;
-        takeWarnings(&c->enc, &out->encodeWarnings, &out->encodeWarningCount);
-        takeWarnings(&c->dec, &out->decodeWarnings, &out->decodeWarningCount);
-    } else {
-        free(body.p);
-    }
+    return c;
+}
+
+static void ctxFree(Ctx* c) {
     freeWarnings(&c->enc);
     freeWarnings(&c->dec);
     sideFree(&c->a);
@@ -3141,6 +3100,138 @@ int stateConvert(const StateConvertSide* writer, const StateConvertSide* reader,
     free(c->byVar);
     free(c->recs);
     free(c);
+}
+
+/* statecanon's Encoder over the writer's body: its chunks, the heap with its blocks' parts, the records. */
+static void encodeWriter(Ctx* c, const StateConvertSide* writer) {
+    if (!parseChunks(c, writer->body, writer->size, &c->ac, &c->nac)) return;
+    c->acMem = malloc((size_t)(c->nac + 1) * sizeof *c->acMem);
+    c->raws = malloc((size_t)(c->nac + 1) * sizeof *c->raws);
+    c->byVar = malloc((size_t)(stateSchemaVarCount(writer->schema) + 1) * sizeof *c->byVar);
+    if (!c->acMem || !c->raws || !c->byVar) fail(c, "out of memory");
+    for (int32_t i = 0; !c->failed && i < c->nac; i++) {
+        c->acMem[i].p = writer->body + c->ac[i].off;
+        c->acMem[i].n = c->ac[i].size;
+    }
+    for (int32_t i = 0; !c->failed && i < stateSchemaVarCount(writer->schema); i++) c->byVar[i] = -1;
+    int32_t hi = c->failed ? -1 : lastChunk(c, "mem.heap");
+    if (hi >= 0) { /* encode_heap, before the records: their pointers reach its blocks */
+        c->heap.present = 1;
+        c->heap.mem = c->acMem[hi];
+        if (encodeHeap(c)) {
+            for (int32_t i = 0; i < c->heap.n && !c->failed; i++) {
+                for (int32_t k = 0; k < c->heap.b[i].nparts; k++) walkPart(c, &c->heap.b[i].parts[k]);
+            }
+        }
+    }
+    if (!c->failed) encodeRecords(c);
+}
+
+int stateConvert(const StateConvertSide* writer, const StateConvertSide* reader, int stackless,
+                 StateConvertResult* out, char* err, size_t errSize) {
+    memset(out, 0, sizeof *out);
+    Ctx* c = ctxNew(err, errSize);
+    if (!c) return 0;
+    Buf body = {0};
+    if (sideInit(c, &c->a, writer->schema, writer->strings) && sideInit(c, &c->b, reader->schema, reader->strings)) {
+        encodeWriter(c, writer);
+    }
+    if (!c->failed) {
+        out->safePoint = safePointOf(c);
+        if (stackless && !out->safePoint) {
+            fail(c, "a stackless state needs one saved at a safe point (XG_STATE_SAVE_SAFE)");
+        }
+    }
+    /* the reader's body is about the template's size: room for it at once, not by doubling */
+    if (!c->failed && bufGrow(c, &body, (int64_t)reader->size + (1 << 16))) {
+        decodeBody(c, reader->body, reader->size, stackless, &body);
+    }
+    int ok = !c->failed;
+    if (ok) {
+        out->body = body.p;
+        out->size = (size_t)body.n;
+        takeWarnings(&c->enc, &out->encodeWarnings, &out->encodeWarningCount);
+        takeWarnings(&c->dec, &out->decodeWarnings, &out->decodeWarningCount);
+    } else {
+        free(body.p);
+    }
+    ctxFree(c);
+    return ok;
+}
+
+int stateConvertEncode(const StateConvertSide* writer, StateConvertResult* out, char* err, size_t errSize) {
+    memset(out, 0, sizeof *out);
+    Ctx* c = ctxNew(err, errSize);
+    if (!c) return 0;
+    /* (the reader's side: the writer's schema, never decoded into) */
+    StateStrings none = {NULL, NULL, NULL};
+    if (sideInit(c, &c->a, writer->schema, writer->strings) && sideInit(c, &c->b, writer->schema, none)) {
+        encodeWriter(c, writer);
+    }
+    if (!c->failed) out->safePoint = safePointOf(c);
+    int ok = !c->failed;
+    if (ok) takeWarnings(&c->enc, &out->encodeWarnings, &out->encodeWarningCount);
+    ctxFree(c);
+    return ok;
+}
+
+int stateConvertTemplate(const uint8_t* reader, size_t readerSize, const StateSchema* readerSchema,
+                         const uint8_t* writer, size_t writerSize, uint8_t** out, size_t* outSize, char* err,
+                         size_t errSize) {
+    *out = NULL;
+    *outSize = 0;
+    Ctx* c = ctxNew(err, errSize);
+    if (!c) return 0;
+    StateStrings none = {NULL, NULL, NULL};
+    Chunk *rc = NULL, *wc = NULL;
+    int32_t nr = 0, nw = 0;
+    Buf body = {0};
+    if (sideInit(c, &c->b, readerSchema, none) && parseChunks(c, reader, readerSize, &rc, &nr) &&
+        parseChunks(c, writer, writerSize, &wc, &nw) && bufGrow(c, &body, (int64_t)readerSize + (1 << 16))) {
+        for (int32_t i = 0; i < nr && !c->failed; i++) {
+            const Chunk* k = &rc[i];
+            int64_t size = k->size;
+            PartTarget pt;
+            /* a variable of the reader's whose type fills the chunk is decoded at the reader's size; the rest
+             * is bytes, an array a pointer points at among them (gp0's cachePend; hw.queue is resized by its
+             * count anyway) */
+            int typed = partTarget(&c->b, k->tag, k->tagLen, &pt) && tsize(&c->b, pt.tid) == k->size;
+            if (!(k->tagLen >= 4 && memcmp(k->tag, "mem.", 4) == 0) && !typed) {
+                /* the writer's chunk of that tag that comes as many times before (a length and its bytes
+                 * can share a tag: gp0's loadBuf) */
+                int32_t nth = 0;
+                for (int32_t j = 0; j < i; j++) nth += tagEq(rc[j].tag, rc[j].tagLen, k->tag, k->tagLen);
+                for (int32_t j = 0; j < nw; j++) {
+                    if (tagEq(wc[j].tag, wc[j].tagLen, k->tag, k->tagLen) && nth-- == 0) {
+                        size = wc[j].size;
+                        break;
+                    }
+                }
+            }
+            int64_t at = body.n;
+            if (!bufGrow(c, &body, at + 1 + k->tagLen + 4 + size)) break;
+            body.p[at] = (uint8_t)k->tagLen;
+            memcpy(body.p + at + 1, k->tag, (size_t)k->tagLen);
+            for (int q = 0; q < 4; q++) body.p[at + 1 + k->tagLen + q] = (uint8_t)((uint64_t)size >> (8 * q));
+            uint8_t* data = body.p + at + 1 + k->tagLen + 4;
+            if (size == k->size) {
+                if (size) memcpy(data, reader + k->off, (size_t)size);
+            } else {
+                memset(data, 0, (size_t)size);
+            }
+            body.n = at + 1 + k->tagLen + 4 + size;
+        }
+    }
+    free(rc);
+    free(wc);
+    int ok = !c->failed;
+    if (ok) {
+        *out = body.p;
+        *outSize = (size_t)body.n;
+    } else {
+        free(body.p);
+    }
+    ctxFree(c);
     return ok;
 }
 

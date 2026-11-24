@@ -434,7 +434,7 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 #define SCENE_LIGHT_BINDINGS (2 + SCENE_LIGHT_IMAGES + SCENE_LIGHT_FILTERED + 1)
 /* That block: a vec4 of the sun and the shadow's darkness, a vec4 of the
  * count, one vec4 per ground point, then the fog's colour, which light.comp's
- * fog pass writes there (FOG_SLOT). */
+ * fog pass writes there (FOG_SLOT), and light shafts' settings (SHAFT_SLOT). */
 #define LIGHT_BLOCK_BYTES ((3 + SCENE_FIGURES) * 16 + 16)
 /* With ambient particles (xg-rgcf.5.10), after it: the room's frame and the
  * particles' settings (5 vec4s), a record of 3 vec4s per particle (light.comp
@@ -5728,6 +5728,7 @@ typedef struct {
 #define LIGHT_SHADOWS 14
 #define LIGHT_FOG 18
 #define LIGHT_COMPOSITE 19
+#define LIGHT_SHAFTS 22 /* and 23: light shafts, before the composite */
 /* light.comp's push constants. */
 typedef struct {
     int32_t pass, n, taps, flags;
@@ -6317,6 +6318,9 @@ static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
     int count = p->figures < 0 ? 0 : p->figures > SCENE_FIGURES ? SCENE_FIGURES : p->figures;
     b[0] = p->sun[0]; b[1] = p->sun[1]; b[2] = p->sun[2]; b[3] = p->shadow;
     b[4] = (float)count; b[5] = b[6] = b[7] = 0;
+    /* Light shafts' settings (light.comp SHAFT_SLOT: the block's last vec4). */
+    b[4 * (3 + SCENE_FIGURES)] = p->shafts; b[4 * (3 + SCENE_FIGURES) + 1] = p->shaftTime;
+    b[4 * (3 + SCENE_FIGURES) + 2] = b[4 * (3 + SCENE_FIGURES) + 3] = 0;
     for (int k = 0; k < count; k++) {
         b[8 + 4 * k] = p->figure[k][0]; b[9 + 4 * k] = p->figure[k][1]; b[10 + 4 * k] = p->figure[k][2]; b[11 + 4 * k] = 0;
     }
@@ -6352,8 +6356,9 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
     /* prepare's samples per PS1 pixel: all of them up to 3x, nine beyond. */
     int shadows = p->all || p->shadow > 0, fog = p->all || p->fogMost > 0, particles = p->particles > 0;
-    int32_t block = shadows || fog || particles ? lightBlock(ctx, p) : -1;
-    if (block < 0) shadows = fog = particles = 0; /* no room for the block: no shadows, fog or particles here */
+    int shafts = p->shafts > 0;
+    int32_t block = shadows || fog || particles || shafts ? lightBlock(ctx, p) : -1;
+    if (block < 0) shadows = fog = particles = shafts = 0; /* no room for the block: none of these here */
     LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
                         {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, (float)block,
                         p->top, p->shade, p->bounce, p->glow};
@@ -6367,7 +6372,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
     int glow = p->all || p->glow > 0, bounce = p->all || p->bounce > 0, shade = p->all || p->shade > 0;
     int surface = shade || p->top > 0;
     /* With particles alone the composite would change nothing: not run. */
-    int composite = p->all || surface || glow || bounce || shadows || fog || p->grade > 0 || p->vignette > 0;
+    int composite = p->all || surface || glow || bounce || shadows || fog || p->grade > 0 || p->vignette > 0 || shafts;
     for (int pass = 0; pass <= LIGHT_COMPOSITE; pass++) {
         int needed = pass == 0 || (pass == LIGHT_COMPOSITE && composite) ||
                      (pass >= 1 && pass <= 3 && (glow || bounce || particles)) || /* the surroundings (the particles' light too), the glow's wide spreads */
@@ -6376,8 +6381,16 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
                      ((pass == 8 || pass == 9) && shade) ||
                      ((pass == 12 || pass == 13) && glow) ||
                      (pass >= LIGHT_SHADOWS && pass < LIGHT_FOG && shadows) ||  /* cast shadows */
-                     (pass == LIGHT_FOG && (fog || particles));                /* the fog's colour; the room's brightness */
+                     (pass == LIGHT_FOG && (fog || particles || shafts));      /* the fog's colour; the room's brightness */
         if (!needed) continue;
+        /* Light shafts (xg-rgcf.5.16), on the quarter grid before the
+         * composite: their sources, then the gather toward the sun. */
+        for (int s = LIGHT_SHAFTS; pass == LIGHT_COMPOSITE && shafts && s <= LIGHT_SHAFTS + 1; s++) {
+            c.pass = s;
+            vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+            vkCmdDispatch(cmd, (uint32_t)((w + 3) / 4 + 7) / 8, (uint32_t)((h + 3) / 4 + 7) / 8, 1);
+            rasterBarrier(cmd);
+        }
         c.pass = pass;
         vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
         /* The PS1's grid, a quarter of it (the surroundings' brightness and

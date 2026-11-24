@@ -1,10 +1,12 @@
 /* The state converter (stateconvert.h): tools/statecanon.py convert in C.
  *
  *   stateconverttest       the checks, on two small layouts of one program
- *   stateconverttest convert A.xgs SCHEMA_A T.xgs SCHEMA_B OUT.xgs [--stackless]
+ *   stateconverttest convert A.xgs SCHEMA_A T.xgs SCHEMA_B OUT.xgs [--stackless] [--moment]
  *                          A's state as B's, the template T giving B's chunk order and host parts,
  *                          written as statecanon.py write_state writes one (T's header and thumbnail,
  *                          the body stored unpacked); the strings come from each schema's "exe".
+ *                          --moment: T is B's state at another moment (stateConvertTemplate first, as a
+ *                          slot's load does).
  *                          tools/test_stateconvert_c.py compares it with statecanon's own. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -208,6 +210,20 @@ static int64_t warningCount(const StateConvertWarning* w, int32_t n, const char*
     return 0;
 }
 
+/* A writer's strings that count what the encoding asks for. */
+typedef struct {
+    StateStrings inner;
+    int count;
+    uint64_t addr;
+} Asked;
+
+static int askedAt(void* user, uint64_t addr, const uint8_t** text, size_t* len) {
+    Asked* a = user;
+    a->count++;
+    a->addr = addr;
+    return a->inner.at(a->inner.user, addr, text, len);
+}
+
 static void convertChecks(void) {
     char err[300];
     char* ta = schemaText(0);
@@ -267,6 +283,50 @@ static void convertChecks(void) {
                                  "pointer to nothing known (kept as a number: same build only)") == 1,
               "a pointer to nothing known: warned");
         stateConvertResultFree(&r);
+        free(a.p);
+        free(t.p);
+        free(want.p);
+    }
+
+    /* the encoding alone (a portable slot's strings table): the strings the writer's pointers reach */
+    {
+        Bytes a = {0};
+        stateBody(&a, 0, 5);
+        Asked asked = {stateRoStrings(stra), 0, 0};
+        StateConvertSide wa = {a.p, a.n, sa, {&asked, askedAt, NULL}};
+        StateConvertResult r;
+        int ok = stateConvertEncode(&wa, &r, err, sizeof err);
+        check(ok && r.safePoint == 5 && r.body == NULL, "the encoding alone: the safe point, no body");
+        check(asked.count == 1 && asked.addr == 0x2000, "the encoding asks for each string a pointer reaches");
+        check(ok && warningCount(r.encodeWarnings, r.encodeWarningCount,
+                                 "pointer to nothing known (kept as a number: same build only)") == 1,
+              "the encoding's warnings");
+        stateConvertResultFree(&r);
+        free(a.p);
+    }
+
+    /* a template of another moment: its raw chunk at the writer's size, the others as they are */
+    {
+        Bytes a = {0}, t = {0}, want = {0};
+        stateBody(&a, 0, 5);
+        stateBody(&t, 1, 0);
+        uint8_t* tp = NULL;
+        size_t tn = 0;
+        int ok = stateConvertTemplate(t.p, t.n, sb, a.p, a.n, &tp, &tn, err, sizeof err);
+        check(ok && tn == t.n - 2 && tp[0] == 6 && memcmp(tp + 1, "zz.raw", 6) == 0 && tp[7] == 3 &&
+                  memcmp(tp + 11, "\0\0\0", 3) == 0 && memcmp(tp + 14, t.p + 16, t.n - 16) == 0,
+              "a template of another moment: the raw chunk at the writer's size, zeros; the others as they are");
+        StateConvertSide wa = {a.p, a.n, sa, stateRoStrings(stra)};
+        StateConvertSide wb = {tp, tn, sb, stateRoStrings(strb)};
+        StateConvertResult r;
+        expectedBody(&want, 1);
+        ok = ok && stateConvert(&wa, &wb, 1, &r, err, sizeof err);
+        /* the expected body with the raw chunk as the writer has it: "abc" */
+        check(ok && r.size == want.n - 2 && memcmp(r.body, "\x06zz.raw\x03\0\0\0abc", 14) == 0 &&
+                  memcmp(r.body + 14, want.p + 16, want.n - 16) == 0,
+              "converted through it: the writer's raw bytes whole");
+        if (ok) stateConvertResultFree(&r);
+        free(tp);
         free(a.p);
         free(t.p);
         free(want.p);
@@ -411,10 +471,15 @@ static void printWarnings(const char* side, const StateConvertWarning* w, int32_
 
 static int convertFiles(int argc, char** argv) {
     if (argc < 7) {
-        fprintf(stderr, "usage: stateconverttest convert A.xgs SCHEMA_A T.xgs SCHEMA_B OUT.xgs [--stackless]\n");
+        fprintf(stderr, "usage: stateconverttest convert A.xgs SCHEMA_A T.xgs SCHEMA_B OUT.xgs [--stackless] "
+                        "[--moment]\n");
         return 2;
     }
-    int stackless = argc > 7 && strcmp(argv[7], "--stackless") == 0;
+    int stackless = 0, moment = 0;
+    for (int i = 7; i < argc; i++) {
+        stackless |= strcmp(argv[i], "--stackless") == 0;
+        moment |= strcmp(argv[i], "--moment") == 0;
+    }
     char err[400];
     clock_t t0 = clock();
     StateSchema* sa = stateSchemaLoad(argv[3], err, sizeof err);
@@ -429,6 +494,17 @@ static int convertFiles(int argc, char** argv) {
     uint8_t* bodyT = bodyA ? readState(argv[4], &ft, &nt, &bt) : NULL;
     ExeStrings ea = {0}, eb = {0};
     if (!bodyA || !bodyT || !exeStrings(sa, &ea) || !exeStrings(sb, &eb)) return 1;
+    if (moment) {
+        uint8_t* adjusted;
+        size_t n;
+        if (!stateConvertTemplate(bodyT, bt, sb, bodyA, ba, &adjusted, &n, err, sizeof err)) {
+            fprintf(stderr, "stateconverttest: %s\n", err);
+            return 1;
+        }
+        free(bodyT);
+        bodyT = adjusted;
+        bt = n;
+    }
     clock_t t1 = clock();
     double before = peakMiB();
     StateConvertSide wa = {bodyA, ba, sa, stateRoStrings(ea.strings)};

@@ -25,6 +25,13 @@
  * seconds as captures of the same kind: hold R or Select+L2 to go back. Linux x86-64 only for now (Windows: the game stack
  * and Battling's fibers need their own switch first).
  *
+ * Portable slots (stateportable.h): in a build with a state schema, a slot
+ * save waits for the next safe point (include/pc_state.h), normally the next
+ * frame, and its file carries what another build needs to convert it at the
+ * load; if none comes within 2 seconds (a movie, a prompt, the card's
+ * directory scan) it is saved as before, for this build only. Rewind, the
+ * undo slot and netplay keep raw states.
+ *
  * Harness (headless tests, tools/statecheck.py):
  *   XG_STATE_SAVE=<vblank>:<file>[,<vblank>:<file>...]  save at the first
  *                     park at or after that vblank
@@ -33,6 +40,11 @@
  *                     last: a run that saves must equal one that does not)
  *   XG_STATE_RELOAD=1      load each harness save right back (in the same run)
  *   XG_STATE_LOG=1         a line per park served
+ *   XG_STATE_SLOT_SAVE=<vblank>:<slot>[,...]  from that vblank, save to the
+ *                     slot as F7 does (a safe point's, else after 2 s as it is)
+ *   XG_STATE_SLOT_LOAD=[<vblank>:]<slot>  load the slot as F8 does (another
+ *                     build's converted), at the first park from that vblank
+ *   XG_STATE_SCHEMA=<file>|none  this build's schema (stateportable.h)
  */
 
 #include <stddef.h>
@@ -166,14 +178,17 @@ typedef struct {
     char label[96];
     int thumbW, thumbH;
     unsigned char* thumb;
-    int otherBuild;        /* saved by another build (an update, a rebuild): never loads here */
+    int otherBuild;        /* saved by another build (an update, a rebuild): loads here only by converting */
     char appVersion[16];   /* the app's version that saved it, "" if unknown */
+    int portable;          /* saved at a safe point: other builds convert it (else this build only) */
 } XgStateInfo;
 int stateSlotInfo(int slot, XgStateInfo* out); /* 1 if a file is there */
 void stateInfoFree(XgStateInfo* info);
 int stateDeleteSlot(int slot);
 /* Changes whenever a slot's file changed (the menu reads the slots again). */
 int stateSerial(void);
+/* Whether this build saves portable slots (it has a state schema: stateportable.h). */
+int stateSlotsPortable(void);
 
 #ifdef __cplusplus
 }

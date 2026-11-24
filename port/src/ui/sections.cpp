@@ -1007,6 +1007,18 @@ void displaySection() {
              "middle. Dialogue, portraits and the HUD are not touched. Off by default.");
         overrideNote("vignette");
     }
+    // Light shafts (xg-rgcf.5.16), on the shown colour after the colour grade.
+    if (row("Light shafts", "light_shafts", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneLightShafts();
+        int chosen = listChoice("##light_shafts", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetLightShafts(chosen);
+        hint("In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft "
+             "sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("light_shafts");
+    }
 
     if (row("Filter", "present_filter")) {
         static const char* const filters[] = {"Nearest", "Linear", "Sharp", "Bicubic", "xBR (edges)"};

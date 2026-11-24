@@ -4157,6 +4157,10 @@ msgid "Another build's"
 msgstr "別のビルドのもの"
 
 #: port/src/ui/states.cpp
+msgid "This version only"
+msgstr "このバージョンのみ"
+
+#: port/src/ui/states.cpp
 msgid "F7 saves to the selected slot, F8 loads it, F9 and Shift+F9 choose the slot, Shift+F8 undoes the last load."
 msgstr "F7 で選んだスロットにセーブ、F8 でロード、F9 と Shift+F9 でスロットを選び、Shift+F8 で最後のロードを取り消します。"
 
@@ -4187,6 +4191,10 @@ msgstr "スロット %d はロードできません: %s。"
 #: port/src/ui/states.cpp
 msgid "A save state is the whole game at a moment: loading it goes back there exactly. Loading never changes the memory cards: saves made since stay on them, and the game reads the cards again. States load only in the build of the port that saved them: after the port is updated or rebuilt, older states are refused. Keep long-term progress on memory cards."
 msgstr "ステートセーブはある瞬間のゲーム全体です: ロードするとそのときへそのままもどります。ロードでメモリーカードは変わりません: その後のセーブはカードに残り、ゲームはカードを読み直します。ステートはセーブしたポートのビルドでだけロードできます: ポートを更新またはビルドし直すと、前のステートは使えません。長く残す進み具合はメモリーカードにセーブしてください。"
+
+#: port/src/ui/states.cpp
+msgid "A save state is the whole game at a moment: loading it goes back there exactly. Loading never changes the memory cards: saves made since stay on them, and the game reads the cards again. Other builds of the port that can convert states load these too, except those marked \"This version only\": saved during a movie, a prompt or a memory card access. Keep long-term progress on memory cards."
+msgstr "ステートセーブはある瞬間のゲーム全体です: ロードするとそのときへそのままもどります。ロードでメモリーカードは変わりません: その後のセーブはカードに残り、ゲームはカードを読み直します。ステートを変換できるポートの別のビルドでもロードできます。ただし「このバージョンのみ」と出ているもの(ムービー、確認の表示、メモリーカードの読み書きの最中にセーブしたもの)は別です。長く残す進み具合はメモリーカードにセーブしてください。"
 
 #: port/src/ui/states.cpp
 #, c-format
@@ -7595,6 +7603,12 @@ msgstr "フィールドとワールドマップで、画面のふちに向かっ
 
 msgid "Vignette"
 msgstr "ビネット"
+
+msgid "Light shafts"
+msgstr "光の筋"
+
+msgid "In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "フィールドとワールドマップで、窓や開口部、空から光の筋がこぼれ、上からやわらかな日差しが斜めに差し込みます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"
 
 msgid "In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the middle. Dialogue, portraits and the HUD are not touched. Off by default."
 msgstr "フィールド、戦闘、ワールドマップで、画面のふちを少し暗くして、目を中央へ向けます。会話、顔グラフィック、HUDは変わりません。初期設定はオフです。"

@@ -256,6 +256,8 @@ int sceneVignette(void);         /* vignette: 0 off (default) .. 3 strong */
 void sceneSetVignette(int level);
 int sceneTiltShift(void);        /* tilt_shift: 0 off (default) .. 3 strong (fields and the world map) */
 void sceneSetTiltShift(int level);
+int sceneLightShafts(void);      /* light_shafts: 0 off (default) .. 3 strong (fields and the world map) */
+void sceneSetLightShafts(int level);
 const char* sceneLightingStatus(void);
 
 /* Texture filters in the enhanced display copy, independently per class

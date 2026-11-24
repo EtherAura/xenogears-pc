@@ -64,6 +64,17 @@ static int computeId(uint64_t* a, uint64_t* b) {
     }
     return 1;
 }
+
+/* (The state schema is read from ELF executables only: portable slots are off here.) */
+int stateImageReadable(uint64_t lo, uint64_t hi) {
+    (void)lo;
+    (void)hi;
+    return 0;
+}
+
+const char* stateImagePath(void) {
+    return NULL;
+}
 #else
 /* The ELF object this code is in (the executable, or the library an Android
  * app loads) and where it sits: its load bias (0 for a non-PIE executable)
@@ -90,6 +101,8 @@ static int findSelf(struct dl_phdr_info* info, size_t size, void* data) {
     return 0;
 }
 
+static const char* imagePath;
+
 /* The bias, before main (or at the library's load): states record it while
  * the game is parked, on the game's stacks, where a call into the C library
  * would leave this run's host values below the game's frames. */
@@ -97,6 +110,43 @@ __attribute__((constructor)) static void imageBiasInit(void) {
     SelfObject self = {.inside = (uintptr_t)&imageBiasInit};
     dl_iterate_phdr(findSelf, &self);
     imageBias = self.found ? self.bias : 0;
+    imagePath = self.found ? self.path : NULL; /* the loader's name for it: kept as long as it is loaded */
+}
+
+typedef struct {
+    uintptr_t inside, lo, hi;
+    int readable;
+} ReadableQuery;
+
+/* Whether [lo, hi) is in one of this object's PT_LOAD segments that can be read. */
+static int findReadable(struct dl_phdr_info* info, size_t size, void* data) {
+    (void)size;
+    ReadableQuery* q = data;
+    int self = 0;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+        uintptr_t lo = info->dlpi_addr + ph->p_vaddr;
+        if (ph->p_type == PT_LOAD && q->inside >= lo && q->inside < lo + ph->p_memsz) self = 1;
+    }
+    if (!self) return 0;
+    for (int i = 0; i < info->dlpi_phnum; i++) {
+        const ElfW(Phdr)* ph = &info->dlpi_phdr[i];
+        uintptr_t lo = info->dlpi_addr + ph->p_vaddr;
+        if (ph->p_type == PT_LOAD && (ph->p_flags & PF_R) && q->lo >= lo && q->hi <= lo + ph->p_memsz) q->readable = 1;
+    }
+    return 1;
+}
+
+int stateImageReadable(uint64_t lo, uint64_t hi) {
+    ReadableQuery q = {.inside = (uintptr_t)&findReadable, .lo = (uintptr_t)(lo + imageBias),
+                       .hi = (uintptr_t)(hi + imageBias)};
+    if (hi < lo) return 0;
+    dl_iterate_phdr(findReadable, &q);
+    return q.readable;
+}
+
+const char* stateImagePath(void) {
+    return imagePath;
 }
 
 static int computeId(uint64_t* a, uint64_t* b) {
@@ -291,7 +341,162 @@ static int headerUnpack(const uint8_t in[HEADER_SIZE], StateHeader* h, uint32_t*
     *bodyPacked = get64(in + H_BODYPACKED);
     memcpy(h->appVersion, in + H_APPVERSION, sizeof(h->appVersion));
     h->appVersion[sizeof(h->appVersion) - 1] = 0;
+    h->imageBias = get64(in + H_IMAGE);
     if (h->thumbW > 1024 || h->thumbH > 1024 || h->bodySize > (1ull << 31)) {
+        return 0;
+    }
+    return 1;
+}
+
+/* ---- the trailer of a portable slot ----------------------------------------------- */
+
+#define TRAILER_MAGIC "XGCANON"
+#define TRAILER_VERSION 1u
+#define TRAILER_HEAD 24 /* magic, version, 0, the size of what follows */
+
+int statePortableString(StatePortable* p, uint64_t addr, const uint8_t* text, size_t len) {
+    if (len > STATE_STRING_MAX) {
+        return 0;
+    }
+    if (p->stringCount == p->stringCap) {
+        uint32_t cap = p->stringCap ? p->stringCap * 2 : 64;
+        StateString* n = realloc(p->strings, (size_t)cap * sizeof(*n));
+        if (n == NULL) {
+            return 0;
+        }
+        p->strings = n;
+        p->stringCap = cap;
+    }
+    if (p->poolSize + len + 1 > p->poolCap) {
+        size_t cap = p->poolCap ? p->poolCap : 4096;
+        while (cap < p->poolSize + len + 1) {
+            cap *= 2;
+        }
+        uint8_t* n = realloc(p->pool, cap);
+        if (n == NULL) {
+            return 0;
+        }
+        p->pool = n;
+        p->poolCap = cap;
+    }
+    StateString* s = &p->strings[p->stringCount++];
+    s->addr = addr;
+    s->len = (uint32_t)len;
+    s->off = (uint32_t)p->poolSize;
+    if (len > 0) {
+        memcpy(p->pool + p->poolSize, text, len);
+    }
+    p->pool[p->poolSize + len] = 0;
+    p->poolSize += len + 1;
+    return 1;
+}
+
+static int byAddress(const void* a, const void* b) {
+    const StateString* x = a;
+    const StateString* y = b;
+    if (x->addr != y->addr) {
+        return x->addr < y->addr ? -1 : 1;
+    }
+    return x->off < y->off ? -1 : x->off > y->off; /* the first added first: stable */
+}
+
+void statePortableSortStrings(StatePortable* p) {
+    if (p->stringCount == 0) {
+        return;
+    }
+    qsort(p->strings, p->stringCount, sizeof(*p->strings), byAddress);
+    uint32_t n = 1;
+    for (uint32_t i = 1; i < p->stringCount; i++) {
+        if (p->strings[i].addr != p->strings[n - 1].addr) {
+            p->strings[n++] = p->strings[i];
+        }
+    }
+    p->stringCount = n;
+}
+
+int statePortableStringAt(void* user, uint64_t addr, const uint8_t** text, size_t* len) {
+    const StatePortable* p = user;
+    uint32_t lo = 0, hi = p->stringCount;
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+        if (p->strings[mid].addr < addr) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo == p->stringCount || p->strings[lo].addr != addr) {
+        return 0;
+    }
+    *text = p->pool + p->strings[lo].off;
+    *len = p->strings[lo].len;
+    return 1;
+}
+
+void statePortableFree(StatePortable* p) {
+    free(p->strings);
+    free(p->pool);
+    memset(p, 0, sizeof(*p));
+}
+
+/* The trailer's bytes, malloc'd (the table sorted). */
+static uint8_t* trailerPack(const StatePortable* p, size_t* size) {
+    size_t n = TRAILER_HEAD + 8 + 4 + 4 + 8;
+    for (uint32_t i = 0; i < p->stringCount; i++) {
+        n += 12 + p->strings[i].len;
+    }
+    uint8_t* out = malloc(n);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, TRAILER_MAGIC, 8);
+    put32(out + 8, TRAILER_VERSION);
+    put32(out + 12, 0);
+    put64(out + 16, n - TRAILER_HEAD);
+    put64(out + 24, p->schemaHash);
+    put32(out + 32, (uint32_t)p->safePoint);
+    put32(out + 36, p->stringCount);
+    size_t at = 40;
+    for (uint32_t i = 0; i < p->stringCount; i++) {
+        put64(out + at, p->strings[i].addr);
+        put32(out + at + 8, p->strings[i].len);
+        memcpy(out + at + 12, p->pool + p->strings[i].off, p->strings[i].len);
+        at += 12 + p->strings[i].len;
+    }
+    put64(out + at, stateHash(out, at, 0));
+    *size = n;
+    return out;
+}
+
+/* A trailer read back (n bytes from its magic to the file's end); 0 if damaged. */
+static int trailerUnpack(const uint8_t* in, size_t n, StatePortable* p) {
+    memset(p, 0, sizeof(*p));
+    if (n < TRAILER_HEAD + 24 || memcmp(in, TRAILER_MAGIC, 8) != 0 || get32(in + 8) != TRAILER_VERSION ||
+        get64(in + 16) != n - TRAILER_HEAD || get64(in + n - 8) != stateHash(in, n - 8, 0)) {
+        return 0;
+    }
+    p->schemaHash = get64(in + 24);
+    p->safePoint = (int32_t)get32(in + 32);
+    uint32_t count = get32(in + 36);
+    size_t at = 40;
+    uint64_t last = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        if (at + 12 > n - 8) {
+            statePortableFree(p);
+            return 0;
+        }
+        uint64_t addr = get64(in + at);
+        uint32_t len = get32(in + at + 8);
+        if (len > STATE_STRING_MAX || at + 12 + len > n - 8 || (i > 0 && addr <= last) ||
+            !statePortableString(p, addr, in + at + 12, len)) {
+            statePortableFree(p);
+            return 0;
+        }
+        last = addr;
+        at += 12 + len;
+    }
+    if (at != n - 8) {
+        statePortableFree(p);
         return 0;
     }
     return 1;
@@ -301,25 +506,34 @@ static int headerUnpack(const uint8_t in[HEADER_SIZE], StateHeader* h, uint32_t*
 
 int stateFileWrite(const char* path, const StateHeader* h, const uint8_t* thumb, const uint8_t* body, char* why,
                    size_t whySize) {
+    return stateFileWritePortable(path, h, thumb, body, NULL, why, whySize);
+}
+
+int stateFileWritePortable(const char* path, const StateHeader* h, const uint8_t* thumb, const uint8_t* body,
+                           const StatePortable* portable, char* why, size_t whySize) {
     size_t thumbRaw = thumb != NULL ? (size_t)h->thumbW * h->thumbH * 3 : 0;
     uint8_t* packedThumb = malloc(statePackBound(thumbRaw));
     uint8_t* packedBody = malloc(statePackBound((size_t)h->bodySize));
+    size_t trailerSize = 0;
+    uint8_t* trailer = portable != NULL ? trailerPack(portable, &trailerSize) : NULL;
     char tmp[1100];
     int ok = 0;
 
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
-    if (packedThumb != NULL && packedBody != NULL) {
+    if (packedThumb != NULL && packedBody != NULL && (portable == NULL || trailer != NULL)) {
         size_t tp = thumbRaw ? statePack(thumb, thumbRaw, packedThumb) : 0;
         size_t bp = statePack(body, (size_t)h->bodySize, packedBody);
         StateHeader copy = *h;
         if (thumb == NULL) {
             copy.thumbW = copy.thumbH = 0;
         }
+        copy.flags = portable != NULL ? copy.flags | STATE_FLAG_PORTABLE : copy.flags & ~STATE_FLAG_PORTABLE;
         uint8_t head[HEADER_SIZE];
         headerPack(&copy, (uint32_t)tp, bp, head);
         FILE* f = fopen(tmp, "wb");
         ok = f != NULL && fwrite(head, 1, HEADER_SIZE, f) == HEADER_SIZE && fwrite(packedThumb, 1, tp, f) == tp &&
-             fwrite(packedBody, 1, bp, f) == bp;
+             fwrite(packedBody, 1, bp, f) == bp &&
+             (trailer == NULL || fwrite(trailer, 1, trailerSize, f) == trailerSize);
         if (f != NULL && fclose(f) != 0) {
             ok = 0;
         }
@@ -337,6 +551,7 @@ int stateFileWrite(const char* path, const StateHeader* h, const uint8_t* thumb,
     }
     free(packedThumb);
     free(packedBody);
+    free(trailer);
     return ok;
 }
 
@@ -408,6 +623,34 @@ int stateFileRead(const char* path, StateHeader* h, uint8_t** body, char* why, s
     return 1;
 }
 
+int stateFileReadPortable(const char* path, StatePortable* out, char* why, size_t whySize) {
+    StateHeader h;
+    uint32_t tp;
+    uint64_t bp;
+    memset(out, 0, sizeof(*out));
+    FILE* f = openHeader(path, &h, &tp, &bp);
+    if (f == NULL) {
+        snprintf(why, whySize, "it is no save state of this format");
+        return 0;
+    }
+    if (!(h.flags & STATE_FLAG_PORTABLE)) {
+        fclose(f);
+        snprintf(why, whySize, "it has no trailer");
+        return 0;
+    }
+    long at = (long)(HEADER_SIZE + tp + bp);
+    long end = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+    uint8_t* data = end > at && end - at < (1l << 26) ? malloc((size_t)(end - at)) : NULL;
+    size_t n = end > at ? (size_t)(end - at) : 0;
+    int ok = data != NULL && fseek(f, at, SEEK_SET) == 0 && fread(data, 1, n, f) == n && trailerUnpack(data, n, out);
+    fclose(f);
+    free(data);
+    if (!ok) {
+        snprintf(why, whySize, "its trailer is damaged");
+    }
+    return ok;
+}
+
 /* ---- slots ------------------------------------------------------------------------ */
 
 #ifdef VERSION_JP
@@ -456,5 +699,81 @@ int stateSlotPath(int slot, char* out, size_t size) {
     } else {
         snprintf(out, size, "%s/slot%d.xgs", dir, slot);
     }
+    return 1;
+}
+
+/* ---- the schemas of portable slots ------------------------------------------------ */
+
+#define SCHEMA_MAGIC "XGSCHEMA"
+
+int stateSchemaFilePath(uint64_t hash, char* out, size_t size) {
+    const char* dir = stateDir();
+    if (dir == NULL) {
+        return 0;
+    }
+    snprintf(out, size, "%s/schemas/%016llx.xgschema", dir, (unsigned long long)hash);
+    return 1;
+}
+
+int stateSchemaFileWrite(const char* path, const uint8_t* json, size_t n, char* why, size_t whySize) {
+    char dir[1100], tmp[1100];
+    snprintf(dir, sizeof dir, "%s", path);
+    char* slash = strrchr(dir, '/');
+    if (slash != NULL) {
+        *slash = 0;
+        SDL_CreateDirectory(dir); /* (fails when it is there) */
+    }
+    uint8_t* packed = malloc(16 + statePackBound(n));
+    if (packed == NULL) {
+        snprintf(why, whySize, "out of memory");
+        return 0;
+    }
+    memcpy(packed, SCHEMA_MAGIC, 8);
+    put64(packed + 8, n);
+    size_t size = 16 + statePack(json, n, packed + 16);
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE* f = fopen(tmp, "wb");
+    int ok = f != NULL && fwrite(packed, 1, size, f) == size;
+    if (f != NULL && fclose(f) != 0) {
+        ok = 0;
+    }
+    free(packed);
+    if (!ok) {
+        snprintf(why, whySize, "cannot write %s", tmp);
+    } else if (!SDL_RenamePath(tmp, path)) {
+        snprintf(why, whySize, "cannot replace %s: %s", path, SDL_GetError());
+        ok = 0;
+    }
+    if (!ok) {
+        SDL_RemovePath(tmp);
+    }
+    return ok;
+}
+
+int stateSchemaFileRead(const char* path, uint8_t** json, size_t* n, char* why, size_t whySize) {
+    *json = NULL;
+    *n = 0;
+    FILE* f = fopen(path, "rb");
+    if (f == NULL) {
+        snprintf(why, whySize, "there is no such file");
+        return 0;
+    }
+    long size = fseek(f, 0, SEEK_END) == 0 ? ftell(f) : -1;
+    uint8_t* data = size >= 16 && size < (1l << 30) ? malloc((size_t)size) : NULL;
+    int ok = data != NULL && fseek(f, 0, SEEK_SET) == 0 && fread(data, 1, (size_t)size, f) == (size_t)size &&
+             memcmp(data, SCHEMA_MAGIC, 8) == 0;
+    fclose(f);
+    uint64_t raw = ok ? get64(data + 8) : 0;
+    uint8_t* text = ok && raw < (1ull << 31) ? malloc((size_t)raw + 1) : NULL;
+    ok = text != NULL && stateUnpack(data + 16, (size_t)size - 16, text, (size_t)raw);
+    free(data);
+    if (!ok) {
+        free(text);
+        snprintf(why, whySize, "it is damaged");
+        return 0;
+    }
+    text[raw] = 0;
+    *json = text;
+    *n = (size_t)raw;
     return 1;
 }

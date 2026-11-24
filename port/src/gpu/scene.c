@@ -135,6 +135,9 @@ static const float fogDensity[] = {0, 0.8f, 1.1f, 1.4f};
 static const float gradeAmount[] = {0, 0.5f, 1.0f, 1.5f};
 /* The vignette: the corners' darkening per level (xg-rgcf.5.13, carl's pick). */
 static const float vignetteAmount[] = {0, 0.12f, 0.22f, 0.35f};
+/* Light shafts: their strength per level (xg-rgcf.5.16; Medium is the
+ * prototype carl chose, light.comp's shares). */
+static const float shaftAmount[] = {0, 0.6f, 1.0f, 1.5f};
 /* The sun: this far above the ground, from the camera's left and a little
  * from beyond the scene, when the room starts. */
 #define SUN_ELEVATION 55.0f
@@ -152,6 +155,7 @@ static struct {
     int particles, particleSize;             /* particles' level (0 off) and size (0 small .. 2 large) */
     int vignette;                            /* the vignette's level, 0 off */
     int tiltShift;                           /* the tilt-shift's level, 0 off */
+    int shafts;                              /* light shafts' level, 0 off */
     int frameRows;                           /* the scene's frame's rows (its drawing area) */
     int shadePart, bouncePart;
     int lightDebug, haveLightGain;
@@ -273,6 +277,10 @@ static void load(void) {
     settingsDescribe("tilt_shift", "tilt_shift: off (default), subtle, medium or strong: the picture blurred toward "
                                    "its edges, in fields and on the world map (the Enhanced engine)");
     sc.tiltShift = levelOf("tilt_shift");
+    settingsDescribe("light_shafts", "light_shafts: off (default), subtle, medium or strong: light spilling in shafts "
+                                     "from windows, openings and the sky, and soft sunbeams, in fields and on the "
+                                     "world map (the Enhanced engine)");
+    sc.shafts = levelOf("light_shafts");
     s = settingsGet("particle_size");
     sc.particleSize = s != NULL && strcmp(s, "medium") == 0 ? 1 : s != NULL && strcmp(s, "large") == 0 ? 2 : 0;
     s = settingsGet("lighting_shade");
@@ -378,6 +386,13 @@ int sceneTiltShift(void) {
 
 void sceneSetTiltShift(int level) { setLevel("tilt_shift", &sc.tiltShift, level); }
 
+int sceneLightShafts(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.shafts : 0;
+}
+
+void sceneSetLightShafts(int level) { setLevel("light_shafts", &sc.shafts, level); }
+
 int sceneParticleSize(void) {
     load();
     return sc.particleSize;
@@ -400,7 +415,8 @@ const char* sceneLightingStatus(void) {
 
 int sceneWantsCopy(void) {
     return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0 || sceneFog() != 0 ||
-           sceneGrade() != 0 || sceneParticles() != 0 || sceneVignette() != 0 || sceneTiltShift() != 0;
+           sceneGrade() != 0 || sceneParticles() != 0 || sceneVignette() != 0 || sceneTiltShift() != 0 ||
+           sceneLightShafts() != 0;
 }
 
 static void normalize3(float v[3]) {
@@ -429,8 +445,10 @@ static void params(SceneParams* p) {
     int vignette = sceneVignette();
     /* Particles: fields, battles and the world map (xg-rgcf.5.11), not Battling. */
     int particles = sc.place == PC_SCENE_BATTLING ? 0 : sceneParticles();
+    /* Light shafts: fields and the world map (xg-rgcf.5.16). */
+    int shafts = sc.place == PC_SCENE_FIELD || sc.place == PC_SCENE_WORLDMAP ? sceneLightShafts() : 0;
     sc.lightStatus = NULL;
-    if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette) return;
+    if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette && !shafts) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
         return;
@@ -453,6 +471,8 @@ static void params(SceneParams* p) {
     if (sc.place == PC_SCENE_WORLDMAP) l->fogDensity *= 0.5f;
     l->grade = gradeAmount[grade] * gain;
     l->vignette = vignetteAmount[vignette];
+    l->shafts = shaftAmount[shafts];
+    l->shaftTime = (float)(hwVSyncCount() % 216000u) / 60.0f; /* seconds, over an hour that repeats */
     if (sc.sunSet) {
         /* The room's sun in this frame's view. */
         for (int i = 0; i < 3; i++)
@@ -686,6 +706,7 @@ static void finish(int reached) {
             gpuLog("scene: %u light top %.2f shade %.2f bounce %.2f glow %.2f fog %.2f grade %.2f up %.3f %.3f %.3f screen %.0f figures %d",
                    sc.scenes, p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.fogMost, p.light.grade,
                    p.light.up[0], p.light.up[1], p.light.up[2], p.light.screenZ, p.light.figures);
+        if (p.light.shafts > 0) gpuLog("scene: %u light shafts %.2f time %.2f", sc.scenes, p.light.shafts, p.light.shaftTime);
         if (p.light.particles > 0)
             gpuLog("scene: %u particles %d size %.2f time %.2f box %.0f blur %.3f %.2f %.2f", sc.scenes, p.light.particles,
                    p.light.particleSize, p.light.particleTime, p.light.particleBox, p.light.blurBand, p.light.blurGain,

@@ -548,6 +548,7 @@ system/spu.c transferCallback state
 system/spu.c transferMode state
 system/stall.c * host the stall watchdog
 system/statefile.c * host save state files
+system/stateportable.c * host portable slots: this build's state schema, read once and kept (never in a state)
 system/release.c * host which release this copy is and how it was installed (its release.txt, read once at start)
 update/update_check.c * host the update check (XG_UPDATER): its setting's state, the check thread and what it found
 update/update_fetch.c * host the update check's fetcher (libcurl loaded at run time)

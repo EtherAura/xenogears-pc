@@ -139,6 +139,15 @@ corners. Dialogue, portraits and the HUD are not touched. The Enhanced engine
 only (F1 > System > Engine). F1 > Display > Vignette (Off, Subtle, Medium,
 Strong).
 
+## Light shafts
+
+In fields and on the world map, light spills in shafts from what is much
+brighter than the place around it (windows, openings, the sky behind), in
+soft bands along the sun's way, and gentle sunbeams slant down from the
+top of the picture over the scenery. Dialogue, portraits and the HUD are
+not touched. The Enhanced engine only (F1 > System > Engine). F1 > Display
+> Light shafts (Off, Subtle, Medium, Strong).
+
 ## Smoothed motion
 
 ![Motion smoothing off and on](img/clip-smooth.webp)
@@ -179,6 +188,7 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Particles | Off |
 | Particle size | Small |
 | Vignette | Off |
+| Light shafts | Off |
 | Speedup | Off |
 | Motion display rate | 60 Hz |
 

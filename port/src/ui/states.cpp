@@ -140,6 +140,20 @@ bool slotRow(int i, bool selected) {
     ImGui::Text(tr("Disc %d  %s"), s.info.disc, s.info.label);
     if (s.info.usable) {
         ImGui::Text(tr("Play time %u:%02u:%02u"), t / 3600, t / 60 % 60, t % 60);
+        // Saved without what another build needs to convert it (during a movie or a prompt, or by a build
+        // without a state schema: system/stateportable.h): no other build loads it. Another build's that
+        // loads here (it converts) says whose.
+        if (!s.info.otherBuild && !s.info.portable) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", tr("This version only"));
+        } else if (s.info.otherBuild) {
+            ImGui::SameLine();
+            if (s.info.appVersion[0] != '\0') {
+                ImGui::TextDisabled(tr("Version %s's"), s.info.appVersion);
+            } else {
+                ImGui::TextDisabled("%s", tr("Another build's"));
+            }
+        }
     } else {
         if (s.info.otherBuild && s.info.appVersion[0] != '\0') {
             ImGui::Text(tr("Version %s's"), s.info.appVersion);
@@ -327,7 +341,9 @@ void statesSection() {
         // An update leaves the earlier version's states: kept (that version loads them), marked,
         // and deleted here on request (system/android.c says so once after the update).
         int others = 0;
-        for (int i = 0; i <= STATE_SLOTS; i++) others += S.slot[i].known && S.slot[i].info.exists && S.slot[i].info.otherBuild;
+        for (int i = 0; i <= STATE_SLOTS; i++) {
+            others += S.slot[i].known && S.slot[i].info.exists && S.slot[i].info.otherBuild && !S.slot[i].info.usable;
+        }
         if (others > 0) {
             char label[96];
             if (others == 1) snprintf(label, sizeof label, "%s", tr("Delete the state another version made"));
@@ -366,10 +382,17 @@ void statesSection() {
             }
             ImGui::EndTable();
         }
-        hint("A save state is the whole game at a moment: loading it goes back there exactly. Loading never changes "
-             "the memory cards: saves made since stay on them, and the game reads the cards again. States load only "
-             "in the build of the port that saved them: after the port is updated or rebuilt, older states are "
-             "refused. Keep long-term progress on memory cards.");
+        // Portable slots (a build with a state schema, system/stateportable.h): others convert them.
+        hint(stateSlotsPortable()
+                 ? "A save state is the whole game at a moment: loading it goes back there exactly. Loading never "
+                   "changes the memory cards: saves made since stay on them, and the game reads the cards again. "
+                   "Other builds of the port that can convert states load these too, except those marked \"This "
+                   "version only\": saved during a movie, a prompt or a memory card access. Keep long-term progress "
+                   "on memory cards."
+                 : "A save state is the whole game at a moment: loading it goes back there exactly. Loading never "
+                   "changes the memory cards: saves made since stay on them, and the game reads the cards again. "
+                   "States load only in the build of the port that saved them: after the port is updated or "
+                   "rebuilt, older states are refused. Keep long-term progress on memory cards.");
     }
 
     rewindSettings(rs);
@@ -398,7 +421,8 @@ void statesSection() {
             } else if (S.ask == 3) {
                 int gone = 0;
                 for (int i = 0; i <= STATE_SLOTS; i++) {
-                    if (S.slot[i].known && S.slot[i].info.exists && S.slot[i].info.otherBuild) gone += stateDeleteSlot(i);
+                    const XgStateInfo& in = S.slot[i].info;
+                    if (S.slot[i].known && in.exists && in.otherBuild && !in.usable) gone += stateDeleteSlot(i);
                 }
                 snprintf(S.message, sizeof S.message, tr("%d states deleted."), gone);
                 readSlots();

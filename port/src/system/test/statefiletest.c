@@ -2,7 +2,10 @@
  * set (the engine id among them: savestate.c's usable() refuses a state from
  * the other engine by it), a thumbnail and a body written and read back; the
  * engine as the file holds it at H_ENGINE (byte 220); a file with another
- * magic and one of another format refused. */
+ * magic and one of another format refused. A portable slot's trailer
+ * (StatePortable): written after the body with its flag, read back, unseen by
+ * the plain reader, refused when damaged or cut; its strings table sorted and
+ * served by address; a schema filed in the "XGSCHEMA" form and read back. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -141,6 +144,104 @@ int main(int argc, char** argv) {
     char format[4] = {(char)(STATE_FORMAT + 1), 0, 0, 0};
     refused("bad format", badFormat, file, size, 8, format);
 
+    /* A portable slot: the same state with a trailer. */
+    StatePortable port;
+    memset(&port, 0, sizeof port);
+    port.schemaHash = 0x0123456789ABCDEFull;
+    port.safePoint = 0x10E;
+    CHECK(statePortableString(&port, 0x9A0010, (const uint8_t*)"second", 6));
+    CHECK(statePortableString(&port, 0x92D000, (const uint8_t*)"first", 5));
+    CHECK(statePortableString(&port, 0x9A0010, (const uint8_t*)"again", 5)); /* the same address: the first kept */
+    CHECK(statePortableString(&port, 0xF00000, (const uint8_t*)"", 0));      /* an empty string */
+    static uint8_t longText[STATE_STRING_MAX + 1];
+    CHECK(!statePortableString(&port, 0xF00008, longText, sizeof longText)); /* past the cap: refused */
+    statePortableSortStrings(&port);
+    CHECK(port.stringCount == 3);
+    const uint8_t* text = NULL;
+    size_t len = 0;
+    CHECK(statePortableStringAt(&port, 0x92D000, &text, &len) && len == 5 && memcmp(text, "first", 5) == 0);
+    CHECK(statePortableStringAt(&port, 0x9A0010, &text, &len) && len == 6 && memcmp(text, "second", 6) == 0);
+    CHECK(statePortableStringAt(&port, 0xF00000, &text, &len) && len == 0);
+    CHECK(!statePortableStringAt(&port, 0x92D001, &text, &len)); /* inside a string: no entry of its own */
+
+    char portPath[1100];
+    snprintf(portPath, sizeof portPath, "%s-portable.xgs", base);
+    h.flags = STATE_FLAG_STEPPED | STATE_FLAG_PORTABLE; /* (the writer sets the flag by the trailer, whatever h says) */
+    CHECK(stateFileWrite(portPath, &h, thumb, body, why, sizeof why));
+    StatePortable back;
+    CHECK(stateFileReadHeader(portPath, &r, NULL) && r.flags == STATE_FLAG_STEPPED); /* none written: no flag */
+    CHECK(!stateFileReadPortable(portPath, &back, why, sizeof why) && strstr(why, "no trailer") != NULL);
+    h.flags = STATE_FLAG_STEPPED;
+    CHECK(stateFileWritePortable(portPath, &h, thumb, body, &port, why, sizeof why));
+    size_t portSize = 0;
+    uint8_t* portFile = SDL_LoadFile(portPath, &portSize);
+    CHECK(portFile != NULL && portSize > size);
+    CHECK(portFile != NULL && memcmp(portFile + 256, file + 256, size - 256) == 0); /* the same thumbnail and body */
+    CHECK(portFile != NULL && memcmp(portFile + size, "XGCANON", 8) == 0);           /* then the trailer */
+    CHECK(stateFileReadHeader(portPath, &r, NULL) && r.flags == (STATE_FLAG_STEPPED | STATE_FLAG_PORTABLE));
+    bodyBack = NULL;
+    CHECK(stateFileRead(portPath, &r, &bodyBack, why, sizeof why)); /* the plain reader: the body, the trailer unseen */
+    CHECK(bodyBack != NULL && memcmp(bodyBack, body, BODY_SIZE) == 0);
+    free(bodyBack);
+    CHECK(stateFileReadPortable(portPath, &back, why, sizeof why));
+    CHECK(back.schemaHash == port.schemaHash && back.safePoint == 0x10E && back.stringCount == 3);
+    CHECK(statePortableStringAt(&back, 0x9A0010, &text, &len) && len == 6 && memcmp(text, "second", 6) == 0);
+    CHECK(statePortableStringAt(&back, 0x92D000, &text, &len) && len == 5 && memcmp(text, "first", 5) == 0);
+    CHECK(statePortableStringAt(&back, 0xF00000, &text, &len) && len == 0);
+    statePortableFree(&back);
+    /* a byte of the trailer changed, the trailer cut, a byte past it: refused; the body still reads */
+    if (portFile != NULL) {
+        for (int k = 0; k < 3; k++) {
+            uint8_t* bad = malloc(portSize + 1);
+            CHECK(bad != NULL);
+            if (bad == NULL) break;
+            memcpy(bad, portFile, portSize);
+            size_t n = portSize;
+            if (k == 0) bad[size + 30] ^= 0x40;  /* the safe point */
+            if (k == 1) n = portSize - 5;        /* cut */
+            if (k == 2) bad[n++] = 0;            /* one byte too many */
+            put(portPath, bad, n);
+            free(bad);
+            CHECK(!stateFileReadPortable(portPath, &back, why, sizeof why) && strstr(why, "damaged") != NULL);
+            CHECK(back.strings == NULL && back.stringCount == 0);
+            bodyBack = NULL;
+            CHECK(stateFileRead(portPath, &r, &bodyBack, why, sizeof why));
+            free(bodyBack);
+        }
+        SDL_free(portFile);
+    }
+    CHECK(SDL_RemovePath(portPath));
+    statePortableFree(&port);
+
+    /* A schema filed in a folder of its own, as the save folder's schemas/ holds them. */
+    char schemaPath[1200];
+    snprintf(schemaPath, sizeof schemaPath, "%s-schemas/0123456789abcdef.xgschema", base);
+    static const char json[] = "{\"version\": \"us\", \"types\": {}}";
+    CHECK(stateSchemaFileWrite(schemaPath, (const uint8_t*)json, strlen(json), why, sizeof why));
+    uint8_t* jsonBack = NULL;
+    size_t jsonSize = 0;
+    CHECK(stateSchemaFileRead(schemaPath, &jsonBack, &jsonSize, why, sizeof why));
+    CHECK(jsonBack != NULL && jsonSize == strlen(json) && memcmp(jsonBack, json, jsonSize) == 0);
+    CHECK(jsonBack != NULL && jsonBack[jsonSize] == 0);
+    free(jsonBack);
+    size_t packedSize = 0;
+    uint8_t* packed = SDL_LoadFile(schemaPath, &packedSize);
+    CHECK(packed != NULL && packedSize > 16 && memcmp(packed, "XGSCHEMA", 8) == 0 && packed[8] == strlen(json));
+    if (packed != NULL && packedSize > 20) {
+        /* another raw size, then a cut stream: refused (a changed byte of a stored block reads back: the
+         * schema's hash, its file name, is checked by its reader, stateportable.c) */
+        packed[8] ^= 1;
+        put(schemaPath, packed, packedSize);
+        CHECK(!stateSchemaFileRead(schemaPath, &jsonBack, &jsonSize, why, sizeof why) && jsonBack == NULL);
+        packed[8] ^= 1;
+        put(schemaPath, packed, packedSize - 3);
+        CHECK(!stateSchemaFileRead(schemaPath, &jsonBack, &jsonSize, why, sizeof why) && jsonBack == NULL);
+    }
+    SDL_free(packed);
+    CHECK(SDL_RemovePath(schemaPath));
+    snprintf(schemaPath, sizeof schemaPath, "%s-schemas", base);
+    CHECK(SDL_RemovePath(schemaPath));
+
     SDL_free(file);
     CHECK(SDL_RemovePath(path));
     CHECK(!SDL_GetPathInfo(path, NULL) && !SDL_GetPathInfo(badMagic, NULL) && !SDL_GetPathInfo(badFormat, NULL));
@@ -149,6 +250,7 @@ int main(int argc, char** argv) {
         printf("statefiletest: %d failures\n", failures);
         return 1;
     }
-    printf("statefiletest: ok (header fields, engine byte 220, thumbnail, body; bad magic and format refused)\n");
+    printf("statefiletest: ok (header fields, engine byte 220, thumbnail, body; bad magic and format refused; a "
+           "portable trailer and its strings, unseen by the plain reader, damaged ones refused; a filed schema)\n");
     return 0;
 }

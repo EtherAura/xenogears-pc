@@ -82,6 +82,24 @@ int stateConvert(const StateConvertSide* writer, const StateConvertSide* reader,
                  StateConvertResult* out, char* err, size_t errSize);
 void stateConvertResultFree(StateConvertResult* r);
 
+/* stateConvert's encoding of the writer's state alone, nothing decoded: out gets the safe point and
+ * the encode warnings (no body). writer->strings.at is asked for every string the state's pointers
+ * reach, as a conversion will ask the writer's table: a portable slot's table is made so (savestate.c,
+ * statefile.h StatePortable). 1 on success; 0 with a message in err. */
+int stateConvertEncode(const StateConvertSide* writer, StateConvertResult* out, char* err, size_t errSize);
+
+/* A template for stateConvert from the reader's own state at another moment than the writer's (the
+ * running game's at a load; statecanon's template comes from the same moment): its chunks in their
+ * order, each as it is but for those the reader keeps as bytes (not "mem." and no variable of its
+ * schema whose type fills the chunk: vram's captures, the arrays a pointer points at, ...), which take
+ * the size the writer's chunk of that tag has (zeros; the
+ * n-th of a tag the writer's n-th), as a template of the writer's moment would: the same data takes
+ * the same room. malloc'd into *out; 0
+ * with a message in err when a body is damaged or memory ran out. */
+int stateConvertTemplate(const uint8_t* reader, size_t readerSize, const StateSchema* readerSchema,
+                         const uint8_t* writer, size_t writerSize, uint8_t** out, size_t* outSize, char* err,
+                         size_t errSize);
+
 #ifdef __cplusplus
 }
 #endif
