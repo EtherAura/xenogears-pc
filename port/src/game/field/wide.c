@@ -19,6 +19,7 @@
 #include "gte.h"
 #include "field/field.h"
 #include "pc_camera.h"
+#include "pc_speedup.h"
 
 /* port/src/system/options.c (game code has no libc) */
 const char* portOption(const char* name);
@@ -180,6 +181,7 @@ void pcFieldWideExit(void) {
     pcFirstPersonEnd();
     pcWideBlock(PC_WIDE_BLOCK_OPTOUT | PC_WIDE_BLOCK_MOVIE | PC_WIDE_BLOCK_EFFECT, 0);
     fieldSpeedMovie(0); /* no movie plays across the mode's start or end */
+    pcTransitionRoom(0); /* nor a room change: an exit to the world map leaves the field without one */
 }
 
 /* A field movie (startFieldTransition). Its frames go to the frame buffers

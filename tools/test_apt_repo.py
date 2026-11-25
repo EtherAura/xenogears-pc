@@ -14,7 +14,8 @@
    version that is not a release's, a control that already has Filename, not a
    package, no control file, a link, an existing Packages or Release.
 3. With gpg: keygen refuses without XG_APT_KEY_PASSPHRASE or into a non-empty
-   home, makes one Ed25519 key, public exports it; sign refuses without the
+   home, makes one Ed25519 key and prints only its fingerprint; public refuses a
+   key the home does not hold and exports its own; sign refuses without the
    passphrase and never overwrites InRelease; verify passes the key's own
    signature and refuses another fingerprint, another key's signature, a changed
    InRelease and an InRelease of another Release.
@@ -200,7 +201,9 @@ def gpg_tests(public: Path, work: Path) -> None:
     check(r.returncode == 1 and "XG_APT_KEY_PASSPHRASE" in r.stderr, "keygen: refused without the passphrase")
     r = run(public, "keygen", "--gnupg-home", home, env=PASS)
     fpr = r.stdout.split()[-1] if r.returncode == 0 else ""
-    check(r.returncode == 0 and len(fpr) == 40, f"keygen: one key, fingerprint {fpr}")
+    check(r.returncode == 0 and r.stdout == f"fingerprint {fpr}\n" and len(fpr) == 40
+          and fpr == fpr.upper() and all(c in "0123456789ABCDEF" for c in fpr),
+          f"keygen: one key, its fingerprint printed alone ({fpr})")
     r = run(public, "keygen", "--gnupg-home", home, env=PASS)
     check(r.returncode == 1 and "not empty" in r.stderr, "keygen: refused into a home that holds anything")
     r = run(public, "keygen", "--gnupg-home", other, env=PASS)
@@ -210,6 +213,9 @@ def gpg_tests(public: Path, work: Path) -> None:
     make_deb(out / "xenogears-pc_2026.12.0_amd64.deb")
     run(public, "make", "--deb", out / "xenogears-pc_2026.12.0_amd64.deb", "--out", out, "--date", DATE)
     key = out / "xenogears-pc-archive-keyring.asc"
+    r = run(public, "public", "--gnupg-home", home, "--key", other_fpr, "--out", key)
+    check(r.returncode == 1 and f"has no secret key {other_fpr}" in r.stderr and not key.exists(),
+          "public: refused for a key the home does not hold, nothing written")
     r = run(public, "public", "--gnupg-home", home, "--key", fpr, "--out", key)
     check(r.returncode == 0 and key.read_text().startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----"),
           "public: the key's public half, armoured")

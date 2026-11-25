@@ -116,6 +116,22 @@ char* heapTypeNames[] = {
     "SOUND",       "MES FONT",    "MES SYSDATA", "LsFONT",      "DelayFree",
 };
 
+#ifdef PLATFORM_PC
+/* The end of the heap block whose bytes hold p (its next block's header), or
+ * NULL when p is in no block (port/src/game/main/lzss.c bounds its reads). */
+u8* pcHeapBlockEnd(const void* p) {
+    HeapBlock* blk;
+
+    if (heapFirstBlockData == NULL) return NULL;
+    for (blk = heapFirstBlockData - 1; blk->m4_user != 1; blk = blk->m0_next - 1) {
+        if ((const u8*)p >= (const u8*)(blk + 1) && (const u8*)p < (const u8*)(blk->m0_next - 1)) {
+            return (u8*)(blk->m0_next - 1);
+        }
+    }
+    return NULL;
+}
+#endif
+
 /* Usable size of an allocation. */
 s32 getAllocationSize(HeapBlock* data) {
     return (s32)((u8*)data[-1].m0_next - (u8*)data - sizeof(HeapBlock));
@@ -810,7 +826,7 @@ void freeHeapDelayed(void* p, s32 delay) {
         return;
     }
     traceNextAlloc(0x33);
-    e = allocateHeap(PC_HEAP_SIZED(sizeof(DelayedFree), 0xC), 1);
+    e = allocateHeap(PC_HEAP_OF(DelayedFree, PC_HEAP_SIZED(sizeof(DelayedFree), 0xC)), 1);
     e->m0_next = delayedFreeListHead.m0_next;
     e->m4_ptr = p;
     e->m8_delay = delay;

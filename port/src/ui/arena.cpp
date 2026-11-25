@@ -151,6 +151,71 @@ void musicPicker() {
          "theme), or any of the jukebox's songs. Online, the host's choice plays for both players.");
 }
 
+// The stage of a mirror match or party vs party (xg-htn.35.143; system/arena.c
+// lists the stages, each checked by a run): named after where it appears in
+// the game (the bestiary's places), with the rooms its battles are in. The
+// setting is read when the match is asked; online the host's.
+struct StageName {
+    int id;            // the stage's number (the battle config's arena)
+    const char* name;  // the place
+    const char* where; // where in it the game's battles on this stage are
+};
+const StageName stageNames[] = {
+    {3, N_("Mountain Path"), N_("The trail from Lahan up to Citan's house.")},
+    {1, N_("Blackmoon Forest"), N_("Its entrance, the large tree and the Rankar clearing.")},
+    {7, N_("Duneman Isle"), N_("The Aveh desert's dunes, below the sandfall and by the skeleton remains.")},
+    {14, N_("Nisan"), N_("The town gate.")},
+    {13, N_("Aveh Castle"), N_("A castle hall: up the ladder from the Bledavik sewers, and the tower passage.")},
+    {9, N_("Nortune sewers"), N_("Under Kislev's capital: the channels and the maintenance passages.")},
+    {10, N_("Nortune Gear dock"), N_("Under the battle arena: the hangar stairs, the storerooms and passages.")},
+    {50, N_("Ethos headquarters"), N_("The front hall, the bishop's stairs and the landings.")},
+    {71, N_("Ethos transport"), N_("On deck, outside the Ethos ship.")},
+    {23, N_("Zeboim"), N_("The buried city under the Ethos dig site, and the dig site's transfer lobby.")},
+    {30, N_("Lighthouse"), N_("The underground landing below the lighthouse: a ruined city.")},
+    {35, N_("Shevat"), N_("The outer escape lift and the terrace.")},
+    {59, N_("Solaris"), N_("Etrenank's lower levels, the Soylent System and Krelian's laboratory.")},
+    {32, N_("Anima Relic 1"), N_("The relic's corridors and lift lobby, and the Nisan mausoleum's metal bridge.")},
+    {44, N_("Grassland (world map)"), N_("The world map's grassland, where most random battles on foot are.")},
+    {47, N_("Badlands (world map)"), N_("The world map's rocky wastes.")},
+    {43, N_("Snowfield (world map)"), N_("The world map's snowfields.")},
+};
+
+const StageName* stageName(int id) {
+    for (const StageName& s : stageNames)
+        if (s.id == id) return &s;
+    return nullptr;
+}
+
+void stagePicker() {
+    int value = pcArenaStageSetting(); // always one of the list's (Blackmoon Forest by default)
+    char label[160];
+    const StageName* shown = stageName(value - 1);
+    if (shown == nullptr) snprintf(label, sizeof label, tr("Stage %d"), value - 1);
+    ImGui::TextUnformatted(tr("Battle stage"));
+    ImGui::BeginDisabled(settingsPinned("arena_stage") != 0);
+    ImGui::SetNextItemWidth(-1);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale())); // as musicPicker
+    bool open = ImGui::BeginCombo("##arenastage", shown != nullptr ? tr(shown->name) : label);
+    ImGui::PopStyleVar();
+    if (open) {
+        skin::frameWindow();
+        for (int i = 0; i < pcArenaStageCount(); i++) {
+            int id = pcArenaStageId(i);
+            const StageName* s = stageName(id);
+            char item[192], number[64];
+            snprintf(number, sizeof number, tr("Stage %d"), id);
+            snprintf(item, sizeof item, "%s##stage%d", s != nullptr ? tr(s->name) : number, id);
+            bool chosen = value == id + 1;
+            if (ImGui::Selectable(item, chosen)) pcArenaSetStage(id + 1);
+            if (chosen) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    if (shown != nullptr) hint("%s", tr(shown->where));
+    hint("The party and player 2 stand where the game's own battles there put a party and its enemies.");
+}
+
 // The versus battle's party: the current one, Fei and Citan as a new game
 // makes them, or members picked (as the save has them; a new game's before
 // one is loaded, and online).
@@ -323,42 +388,78 @@ void mirrorBlock() {
 }
 
 // Party vs party (xg-htn.35.143): each player's party from a memory-card save
-// on their own machine (arena_saves.cpp). For now the save browser and the
-// party record it makes, shown here and logged (XG_ARENA_LOG=1); the match
-// itself is to come.
+// (arena_saves.cpp), player 1's against player 2's on one machine; the match
+// as a mirror match's (system/arena.c pcArenaMatchStartParty,
+// port/src/game/battle/mirror.c).
 void partyBlock() {
-    static XgPartyRecord record, logged;
-    static bool haveLogged = false;
-    textLines("Each player brings a party from a memory-card save on their own machine, on foot. Choose your "
-              "save and its members.");
-    if (!arenaSavesPanel(&record)) {
-        haveLogged = false;
-        return;
+    static XgPartyRecord record[2], logged[2];
+    static bool haveLogged[2] = {false, false};
+    bool ok[2] = {false, false};
+    textLines("Each player brings a party from a memory-card save, on foot: player 1 commands theirs on pad 1, "
+              "player 2 theirs on pad 2, each member with everything it has in that save (attacks and combos within "
+              "its AP, the deathblows it knows, its Ether, Defend, Items from its own save's items). Both may "
+              "come from the same save, with the same members. Escape gives up the battle. At its end both players "
+              "choose Rematch or Leave, and Leave brings your game back as it was.");
+    for (int p = 0; p < 2; p++) {
+        ImGui::Dummy(ImVec2(0, 4 * scale()));
+        ok[p] = arenaSavesPanel(p + 1, &record[p]);
+        if (!ok[p]) {
+            haveLogged[p] = false;
+            continue;
+        }
+        std::string members, english; // shown, and for the log
+        char line[96];
+        XgPartyMember m;
+        for (int k = 0; xgPartyMemberInfo(&record[p], k, &m); k++) {
+            snprintf(line, sizeof line, tr("%s (level %d)"), tr(memberNames[m.id]), m.level);
+            if (k > 0) members += " / ";
+            members += line;
+            snprintf(line, sizeof line, "%s%s %d, HP %d/%d, EP %d/%d", k > 0 ? "; " : "", memberNames[m.id], m.level,
+                     m.hp, m.maxHp, m.ep, m.maxEp);
+            english += line;
+        }
+        int items = 0, rounds = 0;
+        while (items < XG_PARTY_ITEMS && record[p].m298_itemIds[items] != 0) items++;
+        while (rounds < XG_PARTY_ITEMS && record[p].m2F8_ammoIds[rounds] != 0) rounds++;
+        hint("Party: %s, with %d kinds of items and %d kinds of rounds.", members.c_str(), items, rounds);
+        if (!haveLogged[p] || memcmp(&logged[p], &record[p], sizeof record[p]) != 0) {
+            uint32_t h = 2166136261u; // FNV-1a of the record's bytes: the same on every machine
+            for (size_t i = 0; i < sizeof record[p]; i++) h = (h ^ ((const uint8_t*)&record[p])[i]) * 16777619u;
+            pcArenaLog("party vs party: player %d's party record (%u bytes, fnv1a %08x): %s; %d items, %d ammo", p + 1,
+                       (unsigned)sizeof record[p], (unsigned)h, english.c_str(), items, rounds);
+            logged[p] = record[p];
+            haveLogged[p] = true;
+        }
     }
-    std::string members, english; // shown, and for the log
-    char line[96];
-    XgPartyMember m;
-    for (int k = 0; xgPartyMemberInfo(&record, k, &m); k++) {
-        snprintf(line, sizeof line, tr("%s (level %d)"), tr(memberNames[m.id]), m.level);
-        if (k > 0) members += " / ";
-        members += line;
-        snprintf(line, sizeof line, "%s%s %d, HP %d/%d, EP %d/%d", k > 0 ? "; " : "", memberNames[m.id], m.level,
-                 m.hp, m.maxHp, m.ep, m.maxEp);
-        english += line;
+    ImGui::Dummy(ImVec2(0, 4 * scale()));
+    const char* why = nullptr;
+    bool available = pcArenaMatchAvailable(&why) != 0;
+    ImGui::BeginDisabled(!available || !ok[0] || !ok[1]);
+    if (ImGui::Button(tr("Fight##party"))) {
+        if (pcArenaMatchStartParty(&record[0], &record[1], nullptr)) {
+            sfx::play(sfx::CHOOSE);
+            closeMenu();
+        } else {
+            sfx::play(sfx::BUZZ);
+        }
     }
-    int items = 0, rounds = 0;
-    while (items < XG_PARTY_ITEMS && record.m298_itemIds[items] != 0) items++;
-    while (rounds < XG_PARTY_ITEMS && record.m2F8_ammoIds[rounds] != 0) rounds++;
-    hint("Your party: %s, with %d kinds of items and %d kinds of rounds.", members.c_str(), items, rounds);
-    hint("Party vs party matches are not ready yet: this is the party you would bring.");
-    if (!haveLogged || memcmp(&logged, &record, sizeof record) != 0) {
-        uint32_t h = 2166136261u; // FNV-1a of the record's bytes: the same on every machine
-        for (size_t i = 0; i < sizeof record; i++) h = (h ^ ((const uint8_t*)&record)[i]) * 16777619u;
-        pcArenaLog("party vs party: party record (%u bytes, fnv1a %08x): %s; %d items, %d ammo",
-                   (unsigned)sizeof record, (unsigned)h, english.c_str(), items, rounds);
-        logged = record;
-        haveLogged = true;
+    ImGui::EndDisabled();
+    if (available && (!ok[0] || !ok[1])) hint("Choose a party for each player.");
+    availability(available, why);
+}
+
+// Each player sees their own side's HP and EP; the opponent's only with this
+// (system/arena.c; the Enemy info window, port/src/game/battle/enemyinfo.c).
+void opponentHpOption() {
+    bool opponentHp = pcVersusOpponentHpSetting() != 0;
+    ImGui::BeginDisabled(settingsPinned("arena_opponent_hp") != 0);
+    if (ImGui::Checkbox(tr("Opponent's HP and EP"), &opponentHp)) {
+        sfx::play(sfx::CHOOSE);
+        pcVersusSetOpponentHp(opponentHp);
     }
+    ImGui::EndDisabled();
+    hint("In battle, Select shows the opponent's members with their HP and EP (the Enemy info window). Off, "
+         "neither player sees the other's. Online, the host's choice holds for both players.");
 }
 
 // Versus battles: player 2 commands an enemy formation, or a copy of the
@@ -368,7 +469,8 @@ void versusBlock() {
     ImGui::SeparatorText(tr("Versus battle"));
     int kind = 0;
     int match = pcArenaMatchPhase(&kind);
-    if (match != ARENA_PHASE_IDLE && (kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_MIRROR)) {
+    if (match != ARENA_PHASE_IDLE &&
+        (kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_MIRROR || kind == ARENA_MATCH_PARTY)) {
         matchState(match);
         return;
     }
@@ -409,17 +511,8 @@ void versusBlock() {
         V.party = true;
         V.mirror = false;
     }
-    // Each player sees their own side's HP and EP; the opponent's only with this
-    // (system/arena.c; the Enemy info window, port/src/game/battle/enemyinfo.c).
-    bool opponentHp = pcVersusOpponentHpSetting() != 0;
-    ImGui::BeginDisabled(settingsPinned("arena_opponent_hp") != 0);
-    if (ImGui::Checkbox(tr("Opponent's HP and EP"), &opponentHp)) {
-        sfx::play(sfx::CHOOSE);
-        pcVersusSetOpponentHp(opponentHp);
-    }
-    ImGui::EndDisabled();
-    hint("In battle, Select shows the opponent's members with their HP and EP (the Enemy info window). Off, "
-         "neither player sees the other's. Online, the host's choice holds for both players.");
+    opponentHpOption();
+    if (V.mirror || V.party) stagePicker();
     if (V.mirror) {
         mirrorBlock();
         return;
@@ -522,6 +615,9 @@ struct {
     int delay = 3;
     bool versus = false;
     bool joinerPicks = true;
+    bool party = false;      // host: party vs party (each player's party from their own save)
+    bool bringParty = false; // join: a party from a save, for a host's party vs party
+    XgPartyRecord record;    // this machine's party (the online browser's)
 } O;
 
 // Why the last session ended (netplay.c's word on its status line).
@@ -548,6 +644,8 @@ void endText(const char* d, char* out, size_t size) {
         {"pick", N_("The host lets you choose the formation: choose one in the Versus battle list above, then join "
                     "again.")},
         {"disc", N_("The other player's disc is not the same as yours.")},
+        {"noparty", N_("The host plays party vs party: bring a party from a save (below), then join again.")},
+        {"stage", N_("The host's battle stage is not one of this game's.")},
         {"address", N_("The address is not host:port, or that host is unknown.")},
         {"error", N_("The network could not be used (is the port in use?).")},
     };
@@ -556,6 +654,24 @@ void endText(const char* d, char* out, size_t size) {
             snprintf(out, size, "%s", tr(e.text));
             return;
         }
+    }
+    // party vs party: "<word> <reason> <character id>" (netplay.c's header)
+    int reason = 0, member = 255;
+    char why[320];
+    if (sscanf(d, "partyrefused %d %d", &reason, &member) >= 1) {
+        arenaPartyReason(reason, member, why, sizeof why);
+        snprintf(out, size, tr("The other player's game refused your party: %s"), why);
+        return;
+    }
+    if (sscanf(d, "peerparty %d %d", &reason, &member) >= 1) {
+        arenaPartyReason(reason, member, why, sizeof why);
+        snprintf(out, size, tr("The host's party could not be used here: %s"), why);
+        return;
+    }
+    if (sscanf(d, "ownparty %d %d", &reason, &member) >= 1) {
+        arenaPartyReason(reason, member, why, sizeof why);
+        snprintf(out, size, tr("Your party could not be used: %s"), why);
+        return;
     }
     if (strncmp(d, "desync ", 7) == 0) {
         snprintf(out, size, tr("The two games went apart at vblank %s, so the session stopped."), rest);
@@ -610,6 +726,16 @@ void onlineBlock() {
             break;
         }
         textLines(line);
+        int refusedReason = 0, refusedMember = 255;
+        if (state == NETPLAY_HOSTING && netplaySessionRefusedParty(&refusedReason, &refusedMember)) {
+            char why[320];
+            arenaPartyReason(refusedReason, refusedMember, why, sizeof why);
+            snprintf(line, sizeof line, tr("A player joined with a party that cannot be used, and was refused (they "
+                                           "see why): %s Waiting for another."), why);
+            ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
+            ImGui::TextWrapped("%s", line);
+            ImGui::PopStyleColor();
+        }
         if (netplaySessionPaused()) ImGui::TextUnformatted(tr("The other player paused."));
         if (netplaySessionLost()) {
             textLines("The connection is lost: the session waits for it to come back (up to a minute), then "
@@ -627,6 +753,7 @@ void onlineBlock() {
         snprintf(line, sizeof line, tr("The last session: %s"), why);
         textLines(line);
     }
+    bool partyOk = false; // this machine's party, where one is brought: the browser's says it passes
     if (ImGui::RadioButton(tr("Host (player 1)"), O.host)) O.host = true;
     ImGui::SameLine();
     if (ImGui::RadioButton(tr("Join (player 2)"), !O.host)) O.host = false;
@@ -640,10 +767,36 @@ void onlineBlock() {
         ImGui::SliderInt(tr("Input delay"), &O.delay, 1, 8, "%d", ImGuiSliderFlags_AlwaysClamp);
         hint("Vblanks between a press and what it does, the same on both screens: 2 on a home network, 3 to 6 over "
              "the internet.");
-        if (ImGui::RadioButton(tr("Battling"), !O.versus)) O.versus = false;
+        if (ImGui::RadioButton(tr("Battling"), !O.versus && !O.party)) O.versus = O.party = false;
         ImGui::SameLine();
-        if (ImGui::RadioButton(tr("Versus battle##online"), O.versus)) O.versus = true;
-        if (O.versus) {
+        if (ImGui::RadioButton(tr("Versus battle##online"), O.versus)) {
+            O.versus = true;
+            O.party = false;
+        }
+        // on the same line when it fits, else below (as the Versus battle screen's)
+        const char* partyLabel = tr("Party vs party##online");
+        const ImGuiStyle& style = ImGui::GetStyle();
+        float need = style.ItemSpacing.x + ImGui::GetFrameHeight() + style.ItemInnerSpacing.x +
+                     ImGui::CalcTextSize(partyLabel, nullptr, true).x;
+        if (ImGui::GetItemRectMax().x + need <= ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x) {
+            ImGui::SameLine();
+        }
+        if (ImGui::RadioButton(partyLabel, O.party)) {
+            O.party = true;
+            O.versus = false;
+        }
+        if (O.party) {
+            textLines("Each player brings a party from a memory-card save on their own machine, on foot: yours "
+                      "(player 1) against theirs, each member with everything it has in that save. The battle "
+                      "music, the stage and whether each sees the other's HP and EP are yours, for both players.");
+            ImGui::PushID("online");
+            stagePicker();
+            opponentHpOption();
+            partyOk = arenaSavesPanel(0, &O.record);
+            ImGui::PopID();
+            hint("The other player's party comes from their own save, on their machine: it is not verified. Edited "
+                 "saves are accepted; only values outside the game's ranges are refused, and both players see why.");
+        } else if (O.versus) {
             bool chosen = V.selected >= 0 && V.selected < (int)V.list.size();
             ImGui::Checkbox(tr("Player 2 chooses the formation"), &O.joinerPicks);
             if (O.joinerPicks) {
@@ -672,12 +825,22 @@ void onlineBlock() {
         }
         hint("A name or an IPv4 address, then the port (192.168.1.20:7461); an IPv6 address goes in brackets "
              "([2001:db8::20]:7461).");
+        if (ImGui::Checkbox(tr("Bring a party from a save (party vs party)"), &O.bringParty)) sfx::play(sfx::CHOOSE);
+        if (O.bringParty) {
+            ImGui::PushID("online");
+            partyOk = arenaSavesPanel(0, &O.record);
+            ImGui::PopID();
+            hint("For a host who plays party vs party: your party against theirs (you are player 2). Their party "
+                 "comes from their own save, on their machine: it is not verified. Edited saves are accepted; only "
+                 "values outside the game's ranges are refused, and both players see why.");
+        }
     }
     hint("The other player sees your IP address, as you see theirs: play with people you trust. Hosting needs the "
          "UDP port reachable: the same network, a VPN you both use (Tailscale, ZeroTier...), or the port forwarded "
          "on your router.");
     bool formation = V.selected >= 0 && V.selected < (int)V.list.size();
-    bool ready = O.code[0] != '\0' &&
+    bool bringing = O.host ? O.party : O.bringParty;
+    bool ready = O.code[0] != '\0' && (!bringing || partyOk) &&
                  (O.host ? !O.versus || O.joinerPicks || formation : strchr(O.address, ':') != nullptr);
     ImGui::BeginDisabled(!ready);
     if (ImGui::Button(O.host ? tr("Host##netplay") : tr("Join##netplay"))) {
@@ -689,6 +852,9 @@ void onlineBlock() {
         s.delay = O.delay;
         s.progress = pcArenaAllGearsSetting() ? 1000 : netplaySessionStory();
         s.versus = O.host && O.versus && (O.joinerPicks || formation);
+        s.partyVsParty = O.host && O.party;
+        s.hasParty = bringing && partyOk;
+        if (s.hasParty) s.record = O.record;
         s.joinerPicks = O.joinerPicks;
         s.pick = !O.host && formation;
         if (formation) {

@@ -12,6 +12,7 @@ s32 pcFieldNativeFrameGoesOn(void); /* f_80072140.c, xg-hbc.19.3 */
 #include "gte.h"
 #include "pc_gameplay.h"
 #include "pc_slide.h"
+#include "pc_speedup.h"
 
 void getTriangleNormalAndAdjustY(SVECTOR* vec0, SVECTOR* vec1, SVECTOR* vec2, SVECTOR* outputPosition, VECTOR* pOutputTriangleNormal);
 s32 updateEntityEventCode3Sub3Sub2(s16 angle, SVECTOR* edge, VECTOR* delta, s32 unused);
@@ -611,6 +612,7 @@ void openFieldMenu(void) {
     if (g_menuIdToOpen == 0x80 && g_menuDisabled != 0) {
         return;
     }
+    pcTransitionMenu((g_menuIdToOpen & 0x7F) == 0); /* Speedup transitions: the main menu's way in */
     setlen(&fieldMenuFadeTiles[0], 3);
     setcode(&fieldMenuFadeTiles[0], 0x60);
     SetSemiTrans(&fieldMenuFadeTiles[0], 1);
@@ -866,6 +868,7 @@ void openFieldMenu(void) {
     g_menuIdToOpen = 0xFF;
     initFontSystem();
     g_menuOpenCount = 0;
+    pcTransitionMenu(0); /* the field has the screen back */
 }
 
 /* set the four UVs of a POLY_FT4, each clamped to 0..255 */

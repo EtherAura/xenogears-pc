@@ -18,6 +18,12 @@ void freeHeap(void* p) {
     free(p);
 }
 
+/* the allocations' type names for save states (include/pc_state.h PC_HEAP_OF): none here */
+int pcHeapRequestType(const char* name, int size) {
+    (void)name;
+    return size;
+}
+
 #define STUB(name) \
     int name() { return 0; }
 STUB(resetMemoryAllocStats)

@@ -168,7 +168,7 @@ void initScriptMarkerSprites(void) {
     SPRT* s;
     SPRT* s2;
 
-    scriptMarkerSprites = allocateHeap(PC_HEAP_SIZED(sizeof(FieldSpriteList), 0x840), 0);
+    scriptMarkerSprites = allocateHeap(PC_HEAP_OF(FieldSpriteList, PC_HEAP_SIZED(sizeof(FieldSpriteList), 0x840)), 0);
     tw.x = 0;
     tw.y = 0;
     tw.w = 0xFF;
@@ -233,8 +233,8 @@ void initFieldMapScreenPrims(void) {
     POLY_FT4* p;
     POLY_FT4* p2;
 
-    fieldMapScreenPolys = allocateHeap(PC_HEAP_SIZED(sizeof(FieldPolyList), 0x2f8), 0);
-    fieldMapScreenMarkerSprites = allocateHeap(PC_HEAP_SIZED(sizeof(FieldSpriteList16), 0x400), 0);
+    fieldMapScreenPolys = allocateHeap(PC_HEAP_OF(FieldPolyList, PC_HEAP_SIZED(sizeof(FieldPolyList), 0x2f8)), 0);
+    fieldMapScreenMarkerSprites = allocateHeap(PC_HEAP_OF(FieldSpriteList16, PC_HEAP_SIZED(sizeof(FieldSpriteList16), 0x400)), 0);
     tw.x = 0;
     tw.y = 0;
     tw.w = 0xFF;
@@ -696,7 +696,7 @@ void initScrollingTextSprites(void) {
     SetSemiTrans(&scrollingTextFadeGradients[1][0], 1);
     scrollingTextFadeGradients[0][1] = scrollingTextFadeGradients[0][0];
     scrollingTextFadeGradients[1][1] = scrollingTextFadeGradients[1][0];
-    scrollingTextLines = allocateHeap(PC_HEAP_SIZED(16 * (s32)sizeof(FieldTextLine), 16 * (s32)0x100), 1);
+    scrollingTextLines = allocateHeap(PC_HEAP_OF(FieldTextLine, PC_HEAP_SIZED(16 * (s32)sizeof(FieldTextLine), 16 * (s32)0x100)), 1);
     for (i = 0; i < 16; i++) {
         line = &scrollingTextLines[i];
         s = &line->m60_sprites[0][0];

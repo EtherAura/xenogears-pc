@@ -6,6 +6,7 @@
  * loadMechaOverlay_finalize and fieldEntryPoint; gcc-2.7.2-cdk fails 9 of 13. */
 #include "common.h"
 #include "pc_retail_heap.h"
+#include "pc_speedup.h"
 #include "psyq.h"
 #include "main/memory.h"
 #include "main/filesystem.h"
@@ -121,6 +122,7 @@ void updateAndRenderField(void);
 void renderFullScreenTransitionEffect(void);
 s32 isFieldTransitionPermittedByLoading(void);
 s32 isFieldBattlePrevented(void);
+s32 pcFieldBattleWaitsForLanding(void); /* port/src/game/field/battlejump.c */
 void releaseAllDialogWindows(void);
 void resetBattleAudioState(void);
 /* Retail passes playMusic a second argument, which it ignores. */
@@ -491,7 +493,8 @@ void fieldEntryPoint(void) {
         midNative = 0;
         pcFieldNativeFrameDone();
         renderFullScreenTransitionEffect();
-        if (pcFieldNativeParity() == 1 && playMusicAuthorized == 0 && isFieldTransitionPermittedByLoading() == 0 && isFieldBattlePrevented() == 0) {
+        if (pcFieldNativeParity() == 1 && playMusicAuthorized == 0 && isFieldTransitionPermittedByLoading() == 0 && isFieldBattlePrevented() == 0 &&
+            !pcFieldBattleWaitsForLanding()) {
             if (currentFieldId1 != -1) {
                 unflagAllocation(rawFieldBundle);
                 freeHeap(rawFieldBundle);
@@ -551,6 +554,7 @@ void fieldEntryPoint(void) {
             saveStateToKernel();
             waitReadCompletion(0);
             transitionFields();
+            pcTransitionRoom(0); /* Speedup transitions: at the latest here (a room that opens on a scene) */
             resetInputs();
             fieldTransitionCompleted = 1;
         }

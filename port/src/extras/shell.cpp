@@ -75,6 +75,7 @@ extern "C" {
 #include "disc.h"
 #include "gpu/gpu.h"
 #include "preview.h"
+#include "audiotap.h"
 #include "sandbox.h"
 #include "system/hw.h"
 #include "system/pad.h"
@@ -1416,6 +1417,7 @@ void run(bool fromMenu) {
         }
         frame();
         gpuPresentMenu(st.shot);
+        xgTapFrame(hwVSyncPeriod()); // a recording's sound: this frame's time (audiotap.h)
         st.shot = nullptr;
         st.rendered = false;
         st.frames++;

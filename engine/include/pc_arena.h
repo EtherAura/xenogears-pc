@@ -12,7 +12,8 @@
  *                                    arena's reception does it, the return
  *   port/src/game/battling/thread.c  Battling's task: pcArenaBattlingStart
  *   port/src/game/battle/versus.c    versus battles: player 2's choices
- *   port/src/game/battle/mirror.c    mirror matches: player 2's copy of the party
+ *   port/src/game/battle/mirror.c    mirror matches: player 2's copy of the party,
+ *                                    or party vs party: player 2's own party
  *   port/src/game/battling/arena.c   Battling's side of a match: its music,
  *                                    its end's Rematch / Leave
  *   port/src/ui/arena.cpp            the menu block
@@ -78,8 +79,10 @@ int pcVersusRandom(int lo, int hi, int* out);
 
 /* Mirror match (xg-htn.35.143): a versus battle where player 2 commands a copy
  * of player 1's party (its members in enemy slots 3-5, on foot), with the
- * party's own commands, in the mirror's stage (VERSUS_MIRROR_TABLE/CONFIG).
- *   platform (port/src/system/arena.c): the request is a mirror match */
+ * party's own commands, in the mirror's stage (VERSUS_MIRROR_TABLE/CONFIG);
+ * or party vs party (below), the same with each side's own party.
+ *   platform (port/src/system/arena.c): the request is a mirror match (or
+ *   party vs party: VERSUS_KIND_*), 0 not */
 #define VERSUS_MIRROR_TABLE 2  /* the stage: Jackal x2, Hobgob x2 (set 1, on foot) */
 #define VERSUS_MIRROR_CONFIG 1
 int pcVersusMirrorAsked(void);
@@ -112,6 +115,49 @@ void pcVersusViewTurn(unsigned char entity);
 void pcVersusViewHpShown(void);
 int pcVersusPartySlot(int slot);
 void pcVersusSpeedLog(int entity, int wait); /* battleGetSlotStatusSub (b_800941A4.c PARTY_SPEED) */
+
+/* Party vs party (xg-htn.35.143): a mirror match whose two sides each come
+ * from a party record (port/src/card/party.h XgPartyRecord, packed from a
+ * memory-card save and checked), its bytes the match's only input for that
+ * side: player 1's applied to the game at the match's canonical start
+ * (platform: pcArenaStartState), player 2's built into slots 3-5 by mirror.c.
+ *   platform: the kind a mirror-match request is (pcVersusMirrorAsked), and
+ *   the match's records (player 1 or 2; NULL without one) */
+#define VERSUS_KIND_MIRROR 1 /* player 2 commands a copy of the party */
+#define VERSUS_KIND_PARTY 2  /* party vs party: each side from its record */
+const unsigned char* pcVersusPartyRecord(int player);
+/*   battle (mirror.c): online, player 2's side as mirror.c keeps it, for
+ *   the session's state hash (netplay.c; 0 outside party vs party) */
+unsigned int pcVersusPartyHash(void);
+/* The record's layout for the game's C, which has no <stdint.h> (party.h
+ * has the fields; system/arena.c asserts these against it). */
+#define PC_PARTY_BYTES 0x3B8
+#define PC_PARTY_COUNT 0x003      /* members, 1-3 */
+#define PC_PARTY_MEMBERS 0x004    /* their character ids, in order */
+#define PC_PARTY_CHARACTERS 0x010 /* 3 x 0xA4: gameState.m26C_party[id] as saved */
+#define PC_PARTY_ABILITIES 0x1FC  /* 3 x 0x20: gameState.m16C0_abilities[id] */
+#define PC_PARTY_NAMES 0x25C      /* 3 x 0x14: gameState.m0_names[id] */
+#define PC_PARTY_ITEM_IDS 0x298   /* 0x30: battleEffectBF.m42_ids */
+#define PC_PARTY_ITEM_COUNTS 0x2C8
+#define PC_PARTY_AMMO_IDS 0x2F8   /* 0x30: battleAmmoItemIds */
+#define PC_PARTY_AMMO_COUNTS 0x328
+#define PC_PARTY_AMMO_TABLE 0x358 /* 0x60: gameState.m22B8_ammoCounts */
+/*   main: this versus battle is party vs party */
+int pcVersusPartyMatch(void);
+/*   battle (mirror.c): the battle loader's hook (loadPartyMembers, its
+ *   character file's table relocated): player 2's attack rows and the
+ *   portraits, read from the files the party's are */
+void pcVersusPartyFiles(unsigned char** reloc);
+
+/* The stage (xg-htn.35.143): a mirror match or party vs party fought on a
+ * stage the players chose from a list (port/src/system/arena.c: each one
+ * checked by a run), the formation the same. The config's stage (+2,
+ * m2_arenaId) and its slot bytes from a real battle of that stage: the
+ * party's position slots (+4..+6) and player 2's members' places, as the
+ * first three enemies' (+0x18..+0x1A).
+ *   platform: the stage chosen (0..74), and those bytes; -1 the match's own
+ *   (its formation's stage and places, unchanged) */
+int pcVersusStage(unsigned char party[3], unsigned char places[3]);
 
 /* Field (port/src/game/field/arena_field.c): fieldEntryPoint, where the
  * player could open the menu. */

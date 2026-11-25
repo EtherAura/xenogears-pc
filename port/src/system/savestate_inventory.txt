@@ -125,6 +125,7 @@ cd/xa.c history state
 cd/xa.c logLevel host logging
 cd/xa.c lr derived scratch (one sector)
 cd/xa.c xaSectors host logging
+extras/audiotap.c * host the extras' audio streams and XG_EXTRAS_AUDIO_DUMP's file (never in a state)
 extras/bestiary_data.c * host the extras (their own worlds; states wait until they are left)
 extras/bestiary_record.c * host the extras (their own worlds; states wait until they are left)
 extras/disc.c * host the extras (their own worlds; states wait until they are left)
@@ -276,6 +277,8 @@ gte/precision.c enabled host enhanced geometry or field interpolation setting
 gte/precision.c entries derived projection metadata: cleared on load (precisionStateLoaded)
 gte/precision.c epoch derived reset on load
 gte/precision.c pendingDraws derived reset on load
+gte/precision.c viewOffset derived the field's drawn view's fraction, set for each draw (xg-ugy.9)
+gte/precision.c viewOffsetOn derived reset on load, set for each draw
 main.c * host entry (kernelEntry: the host stack's jmp_buf)
 mdec/libpress.c cmdActive state
 mdec/libpress.c cmdEndAt state
@@ -338,10 +341,13 @@ spu/core.c spu state
 spu/menusfx.c * host the menu's sound effects
 spu/output.c * host audio output and dump (flushed on load: spuOutputStateLoaded)
 system/arena.c M host the Battle arena's match from anywhere: it outlives the kept game's return (savestate.c keeps the game)
+system/arena.c S host an online party vs party's two records (netplay.c, at its handshake): the session's terms, never a state's (states are off in a session)
 system/arena.c at host environment (XG_ARENA_MATCH)
 system/arena.c directAsked host environment (XG_ARENA=2,...: the oracle's direct match), taken once
 system/arena.c directParams host environment (XG_ARENA=2,...)
 system/arena.c envRead host environment and settings
+system/arena.c envSaves host scratch of XG_ARENA_MATCH's party vs party (the cards' saves, read once)
+system/arena.c envSides host scratch of XG_ARENA_MATCH's party vs party (the two records, handed to the match)
 system/arena.c gameSeen host whether a game was loaded since the boot (the match's party picker); a match's own leaves it
 system/arena.c keptState host the kept game's gameState for a match's start (its members, Battling's records)
 system/arena.c keyboardOn derived set from the restored session on load
@@ -379,6 +385,12 @@ system/fieldspeed.c fieldChosen host the field_speed setting
 system/fieldspeed.c fieldChosenRevision host the field_speed setting
 system/fieldspeed.c fieldChosenValid host the field_speed setting
 system/fieldspeed.c fieldMovie state a field movie plays (fieldSpeedStateIo, called by battleSpeedStateIo)
+system/fieldspeed.c transitionChosen host the speedup_transitions setting
+system/fieldspeed.c transitionChosenRevision host the speedup_transitions setting
+system/fieldspeed.c transitionChosenValid host the speedup_transitions setting
+system/fieldspeed.c transitionIdle state the main menu's loop waits for the player (pcTransitionMenuIdle; fieldSpeedStateIo)
+system/fieldspeed.c transitionMenu state the main menu's way in or out is marked (pcTransitionMenu; fieldSpeedStateIo)
+system/fieldspeed.c transitionRoom state the field's room change is marked (pcTransitionRoom; fieldSpeedStateIo)
 system/bios.c * host host files for the extras' sandbox
 system/cputime.c * host XG_CPU_TIMING
 system/displaylock.c * host the display lock
@@ -486,6 +498,8 @@ system/libetc.c started state
 system/libetc.c videoMode state
 system/memory.c gameModeNow state
 system/memory.c heapArena state a region of its own (savestate.c)
+system/memory.c portBattlingSandbox host the 60 Hz Battling's sandbox (between.c): host memory, set up once per process
+system/memory.c portBattlingSandboxState host whether that sandbox is set up (between.c), once per process
 system/memory.c pcScratchpad state the PS1 scratchpad (include/common.h PSX_SCRATCH): part "scratchpad" (savestate.c)
 system/memory.c pristineData host pristine module data, the copy's place
 system/memory.c savedModule state the gear shop's copy of field_mecha
@@ -517,6 +531,7 @@ system/pad.c scriptKeys host devices, bindings, scripts (re-positioned on load)
 system/pad.c selectedProfile host devices, bindings, scripts (re-positioned on load)
 system/pad.c strings host devices, bindings, scripts (re-positioned on load)
 system/pad.c camIn host the free camera's stick and keys this frame
+system/pad.c camSet host the player's camera settings (settings.ini camera_*), read again when a setting changes
 system/pad.c cameraScript host XG_CAMERA_SCRIPT's lines (a harness script, found by the vblank count)
 system/pad.c cameraScriptCount host XG_CAMERA_SCRIPT's lines (a harness script, found by the vblank count)
 system/pad.c chordHeld host the first-person look chord's edge (Enhanced builds; live input, as camIn)
@@ -571,10 +586,12 @@ system/freecam.c fade host the XG_FREECAM_FADE switch
 system/freecam.c fc host the free camera's view (the player's, not the game's)
 system/freecam.c fixedRooms host the XG_FREECAM_FIXED switch
 system/freecam.c limits host the XG_FREECAM_LIMITS switch
+system/freecam.c on host the XG_PRECISE_CAMERA switch
 system/freecam.c field host log state
 system/freecam.c look host the first-person view (the player's, not the game's), as fc
 system/freecam.c row host log state
 system/freecam.c sw host the XG_FREECAM_SWEEP tool's state
+system/freecam.c trace host the XG_FREECAM_TRACE switch
 system/freecam.c walls host the XG_FREECAM_WALLS switch
 system/freecam.c wc host the world map free camera's tilt and zoom (the player's view)
 system/freecam.c start host the XG_WORLDCAM test start

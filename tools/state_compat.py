@@ -6,7 +6,8 @@ canonical release E:
   forward   each state of E's corpus loads in the new build;
   backward  each state of the new build's corpus loads in E's executable (E's published Linux tarball,
             downloaded once into the cache and checked against its published SHA-256; executables that are
-            no asset, JP's, were kept in the cache when E's corpus was made);
+            no asset, JP's, E's corpus keeps: state_corpus.py release --build, checked against the SHA-256
+            its manifest records, a tarball unpacked into the cache);
 
 and in both, a load is held to tools/state_corpus.py check_load: no refusal, no crash, and the invariant and
 sweep logs of the 600 vblanks after the load equal the writer's own continuation, line for line.
@@ -180,7 +181,7 @@ def run(corpora_root: Path, new_corpus: Path | None = None, new_builds: dict | N
                 if config not in new_m["configs"]:
                     continue
                 try:
-                    exe = cache.executable(rel, info["executable"])
+                    exe = cache.executable(rel, info["executable"], d)
                 except (cs.CorpusError, KeyError) as error:
                     result.errors.append(f"{rel} {config}: its executable: {error}")
                     continue
@@ -262,7 +263,7 @@ def main() -> int:
             m = cs.read_manifest(d)
             new_corpus = new_corpus or d
             for config, info in m["configs"].items():
-                exe = cache.executable(args.release, info["executable"])
+                exe = cache.executable(args.release, info["executable"], d)
                 new_builds[config] = cs.Build(info["region"], info["engine"], exe, None)
         for path in args.new:
             for b in cs.resolve_builds(path):

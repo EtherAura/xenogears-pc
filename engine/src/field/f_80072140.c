@@ -199,7 +199,7 @@ void uploadCharacterSprites(void);
 void execSpritesCallbacksList1(void);
 void execSpritesCallbacksList2(void);
 void OP_INIT_ENTITY_SCRIPT_sub0Sub9(SpriteActorCore* actor);
-static void drawFieldSprites(OTag* ot, s32 oddOrEven, MATRIX* gameProjection);
+static void drawFieldSprites(OTag* ot, s32 oddOrEven, MATRIX* gameProjection, int hideLeader);
 void renderCharShadows(OTag* ot, s32 oddOrEven);
 void exectueEntitiesUpdateFunction(void);
 void stepDialogWindows(void);
@@ -844,6 +844,68 @@ static int firstPersonPlayerControl(void) {
     return 1;
 }
 
+/* Enhanced (xg-ugy.9): the picture drawn from the view at full precision. lookAtDivided takes
+ * the eye and target in whole world units, so a camera following the party is drawn in uneven
+ * whole-unit steps (2, 3, 2, 2, 3 for an even 2.3) and its direction wobbles: at 60 Hz in an
+ * upscaled picture the room judders. The frame draws pcFieldLookAtPrecise's view of the same
+ * points (port/src/system/freecam.c) and decides with lookAtDivided's: the off-screen verdicts
+ * (drawFieldSprites' gameProjection), the dialogue's place and the next frame keep the game's
+ * matrices, as the first-person look keeps them. The drawn matrix is the call before's (the
+ * double buffer below): each call's points are kept with the matrix lookAtDivided made of them,
+ * and the precise view is drawn only while the game's drawn matrix is that one. It goes in after
+ * updateCamera, whose sounds pan by the actors' places in the game's view
+ * (getActorScreenPosition). Only in the 60 Hz field, so a native-cadence run (XG_FIELD60=0)
+ * draws the Original's picture. */
+static struct {
+    VECTOR eye, at;
+    MATRIX game;
+    s32 valid;
+} pcDrawCam[2]; /* [0] this call's points, [1] the call before's */
+static s32 pcFieldDrawPrecise; /* this frame draws a precise view (updateAndRenderField restores the game's) */
+static MATRIX pcDrawView;       /* that view, before setProjectionMatrixForField composes it */
+static double pcDrawExactT[3];  /* the drawn view's exact translation (pcFieldLookAtPrecise) */
+static double pcDrawOffset[3];  /* what the composed matrices' translation lacks of it (gtePrecisionViewOffset) */
+static int pcSameMatrix(const MATRIX* a, const MATRIX* b) {
+    s32 i, j;
+    for (i = 0; i < 3; i++) {
+        if (a->t[i] != b->t[i]) return 0;
+        for (j = 0; j < 3; j++) {
+            if (a->m[i][j] != b->m[i][j]) return 0;
+        }
+    }
+    return 1;
+}
+static void pcFieldDrawRecord(const VECTOR* eye, const VECTOR* at) {
+    pcDrawCam[1] = pcDrawCam[0];
+    pcDrawCam[0].eye = *eye;
+    pcDrawCam[0].at = *at;
+    pcDrawCam[0].game = g_updateAllEntitiesSub2Var0 != 0 ? fieldSceneState.m110_cameraMatrix : g_cameraMatrix2;
+    pcDrawCam[0].valid = 1;
+}
+static int pcFieldDrawView(MATRIX* view) {
+    s32 drawn = g_updateAllEntitiesSub2Var0 != 0 ? 0 : 1;
+    if (pcFieldSubFrames() == 1 || !pcDrawCam[drawn].valid ||
+        !pcSameMatrix(&pcDrawCam[drawn].game, &fieldSceneState.m110_cameraMatrix)) {
+        return 0;
+    }
+    return pcFieldLookAtPrecise(view, pcDrawExactT, &pcDrawCam[drawn].eye, &pcDrawCam[drawn].at, &fieldSceneState.m20_cameraUp);
+}
+/* The game's view kept for the decisions, the drawn one composed in its place (m110 = m130 o view,
+ * m1E4 from it), and the fraction its translation lost, which every matrix composed from m1E4
+ * carries as it is. */
+static void pcFieldDrawInstall(MATRIX* gameCamera, MATRIX* gameProjection) {
+    const MATRIX* r = &fieldSceneState.m130_projectionTempMatrix;
+    s32 i;
+    *gameCamera = fieldSceneState.m110_cameraMatrix;
+    *gameProjection = fieldSceneState.m1E4_projectionMatrix;
+    fieldSceneState.m110_cameraMatrix = pcDrawView;
+    setProjectionMatrixForField();
+    for (i = 0; i < 3; i++) {
+        pcDrawOffset[i] = (r->m[i][0] * pcDrawExactT[0] + r->m[i][1] * pcDrawExactT[1] + r->m[i][2] * pcDrawExactT[2]) / 4096.0 -
+                          fieldSceneState.m110_cameraMatrix.t[i];
+    }
+}
+
 static int updateFieldEntitiesForView(MATRIX* gameCamera, MATRIX* gameProjection) {
     VECTOR eye, at, lookEye, lookAt;
     s16 spriteHeading;
@@ -894,6 +956,8 @@ static int updateFieldEntitiesForView(MATRIX* gameCamera, MATRIX* gameProjection
         fieldSceneState.m110_cameraMatrix = g_cameraMatrix2;
         lookAtDivided(&g_cameraMatrix2, &eye, &at, &fieldSceneState.m20_cameraUp);
     }
+    pcFieldDrawRecord(&eye, &at); /* Enhanced (xg-ugy.9) */
+    pcFieldDrawPrecise = gameProjection && !looking && pcFieldDrawView(&pcDrawView);
     STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     if (looking) {
         computeProjectionMatrix();
@@ -1186,8 +1250,11 @@ void updateFieldInputs(void) {
         g_padButtonForField = 0;
         padButtonForField2 = 0;
     }
-    if (playMusicAuthorized == 0) {
-        padButtonForDialogs &= ~0x80;
+    {
+        extern s32 pcFieldBattleJumpAllowed(void); /* port/src/game/field/battlejump.c */
+        if (playMusicAuthorized == 0 && !pcFieldBattleJumpAllowed()) {
+            padButtonForDialogs &= ~0x80;
+        }
     }
     /* Enhanced (xg-hbc.19.3, the preview method): the tick reads every input
      * sample of its native frame itself (pcFieldSubAdvance), so nothing is
@@ -1580,7 +1647,7 @@ static void pcFieldTasksPicture(void) {
     }
 }
 
-static void renderChars(MATRIX* gameProjection) {
+static void renderChars(MATRIX* gameProjection, int hideLeader) {
     s32 i;
 
     if (renderCharsDisabled != 1) {
@@ -1601,7 +1668,7 @@ static void renderChars(MATRIX* gameProjection) {
             pcFieldTasksAfter();
         }
         pcFieldShiftBegin(1); /* Enhanced (xg-hbc.19.3) */
-        drawFieldSprites(pCurrentFieldRenderingContext->mCC_OT, g_frameOddOrEven, gameProjection);
+        drawFieldSprites(pCurrentFieldRenderingContext->mCC_OT, g_frameOddOrEven, gameProjection, hideLeader);
         pcFieldShiftEnd(1);
         if (pcFieldSubFrames() == 1) {
             for (i = 0; i < g_totalActors; i++) {
@@ -2132,7 +2199,7 @@ static void pcFieldPictureLog(void) {
  * look-at point is the game camera's: it is registered with the eye-level view
  * (saved before the game's matrices are put back) and a focus the port takes
  * from the picture's depth at its centre. */
-static MATRIX pcEyeProjection; /* the eye-level view a first-person picture was drawn with */
+static MATRIX pcEyeProjection; /* the view a first-person (or precise, xg-ugy.9) picture was drawn with */
 
 /* Enhanced (xg-rgcf.5.18): while a dialogue window is open, the view depth of
  * the actor it belongs to (the one on top when several are open), a little
@@ -2175,7 +2242,7 @@ static void pcFieldSceneDepth(int looking) {
      * scene (SetGeomOffset(0xA0, 0x70), SetGeomScreen(sceneSCRZ)). */
     /* The speaker's depth in the game's view (an eye-level look keeps its own focus). */
     pcSceneSpeaker(looking ? 0 : pcDialogSpeakerDepth(m));
-    if (looking) m = &pcEyeProjection; /* the picture's own view, not the game's restored one */
+    if (looking || pcFieldDrawPrecise) m = &pcEyeProjection; /* the picture's own view, not the game's restored one */
     pcSceneView(m->m, m->t, fieldSceneState.m178_sceneSCRZ, 0xA0, 0x70, fieldMapNumber & 0xFFF);
     pcSceneDepth(pCurrentFieldRenderingContext->mCC_OT, 0x1000,
                  fieldUseGroundOT != 0 ? pCurrentFieldRenderingContext->m40D0_secondaryOT : 0, 0x1000,
@@ -2205,6 +2272,7 @@ void updateAndRenderField(void) {
          * distance: updateCameraAt) once a native frame, from its state, not from a preview */
         updateCamera();
     }
+    if (pcFieldDrawPrecise) pcFieldDrawInstall(&gameCamera, &gameProjection); /* Enhanced (xg-ugy.9): drawn from here */
     if (fieldDebugDisable == 0) {
         func_80281B00("SEFFECT   ");
     }
@@ -2213,11 +2281,12 @@ void updateAndRenderField(void) {
         func_80281B00("MESSAGE   ");
     }
     renderCompass();
+    gtePrecisionViewOffset(pcFieldDrawPrecise ? pcDrawOffset : NULL); /* Enhanced (xg-ugy.9): the world drawn from the camera */
     STACK_SWITCH(PSX_SCRATCH(0x1F8003FC));
     pcFieldShiftBegin(0); /* Enhanced: scripted moves drawn through the tick (xg-hbc.19.3) */
     renderObjects();
     pcFieldShiftEnd(0);
-    renderChars(looking ? &gameProjection : NULL);
+    renderChars(looking || pcFieldDrawPrecise ? &gameProjection : NULL, looking);
     updateParticles();
     if (fieldDebugDisable == 0) {
         func_80281450();
@@ -2228,6 +2297,7 @@ void updateAndRenderField(void) {
     renderBackgroundPolyIfEnabled();
     renderMechasInField();
     drawWideImageSprites();
+    gtePrecisionViewOffset(NULL);
     if (fieldDebugDisable == 0) {
         func_80281400();
         func_80281B00("FntPrint  ");
@@ -2239,9 +2309,10 @@ void updateAndRenderField(void) {
     addDialogWindowsToOT(pCurrentFieldRenderingContext->m80D4_uiOT, g_frameOddOrEven);
     pcGameplaySetDialogStepSkip(0);
     pcFieldPictureLog(); /* Enhanced oracle: the picture's values (XG_SWEEP_PICTURE) */
-    if (looking) {
+    if (looking || pcFieldDrawPrecise) {
         /* The next script tick projects actors to place dialogue. Leave the game's
-         * view in all three matrices after the eye-level picture is submitted. */
+         * view in all three matrices after the eye-level (or precise, xg-ugy.9) picture
+         * is submitted. */
         pcEyeProjection = fieldSceneState.m1E4_projectionMatrix; /* Enhanced: for the scene effects (pcFieldSceneDepth) */
         fieldSceneState.m110_cameraMatrix = gameCamera;
         fieldSceneState.m1E4_projectionMatrix = gameProjection;
@@ -2366,7 +2437,7 @@ void setSpriteColorIfNoFog(SpriteActorCore* actor, u8* rgb) {
 
 /* The map viewer supplies its own camera. */
 void renderFieldCharacterSprites(OTag* ot, s32 oddOrEven) {
-    drawFieldSprites(ot, oddOrEven, NULL);
+    drawFieldSprites(ot, oddOrEven, NULL, 0);
 }
 
 static void projectFieldSprite(MATRIX* projection, MATRIX* actor, SVECTOR* point, s32* sxy, s32* p, s32* flag, s32* depth) {
@@ -2377,8 +2448,8 @@ static void projectFieldSprite(MATRIX* projection, MATRIX* actor, SVECTOR* point
     gte_RotTransPers(point, sxy, p, flag, depth);
 }
 
-static void drawFieldSprites(OTag* ot, s32 oddOrEven, MATRIX* gameProjection) {
-    s32 hiddenActor = gameProjection ? op9DVar1.mE8_playerControlledActor : -1;
+static void drawFieldSprites(OTag* ot, s32 oddOrEven, MATRIX* gameProjection, int hideLeader) {
+    s32 hiddenActor = hideLeader ? op9DVar1.mE8_playerControlledActor : -1;
     SVECTOR v;
     SVECTOR pos;
     VECTOR scale;

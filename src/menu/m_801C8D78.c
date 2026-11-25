@@ -895,7 +895,7 @@ void updateMemoryCardProgressBox(u8 mode) {
         }
         break;
     case 1:
-        p = allocateHeap(PC_HEAP_SIZED((s32)sizeof(MenuContext_44C), (s32)0x7bc), 0);
+        p = allocateHeap(PC_HEAP_OF(MenuContext_44C, PC_HEAP_SIZED((s32)sizeof(MenuContext_44C), (s32)0x7bc)), 0);
         gMenuContext->m44C_progressBox = p;
         bzero(p, (s32)sizeof(MenuContext_44C));
         SetPolyF4(&gMenuContext->m44C_progressBox->m0_bar[gMenuContext->m308_oddOrEven]);

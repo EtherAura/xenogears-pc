@@ -167,6 +167,11 @@ typedef struct {
 #define DRAW_RESOLVED 0x4000u /* final native words, opaque including black */
 #define DRAW_CACHED 0x2000u    /* native decoded texels appended to span rows */
 #define DRAW_FADE 0x8000u      /* PC: every texel blended half and half (pcFadePrim), STP or not */
+/* Motion smoothing's snapshots only (gp0.c recordPolygon, vk.c interpolationSealReplay): the
+ * triangle's perimeter edges for the seam fringe its replay gives it as hiTriangle gives the live
+ * one (bit i: the edge from vertex i to i + 1). Never reaches a shader. */
+#define DRAW_SEAL_SHIFT 16
+#define DRAW_SEAL_MASK (7u << DRAW_SEAL_SHIFT)
 
 typedef struct {
     int x, y, w, h; /* VRAM area shown */
@@ -313,6 +318,11 @@ typedef struct {
 #define SCENE_Z_NONE 0.0f
 #define SCENE_Z_SHARP 1.0e30f
 #define SCENE_Z_IS_DEPTH(z) ((z) != SCENE_Z_NONE && (z) < 1.0e29f && (z) > -1.0e29f)
+/* A projected triangle with its seam fringe (gp0.c hiSeal: strips along the perimeter edges the
+ * mask names, filling only uncovered pixels), the fringe's scene depth carried on along the face's
+ * plane when sceneDepth: out holds the triangle then the strips; returns their vertex count (3:
+ * no strip). The live copy's and the motion smoothing's replay's (vk.c). */
+int gp0SealTriangle(const HiVertex src[3], HiVertex out[21], unsigned perimeter, int sceneDepth);
 
 /* hires.c: upscale_color */
 #define HIRES_COLOR_TRUE 0     /* no dither, blending in 8 bits (shaders/hires.frag) */
@@ -431,6 +441,7 @@ typedef struct {
 } DofParams;
 /* The most actors' ground points a scene's shadows take (pcSceneFigure). */
 #define SCENE_FIGURES 32
+#define SCENE_DUST 48 /* footstep dust's puffs alive at once, at most (light.comp DUST_MAX) */
 /* The lighting and the shadows: each part's strength (0: without it), and the
  * view the scene was projected with, which gives each pixel its place and its
  * normal. */
@@ -468,6 +479,14 @@ typedef struct {
      * (seconds), the speed (flickers a second) and how irregular (0..1);
      * the room's origin is roomTrans. */
     float flicker, flickerTime, flickerSpeed, flickerIrregular;
+    /* The colour grade adapting to the area (xg-rgcf.5.22): how much (0: none). */
+    float gradeArea;
+    /* Footstep dust (xg-rgcf.5.23): the live puffs, each its centre at the
+     * ground (view space), its age (0 born .. 1 gone), how strong, a seed. */
+    int dustCount;
+    float dust[SCENE_DUST][6];
+    float dustSize, dustCover; /* a puff's radius when born (characters' heights), how much it covers at most */
+    float glare; /* sun glare's strength (0: none, 1 Medium; xg-rgcf.5.24) */
     /* Ambient particles (xg-rgcf.5.10): their level (0: none) and size scale,
      * the time they drift by (seconds), the room's frame they keep their
      * places in (view = roomRot * room + roomTrans, the room in view units),

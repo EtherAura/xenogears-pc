@@ -1053,9 +1053,18 @@ void updateFieldInputs(void) {
         g_padButtonForField = 0;
         padButtonForField2 = 0;
     }
+#ifdef PLATFORM_PC
+    {
+        extern s32 pcFieldBattleJumpAllowed(void); /* port/src/game/field/battlejump.c */
+        if (playMusicAuthorized == 0 && !pcFieldBattleJumpAllowed()) {
+            padButtonForDialogs &= ~0x80;
+        }
+    }
+#else
     if (playMusicAuthorized == 0) {
         padButtonForDialogs &= ~0x80;
     }
+#endif
 }
 
 void renderObjects(void) {

@@ -84,6 +84,13 @@
 
 layout(local_size_x = 8, local_size_y = 8) in;
 
+// The pass a pipeline is made for, or -1: any (pc.pass). The fog's colour
+// (18), the composite (19) and the particles over the copy (21) each have a
+// pipeline of its own (vk.c sceneCompile): made for one pass, the shader
+// keeps none of the others' code, registers or shared memory, so more of it
+// runs at once. The results are the same.
+layout(constant_id = 0) const int ONLY_PASS = -1;
+
 layout(set = 0, binding = 0, r32ui) uniform uimage2D color;
 layout(set = 0, binding = 1, r32ui) uniform readonly uimage2D depth;
 layout(set = 0, binding = 2, rgba16f) uniform image2D base;    // rgb: mean light, a: its brightness
@@ -209,6 +216,16 @@ const float SHAFT_FAR_FROM = 0.44, SHAFT_FAR_TO = 0.50;
 const int SHAFT_STEPS = 16;
 const float SHAFT_FADE = 2.5, SHAFT_BEAMS = 1.1, SHAFT_SUN = 0.16, SHAFT_REACH = 0.55;
 const vec3 SUN_COLOUR = vec3(1.0, 0.94, 0.80);
+// Sun glare (xg-rgcf.5.24, carl's picks from work/hd2d/light/proto23.py): in
+// SHAFT_SLOT z its strength (0 none, 1 Medium) and w how open the sun's side
+// is (pass 18). The glare's sun sits just outside the picture's edge the
+// room's sun lies beyond, GLARE_OUT picture heights past it (the true sun is
+// 55 degrees high: almost never in view); a warm glow falls off from it and
+// four faint rings sit along the line from it through the middle. The sun's
+// side is open where far scenery (the backdrop, or past twice the focus)
+// shows near that point: GLARE_OPEN of it counts as all, GLARE_NEAR picture
+// heights the reach of "near".
+const float GLARE_OUT = 0.12, GLARE_OPEN = 0.5, GLARE_NEAR = 0.35;
 // Cloud shadows (xg-rgcf.5.17, carl chose the large soft clouds from the
 // prototypes, work/hd2d/light/proto18.py): their settings' place in the block
 // (x: how much of the sun a cloud takes, 0 none; y: a cloud's size, view
@@ -226,6 +243,22 @@ const int CLOUD_SLOT = 4 + MAX_FIGURES;
 // FLICKER_CELL view units to each other flicker nearly together. The room's
 // origin is the clouds' (CLOUD_SLOT + 1).
 const int FLICKER_SLOT = 6 + MAX_FIGURES;
+// The colour grade adapting to the area (xg-rgcf.5.22, carl chose "subtle"
+// from the prototypes, work/hd2d/light/proto21.py): its place in the block
+// (rgb: the room's scenery's average shown colour, which pass 18 writes; w:
+// how much, 0 none, 1 at the grade's Medium), and the lean at 1: a tint toward
+// that colour (at most AREA_MOST of it away from grey), more colour where a
+// pixel's hue is near it, and in a dark room a lean toward blue in the shadows.
+const int AREA_SLOT = 7 + MAX_FIGURES;
+const vec3 AREA_LEAN = vec3(0.25, 0.15, 0.5);
+const float AREA_MOST = 0.25;
+// Footstep dust (xg-rgcf.5.23): the puffs' place in the block (x: how many,
+// y: a puff's radius when born, in characters' heights, z: how much it covers
+// at most; then two vec4s each: xyz the ground point in view space, w its age
+// 0..1; x how strong, y a seed; scene.c dustStep), at most DUST_MAX.
+const int DUST_SLOT = 8 + MAX_FIGURES;
+const int DUST_MAX = 48;
+
 const float FLICKER_CELL = 160.0;
 const float CLOUD_SPREAD = 0.132, CLOUD_EDGE = 0.253, CLOUD_SOFT = 0.6, CLOUD_LOW_SUN = 0.2;
 const float FOG_FAR_FROM = 1.2, FOG_FAR_TO = 3.0;
@@ -329,7 +362,8 @@ void prepare(ivec2 t) {
     sum /= count;
     imageStore(base, t, vec4(sum, dot(sum, vec3(0.2126, 0.7152, 0.0722))));
     // Firelight: the glow's source flickers where it is a fire-coloured light:
-    // brighter than what is around it (eight samples ten PS1 pixels out), its
+    // brighter than what is around it (eight samples twenty PS1 pixels out,
+    // beyond a big fire's own flames), its
     // colour judged with its halo (eight three PS1 pixels out: a flame's core
     // is near white).
     if (flickering() && dot(source, vec3(1.0)) > 0.0) {
@@ -337,12 +371,12 @@ void prepare(ivec2 t) {
         vec3 halo = vec3(0.0);
         for (int k = 0; k < 8; k++) {
             vec2 d = vec2(cos(float(k) * 0.785398), sin(float(k) * 0.785398));
-            ivec2 l = clamp(middle(t) + ivec2(10.0 * d * float(pc.n)), ivec2(0), pc.size - 1);
+            ivec2 l = clamp(middle(t) + ivec2(20.0 * d * float(pc.n)), ivec2(0), pc.size - 1);
             around += dot(light(imageLoad(color, pc.origin + l).r), vec3(0.2126, 0.7152, 0.0722)) / 8.0;
             l = clamp(middle(t) + ivec2(3.0 * d * float(pc.n)), ivec2(0), pc.size - 1);
             halo += light(imageLoad(color, pc.origin + l).r) / 8.0;
         }
-        float fire = smoothstep(1.6, 2.6, own / max(around, 1.0e-3)) * warmth(0.3 * sum + 0.7 * halo);
+        float fire = smoothstep(1.3, 2.0, own / max(around, 1.0e-3)) * warmth(0.3 * sum + 0.7 * halo);
         float code = depthCode(imageLoad(depth, middle(t)).r);
         if (code > 0.0 && fire > 0.0) source *= mix(1.0, flicker(place(middleAt(t), code)), fire);
     }
@@ -861,27 +895,58 @@ vec3 brighten(vec3 c, vec3 factor) {
 // focus depth; sprites and kept pictures left out), or of all the scenery
 // when too little is that far, taken half way to a neutral scaled by its
 // brightness: a dark room gets a dim haze, a bright one a pale one.
+// The glare's sun (on the layers' frame, PS1 pixels), defined with the shafts.
+vec2 glarePoint(int b);
+
 shared vec4 fogFar[64], fogAll[64];
+shared vec2 glareSum[64];
 void fogColour() {
     uint i = gl_LocalInvocationIndex;
     vec4 far = vec4(0.0), every = vec4(0.0);
+    vec2 open = vec2(0.0);
+    int b = int(pc.lens.w);
+    bool glare = b >= 0 && block[b + SHAFT_SLOT].z > 0.0;
+    vec2 sunAt = glare ? glarePoint(b) : vec2(0.0);
+    // A run of FOG_RUN of the invocation's pixels along the row is read at
+    // once, then summed in the order they lie (one group alone does the whole
+    // grid: reading one pixel at a time, it waited on each).
+    const int FOG_RUN = 8;
     for (int y = int(gl_LocalInvocationID.y); y < pc.work.y; y += 8)
-        for (int x = int(gl_LocalInvocationID.x); x < pc.work.x; x += 8) {
-            ivec2 t = ivec2(x, y);
-            float code = imageLoad(geo, t).a;
-            if (code <= 0.0) continue;
-            vec3 shown = sqrt(max(imageLoad(base, t).rgb, 0.0));
-            float w = smoothstep(FOG_FAR_FROM, FOG_FAR_TO, code / max(pc.lens.z, 1.0));
-            far += vec4(shown * w, w);
-            every += vec4(shown, 1.0);
+        for (int x0 = int(gl_LocalInvocationID.x); x0 < pc.work.x; x0 += 8 * FOG_RUN) {
+            vec4 geoRun[FOG_RUN], baseRun[FOG_RUN];
+            uint depthRun[FOG_RUN];
+            for (int k = 0; k < FOG_RUN; k++) {
+                ivec2 t = ivec2(min(x0 + 8 * k, pc.work.x - 1), y);
+                geoRun[k] = imageLoad(geo, t);
+                baseRun[k] = imageLoad(base, t);
+                depthRun[k] = glare ? imageLoad(depth, middle(t)).r : 0u;
+            }
+            for (int k = 0; k < FOG_RUN && x0 + 8 * k < pc.work.x; k++) {
+                ivec2 t = ivec2(x0 + 8 * k, y);
+                float code = geoRun[k].a;
+                if (glare) {
+                    // How open the sun's side is: far scenery near the glare's sun.
+                    float w = exp(-length(vec2(t) + 0.5 - sunAt) / (GLARE_NEAR * float(pc.work.y)));
+                    bool distant = depthRun[k] == DEPTH_FAR || code > 2.0 * pc.lens.z;
+                    open += vec2(distant ? w : 0.0, w);
+                }
+                if (code <= 0.0) continue;
+                vec3 shown = sqrt(max(baseRun[k].rgb, 0.0));
+                float w = smoothstep(FOG_FAR_FROM, FOG_FAR_TO, code / max(pc.lens.z, 1.0));
+                far += vec4(shown * w, w);
+                every += vec4(shown, 1.0);
+            }
         }
     fogFar[i] = far;
     fogAll[i] = every;
+    glareSum[i] = open;
     barrier();
     for (uint s = 32u; s > 0u; s >>= 1) {
-        if (i < s) { fogFar[i] += fogFar[i + s]; fogAll[i] += fogAll[i + s]; }
+        if (i < s) { fogFar[i] += fogFar[i + s]; fogAll[i] += fogAll[i + s]; glareSum[i] += glareSum[i + s]; }
         barrier();
     }
+    if (i == 0u && glare)
+        block[b + SHAFT_SLOT].w = glareSum[0].y > 0.0 ? clamp(glareSum[0].x / glareSum[0].y / GLARE_OPEN, 0.0, 1.0) : 0.0;
     if (i == 0u && pc.lens.w >= 0.0) {
         vec4 f = fogFar[0], a = fogAll[0];
         vec3 mean = f.w > 0.02 * a.w && f.w > 0.0 ? f.rgb / f.w : a.w > 0.0 ? a.rgb / a.w : FOG_NEUTRAL;
@@ -890,6 +955,8 @@ void fogColour() {
         vec3 every = a.w > 0.0 ? a.rgb / a.w : FOG_NEUTRAL;
         block[int(pc.lens.w) + FOG_SLOT] = vec4(0.5 * mean + 0.5 * FOG_NEUTRAL * clamp(grey * 1.6 + 0.2, 0.35, 1.0),
                                                dot(every, vec3(0.2126, 0.7152, 0.0722)));
+        // The room's own colour, for the colour grade adapting to the area.
+        block[int(pc.lens.w) + AREA_SLOT].rgb = every;
     }
 }
 
@@ -1072,6 +1139,36 @@ float cloudAt(vec2 at, float z, int b) {
     return o.w > 0.0 ? cover * backdropFade(z) : cover;
 }
 
+// Sun glare: the glare's sun just outside the edge the room's sun lies beyond
+// (its view x and y: the way toward it across the screen).
+vec2 glarePoint(int b) {
+    vec2 w = block[b].xy;
+    float len = length(w);
+    w = len > 1.0e-3 ? w / len : vec2(-0.7071, -0.7071);
+    vec2 m = 0.5 * vec2(pc.work);
+    float reach = min(abs(w.x) > 1.0e-4 ? m.x / abs(w.x) : 1.0e9, abs(w.y) > 1.0e-4 ? m.y / abs(w.y) : 1.0e9);
+    return m + w * (reach + GLARE_OUT * float(pc.work.y));
+}
+
+// The glare's light at a point of the frame: the glow, and the rings along the
+// line from the glare's sun through the middle (where along it, its radius in
+// picture heights, how strong; tint).
+vec3 glareLight(vec2 at, int b) {
+    vec4 s = block[b + SHAFT_SLOT];
+    float fh = float(pc.work.y);
+    vec2 sunAt = glarePoint(b), m = 0.5 * vec2(pc.work);
+    float r = length(at - sunAt) / fh;
+    vec3 light = (0.6 * exp(-r / 0.6) + 0.12 * exp(-r / 1.6)) * SUN_COLOUR;
+    const vec3 rings[4] = vec3[4](vec3(0.55, 0.05, 0.5), vec3(1.25, 0.09, 0.35), vec3(1.6, 0.04, 0.45), vec3(2.1, 0.14, 0.25));
+    const vec3 tints[4] = vec3[4](vec3(1.0, 0.85, 0.6), vec3(0.6, 0.8, 1.0), vec3(0.8, 1.0, 0.7), vec3(1.0, 0.7, 0.9));
+    for (int k = 0; k < 4; k++) {
+        float rr = length(at - (sunAt + (m - sunAt) * rings[k].x)) / fh, rad = rings[k].y;
+        float ring = 0.6 * exp(-pow((rr - rad) / (0.25 * rad), 2.0)) + 0.4 * exp(-pow(rr / rad, 2.0));
+        light += 0.12 * rings[k].z * ring * tints[k];
+    }
+    return s.z * s.w * light;
+}
+
 // The warm and cool grade on a shown colour, by amount k (1: the agreed
 // look): shadows toward cool, highlights toward warm, a touch more colour
 // and contrast.
@@ -1081,6 +1178,100 @@ vec3 grade(vec3 c, float k) {
     vec3 o = c * (1.0 + k * low * (vec3(0.93, 0.98, 1.07) - 1.0)) * (1.0 + k * high * (vec3(1.06, 1.0, 0.91) - 1.0));
     o = l + (o - l) * (1.0 + 0.12 * k);
     o = 0.5 + (o - 0.5) * (1.0 + 0.06 * k);
+    return clamp(o, 0.0, 1.0);
+}
+
+// Footstep dust (carl's pick: lingering clouds, a step paler than the ground
+// so they read on bright sand too): how much a ground's colour (light) looks
+// like dust: muted,
+// neither green (grass) nor bluer than it is red (water, snow), neither
+// black nor near white.
+float dustiness(vec3 light) {
+    vec3 c = sqrt(max(light, 0.0));
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float hi = max(c.r, max(c.g, c.b)), lo = min(c.r, min(c.g, c.b));
+    float muted = 1.0 - smoothstep(0.45, 0.65, (hi - lo) / max(hi, 1.0e-3));
+    float notGreen = 1.0 - smoothstep(1.0, 1.12, c.g / max(c.r, 1.0e-3));
+    float notBlue = 1.0 - smoothstep(1.0, 1.1, c.b / max(c.r, 1.0e-3));
+    float lit = smoothstep(0.08, 0.16, l) * (1.0 - smoothstep(0.8, 0.92, l));
+    return muted * notGreen * notBlue * lit;
+}
+
+// A puff's size (PS1 pixels) and where its foot is on the frame.
+float dustRadius(vec4 p, int b) { return FIGURE_HEIGHT * block[b + DUST_SLOT].y * (0.7 + 0.9 * p.w) * pc.view.w / p.z; }
+vec2 dustFoot(vec4 p) { return p.xy * pc.view.w / p.z + pc.lens.xy; }
+
+// The composite's groups (8 by 8 pixels of the copy): which puffs may cover
+// one of the group's pixels, each invocation testing one puff's box against
+// the group's (with a little to spare), so a pixel goes through only those,
+// in the same order (DUST_MAX is under 64).
+shared uint dustNear[2];
+
+void dustShare() {
+    uint i = gl_LocalInvocationIndex;
+    if (i < 2u) dustNear[i] = 0u;
+    barrier();
+    int b = int(pc.lens.w);
+    if (int(i) < min(int(block[b + DUST_SLOT].x), DUST_MAX)) {
+        vec4 p = block[b + DUST_SLOT + 1 + 2 * int(i)];
+        if (p.z > 1.0) {
+            float r = dustRadius(p, b);
+            vec2 middle = dustFoot(p) - vec2(0.0, r * (0.3 + 0.8 * p.w)), reach = vec2(r, 0.6 * r) * 1.01 + 0.01;
+            vec2 g0 = vec2(gl_WorkGroupID.xy * 8u);
+            vec2 lo = (g0 + 0.5) / float(pc.n) + vec2(pc.layer), hi = (g0 + 7.5) / float(pc.n) + vec2(pc.layer);
+            if (all(greaterThanEqual(hi, middle - reach)) && all(lessThanEqual(lo, middle + reach)))
+                atomicOr(dustNear[i >> 5], 1u << (i & 31u));
+        }
+    }
+    barrier();
+}
+
+// The puffs over a pixel of the frame (at, PS1 pixels of the layers; code its
+// depth): each a soft flat ellipse rising and growing from where the foot
+// was, in the colour of the ground there (lighter), hidden behind nearer
+// scenery, fading with its age.
+vec3 dustOver(vec3 shown, vec2 at, float code, int b) {
+    for (int half_ = 0; half_ < 2; half_++)
+    for (uint near = dustNear[half_]; near != 0u; ) {
+        int i = half_ * 32 + findLSB(near);
+        near &= near - 1u;
+        vec4 p = block[b + DUST_SLOT + 1 + 2 * i], q = block[b + DUST_SLOT + 2 + 2 * i];
+        float size = block[b + DUST_SLOT].y, cover = block[b + DUST_SLOT].z;
+        float r = dustRadius(p, b); // PS1 pixels
+        vec2 foot = dustFoot(p);
+        vec2 d = (at - (foot - vec2(0.0, r * (0.3 + 0.8 * p.w)))) / vec2(r, 0.6 * r);
+        float e = dot(d, d);
+        // hidden behind scenery nearer than the puff's front (the ground just
+        // before the foot is a little nearer than the foot itself)
+        if (e >= 1.0 || (code > 0.0 && code < p.z - FIGURE_HEIGHT * size * 1.5)) continue;
+        vec3 ground = imageLoad(base, inside(ivec2(foot))).rgb;
+        float dusty = dustiness(ground);
+        if (dusty <= 0.0) continue;
+        vec3 colour = mix(sqrt(max(ground, 0.0)), vec3(0.95, 0.93, 0.88), 0.45); // a step paler than the ground
+        float a = q.x * dusty * (1.0 - e) * (1.0 - e) * (1.0 - p.w) * (1.0 - p.w) * smoothstep(0.0, 0.15, p.w);
+        a *= 0.7 + 0.3 * cloudNoise(d * 2.5 + q.y * 37.0, 31u);
+        shown = mix(shown, colour, clamp(a, 0.0, 1.0) * cover);
+    }
+    return shown;
+}
+
+// The colour grade's lean into the room's own colour (`mean`), by k.
+vec3 areaLean(vec3 c, vec3 mean, float k) {
+    const vec3 luma = vec3(0.2126, 0.7152, 0.0722);
+    float lm = dot(mean, luma);
+    vec3 d = mean - lm;
+    float size = length(d);
+    if (size < 1.0e-3) return c;
+    vec3 way = d / size;
+    d = way * min(size, AREA_MOST);
+    float l = dot(c, luma);
+    vec3 o = c + k * AREA_LEAN.x * d * (0.4 + l);
+    float lo = dot(o, luma);
+    vec3 chroma = o - lo;
+    float near = clamp(dot(chroma, way) / max(length(chroma), 1.0e-4), 0.0, 1.0);
+    o = lo + chroma * (1.0 + k * AREA_LEAN.y * near);
+    float dark = clamp((0.3 - lm) / 0.18, 0.0, 1.0), shadow = clamp(1.0 - l / 0.4, 0.0, 1.0);
+    o *= 1.0 + k * AREA_LEAN.z * dark * shadow * vec3(-0.06, -0.02, 0.08);
     return clamp(o, 0.0, 1.0);
 }
 
@@ -1180,10 +1371,14 @@ void composite(ivec2 l) {
         return;
     }
 
+    // With the firelight (xg-rgcf.5.21), a painted light (a lamp, a fire, a
+    // see-through flame over a wall) keeps its brightness under the top
+    // light's darkening, the shade and the fog too, as under cast shadows.
+    float painted = b >= 0 && flickering() ? smoothstep(SHADOW_KEEP_FROM, SHADOW_KEEP_TO, max(c.r, max(c.g, c.b))) : 0.0;
     if (code > 0.0 && pc.strength.x > 0.0) {
         float f = 1.0 + pc.strength.x * (top > 0.0 ? TOP_UP : TOP_DOWN) * top;
         f *= f;
-        c = f > 1.0 ? brighten(c, vec3(f)) : c * f;
+        c = f > 1.0 ? brighten(c, vec3(f)) : c * mix(f, 1.0, painted);
     }
     if (code < 0.0 && (pc.flags & CHARACTERS) != 0) {
         // The sprites in the light, by the top light's strength (Medium's: 1).
@@ -1195,7 +1390,7 @@ void composite(ivec2 l) {
     }
     if (pc.strength.z > 0.0) c = brighten(c, 1.0 + pc.strength.z * pool);
     if (code > 0.0 && pc.strength.y > 0.0) {
-        float s = 1.0 - clamp(pc.strength.y * SHADE_GAIN * shade, 0.0, SHADE_MOST);
+        float s = 1.0 - clamp(pc.strength.y * SHADE_GAIN * shade * (1.0 - painted), 0.0, SHADE_MOST);
         c *= s * s;
     }
     // Cast shadows and clouds both keep the sun off: where both fall, the
@@ -1217,10 +1412,15 @@ void composite(ivec2 l) {
     if (pc.atmos.x > 0.0 && b >= 0 && raw != DEPTH_SHARP && raw != DEPTH_FAR) {
         float past = max(float(raw & ~DEPTH_FIGURE) / 16.0 / max(pc.lens.z, 1.0) - 1.0, 0.0);
         if (pc.atmos.w > 0.0) past = min(past, pc.atmos.w);
-        shown = mix(shown, block[b + FOG_SLOT].rgb, pc.atmos.x * (1.0 - exp(-pc.atmos.y * past)));
+        shown = mix(shown, block[b + FOG_SLOT].rgb, pc.atmos.x * (1.0 - exp(-pc.atmos.y * past)) * (1.0 - painted));
     }
     if (pc.atmos.z > 0.0) shown = grade(shown, pc.atmos.z);
+    if (b >= 0 && block[b + AREA_SLOT].w > 0.0 && raw != DEPTH_SHARP && raw != DEPTH_FAR)
+        shown = areaLean(shown, block[b + AREA_SLOT].rgb, block[b + AREA_SLOT].w);
+    if (b >= 0 && block[b + DUST_SLOT].x > 0.0) shown = dustOver(shown, at, code, b);
     if (b >= 0 && block[b + SHAFT_SLOT].x > 0.0) shown = 1.0 - (1.0 - shown) * (1.0 - clamp(shaftLight(at, raw, b), 0.0, 1.0));
+    if (b >= 0 && block[b + SHAFT_SLOT].z > 0.0 && block[b + SHAFT_SLOT].w > 0.0)
+        shown = 1.0 - (1.0 - shown) * (1.0 - clamp(glareLight(at, b), 0.0, 1.0));
     if (pc.vignette > 0) {
         // The vignette: the edges darker by a smooth falloff from the frame's
         // middle (an ellipse, its aspect kept), from 0.45 of the way to the
@@ -1250,7 +1450,7 @@ void composite(ivec2 l) {
 // their order, those nearer than what is drawn there. Nothing over a pixel
 // where nothing or a kept picture is drawn.
 const int PARTICLES_MAX = 2048, PARTICLE_EMBERS = 1536; // embers from this index on
-const int PART_SLOT = 7 + MAX_FIGURES;                // after the firelight's settings (vk.c LIGHT_BLOCK_BYTES)
+const int PART_SLOT = 8 + MAX_FIGURES + 1 + 2 * 48;   // after footstep dust's puffs (vk.c LIGHT_BLOCK_BYTES)
 const int PART_REC = PART_SLOT + 5, PART_MASK = PART_REC + 3 * PARTICLES_MAX;
 const int PARTICLE_TILES = 64 * 16; // the masks' room (vk.c PARTICLE_TILES)
 
@@ -1414,6 +1614,36 @@ void particleRecord(int i) {
             atomicOr(words[words0 + uint(ty * tiles.x + tx) * uint(PARTICLES_MAX / 32)], 1u << uint(i & 31));
 }
 
+// Pass 21's groups (8 by 8 pixels of the copy) lie in at most two tiles each
+// way (a tile is 16 PS1 pixels a side or more, the group at most 8): their
+// masks are read once into the group's memory, with which of each one's
+// words hold any particle, so a pixel reads only those, in the same order.
+shared uint partMask[4][PARTICLES_MAX / 32];
+shared uint partWords[4][2];
+
+ivec2 particleTileAt(vec2 at, ivec3 grid) { return clamp(ivec2(floor(at / float(grid.z))), ivec2(0), grid.xy - 1); }
+ivec2 particleGroupTile(ivec3 grid) {
+    return particleTileAt((vec2(gl_WorkGroupID.xy * 8u) + 0.5) / float(pc.n) + vec2(pc.layer), grid);
+}
+
+void particlesShare() {
+    int b = int(pc.lens.w);
+    ivec3 grid = particleTiles();
+    ivec2 first = particleGroupTile(grid);
+    uint i = gl_LocalInvocationIndex; // PARTICLES_MAX / 32 words a tile: one each
+    if (i < 8u) partWords[i >> 1][i & 1u] = 0u;
+    barrier();
+    for (int k = 0; k < 4; k++) {
+        ivec2 tile = first + ivec2(k & 1, k >> 1);
+        uint m = tile.x < grid.x && tile.y < grid.y
+                     ? words[uint(b + PART_MASK) * 4u + uint(tile.y * grid.x + tile.x) * uint(PARTICLES_MAX / 32) + i]
+                     : 0u;
+        partMask[k][i] = m;
+        if (m != 0u) atomicOr(partWords[k][i >> 5], 1u << (i & 31u));
+    }
+    barrier();
+}
+
 void particlesDraw(ivec2 l) {
     uint raw = imageLoad(depth, l).r;
     if (raw == DEPTH_FAR || raw == DEPTH_SHARP) return;
@@ -1421,13 +1651,15 @@ void particlesDraw(ivec2 l) {
     int b = int(pc.lens.w);
     vec2 at = (vec2(l) + 0.5) / float(pc.n) + vec2(pc.layer);
     ivec3 grid = particleTiles();
-    ivec2 tiles = grid.xy;
-    ivec2 tile = clamp(ivec2(floor(at / float(grid.z))), ivec2(0), tiles - 1);
-    uint words0 = uint(b + PART_MASK) * 4u + uint(tile.y * tiles.x + tile.x) * uint(PARTICLES_MAX / 32);
+    ivec2 rel = particleTileAt(at, grid) - particleGroupTile(grid);
+    int k = rel.y * 2 + rel.x;
     float least = 0.6 / float(pc.n);
     vec3 add = vec3(0.0);
-    for (int w = 0; w < PARTICLES_MAX / 32; w++) {
-        uint m = words[words0 + uint(w)];
+    for (int half_ = 0; half_ < 2; half_++)
+    for (uint used = partWords[k][half_]; used != 0u; ) {
+        int w = half_ * 32 + findLSB(used);
+        used &= used - 1u;
+        uint m = partMask[k][w];
         while (m != 0u) {
             int i = w * 32 + findLSB(m);
             m &= m - 1u;
@@ -1456,16 +1688,18 @@ void particlesDraw(ivec2 l) {
 
 void main() {
     ivec2 t = ivec2(gl_GlobalInvocationID.xy);
-    if (pc.pass == 20) {
+    int pass = ONLY_PASS >= 0 ? ONLY_PASS : pc.pass;
+    if (pass == 20) {
         int i = int(gl_WorkGroupID.x) * 64 + int(gl_LocalInvocationIndex); // groups of 8x8: 64 particles each
         if (i < PARTICLES_MAX) particleRecord(i);
         return;
     }
-    if (pc.pass == 21) {
+    if (pass == 21) {
+        particlesShare(); // every invocation of the group (barriers), then the pixels of the copy
         if (t.x < pc.size.x && t.y < pc.size.y) particlesDraw(t);
         return;
     }
-    if (pc.pass == 11) {
+    if (pass == 11) {
         // Every invocation of the group marks the sources (barriers), then
         // those on the grid gather.
         ivec2 base = ivec2(gl_WorkGroupID.xy) * 8 - BOUNCE_SCAN;
@@ -1474,18 +1708,21 @@ void main() {
         if (t.x < q.x && t.y < q.y) gather(t, base);
         return;
     }
-    if (pc.pass == 19) {
+    if (pass == 19) {
+        // (every invocation of the group: barriers; the same for the whole dispatch)
+        int b = int(pc.lens.w);
+        if (b >= 0 && block[b + DUST_SLOT].x > 0.0) dustShare();
         if (t.x < pc.size.x && t.y < pc.size.y) composite(t);
         return;
     }
-    if (pc.pass == 18) {
+    if (pass == 18) {
         fogColour();
         return;
     }
-    if ((pc.pass >= 1 && pc.pass <= 3) || pc.pass == 10 || pc.pass == 11 || pc.pass == 22 || pc.pass == 23) {
+    if ((pass >= 1 && pass <= 3) || pass == 10 || pass == 11 || pass == 22 || pass == 23) {
         ivec2 q = quarters();
         if (t.x >= q.x || t.y >= q.y) return;
-        switch (pc.pass) {
+        switch (pass) {
         case 1: quarter(t); break;
         case 2: quarterAcross(t); break;
         case 3: quarterDown(t); break;
@@ -1496,7 +1733,7 @@ void main() {
         return;
     }
     if (t.x >= pc.work.x || t.y >= pc.work.y) return;
-    switch (pc.pass) {
+    switch (pass) {
     case 0: prepare(t); break;
     case 4: sources(t); break;
     case 5: softNormals(t, ivec2(1, 0), false); break;

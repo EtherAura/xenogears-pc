@@ -2269,7 +2269,7 @@ void initMechSub110(sLoadedMechas* pMecha) {
     s32 i;
 
     if (pMecha->m10C_num110 != 0) {
-        p = allocateHeap(PC_HEAP_SIZED(pMecha->m10C_num110 * sizeof(sLoadedMechas_110), pMecha->m10C_num110 * 0x70), 0);
+        p = allocateHeap(PC_HEAP_OF(sLoadedMechas_110, PC_HEAP_SIZED(pMecha->m10C_num110 * sizeof(sLoadedMechas_110), pMecha->m10C_num110 * 0x70)), 0);
         for (i = 0; i < pMecha->m10C_num110; i++) {
             p[i].m0_boneIndex = -1;
             p[i].m8_segment = NULL;

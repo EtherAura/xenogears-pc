@@ -13,6 +13,8 @@
 /* battle overlay */
 void* allocateBattleHeap(s32 size, s32 flags);
 void* allocateTextureRamForText(s32 size);
+/* party vs party: player 2's party (port/src/game/battle/mirror.c) */
+void pcVersusPartyFiles(u8** reloc);
 
 /* battle .bss */
 extern u8 battleEventMoviePending;
@@ -494,6 +496,7 @@ void loadPartyMembers(void) {
             freeHeap(p);
         }
     }
+    pcVersusPartyFiles(reloc); /* party vs party: player 2's attack rows and the portraits (port/src/game/battle/mirror.c) */
     p = mallocAndDecompress(reloc[4], 1);
     memmove(battleEntities.m35D8_enemiesBattleStats, p, sizeof(battleEntities.m35D8_enemiesBattleStats));
 #ifdef PLATFORM_PC

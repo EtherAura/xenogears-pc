@@ -1831,7 +1831,7 @@ void createMechaLoadingTask(s32 arg0) {
     saved = spriteBytecode2ExtendedE0_Var0;
     spriteBytecode2ExtendedE0_Var0 = 0;
     battleScriptLoaderTaskCreationInProgress = 1;
-    task = (sBattleMechaLoaderTask*)allocateUpdateTask(NULL, (s32)sizeof(sBattleMechaLoaderTask) - (s32)sizeof(TaskHeader));
+    task = (sBattleMechaLoaderTask*)allocateUpdateTask(NULL, PC_HEAP_OF(sBattleMechaLoaderTask, (s32)sizeof(sBattleMechaLoaderTask) - (s32)sizeof(TaskHeader)));
     setTaskUpdateFunction(&task->m0_task, mechaLoadingTask_phase0);
     task->m1C_entity = arg0;
     battleScriptLoaderTaskCreationInProgress = 0;
@@ -2548,7 +2548,7 @@ void updateTargetSelectionMarkerSub0Sub1(void) {
         updateTargetSelectionMarkerSub0Sub2(NULL);
     }
     if (battleBssBlock.m8CB8_spriteActors[battleBssBlock.mA72_currentEntity] != NULL) {
-        task = (BattleBlinkTask*)allocateUpdateTask(&battleBssBlock.m8CB8_spriteActors[battleBssBlock.mA72_currentEntity]->m0_updateTask, (s32)sizeof(BattleBlinkTask) - (s32)sizeof(TaskHeader));
+        task = (BattleBlinkTask*)allocateUpdateTask(&battleBssBlock.m8CB8_spriteActors[battleBssBlock.mA72_currentEntity]->m0_updateTask, PC_HEAP_OF(BattleBlinkTask, (s32)sizeof(BattleBlinkTask) - (s32)sizeof(TaskHeader)));
         characterBlinkTask = task;
         setTaskUpdateFunction(&task->m0_task, updateCharacterBlinkColor);
         setTaskDeleteFunction(&task->m0_task, updateTargetSelectionMarkerSub0Sub2);
@@ -2666,7 +2666,7 @@ void createSpinningEnemySelectionCursor(sBattleSpriteActor* arg0) {
     cursor->m0_updateTask.m14_ownerId.m31 = 0;
     setSVector3(&cursor->m4C_rotation, 0, 0, 0);
     size = getCustomPolySubBufferSize(getCustomPolySubBuffer(battleBlinkingPolyBuffer, 0));
-    buffer = allocateHeap(size * 2, 0);
+    buffer = allocateHeap(PC_HEAP_OF(PC_PRIMS, size * 2), 0);
     copyCustomPolySubBuffer(getCustomPolySubBuffer(battleBlinkingPolyBuffer, 0), buffer, 0, 1);
     buffer2 = buffer + size;
     memcpy(buffer2, buffer, size);

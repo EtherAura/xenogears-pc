@@ -252,6 +252,12 @@ int sceneFog(void);              /* fog: 0 off (default) .. 3 strong */
 void sceneSetFog(int level);
 int sceneGrade(void);            /* color_grade: 0 off (default) .. 3 strong */
 void sceneSetGrade(int level);
+int sceneSunGlare(void);         /* sun_glare: 0 off (default) .. 3 strong (outdoors by day) */
+void sceneSetSunGlare(int level);
+int sceneFootstepDust(void);     /* particles_footsteps: 1 on (default), 0 off: footstep dust, with particles */
+void sceneSetFootstepDust(int on);
+int sceneGradeArea(void);        /* color_grade_area: 1 on (default), 0 off: the grade leans into the room's colour */
+void sceneSetGradeArea(int on);
 int sceneParticles(void);        /* particles: 0 off (default) .. 3 strong (fields, battles, the world map) */
 void sceneSetParticles(int level);
 int sceneParticleSize(void);     /* particle_size: 0 small (default), 1 medium, 2 large */

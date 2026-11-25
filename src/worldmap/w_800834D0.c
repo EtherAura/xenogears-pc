@@ -1202,8 +1202,8 @@ void initWorldmapBillboards(void) {
 void createWorlmapPolyFT4Array3(void) {
     s32 i;
     POLY_FT4* p;
-    worldmapFT4_3[0] = allocateHeap(0x200 * sizeof(POLY_FT4), 1);
-    worldmapFT4_3[1] = allocateHeap(0x200 * sizeof(POLY_FT4), 1);
+    worldmapFT4_3[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, 0x200 * sizeof(POLY_FT4)), 1);
+    worldmapFT4_3[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, 0x200 * sizeof(POLY_FT4)), 1);
     p = worldmapFT4_3[0];
     for (i = 0; i < 0x200; i++, p++) {
         setPolyFT4(p);
@@ -1315,8 +1315,8 @@ void createWorlmapPolyFT4Array2(void) {
     s32 i;
     POLY_FT4* p;
     u8 len, code, c;
-    worldmapFT4_2[0] = allocateHeap(0x120 * sizeof(POLY_FT4), 1);
-    worldmapFT4_2[1] = allocateHeap(0x120 * sizeof(POLY_FT4), 1);
+    worldmapFT4_2[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, 0x120 * sizeof(POLY_FT4)), 1);
+    worldmapFT4_2[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, 0x120 * sizeof(POLY_FT4)), 1);
     p = worldmapFT4_2[0];
     c = 0x26;
     for (i = 0; i < 0x120; i++, p++) {
@@ -2191,8 +2191,8 @@ void createWorlmapPolyFT4Array1(void) {
     POLY_FT4* p;
     s32 i;
 
-    worldmapFT4_1[0] = allocateHeap(256 * (s32)sizeof(POLY_FT4), 1);
-    worldmapFT4_1[1] = allocateHeap(256 * (s32)sizeof(POLY_FT4), 1);
+    worldmapFT4_1[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, 256 * (s32)sizeof(POLY_FT4)), 1);
+    worldmapFT4_1[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, 256 * (s32)sizeof(POLY_FT4)), 1);
     p = worldmapFT4_1[0];
     for (i = 255; i != -1; i--) {
         setlen(p, 9);

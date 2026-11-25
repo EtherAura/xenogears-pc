@@ -16,8 +16,8 @@
 #   tools/build_android.sh --native-only   # the libraries, no APK
 #   tools/build_android.sh --updater       # with the opt-in update check and install (-DXG_UPDATER=ON;
 #                                          # the INTERNET and REQUEST_INSTALL_PACKAGES permissions:
-#                                          # port/src/update, xg-4oq.14.3, .14.5); off by default and
-#                                          # in releases until xg-4oq.14.7
+#                                          # port/src/update, xg-4oq.14.3, .14.5); off by default,
+#                                          # on in releases (packaging/build-android-release.sh)
 #   tools/build_android.sh --updater-test  # the same as a test build, never to hand out
 #                                          # (-DXG_UPDATER_TEST=ON: the tests' FIXTURE key trusted,
 #                                          # XG_UPDATE_TEST_DIR read instead of the network; built

@@ -78,6 +78,14 @@ void* portSandboxAlloc(size_t n) {
     return malloc(n);
 }
 
+/* The sandbox itself and whether it was set up (between.c: 0 not yet, 1
+ * ready, -1 failed). Here, outside every state: between.c is linked into the
+ * battling module, whose BSS a state holds, so a pointer kept there came back
+ * from a state as the writing process's malloc address and the first frame
+ * after a load in a fresh process wrote through it (xg-xf02). */
+void* portBattlingSandbox;
+int portBattlingSandboxState;
+
 /* A module's data and BSS ranges (the 60 Hz Battling's memory sandbox,
  * port/src/game/battling/between.c). 0 when there is no such module. */
 int portModuleRange(const char* name, void** dataStart, void** dataEnd, void** bssStart, void** bssEnd) {

@@ -41,6 +41,8 @@ static sFieldRenderContext context;
 sFieldRenderContext* pCurrentFieldRenderingContext = &context;
 void* allocateHeap(s32 bytes, s32 flags) { (void)flags; return calloc(1, (size_t)bytes); }
 s32 freeHeap(void* ptr) { free(ptr); return 0; }
+/* the allocations' type names for save states (include/pc_state.h PC_HEAP_OF): none here */
+s32 pcHeapRequestType(const char* name, s32 size) { (void)name; return size; }
 s32 getImmediateOrVariableUnsigned(s32 offset) { (void)offset; return 0; }
 static int replayAmplitude = 5, replayPhase = 0x123;
 static int replayAmpX = 6, replayStepX = 0x50, replayStepY = 0x70, replayPhaseX, replayPattern = 1, replayPasses = 1;

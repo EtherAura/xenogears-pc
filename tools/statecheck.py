@@ -652,8 +652,9 @@ def compare_frames(fa: Path, fb: Path, first: int, last: int, hold: tuple[int, i
     """The pictures of two runs per vblank. With hold=(v0, span), a vblank in
     v0..v0+span where B shows its previous picture again while A changed is
     noted (appended to notes), not failed: a picture between that B could not
-    draw after a rewind restore (the 60 Hz Battling's sandbox ring is host
-    memory, not state)."""
+    draw after a rewind restore or a load (the 60 Hz Battling's sandbox ring is
+    host memory, not state). B's first picture after a load, with none of its
+    own before it, shows the restored one again: A's previous."""
     cache: dict = {}
     names_a = {int(m.group(1)) for f in os.listdir(fa) if (m := re.match(r"frame_(\d+)\.png$", f))}
     names_b = {int(m.group(1)) for f in os.listdir(fb) if (m := re.match(r"frame_(\d+)\.png$", f))}
@@ -661,7 +662,8 @@ def compare_frames(fa: Path, fb: Path, first: int, last: int, hold: tuple[int, i
     bad, held = [], []
     for v in points:
         if frame_at(fa, v, cache) != frame_at(fb, v, cache):
-            if hold and hold[0] <= v <= hold[0] + hold[1] and frame_at(fb, v, cache) == frame_at(fb, v - 1, cache):
+            if hold and hold[0] <= v <= hold[0] + hold[1] and frame_at(fb, v, cache) == (
+                    frame_at(fb, v - 1, cache) or frame_at(fa, v - 1, cache)):
                 held.append(v)
             else:
                 bad.append(v)
@@ -734,8 +736,13 @@ def scene_test(build: Path, out: Path, name: str, jp: bool, extra: dict | None =
     if audio["a"][:end] != audio["c"][:end]:
         problems.append("A/C (saving): audio differs")
     problems += [f"A/C (saving): {p}" for p in describe_diffs(*state_diffs(sm, sc, build), nondet)]
-    # A load goes on exactly.
-    problems += [f"B/A (loading): {p}" for p in compare_frames(out / "a" / "frames", out / "b" / "frames", first, last)]
+    # A load goes on exactly (but for a picture between B cannot draw right after it: the scene's hold, as
+    # the rewind test's; a fresh process has no 60 Hz Battling sandbox ring either).
+    held: list[str] = []
+    hold = (ha["vblank"], SCENES[name]["hold"]) if SCENES[name].get("hold") else None
+    problems += [f"B/A (loading): {p}" for p in compare_frames(out / "a" / "frames", out / "b" / "frames", first, last,
+                                                               hold, held)]
+    notes += [f"B/A (loading): {p}" for p in held]
     if audio["a"][at:end] != audio["b"][at:end]:
         diffs = next((i for i in range(at, min(len(audio["a"]), len(audio["b"]), end))
                       if audio["a"][i] != audio["b"][i]), None)

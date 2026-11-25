@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The cursor for themed icons (Android 13 and later), which colour this layer by its alpha
+     alone: the lower triangle at 60%, so the cursor keeps its fold in one colour. The same
+     shapes as ic_launcher_foreground.xml. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FFFFFFFF" android:pathData="M33,75 L59.88,33 L59.88,51.48 Z" />
+    <path android:fillColor="#99FFFFFF" android:pathData="M33,75 L59.88,51.48 L75,51.48 Z" />
+</vector>

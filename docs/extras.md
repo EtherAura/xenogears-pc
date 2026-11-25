@@ -103,10 +103,31 @@ Scripts: a room's actor routines, variables, a trace and the dialogue history.
 
 ![F1 > Extras](img/extras-f1.png)
 
-Battling's two-player bouts from any field, and versus battles where player 2
-commands an enemy formation. Online plays either with someone elsewhere: one
-hosts, the other joins with the same session word (UDP port 7461 by default).
-F1 > Extras.
+Battling's two-player bouts and versus battles, from anywhere in the game, the
+title screen too. When a match ends both players choose **Rematch** or
+**Leave**, and Leave goes back to where you were. F1 > Extras.
+
+In a **Versus battle** player 2 fights your party with the second controller:
+an enemy formation, commanded through the party's command ring (each attack
+under the game's name for it, or what it does); a **Mirror match**, your party
+against a copy of itself; or **Party vs party**, where each player picks a
+memory-card save and up to three of its members, with their levels,
+equipment, abilities and items as saved. Edited saves are accepted.
+
+In a mirror match or party vs party each player sees their own side's HP and
+EP: on one screen the status bar shows the side whose turn it is.
+**Opponent's HP and EP** (off by default) shows the other side's in the enemy
+information window (Select). **Battle music** plays any of the jukebox's
+songs, and **Battle stage** sets where a mirror match or party vs party is
+fought, from 17 places in the game.
+
+Online plays Battling, versus battles against an enemy formation, and party
+vs party with someone elsewhere: one hosts, the other joins with the same
+session word (UDP port 7461 by default). In party vs party each player brings a
+party from a save on their own machine; the other player's party is not
+verified, only kept within the game's ranges, and the host's battle music,
+battle stage and Opponent's HP and EP hold for both. The mirror match is on one
+machine for now.
 
 ![Battling from the battle arena](img/extras-battling.webp)
 

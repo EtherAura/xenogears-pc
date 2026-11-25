@@ -19,6 +19,7 @@
  */
 
 #include <SDL3/SDL.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "savestate.h"
@@ -39,6 +40,10 @@ static void endEvent(void* arg) {
         return; /* restored by a save state from a run with XG_QUIT_AT: not this run's */
     }
     if (hwVSyncCount() >= quitAt) {
+        /* Its own line: a run that must end here can tell this end from any other quit (the
+         * Android start check, tools/android_start_check.py: SDL's quit when Android destroyed
+         * the activity printed the same "xenogears: quit", xg-7xkb). */
+        fprintf(stderr, "quit at: vblank %u (XG_QUIT_AT)\n", (unsigned)hwVSyncCount());
         quitNow();
     }
     double at = hwVBlankToTime((double)hwVSyncCount() + 1);
@@ -59,6 +64,8 @@ static int fallback(void* arg) {
             return 0;
         }
         if (hwVSyncCount() > quitAt && ++past >= FALLBACK_GRACE_POLLS) {
+            fprintf(stderr, "quit at: vblank %u passed, asked by the fallback (XG_QUIT_AT)\n",
+                    (unsigned)hwVSyncCount());
             quitRequest();
             return 0;
         }

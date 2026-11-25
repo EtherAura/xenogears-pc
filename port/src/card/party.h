@@ -16,6 +16,12 @@
  * as long as they pass it: the check keeps memory safe, it cannot tell an
  * edited save from a real one.
  *
+ * What the battle on foot reads of a record (party.c's list): the checks
+ * below bound every field it uses as a table index, pointer offset, loop
+ * bound or divisor, or that the apply step does not force (HP, EP, the Gear
+ * number, the command loadout); the rest it reads only as bits, in switches,
+ * compares and sums, or not at all.
+ *
  * Format 1 (this layout) has no Gears. The Gears step makes format 2: these
  * bytes, then each member's Gear record (0xA4) and Gear name (0x14), about
  * 552 bytes more, XG_PARTY_GEARS in m2_flags and m8_size the whole record's.
@@ -92,6 +98,7 @@ enum {
     XG_PARTY_BAD_ITEMS,      /* an item id not 1-0x30, a count not 1-99, a repeat or a gap */
     XG_PARTY_BAD_AMMO,       /* an ammo id not 0x32-0x48, a count not 1-99, a repeat or a gap */
     XG_PARTY_BAD_AMMO_TABLE, /* an ammo-count table entry above 100 */
+    XG_PARTY_BAD_EXP,        /* experience to the next level (m44, m48) not 1 or more */
     XG_PARTY_REASONS
 };
 
@@ -129,6 +136,9 @@ int xgPartyMemberInfo(const XgPartyRecord* r, int k, XgPartyMember* out);
 /* party_game.c (the game's build only): the running release's code table,
  * read from its disc image (cd: never the drive's state). 1 when read. */
 int xgPartyGameCodes(uint8_t codes[XG_PARTY_CODE_TABLE]);
+/* The same from the disc image at `path` (a .cue or .bin of this region's
+ * release), read and closed again: 1 when read. */
+int xgPartyImageCodes(const char* path, uint8_t codes[XG_PARTY_CODE_TABLE]);
 
 #ifdef __cplusplus
 }

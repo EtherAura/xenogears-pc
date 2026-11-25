@@ -225,7 +225,7 @@ void createDamageDisplay(SpriteActorCore* actor, s32 damageValue, s32 damageType
             p->m0_updateTask.mC_deleteCallback(&p->m0_updateTask);
         }
     }
-    t = (sDamageDisplayTask*)allocateTaskPair((s32)sizeof(sDamageDisplayTask), NULL, (void*)updateDamageDisplayTask, (void*)drawDamageDisplayTask, (void*)deleteDamageDisplayTask);
+    t = (sDamageDisplayTask*)allocateTaskPair(PC_HEAP_OF(sDamageDisplayTask, (s32)sizeof(sDamageDisplayTask)), NULL, (void*)updateDamageDisplayTask, (void*)drawDamageDisplayTask, (void*)deleteDamageDisplayTask);
     t->m78_actor = actor;
     t->m88_timer = 8;
     t->m38_pNext = damageTaskDisplayListHead;
@@ -663,7 +663,7 @@ void createDamageDisplayTask3(s32 value) {
     s32 x;
     s32 i;
 
-    t = (sDamageParticleTask*)allocateTaskPair((s32)offsetof(sDamageParticleTask, m70_glyphs[8]), NULL, updateDamageDisplayTask3, drawDamageDisplayTask3, NULL);
+    t = (sDamageParticleTask*)allocateTaskPair(PC_HEAP_OF(sDamageParticleTask, (s32)offsetof(sDamageParticleTask, m70_glyphs[8])), NULL, updateDamageDisplayTask3, drawDamageDisplayTask3, NULL);
     t->m64_rotationStep = -(((rand() & 3) - 2) * 8);
     if (t->m64_rotationStep == 0) {
         t->m64_rotationStep = 6;
@@ -1316,7 +1316,7 @@ void updateSpriteDistanceWatch(TaskHeader* task) {
 /* create the distance watch task for actor */
 void startSpriteDistanceWatch(SpriteActorCore* actor, s32 minDistance, void (*callback)(SpriteActorCore*));
 void startSpriteDistanceWatch(SpriteActorCore* actor, s32 minDistance, void (*callback)(SpriteActorCore*)) {
-    BattleDistanceWatchTask* t = (BattleDistanceWatchTask*)allocateUpdateTask(actor->m6C_owner, (s32)sizeof(BattleDistanceWatchTask) - (s32)sizeof(TaskHeader));
+    BattleDistanceWatchTask* t = (BattleDistanceWatchTask*)allocateUpdateTask(actor->m6C_owner, PC_HEAP_OF(BattleDistanceWatchTask, (s32)sizeof(BattleDistanceWatchTask) - (s32)sizeof(TaskHeader)));
 
     setTaskUpdateFunction(&t->m0_task, updateSpriteDistanceWatch);
     t->m2C_callback = callback;

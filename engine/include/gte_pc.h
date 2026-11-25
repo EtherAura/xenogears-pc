@@ -54,6 +54,12 @@ int gtePrecisionLookup(const void* addr, u32 word, GtePrecise* out);
 void gtePrecisionForget(const void* addr);
 void gteCopyPrecision(void* dst, const void* src);
 void gteCopySxy(void* dst, const void* src);
+/* The field's drawn view's fraction (xg-ugy.9): the part of the camera's translation its integer
+ * matrix could not hold, in GTE translation units. While set, every projection's shadow position
+ * adds it to the view coordinates (the integer results stay as they are); NULL clears it. The
+ * field sets it around the world it draws from the camera (not the compass, not the UI). */
+void gtePrecisionViewOffset(const double* offset);
+int gtePrecisionViewOffsetGet(double offset[3]);
 
 /* Command fields: fake_op << 20 | sf << 19 | mx << 17 | v << 15 | cv << 13 | lm << 10 | op. */
 #define GTE_RTPS 0x0180001

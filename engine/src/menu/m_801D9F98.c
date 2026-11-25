@@ -140,7 +140,7 @@ u8 processLoadSaveMenu(u8 arg0, u8 arg1) {
 void initItemMenu(void) {
     setupDraw428(2);
     j_setupMenuContext4E0(8, gMenuContext->m10E0_listMenuLabels, listMenuLabelConfig, gMenuContext->m33C_drawFlags->m38_drawListMenuLabels);
-    gMenuContext->m42C_itemMenu = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_42C), (s32)0x1198), 0);
+    gMenuContext->m42C_itemMenu = allocateHeap(PC_HEAP_OF(MenuContext_42C, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_42C), (s32)0x1198)), 0);
     bzero(gMenuContext->m42C_itemMenu, (s32)sizeof(struct MenuContext_42C));
     loadSharedMenuData2(0);
 }

@@ -889,7 +889,7 @@ static int newWorld(XgSprite* s, int palette) {
         return 0;
     }
     if (st->nativeEffects) {
-        TaskHeader* root = allocateTaskPair(2 * sizeof(TaskHeader), NULL, fxRootTask, fxRootTask, NULL);
+        TaskHeader* root = allocateTaskPair(PC_HEAP_OF(TaskHeader, 2 * sizeof(TaskHeader)), NULL, fxRootTask, fxRootTask, NULL);
         root->m4_data = root[1].m4_data = c;
         c->m6C_owner = root;
         if (!s->caster) c->m70_parent = tc;

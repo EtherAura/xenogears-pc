@@ -8,7 +8,10 @@
  * enemy slots 3-5, one for each member, member k in entity 3 + k:
  *   - the formation (versus.c pcVersusBattleSetup, the mirror's stage, a
  *     small set on foot): its first enemies in slots 3.., one per member,
- *     the rest empty, no battle event, no Gears (config flag 0x40);
+ *     the rest empty, no battle event, no Gears (config flag 0x40); or the
+ *     stage the players chose (pcVersusStage: system/arena.c's list), with
+ *     that stage's party slots and player 2's places from a real battle of
+ *     that stage, the formation's enemy set the same;
  *   - once the loader has built the battle (battleMain, after
  *     startBattleLoader: pcVersusBattleLoaded): each member's battle entity
  *     (its record with equipment, abilities, HP, EP, statuses: the whole
@@ -24,7 +27,8 @@
  *     0x2C/1, battlePartyFileMapping) read again into a VRAM column of its
  *     own (the party's sprites take x 0x100-0x13F, y 0x1C0-0x1FF, one
  *     64-column texture page for three: the copy takes the next page,
- *     x 0x180-0x1BF; free in the mirror's stage, measured) and the entity's
+ *     x 0x180-0x1BF; free in the mirror's stage and in each listed one,
+ *     measured: no stage's upload there) and the entity's
  *     own palette row (y 0x1C0 + entity, as every battle sprite), in the
  *     party's own colours (the user's choice: only the name label tells
  *     player 2's copy apart). They jump in as the party does.
@@ -111,6 +115,39 @@
  * work is in hwClockHold (no time on the stepped clock, nothing delivered),
  * so the game's frames and their vblanks are the same whichever is shown.
  *
+ * Party vs party (the same hooks; pcVersusPartyMatch, include/pc_arena.h):
+ * each side's party from its own party record (port/src/card/party.h, a
+ * memory-card save's members), player 1's applied to the game at the
+ * match's start (port/src/system/arena.c), player 2's built here from its
+ * record's bytes alone (p2Record: the only input, as online it will be what
+ * the other machine sent), into slots 3-5 as the copy is:
+ *   - its members as the loader makes the party: their records with HP and
+ *     EP full, no Gear (the number 0xFF) and their own command loadout, as
+ *     loadPartyMembers puts them into a battle entity; its attack rows read
+ *     from the disc by character id where the party's are
+ *     (pcVersusPartyFiles: loadPartyMembers' table, reloc[id + 5]); then the
+ *     game's own initPartyBattleStats run on them (accessory and bonus
+ *     stats, the cost changes in its rows, its per-character fixes) in slots
+ *     0-2 with its rows in gameState, and player 1's put back after
+ *     (partyBuild); its AP per turn its abilities' (m17), its menus its
+ *     loadout's (battleCommandsSetups, as batteLoaderPhase2_2), and the
+ *     battle's turn order made again with them in it (batteLoaderPhase2_1:
+ *     each member's first wait from its own speed);
+ *   - the gameState rows the party's code reads by character id (its record
+ *     in m26C_party, its abilities in m16C0_abilities, its name in m0_names)
+ *     are player 2's own for its turns (swapRows, with the items): so Fei
+ *     against Fei reads each side's own deathblows, ethers, Billy's guns;
+ *   - its items, rounds and ammo-count table its record's;
+ *   - its status bar its own members': its boxes where its member count puts
+ *     them (battlePartyLayoutType and the boxes' visual ids for player 2's
+ *     HUD: hudIn), built as the loader builds the party's
+ *     (batteLoaderPhase3_0_sub1), and its members' portraits. The portraits
+ *     are battle font glyphs (0x61 + box), one place in VRAM for both bars:
+ *     those of the side whose bar is shown are loaded there when the bar
+ *     shown changes (portraitsLoad, the loader's loadBattleCharacterPortraits
+ *     with that side's ids). Display only, as the bar: nothing the battle
+ *     reads.
+ *
  * Without a mirror match every hook returns at once.
  */
 #include "common.h"
@@ -121,6 +158,7 @@
 #include "main/memory.h"
 #include "main/sprite.h"
 #include "battle/battle.h"
+#include "battle_loader/battle_loader.h"
 #include "gte_pc.h"
 #include "pc_arena.h"
 #include "versus.h"
@@ -184,6 +222,15 @@ extern u8 printIntegerToStringBattleBuffer[9];
 /* Billy's ammo (the battle loader's list, from inventory 1) */
 extern u8 battleAmmoItemIds[];
 extern u8 battleAmmoItemCounts[];
+/* party vs party: the loader's party code (src/battle_loader/bld_801E4048.c,
+ * src/battle/b_800941A4.c, b_800769E8.c) run for player 2's */
+extern u8* battleCommandsSetups[19];
+extern u8 battlePartyMemberCount;
+extern sBattleEntity* battleGetSlotStatusSub_currentBattleEntity;
+extern GameStateGear* battleGetSlotStatusSub_currentBattleEntityGear;
+void initPartyBattleStats(void);
+void batteLoaderPhase2_1(void);
+void batteLoaderPhase3_0_sub1(void);
 
 #define MIRROR_SPRITE_X 0x180 /* the copy's VRAM column (the header) */
 #define MIRROR_SPRITE_Y 0x1C0
@@ -223,8 +270,38 @@ static sBattleVar0* hudSaved0;
 static sBattleVar1* hudSaved1;
 static s32 hudPass;  /* the bar's code is on player 2's HUD: HUD_SLOT reads slots 3-5 */
 static s32 viewSide; /* the side whose turn began last: 1 player 1's, 2 player 2's */
+/* party vs party (the header) */
+static s32 partyOn;
+static u8 p2Record[PC_PARTY_BYTES]; /* player 2's party record, as the match has it */
+static u8 p2Count;                  /* its members */
+static u8 p2Layout;                 /* its bar's box layout (battlePartyLayoutType: members - 1) */
+static GameStateCharacter p2Party[3]; /* its rows of gameState (swapRows), member k's */
+static GameStateSize20 p2Abilities[3];
+static u8 p2Names[3][sizeof(gameState.m0_names[0])];
+static sBattle800CDD40Sub p2Rows[3][STATS_ROWS]; /* its attack rows from the disc (pcVersusPartyFiles) */
+#define PORTRAIT_BYTES 0x460 /* a 24x24 8-bit TIM (loadBattleCharacterPortraits) */
+#define PORTRAITS 12         /* characters 0-10, and 11 (battleForceOnGear's) */
+static u8 portraitFile[PORTRAITS * PORTRAIT_BYTES]; /* the loader's portrait file (reloc[36]) */
+static s32 portraitsShown; /* whose portraits the glyphs have in VRAM: 1 player 1's, 2 player 2's */
+static u8 hudSavedIds[3];  /* hudIn: the party's boxes' visual ids, its layout */
+static u8 hudSavedLayout;
+/* partyBuild: what running the party's code for player 2 changes of player 1's */
+static struct {
+    sBattleEntity entities[3];
+    u8 rows[sizeof(battleEntities.m1058_partyBattleStats) + sizeof(battleEntities.m2228_mechaBattleStats)];
+    s32 exp[3][2];
+    u16 maxHpMp[3][2];
+    u8 stats[3][8];
+    s32 damage[3];
+    s32 gearDamage[3];
+    u8 characters[4];
+    u8 count;
+    sBattleEntity* entity;
+    GameStateGear* gear;
+} keep;
 
 int pcVersusMirror(void);
+static void swapBytes(u8* a, u8* b, s32 n);
 
 int pcVersusMirrorSlot(s32 entity) {
     return mirrorOn && entity >= 3 && entity < 6 && mirrorChar[entity - 3] != 0x7F;
@@ -285,7 +362,66 @@ int pcVersusMirrorForfeit(void) {
     return mirrorOn && forfeit;
 }
 
+/* Online party vs party (netplay.c's state hash, every vblank of a battle):
+ * player 2's side as this file keeps it outside its turns, which gameState
+ * and the battle entities do not hold: its record, rows, names, items,
+ * rounds and attack rows, the copies' ids and the turn's state. Game state
+ * only (the same on both machines): not the HUD, the portraits, the label or
+ * the sprites' pointers (display). FNV-1a, 32 bits. */
+static u32 hashBytes(u32 h, const void* p, s32 n) {
+    const u8* b = p;
+    s32 i;
+
+    for (i = 0; i < n; i++) {
+        h = (h ^ b[i]) * 16777619u;
+    }
+    return h;
+}
+
+u32 pcVersusPartyHash(void) {
+    u32 h = 2166136261u;
+
+    if (!mirrorOn || !partyOn) {
+        return 0;
+    }
+    h = hashBytes(h, p2Record, sizeof(p2Record));
+    h = hashBytes(h, p2Party, sizeof(p2Party));
+    h = hashBytes(h, p2Abilities, sizeof(p2Abilities));
+    h = hashBytes(h, p2Names, sizeof(p2Names));
+    h = hashBytes(h, p2Rows, sizeof(p2Rows));
+    h = hashBytes(h, p2Items, sizeof(p2Items));
+    h = hashBytes(h, p2AmmoItems, sizeof(p2AmmoItems));
+    h = hashBytes(h, p2Ammo, sizeof(p2Ammo));
+    h = hashBytes(h, mirrorChar, sizeof(mirrorChar));
+    h = hashBytes(h, &p2Count, sizeof(p2Count));
+    h = hashBytes(h, &p2Turn, sizeof(p2Turn));
+    h = hashBytes(h, &forfeit, sizeof(forfeit));
+    return h;
+}
+
 /* ---- the formation (pcVersusBattleSetup) ---- */
+
+/* Party vs party: player 2's members' gameState rows from its record, as
+ * player 1's are applied to the game (port/src/system/arena.c
+ * partyFromRecord): HP and EP full, the Gear number 0xFF (on foot), the
+ * command loadout the member's own. */
+static void partyRecordRows(void) {
+    s32 k;
+    u8 c;
+
+    for (k = 0; k < p2Count; k++) {
+        c = p2Record[PC_PARTY_MEMBERS + k];
+        __builtin_memcpy(&p2Party[k], p2Record + PC_PARTY_CHARACTERS + k * sizeof(GameStateCharacter),
+                         sizeof(p2Party[k]));
+        p2Party[k].m4C_HP = p2Party[k].m4E_MaxHP;
+        p2Party[k].m50_MP = p2Party[k].m52_MaxMP;
+        p2Party[k].mA0_gearNum = 0xFF;
+        p2Party[k].m56_battleCommandLoadout = c;
+        __builtin_memcpy(&p2Abilities[k], p2Record + PC_PARTY_ABILITIES + k * sizeof(GameStateSize20),
+                         sizeof(p2Abilities[k]));
+        __builtin_memcpy(p2Names[k], p2Record + PC_PARTY_NAMES + k * sizeof(p2Names[k]), sizeof(p2Names[k]));
+    }
+}
 
 void pcVersusMirrorSetup(void) {
     extern u8 battleConfigs[0x220];
@@ -303,6 +439,8 @@ void pcVersusMirrorSetup(void) {
     p2HudReady = 0;
     hudPass = 0;
     viewSide = 1; /* the party's bar until a copy's turn */
+    partyOn = 0;
+    portraitsShown = 1; /* the loader's: the party's */
     for (i = 0; i < 3; i++) {
         mirrorChar[i] = 0x7F;
         mirrorSprite[i] = NULL;
@@ -310,9 +448,26 @@ void pcVersusMirrorSetup(void) {
     if (!mirrorOn) {
         return;
     }
-    for (i = 0; i < 3; i++) {
-        if (bitmaskCharacterCheck(mask, gameState.m1D34_currentParty[i])) {
-            members++; /* as loadPartyMembers counts them */
+    if (pcVersusPartyMatch()) {
+        const u8* r = pcVersusPartyRecord(2);
+
+        if (r != NULL) {
+            __builtin_memcpy(p2Record, r, sizeof(p2Record));
+            p2Count = p2Record[PC_PARTY_COUNT];
+            p2Layout = p2Count - 1;
+            partyOn = 1;
+            partyRecordRows();
+        } else {
+            pcArenaLog("party vs party: no record for player 2: a copy of the party instead");
+        }
+    }
+    if (partyOn) {
+        members = p2Count; /* player 2's own party (its record) */
+    } else {
+        for (i = 0; i < 3; i++) {
+            if (bitmaskCharacterCheck(mask, gameState.m1D34_currentParty[i])) {
+                members++; /* as loadPartyMembers counts them */
+            }
         }
     }
     /* one of the set's first enemy for each member, where the formation has
@@ -322,7 +477,219 @@ void pcVersusMirrorSetup(void) {
         c[0x10 + i] = 0;
     }
     c[1] = (c[1] & ~0x20) | 0x40; /* no battle event; on foot (no Gears to call) */
-    pcArenaLog("mirror match: %d members, set %d, enemy %d in their places", members, c[0], enemy);
+    pcArenaLog("%s: %d members, set %d, enemy %d in their places", partyOn ? "party vs party" : "mirror match",
+               members, c[0], enemy);
+    /* the stage the players chose (include/pc_arena.h pcVersusStage): its
+     * number, the party's slots and player 2's places from a real battle of
+     * that stage; the formation's enemies (their sprites, sounds) the same */
+    {
+        u8 party[3];
+        u8 places[3];
+        s32 stage = pcVersusStage(party, places);
+
+        if (stage >= 0) {
+            c[2] = (u8)stage;
+            for (i = 0; i < 3; i++) {
+                c[4 + i] = party[i];
+                c[0x18 + i] = places[i];
+            }
+            pcArenaLog("%s: stage %d, the party in slots %d,%d,%d, player 2 in places %d,%d,%d",
+                       partyOn ? "party vs party" : "mirror match", stage, party[0], party[1], party[2], places[0],
+                       places[1], places[2]);
+        }
+    }
+}
+
+/* ---- party vs party: player 2's battlers (the header) ---- */
+
+/* loadPartyMembers, its character file's table relocated: player 2's attack
+ * rows (reloc[id + 5], 38 entries as the party's) and the portrait file
+ * (reloc[36]), read as the loader reads the party's. */
+void pcVersusPartyFiles(u8** reloc) {
+    u8* p;
+    u32 n;
+    s32 k;
+
+    if (!partyOn) {
+        return;
+    }
+    for (k = 0; k < p2Count; k++) {
+        p = mallocAndDecompress(reloc[p2Record[PC_PARTY_MEMBERS + k] + 5], 1);
+        __builtin_memcpy(p2Rows[k], p, sizeof(p2Rows[k]));
+        freeHeap(p);
+    }
+    n = *(u32*)reloc[36]; /* LZSS: the decompressed size first */
+    p = mallocAndDecompress(reloc[36], 1);
+    __builtin_memcpy(portraitFile, p, n < sizeof(portraitFile) ? n : sizeof(portraitFile));
+    freeHeap(p);
+}
+
+/* Player 2's rows of gameState in (its members' records, abilities and
+ * names, by character id), player 1's out; or back. */
+static void swapRows(void) {
+    s32 k;
+    u8 c;
+
+    for (k = 0; k < 3; k++) {
+        c = mirrorChar[k];
+        if (c == 0x7F) {
+            continue;
+        }
+        swapBytes((u8*)&gameState.m26C_party[c], (u8*)&p2Party[k], sizeof(p2Party[k]));
+        swapBytes((u8*)&gameState.m16C0_abilities[c], (u8*)&p2Abilities[k], sizeof(p2Abilities[k]));
+        swapBytes(gameState.m0_names[c], p2Names[k], sizeof(p2Names[k]));
+    }
+}
+
+/* One battler's numbers, for the log: what the game made of a member. */
+static void partyLog(s32 e) {
+    sBattleEntity* b = &battleEntities.m0_entities[e];
+    const u8* bytes = (const u8*)b;
+    const u8* rows = (const u8*)(&battleEntities.m1058_partyBattleStats[0][0] + e * STATS_ROWS);
+    u32 h = 2166136261u;
+    u32 r = 2166136261u;
+    u32 i;
+
+    /* the battler without its status timers (its record, Gear, modes, shares, flags) and its attack rows */
+    for (i = 0; i < 0x15C; i++) {
+        h = (h ^ bytes[i]) * 16777619u;
+    }
+    for (i = 0; i < sizeof(sBattle800CDD40Sub) * STATS_ROWS; i++) {
+        r = (r ^ rows[i]) * 16777619u;
+    }
+    pcArenaLog("party vs party: entity %d character %d: level %d, HP %d/%d, EP %d/%d, attack %d, defence %d, agility %d, "
+               "ether %d/%d, hit %d, evade %d, AP %d, battler fnv1a %08x, rows %08x",
+               e, BATTLE_CHARACTER(e), b->m0_base.m62_Level, b->m0_base.m4C_HP, b->m0_base.m4E_MaxHP, b->m0_base.m50_MP,
+               b->m0_base.m52_MaxMP, b->m0_base.m58_attack, b->m0_base.m59_defence, b->m0_base.m5A_agility,
+               b->m0_base.m5B_ether, b->m0_base.m5C_etherDefence, b->m0_base.m5E_hitPercentage,
+               b->m0_base.m5F_evadePercentage, apConfigArray[e].m4_currentAP, h, r);
+}
+
+/* Each side's Billy (character 4) and his guns' rounds left (the ammo-count
+ * table's entries for the ammo loaded), for the log: player 2's are its own. */
+static void partyLogBilly(void) {
+    GameStateCharacter* p1 = NULL;
+    GameStateCharacter* p2 = NULL;
+    s32 k;
+
+    for (k = 0; k < 3; k++) {
+        if (battleCharacters[k] == 4) {
+            p1 = &gameState.m26C_party[4];
+        }
+        if (mirrorChar[k] == 4) {
+            p2 = &p2Party[k];
+        }
+    }
+    if (p1 != NULL || p2 != NULL) {
+        pcArenaLog("party vs party: Billy's rounds: P1 %d %d, P2 %d %d",
+                   p1 != NULL ? gameStateAmmoByWeaponItem[p1->m6F_equipment[0]] : -1,
+                   p1 != NULL ? gameStateAmmoByWeaponItem[p1->m6F_equipment[3]] : -1,
+                   p2 != NULL ? p2Ammo[p2->m6F_equipment[0] - 0x32] : -1,
+                   p2 != NULL ? p2Ammo[p2->m6F_equipment[3] - 0x32] : -1);
+    }
+}
+
+/* Player 2's members made by the party's own code (the header), into slots
+ * 3-5 with their rows (m1058_partyBattleStats[e], past its 3 rows: the
+ * mirror's place), their AP and their menus. */
+static void partyBuild(void) {
+    sBattleVar2Sub* menu;
+    sBattleEntity* b;
+    u8 setups;
+    s32 k;
+    s32 e;
+    s32 j;
+    u8 c;
+
+    /* what running the party's code changes of player 1's */
+    __builtin_memcpy(keep.entities, battleEntities.m0_entities, sizeof(keep.entities));
+    __builtin_memcpy(keep.rows, (u8*)battleEntities.m1058_partyBattleStats, sizeof(keep.rows)); /* and m2228 after it */
+    __builtin_memcpy(keep.exp, battleEntities.mFD0_savedM3C, sizeof(keep.exp));
+    __builtin_memcpy(keep.maxHpMp, battleEntities.m1000_savedMaxHpMp, sizeof(keep.maxHpMp));
+    __builtin_memcpy(keep.stats, battleEntities.m1028_savedStats, sizeof(keep.stats));
+    __builtin_memcpy(keep.damage, battleEntities.m5F54_damageTaken, sizeof(keep.damage));
+    __builtin_memcpy(keep.gearDamage, battleEntities.m5F60_gearDamageTaken, sizeof(keep.gearDamage));
+    __builtin_memcpy(keep.characters, battleCharacters, sizeof(keep.characters));
+    keep.count = battlePartyMemberCount;
+    keep.entity = battleGetSlotStatusSub_currentBattleEntity;
+    keep.gear = battleGetSlotStatusSub_currentBattleEntityGear;
+    /* player 2's members in slots 0-2, as loadPartyMembers makes the party's
+     * (on foot, the Gear number 0xFF reads Gear 0), its rows in gameState */
+    swapRows();
+    for (k = 0; k < 3; k++) {
+        c = mirrorChar[k];
+        battleCharacters[k] = c;
+        if (c == 0x7F) {
+            continue;
+        }
+        __builtin_memset(&battleEntities.m0_entities[k], 0, sizeof(sBattleEntity));
+        __builtin_memcpy(&battleEntities.m0_entities[k].m0_base, &gameState.m26C_party[c], sizeof(GameStateCharacter));
+        __builtin_memcpy(&battleEntities.m0_entities[k].mA4_gear, &gameState.m978_gears[0], sizeof(GameStateGear));
+        __builtin_memcpy(battleEntities.m1058_partyBattleStats[k], p2Rows[k], sizeof(p2Rows[k]));
+    }
+    initPartyBattleStats();
+    for (k = 0; k < 3; k++) {
+        c = mirrorChar[k];
+        if (c == 0x7F) {
+            continue;
+        }
+        e = 3 + k;
+        b = &battleEntities.m0_entities[e];
+        __builtin_memcpy(b, &battleEntities.m0_entities[k], sizeof(sBattleEntity));
+        __builtin_memcpy(p2Rows[k], battleEntities.m1058_partyBattleStats[k], sizeof(p2Rows[k]));
+        b->m15A_flags &= 0x7F; /* on foot (batteLoaderPhase1_3) */
+        /* battleStartPartyFixups' fix of character 8's abilities, on its own row */
+        if (c == 8 && (gameState.m16C0_abilities[8].m1A_unlockedGearAbilities & 0x2000)) {
+            gameState.m16C0_abilities[8].m0_unlockedAbilitiesBitField[1] |= 0x800;
+        }
+        /* its AP per turn (batteLoaderPhase2_2) and levels (batteLoaderPhase1_3) */
+        __builtin_memset(&apConfigArray[e], 0, sizeof(apConfigArray[e]));
+        apConfigArray[e].m4_currentAP = gameState.m16C0_abilities[c].m17_energyPerTurn;
+        apConfigArray[e].m5_savedLevels[0] = b->m0_base.m62_Level;
+        apConfigArray[e].m5_savedLevels[1] = b->m0_base.m63_Level2;
+        /* its ring, as batteLoaderPhase2_2 sets up the party's: its loadout's
+         * commands, no Gear to call (config flag 0x40) */
+        menu = &battleVar2->m0_entityMenus[e];
+        __builtin_memset(menu, 0, sizeof(*menu));
+        for (j = 0; j < 8; j++) {
+            menu->m0_circleMenuBattleCommandsMapping[j] = battleCommandsSetups[b->m0_base.m56_battleCommandLoadout][j];
+        }
+        setups = c != 7 ? 16 : 18;
+        for (j = 0; j < 4; j++) {
+            menu->m8_extraCommandsMapping[j] = battleCommandsSetups[setups][j];
+            menu->mC_extraCommandsMapping2[j] = battleCommandsSetups[17][j];
+        }
+        for (j = 0; j < 16; j++) {
+            menu->m1C_isCommandEnabled[j] = b->m0_base.m7A_commandEnabledBF & party1C_InitialValues[j];
+        }
+        menu->m1C_isCommandEnabled[7] = party1C_InitialValues[7];
+        b->m0_base.m7A_commandEnabledBF |= party1C_InitialValues[7];
+        if (currentBattleConfig.m1_flags & 0x80) {
+            menu->m1C_isCommandEnabled[8] = party1C_InitialValues[8];
+            b->m0_base.m7A_commandEnabledBF |= party1C_InitialValues[8];
+        }
+    }
+    swapRows();
+    /* player 1's back */
+    __builtin_memcpy(battleEntities.m0_entities, keep.entities, sizeof(keep.entities));
+    __builtin_memcpy((u8*)battleEntities.m1058_partyBattleStats, keep.rows, sizeof(keep.rows));
+    __builtin_memcpy(battleEntities.mFD0_savedM3C, keep.exp, sizeof(keep.exp));
+    __builtin_memcpy(battleEntities.m1000_savedMaxHpMp, keep.maxHpMp, sizeof(keep.maxHpMp));
+    __builtin_memcpy(battleEntities.m1028_savedStats, keep.stats, sizeof(keep.stats));
+    __builtin_memcpy(battleEntities.m5F54_damageTaken, keep.damage, sizeof(keep.damage));
+    __builtin_memcpy(battleEntities.m5F60_gearDamageTaken, keep.gearDamage, sizeof(keep.gearDamage));
+    __builtin_memcpy(battleCharacters, keep.characters, sizeof(keep.characters));
+    battlePartyMemberCount = keep.count;
+    battleGetSlotStatusSub_currentBattleEntity = keep.entity;
+    battleGetSlotStatusSub_currentBattleEntityGear = keep.gear;
+    /* its rows where the party's code reads them for its slots (the header:
+     * past the party's 3, over its Gear rows, which nothing reads on foot) */
+    for (k = 0; k < 3; k++) {
+        if (mirrorChar[k] != 0x7F) {
+            __builtin_memcpy(&battleEntities.m1058_partyBattleStats[0][0] + (3 + k) * STATS_ROWS, p2Rows[k],
+                             sizeof(p2Rows[k]));
+        }
+    }
 }
 
 /* ---- the copy (battleMain, after the loader) ---- */
@@ -345,7 +712,7 @@ static void buildNames(void) {
             mirrorStrings[at++] = 0;
             continue;
         }
-        pcVersusGameText(name, gameState.m0_names[c], VERSUS_LABEL - 7);
+        pcVersusGameText(name, partyOn && k < NAME_PARTY ? p2Names[k - 1] : gameState.m0_names[c], VERSUS_LABEL - 7);
         for (n = 0; name[n] != 0; n++) {
             mirrorStrings[at++] = name[n];
         }
@@ -364,15 +731,29 @@ void pcVersusBattleLoaded(void) {
     if (!mirrorOn) {
         return;
     }
+    if (partyOn) {
+        /* player 2's own members (its record), built by the party's code */
+        for (k = 0; k < 3; k++) {
+            mirrorChar[k] = k < p2Count && isBattleSlotFilled.m0_isBattleSlotFilled[3 + k] ? p2Record[PC_PARTY_MEMBERS + k]
+                                                                                           : 0x7F;
+        }
+        partyBuild();
+    }
     for (k = 0; k < 3; k++) {
         e = 3 + k;
-        mirrorChar[k] = 0x7F;
-        if (battleCharacters[k] == 0x7F || !isBattleSlotFilled.m0_isBattleSlotFilled[e]) {
-            continue;
+        if (partyOn) {
+            if (mirrorChar[k] == 0x7F) {
+                continue;
+            }
+        } else {
+            mirrorChar[k] = 0x7F;
+            if (battleCharacters[k] == 0x7F || !isBattleSlotFilled.m0_isBattleSlotFilled[e]) {
+                continue;
+            }
+            mirrorChar[k] = battleCharacters[k];
+            /* the member as the loader made it, over the enemy */
+            __builtin_memcpy(&battleEntities.m0_entities[e], &battleEntities.m0_entities[k], sizeof(sBattleEntity));
         }
-        mirrorChar[k] = battleCharacters[k];
-        /* the member as the loader made it, over the enemy */
-        __builtin_memcpy(&battleEntities.m0_entities[e], &battleEntities.m0_entities[k], sizeof(sBattleEntity));
         battleBssBlock.m4_visualEntities[e].m2_characterId = mirrorChar[k];
         battleBssBlock.m4_visualEntities[e].m3_hidden = 0;
         battleBssBlock.m4_visualEntities[e].m4_isGear = 0;
@@ -383,18 +764,22 @@ void pcVersusBattleLoaded(void) {
         monstersScriptsEntities[k].m0_scripts[3] = emptyScript;
         unknownMonsterStatus0[k].m0_hasWhenAttackedScript = 0;
         unknownMonsterStatus0[k].m1_hasEndOfTurnScript = 0;
-        apConfigArray[e] = apConfigArray[k];
-        apConfigArray[e].m0_storedAP = 0;
-        /* the party's table, read as m1058_partyBattleStats[e] (the header) */
-        __builtin_memcpy(rows + e * STATS_ROWS, rows + k * STATS_ROWS, sizeof(sBattle800CDD40Sub) * STATS_ROWS);
-        /* the same start to its turns as the member's */
-        isBattleSlotFilled.m24_battleSlotStatusVar0[e] = isBattleSlotFilled.m24_battleSlotStatusVar0[k];
-        isBattleSlotFilled.m3A_numTicksBeforeReady[e] = isBattleSlotFilled.m3A_numTicksBeforeReady[k];
+        if (!partyOn) {
+            apConfigArray[e] = apConfigArray[k];
+            apConfigArray[e].m0_storedAP = 0;
+            /* the party's table, read as m1058_partyBattleStats[e] (the header) */
+            __builtin_memcpy(rows + e * STATS_ROWS, rows + k * STATS_ROWS, sizeof(sBattle800CDD40Sub) * STATS_ROWS);
+            /* the same start to its turns as the member's */
+            isBattleSlotFilled.m24_battleSlotStatusVar0[e] = isBattleSlotFilled.m24_battleSlotStatusVar0[k];
+            isBattleSlotFilled.m3A_numTicksBeforeReady[e] = isBattleSlotFilled.m3A_numTicksBeforeReady[k];
+        }
         /* its command mask as the battle's start keeps the member's: put back
          * when a confusion ends (battleStartPartyFixups saves the party's, after this) */
-        partySavedCommandEnabledBF[e] = battleEntities.m0_entities[k].m0_base.m7A_commandEnabledBF;
-        /* the member's ring (batteLoaderPhase2_2 sets up the party's) */
-        battleVar2->m0_entityMenus[e] = battleVar2->m0_entityMenus[k];
+        partySavedCommandEnabledBF[e] = battleEntities.m0_entities[e].m0_base.m7A_commandEnabledBF;
+        if (!partyOn) {
+            /* the member's ring (batteLoaderPhase2_2 sets up the party's; party vs party: partyBuild) */
+            battleVar2->m0_entityMenus[e] = battleVar2->m0_entityMenus[k];
+        }
         battleVar2->m0_entityMenus[e].m3C_currentTarget = getEntityToFace(e);
         battleBssBlock.m4_visualEntities[e].m6_direction =
             getDirectionBetween2BattleEntities(e, battleVar2->m0_entityMenus[e].m3C_currentTarget);
@@ -404,6 +789,25 @@ void pcVersusBattleLoaded(void) {
     }
     buildNames();
     currentBattleSpecificStrings = mirrorStrings;
+    if (partyOn) {
+        /* player 2's items, rounds and their table: its record's (Billy's guns
+         * are in its rows: swapRows) */
+        __builtin_memcpy(p2Items[0], p2Record + PC_PARTY_ITEM_COUNTS, sizeof(p2Items[0]));
+        __builtin_memcpy(p2Items[1], p2Record + PC_PARTY_ITEM_IDS, sizeof(p2Items[1]));
+        __builtin_memcpy(p2AmmoItems[0], p2Record + PC_PARTY_AMMO_IDS, sizeof(p2AmmoItems[0]));
+        __builtin_memcpy(p2AmmoItems[1], p2Record + PC_PARTY_AMMO_COUNTS, sizeof(p2AmmoItems[1]));
+        __builtin_memcpy(p2Ammo, p2Record + PC_PARTY_AMMO_TABLE, sizeof(p2Ammo));
+        /* the battle's turn order made again with player 2's members in it:
+         * each one's first wait from its own speed (the party's formula:
+         * PARTY_SPEED), as the loader makes every side's */
+        batteLoaderPhase2_1();
+        for (k = 0; k < 6; k++) {
+            if (k < 3 ? battleCharacters[k] != 0x7F : mirrorChar[k - 3] != 0x7F) {
+                partyLog(k);
+            }
+        }
+        return;
+    }
     /* player 2's items and Billy's guns: player 1's as the battle begins */
     __builtin_memcpy(p2Items[0], battleEffectBF.m12_counts, sizeof(p2Items[0]));
     __builtin_memcpy(p2Items[1], battleEffectBF.m42_ids, sizeof(p2Items[1]));
@@ -426,13 +830,17 @@ static void swapBytes(u8* a, u8* b, s32 n) {
 }
 
 /* Player 2's inventory and Billy's guns in, player 1's out, or back (the
- * header). */
+ * header); party vs party, its gameState rows too. */
 static void swapItems(void) {
     swapBytes(battleEffectBF.m12_counts, p2Items[0], sizeof(p2Items[0]));
     swapBytes(battleEffectBF.m42_ids, p2Items[1], sizeof(p2Items[1]));
     swapBytes(battleAmmoItemIds, p2AmmoItems[0], sizeof(p2AmmoItems[0]));
     swapBytes(battleAmmoItemCounts, p2AmmoItems[1], sizeof(p2AmmoItems[1]));
     swapBytes(gameState.m22B8_ammoCounts, p2Ammo, sizeof(p2Ammo));
+    if (partyOn) {
+        swapRows(); /* its own rows, Billy's guns with them */
+        return;
+    }
     swapBytes((u8*)&gameState.m26C_party[4], p2Gun, sizeof(p2Gun));
     swapBytes(gameState.m26C_party[4].m6F_equipment, p2GunEquipment, sizeof(p2GunEquipment));
 }
@@ -503,24 +911,64 @@ void pcVersusMirrorEnd(void) {
     p2Turn = 0;
     labelOn = 0;
     p2HudReady = 0;
+    partyOn = 0;
 }
 
 /* ---- what each player sees: player 2's status bar (the header) ---- */
 
 /* Player 2's HUD in place of the party's (the bar's code then builds and
- * draws player 2's), and back. */
+ * draws player 2's), and back. Party vs party: its boxes too, which the
+ * bar's code takes from the party's visual entities (a box for each slot
+ * 0-2 with a character) and battlePartyLayoutType (where they are). */
 static void hudIn(void) {
+    s32 k;
+
     hudSaved0 = battleVar0;
     hudSaved1 = battleVar1;
     battleVar0 = &p2Hud0;
     battleVar1 = &p2Hud1;
+    if (partyOn) {
+        for (k = 0; k < 3; k++) {
+            hudSavedIds[k] = battleBssBlock.m4_visualEntities[k].m2_characterId;
+            battleBssBlock.m4_visualEntities[k].m2_characterId = mirrorChar[k];
+        }
+        hudSavedLayout = battlePartyLayoutType;
+        battlePartyLayoutType = p2Layout;
+    }
     hudPass = 1;
 }
 
 static void hudOut(void) {
+    s32 k;
+
     battleVar0 = hudSaved0;
     battleVar1 = hudSaved1;
+    if (partyOn) {
+        for (k = 0; k < 3; k++) {
+            battleBssBlock.m4_visualEntities[k].m2_characterId = hudSavedIds[k];
+        }
+        battlePartyLayoutType = hudSavedLayout;
+    }
     hudPass = 0;
+}
+
+/* Party vs party: the portraits of side `side`'s members into the battle
+ * font's portrait glyphs (the header), as the loader loads the party's. */
+static void portraitsLoad(s32 side) {
+    u8 ids[3];
+    s32 k;
+
+    for (k = 0; k < 3; k++) {
+        ids[k] = battleCharacters[k];
+        if (side == 2) {
+            battleCharacters[k] = mirrorChar[k];
+        }
+    }
+    loadBattleCharacterPortraits(portraitFile, 0x61);
+    for (k = 0; k < 3; k++) {
+        battleCharacters[k] = ids[k];
+    }
+    portraitsShown = side;
 }
 
 /* Player 2's HUD as the party's is set up (the battle loader's frames,
@@ -548,6 +996,18 @@ static void hudReady(void) {
     p2Hud1.mAF_drawApCounter = 0;
     p2Hud0.m6415_drawHighlight = 0;
     p2Hud0.m6416_highlightFadingOut = 0;
+    if (partyOn) {
+        /* its own boxes, as the loader makes the party's: on foot
+         * (batteLoaderPhase1_3's bar mode), their frames, portraits and
+         * labels where its layout puts them (batteLoaderPhase3_0_sub1) */
+        for (k = 0; k < 3; k++) {
+            p2Hud1.m78_apBarFrameLengths[k] = 0;
+            p2Hud0.m835C_apFuelLabels[k].m1E1_barMode = mirrorChar[k] != 0x7F;
+        }
+        hudIn();
+        batteLoaderPhase3_0_sub1();
+        hudOut();
+    }
     p2HudReady = 1;
 }
 
@@ -606,8 +1066,13 @@ int pcVersusViewBar(void) {
     hudReady();
     scratchSave(&scratch);
     /* what the battle changes in the party's (a Gear's bar mode; the ring
-     * up, which shows the turn gauge's fill) */
-    __builtin_memcpy(p2Hud0.m835C_apFuelLabels, battleVar0->m835C_apFuelLabels, sizeof(p2Hud0.m835C_apFuelLabels));
+     * up, which shows the turn gauge's fill); party vs party: its labels are
+     * its own boxes' (hudReady), on foot */
+    if (!partyOn) {
+        __builtin_memcpy(p2Hud0.m835C_apFuelLabels, battleVar0->m835C_apFuelLabels, sizeof(p2Hud0.m835C_apFuelLabels));
+    } else if (portraitsShown != (shows2 ? 2 : 1)) {
+        portraitsLoad(shows2 ? 2 : 1); /* the shown side's portraits (the header) */
+    }
     p2Hud1.mCB_drawCommandRing = battleVar1->mCB_drawCommandRing;
     p2Hud1.mAF_drawApCounter = 0; /* the AP counter is the turn's (the party's HUD's), below */
     hudIn();
@@ -925,15 +1390,19 @@ int pcVersusMirrorTurn(u8 entity) {
      * the party's (its pulse: pcVersusViewTick) */
     hudReady();
     setXYWH(&p2Hud0.m63C8_portraitHighlight[D_800CCB04.m30_battleOddOrEven],
-            k * 0x60 + 0x10 + partyMemberSpritesOffset[battlePartyLayoutType * 3 + k], 8, 0x18, 0x18);
+            k * 0x60 + 0x10 + partyMemberSpritesOffset[(partyOn ? p2Layout : battlePartyLayoutType) * 3 + k], 8, 0x18,
+            0x18);
     p2Hud0.m6414_highlightOddOrEven = D_800CCB04.m30_battleOddOrEven;
     p2Hud0.m6415_drawHighlight = 1;
     if ((self->m0_base.m7C_statusFlags[0] & 0x2080) || (self->m0_base.m7C_statusFlags[2] & 0x1000)) {
         p2Hud0.m6415_drawHighlight = 0;
         return 1; /* asleep, stopped...: no turn (as the party's) */
     }
-    /* its attacks, deathblows and ethers where an enemy's attack resolves */
-    __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats, battleEntities.m1058_partyBattleStats[k],
+    /* its attacks, deathblows and ethers where an enemy's attack resolves
+     * (party vs party: its own rows, m1058_partyBattleStats[entity]) */
+    __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats,
+                     partyOn ? &battleEntities.m1058_partyBattleStats[0][0] + entity * STATS_ROWS
+                             : battleEntities.m1058_partyBattleStats[k],
                      sizeof(battleEntities.m1058_partyBattleStats[k]));
     pcVersusGameText(label, getDialogParamPointer(currentBattleSpecificStrings, battleMonsterMapping[entity]),
                      VERSUS_LABEL - 1);
@@ -953,6 +1422,9 @@ int pcVersusMirrorTurn(u8 entity) {
                battleEffectBF.m42_ids[0], battleEffectBF.m12_counts[0], battleEffectBF.m42_ids[1],
                battleEffectBF.m12_counts[1], battleEffectBF.m42_ids[2], battleEffectBF.m12_counts[2], p2Items[1][0],
                p2Items[0][0], p2Items[1][1], p2Items[0][1], p2Items[1][2], p2Items[0][2]);
+    if (partyOn) {
+        partyLogBilly();
+    }
     labelOn = 0;
     pcVersusHideLabel();
     previousEntityTurn.m0_lastEntityTurn = entity;

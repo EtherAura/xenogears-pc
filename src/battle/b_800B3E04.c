@@ -989,7 +989,7 @@ void battleSpriteOpcode_FB_taskUpdate(TaskHeader* task) {
 
 BattleSpriteDistanceTask* battleSpriteOpcode_FB(SpriteActorCore* actor, s32 minDistance, u8* bytecode);
 BattleSpriteDistanceTask* battleSpriteOpcode_FB(SpriteActorCore* actor, s32 minDistance, u8* bytecode) {
-    BattleSpriteDistanceTask* p = (BattleSpriteDistanceTask*)allocateUpdateTask(actor->m6C_owner, (s32)sizeof(BattleSpriteDistanceTask) - (s32)sizeof(TaskHeader));
+    BattleSpriteDistanceTask* p = (BattleSpriteDistanceTask*)allocateUpdateTask(actor->m6C_owner, PC_HEAP_OF(BattleSpriteDistanceTask, (s32)sizeof(BattleSpriteDistanceTask) - (s32)sizeof(TaskHeader)));
 
     setTaskUpdateFunction(&p->m0_task, battleSpriteOpcode_FB_taskUpdate);
     p->m1C_actor = actor;
@@ -1049,7 +1049,7 @@ void battleSpriteEffect_3_update(BattleSpriteAttachTask* p) {
 }
 
 BattleSpriteAttachTask* battleSpriteEffect_3(SpriteActorCore* actor, u8* args) {
-    BattleSpriteAttachTask* p = (BattleSpriteAttachTask*)allocateUpdateTask(actor->m6C_owner, (s32)sizeof(BattleSpriteAttachTask) - (s32)sizeof(TaskHeader));
+    BattleSpriteAttachTask* p = (BattleSpriteAttachTask*)allocateUpdateTask(actor->m6C_owner, PC_HEAP_OF(BattleSpriteAttachTask, (s32)sizeof(BattleSpriteAttachTask) - (s32)sizeof(TaskHeader)));
 
     setTaskUpdateFunction(&p->m0_task, (void (*)(TaskHeader*))battleSpriteEffect_3_update);
     p->m1C_actor = actor;

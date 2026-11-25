@@ -1055,8 +1055,8 @@ void initBattlingDust(void) {
     BattlingDust* a;
 
     battlingDustParticles = allocateHeap(0x9F6, 0);
-    battlingDustTiles[0] = allocateHeap(255 * (s32)sizeof(TILE_1), 0);
-    battlingDustTiles[1] = allocateHeap(255 * (s32)sizeof(TILE_1), 0);
+    battlingDustTiles[0] = allocateHeap(PC_HEAP_OF(TILE_1, 255 * (s32)sizeof(TILE_1)), 0);
+    battlingDustTiles[1] = allocateHeap(PC_HEAP_OF(TILE_1, 255 * (s32)sizeof(TILE_1)), 0);
     a = battlingDustParticles;
     for (i = 0; i < 0xFF; a++, i++) {
         setlen(&battlingDustTiles[0][i], 2);
@@ -1163,8 +1163,8 @@ void initBattlingSplash(void) {
     BattlingDebris* c;
 
     battlingSplashParticles = allocateHeap(0x1950, 0);
-    p = battlingSplashTiles[0] = allocateHeap(540 * (s32)sizeof(TILE), 0);
-    battlingSplashTiles[1] = allocateHeap(540 * (s32)sizeof(TILE), 0);
+    p = battlingSplashTiles[0] = allocateHeap(PC_HEAP_OF(TILE, 540 * (s32)sizeof(TILE)), 0);
+    battlingSplashTiles[1] = allocateHeap(PC_HEAP_OF(TILE, 540 * (s32)sizeof(TILE)), 0);
     c = battlingSplashParticles;
     for (i = 0; i < 0x21C; i++, c++, p++) {
         setlen(p, 3);

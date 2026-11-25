@@ -44,6 +44,46 @@ _Static_assert(offsetof(XgPartyRecord, m10_characters) == 0x10 && offsetof(XgPar
 #define LEVEL_MAX 99
 #define AP_MAX 7            /* setAPMarksPositions draws max AP - 1 marks into 6 lines (battle.h m908_apMarks) */
 
+/* The received-record audit (xg-htn.35.143,): every field of a
+ * member's record (GameStateCharacter) and ability row (GameStateSize20)
+ * that the battle on foot reads, src/battle, battle_loader, battle_result,
+ * the effect overlays and port/src/game/battle, as the copy in
+ * battleEntities[i].m0_base too.
+ *   Table indexes, loop bounds, divisors, bounded here:
+ *     m56 loadout: battleCommandsSetups[19], m26C_party[11], m16C0_abilities[11]
+ *       (b_800941A4.c:1358-1403, bld_801E4048.c:401): == the id (and forced so);
+ *     mA0 Gear number: m978_gears[20], reloc[gear + 17] (bld_801E4048.c:491):
+ *       < 20 or 0xFF (forced 0xFF on foot);
+ *     Billy's m6F_equipment[0], [3], the rounds loaded: gameState + 0x2286 + id,
+ *       read and decremented (spendBillyAmmo, b_800941A4.c:2474-2499), the
+ *       ammo shown (b_8008B478.c:2229), the weapon names' bank (99 entries on
+ *       every disc): 0x32-0x49;
+ *     m17 AP per turn: apTurnDelayTicks[max][left] (b_80080AE4.c:660), the AP
+ *       marks m908_apMarks[12] (b_80079674.c:2133), a combo's m2CC_comboInput[7]
+ *       (b_80085350.c:581): 1-7, exactly (0 draws 255 lines, 8 writes past both);
+ *     m4E max HP: HP / (max / 10) (b_800941A4.c:1033, R3000_DIV, no trap): >= 1;
+ *     m44, m48 experience to the next level: battle_result's level-up loop
+ *       (br_801DE5C4.c:1505-1527: <= 0 runs it on past level 99, reading
+ *       mBB0_expTable out of range); a versus battle never gets there (its
+ *       end, 0x21 or 0x40, skips the rewards): >= 1 all the same (every real
+ *       save has 5 or more);
+ *     m62, m63 levels: the same table at battle_result: 1-99.
+ *   Bits, switches, compares, sums only (any value is safe): the weapons'
+ *   status mask, chance and type (m0-m3, the type only in a switch), their
+ *   power and ids (m4_weaponSlots: sums, equality with an ammo id), every
+ *   bonus (m28-m31; the HP/EP bonus by a constant divisor, then capped), the
+ *   flags m32-m38, the kill count, experience, HP and EP (forced full), the
+ *   stats m58-m67 (agility capped at 16), m55/mA1 learning (added to the
+ *   progress of a deathblow the attack picks, row < 7), m7A command mask
+ *   (masked), the status words m7C/m84 (bit tests, fixed slots), m90
+ *   deathblow progress (indexed by the attack, not by itself); the ability
+ *   bits m0[0..3] (gates on rows that fixed tables pick: i + 7, i + 22,
+ *   cursor <= 15), m1A Gear ability bits. Not read: m24, m57, m68, m6A (written
+ *   for one character), m6F of the others, m74 accessories, m77-m79, mA2,
+ *   the abilities' m0[4..7], m10, m18, m1C. The names: printed (the glyph
+ *   check below). Field 22 before the battle reads HP, EP, the Gear number
+ *   and the weights only, by party and script ids. */
+
 /* The printer's first two-byte code (the font's header +4, dialogFontVar0:
  * measured on both releases' discs): a byte from it on starts a pair. */
 static int pairLead(int region) {
@@ -51,6 +91,7 @@ static int pairLead(int region) {
 }
 
 static unsigned rd16(const uint8_t* p) { return p[0] | p[1] << 8; }
+static uint32_t rd32(const uint8_t* p) { return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24; }
 
 static int fail(XgPartyWhy* why, int reason, int member, const char* fmt, ...) __attribute__((format(printf, 4, 5)));
 static int fail(XgPartyWhy* why, int reason, int member, const char* fmt, ...) {
@@ -200,6 +241,12 @@ int xgPartyCheck(const XgPartyRecord* r, const uint8_t* codes, XgPartyWhy* why) 
         unsigned maxEp = rd16(c + offsetof(GameStateCharacter, m52_MaxMP));
         if (maxEp > EP_MAX || ep > maxEp) {
             return fail(why, XG_PARTY_BAD_EP, k, "member %d (id %d): EP %u of %u", k + 1, id, ep, maxEp);
+        }
+        int32_t toNext = (int32_t)rd32(c + offsetof(GameStateCharacter, m44_expToNextLevel));
+        int32_t toNext2 = (int32_t)rd32(c + offsetof(GameStateCharacter, m48_expToNextLevel2));
+        if (toNext < 1 || toNext2 < 1) {
+            return fail(why, XG_PARTY_BAD_EXP, k, "member %d (id %d): experience to the next levels %ld and %ld", k + 1,
+                        id, (long)toNext, (long)toNext2);
         }
         int level = c[offsetof(GameStateCharacter, m62_Level)];
         int level2 = c[offsetof(GameStateCharacter, m63_Level2)];

@@ -43,6 +43,7 @@ Linux と Windows の両方で、ディスク 1 とディスク 2 のどちら�
 - **Linux x86-64 と Windows x64。** [ダウンロード](https://github.com/EtherAura/xenogears-pc/releases/latest)を公開しています。
 - **FreeBSD 15 amd64。** 北米版と日本版のディスクに対応し、オリジナルエンジンと強化エンジンを含む[ネイティブパッケージ](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.20-freebsd)があります。ソフトウェア Vulkan を使う VM 上の FreeBSD 15.1 amd64 で、インストールと起動を確認しました。
 - **Android 13 以降、arm64 と x86-64。** すべての[リリース](https://github.com/EtherAura/xenogears-pc/releases/latest)に、それぞれ向けの署名済み APK があります。どちらを使うかとインストール方法は [Android のページ](docs/android-ja.md)にあります。Pixel 10 Pro XL（arm64）と Android 17 x86-64 のエミュレーターでテストしました。
+- **アップデート。** 初回に尋ねられたときに許可した場合に限り、リリースは新しいリリースを確認し、アプリが自分のファイルを管理している形態では自分でインストールします。`.deb` には APT リポジトリがあります。[アップデート](docs/building-ja.md#アップデート)を参照してください。
 
 [開発への参加](CONTRIBUTING.ja.md) · [セキュリティ](SECURITY.ja.md) · [行動規範](CODE_OF_CONDUCT.ja.md) · [ディスカッション](https://github.com/EtherAura/xenogears-pc/discussions)
 

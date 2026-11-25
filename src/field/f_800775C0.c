@@ -6,6 +6,7 @@
  * loadMechaOverlay_finalize and fieldEntryPoint; gcc-2.7.2-cdk fails 9 of 13. */
 #include "common.h"
 #include "pc_retail_heap.h"
+#include "pc_speedup.h"
 #include "psyq.h"
 #include "main/memory.h"
 #include "main/filesystem.h"
@@ -358,6 +359,7 @@ s32 isFieldBattlePrevented(void) {
 }
 
 #ifdef PLATFORM_PC
+s32 pcFieldBattleWaitsForLanding(void); /* port/src/game/field/battlejump.c */
 void pcFieldWideExit(void);
 int portStartMusic(int music); /* port/src/system/options.c */
 void pcGauntletFieldTick(void); /* port/src/game/field/gauntlet_field.c */
@@ -500,7 +502,12 @@ void fieldEntryPoint(void) {
         fieldPerFrameReset();
         updateAndRenderField();
         renderFullScreenTransitionEffect();
+#ifdef PLATFORM_PC
+        if (g_frameOddOrEven == 1 && playMusicAuthorized == 0 && isFieldTransitionPermittedByLoading() == 0 && isFieldBattlePrevented() == 0 &&
+            !pcFieldBattleWaitsForLanding()) {
+#else
         if (g_frameOddOrEven == 1 && playMusicAuthorized == 0 && isFieldTransitionPermittedByLoading() == 0 && isFieldBattlePrevented() == 0) {
+#endif
             if (currentFieldId1 != -1) {
                 unflagAllocation(rawFieldBundle);
                 freeHeap(rawFieldBundle);
@@ -558,6 +565,9 @@ void fieldEntryPoint(void) {
             saveStateToKernel();
             waitReadCompletion(0);
             transitionFields();
+#ifdef PLATFORM_PC
+            pcTransitionRoom(0); /* Speedup transitions: at the latest here (a room that opens on a scene) */
+#endif
             resetInputs();
             fieldTransitionCompleted = 1;
         }

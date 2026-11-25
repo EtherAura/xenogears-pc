@@ -14,6 +14,7 @@
 #include "pc_gameplay.h"
 #include "pc_interpolation.h"
 #include "pc_camera.h"
+#include "pc_speedup.h"
 #include "pc_scene.h"
 
 extern sWorldmapState* gWorldmapState;
@@ -1250,6 +1251,7 @@ void worldmapMainLoop(void) {
                     if (worldMapGearMode < 4) {
                         pcWm60Settle();
                         pcFirstPersonEnd();
+                        pcTransitionMenu(1); /* Speedup transitions: the main menu's way in */
                         worldmapPrepareEnterMenu();
                         menuToEnter = 0;
                         useDebugMenuList = 0;
@@ -1266,6 +1268,7 @@ void worldmapMainLoop(void) {
                         }
                         worldmapFlushCacheAndSync();
                         worldmapRestoreAfterMenu();
+                        pcTransitionMenu(0); /* the world map has the screen back */
                     } else if (worldMapGearMode < 8) {
                         continueWorldmapLoop = 0;
                         exitWorldMapMode = 0;
@@ -1872,9 +1875,9 @@ void worldmapFadeIn(s32 count, s32 start, s32 step, s32 abr) {
     s32 i;
     s32 odd;
 
-    ft4 = allocateHeap(sizeof(POLY_FT4) * 3, 1);
-    g4 = allocateHeap(sizeof(POLY_G4) * 2, 1);
-    tpage = allocateHeap(sizeof(DR_TPAGE), 1);
+    ft4 = allocateHeap(PC_HEAP_OF(POLY_FT4, sizeof(POLY_FT4) * 3), 1);
+    g4 = allocateHeap(PC_HEAP_OF(POLY_G4, sizeof(POLY_G4) * 2), 1);
+    tpage = allocateHeap(PC_HEAP_OF(DR_TPAGE, sizeof(DR_TPAGE)), 1);
     for (i = 0; i < 3; i++) {
         setlen(&ft4[i], 9);
         setcode(&ft4[i], 0x2C);

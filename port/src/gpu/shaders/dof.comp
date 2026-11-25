@@ -12,12 +12,14 @@
 //
 // Each pixel's blur radius comes from its depth alone (amount()), in PS1
 // pixels, so the result does not depend on N. The blurred layers are made on
-// the PS1's own pixel grid (a blurred picture holds no more; the cost then
-// hardly grows with N) and laid back over the copy pixel by pixel:
-//   0  prefilter: each PS1 pixel averages samples of the copy under it into
+// a grid of `scale` pixels per PS1 pixel (vk.c dofScale: the PS1's own up to
+// 3x, then a layer pixel two or three of the copy's, so the blur starts small
+// and grows with depth rather than fading in over the sharp picture already
+// a PS1 pixel and a half wide) and laid back over the copy pixel by pixel:
+//   0  prefilter: each layer pixel averages samples of the copy under it into
 //      two layers, premultiplied by how much each sample belongs there: the
 //      far layer (behind the focus) and the near layer (in front of it); the
-//      layers' radii go to `amounts`;
+//      layers' radii go to `amounts`, in layer pixels;
 //   1, 2  the far layer blurred across and down. A pixel gathers within its
 //      own radius, and only from neighbours whose own blur reaches it, so a
 //      sharp sprite puts no halo into the soft background around it;
@@ -38,7 +40,7 @@ layout(set = 0, binding = 0, r32ui) uniform uimage2D color;
 layout(set = 0, binding = 1, r32ui) uniform readonly uimage2D depth;
 layout(set = 0, binding = 2, rgba16f) uniform image2D farLayer;
 layout(set = 0, binding = 3, rgba16f) uniform image2D nearLayer;
-layout(set = 0, binding = 4, rgba16f) uniform image2D amounts; // r: far radius, g: near radius, PS1 pixels
+layout(set = 0, binding = 4, rgba16f) uniform image2D amounts; // r: far radius, g: near radius, layer pixels
 layout(set = 0, binding = 5, rgba16f) uniform image2D temp;
 layout(set = 0, binding = 6, rgba16f) uniform image2D temp2;   // r: the near radius carried through pass 3
 // The finished layers again, read with bilinear filtering by the composite.
@@ -48,19 +50,20 @@ layout(set = 0, binding = 8) uniform sampler2D nearBlurred;
 layout(push_constant) uniform Dof {
     int pass;
     int n;         // the copy's pixels per PS1 pixel
-    int taps;      // prefilter samples per PS1 pixel, each way (at most n)
+    int taps;      // prefilter samples per layer pixel, each way
     int flags;     // DEBUG: the amounts as colours instead of the blur (INVERT: on white); FIGURES: sprites stay in focus
     ivec2 origin;  // the frame's first pixel in `color`
     ivec2 size;    // the frame, in the copy's pixels (the depth image's used size)
-    ivec2 work;    // the layers' used size (the frame they were made from, PS1 pixels)
-    ivec2 layer;   // this frame's first PS1 pixel in the layers
+    ivec2 work;    // the layers' used size (the frame they were made from, layer pixels)
+    ivec2 layer;   // this frame's first PS1 pixel in the layers' frame
     float focus;   // the focus, in the depth image's units
     float band;    // the focus range, in relative depth
     float gain;    // radius per unit of relative depth beyond it (as a share of `radius`)
     float radius;  // the largest radius, PS1 pixels
     int color;     // the copy's colour mode (scene_color.glsl)
-    int tilt;      // the tilt-shift (xg-rgcf.5.14): its radius at the edges in 16ths of a PS1 pixel | the layers' rows the display shows, from their top << 16 (and all their columns); 0: none
+    int tilt;      // the tilt-shift (xg-rgcf.5.14): its radius at the edges in 16ths of a PS1 pixel | the PS1 rows the display shows, from the layers' top << 16 (and all their columns); 0: none
     ivec2 ditherOrigin; // scene_color.glsl
+    int scale;     // the layers' pixels per PS1 pixel
 } pc;
 
 #include "scene_color.glsl"
@@ -70,8 +73,8 @@ const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
 const uint DEPTH_FIGURE = 0x40000000u;
 const int DEBUG = 1, FIGURES = 2, INVERT = 4;
-// The largest radius, plus one: the tilt-shift's 20 PS1 pixels (the depth's
-// is 4: its loops stop at their own).
+// The largest radius in layer pixels, plus one: the tilt-shift's Strong 5 PS1
+// pixels at up to 4 layer pixels each (the loops stop at their own).
 const int MAX_TAPS = 21;
 
 // The tilt-shift's radius at a point of the layers (PS1 pixels): nothing but
@@ -79,7 +82,7 @@ const int MAX_TAPS = 21;
 // radius at the edge. The strips blur as the far layer, which stays where it
 // is made (the near layer spreads over what is sharp, so a strip would grow).
 float tiltMost() { return float(pc.tilt & 0xFFFF) / 16.0; }
-float tilt(vec2 at) { return tiltMost() * tiltRamp(at, vec2(float(pc.work.x), float(pc.tilt >> 16))); }
+float tilt(vec2 at) { return tiltMost() * tiltRamp(at, vec2(float(pc.work.x / pc.scale), float(pc.tilt >> 16))); }
 
 // The blur radius in PS1 pixels: positive behind the focus, negative in front.
 // Behind the focus the relative depth is the thin lens's, 1 - focus / z: 0 at
@@ -111,12 +114,12 @@ void prefilter(ivec2 t) {
     vec4 far = vec4(0.0), near = vec4(0.0);
     float farRadius = 0.0, nearRadius = 0.0, count = 0.0;
     for (int y = 0; y < pc.taps; y++) for (int x = 0; x < pc.taps; x++) {
-        // Evenly through the pixel's block of the copy.
-        ivec2 l = t * pc.n + (ivec2(x, y) * 2 + 1) * pc.n / (2 * pc.taps);
+        // Evenly through the layer pixel's block of the copy (n / scale of its pixels each way).
+        ivec2 l = ((t * pc.taps + ivec2(x, y)) * 2 + 1) * pc.n / (2 * pc.taps * pc.scale);
         if (l.x >= pc.size.x || l.y >= pc.size.y) continue;
         vec3 c = light(imageLoad(color, pc.origin + l).r);
-        float a = amount(imageLoad(depth, l).r, (vec2(l) + 0.5) / float(pc.n));
-        // A sample belongs wholly to a layer once its radius is a PS1 pixel.
+        float a = amount(imageLoad(depth, l).r, (vec2(l) + 0.5) / float(pc.n)) * float(pc.scale);
+        // A sample belongs wholly to a layer once its radius is a layer pixel.
         float wf = clamp(a, 0.0, 1.0), wn = clamp(-a, 0.0, 1.0);
         far += vec4(c, 1.0) * wf;
         near += vec4(c, 1.0) * wn;
@@ -155,7 +158,7 @@ void farBlur(ivec2 t, ivec2 axis, bool second) {
 
 // The near layer along one axis: each sample spread by its own radius.
 void nearBlur(ivec2 t, ivec2 axis, bool second) {
-    int taps = min(int(ceil(pc.radius)) + 1, MAX_TAPS);
+    int taps = min(int(ceil(pc.radius * float(pc.scale))) + 1, MAX_TAPS);
     vec4 sum = vec4(0.0);
     float carried = 0.0;
     for (int d = -taps; d <= taps; d++) {
@@ -177,11 +180,12 @@ void nearBlur(ivec2 t, ivec2 axis, bool second) {
 }
 
 void composite(ivec2 l) {
-    // The layers at this pixel: its place on the PS1 grid, kept inside the
-    // part of the images this frame made (they may be larger).
+    // The layers at this pixel: its place on the PS1 grid (`at`), then on the
+    // layers', kept inside the part of the images this frame made (they may be
+    // larger).
     vec2 at = (vec2(l) + 0.5) / float(pc.n) + vec2(pc.layer);
     float a = amount(imageLoad(depth, l).r, at);
-    vec2 uv = clamp(at, vec2(0.5), vec2(pc.work) - 0.5) / vec2(textureSize(nearBlurred, 0));
+    vec2 uv = clamp(at * float(pc.scale), vec2(0.5), vec2(pc.work) - 0.5) / vec2(textureSize(nearBlurred, 0));
     vec4 near = textureLod(nearBlurred, uv, 0.0);
     // Twice the spread coverage: the whole blurred colour at the outline,
     // fading outside it, and no sharp copy of the object left under its edge.
@@ -208,7 +212,8 @@ void composite(ivec2 l) {
     }
     if (a > 0.0) {
         vec4 far = textureLod(farBlurred, uv, 0.0);
-        if (far.a > 1.0e-4) c = mix(c, far.rgb / far.a, clamp(a, 0.0, 1.0));
+        // Wholly the far layer once the radius is a layer pixel (the layer's own least blur).
+        if (far.a > 1.0e-4) c = mix(c, far.rgb / far.a, clamp(a * float(pc.scale), 0.0, 1.0));
         else if (mixNear <= 0.0) return;
     }
     if (mixNear > 0.0) c = mix(c, near.rgb / near.a, mixNear);

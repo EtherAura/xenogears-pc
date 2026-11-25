@@ -111,7 +111,7 @@ void initMechaCloth_battle(sLoadedMechas_114* obj, u16* data, s32 gravity, s32 s
         roots++;
     }
     counts = data;
-    tri = allocateHeap(obj->m6_numTriangles * sizeof(sMechaClothTriangle), 0);
+    tri = allocateHeap(PC_HEAP_OF(sMechaClothTriangle, obj->m6_numTriangles * sizeof(sMechaClothTriangle)), 0);
     if (tri == NULL) {
         obj->m14_vertices = NULL;
         freeHeap(obj->m14_vertices);

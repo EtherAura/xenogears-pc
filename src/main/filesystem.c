@@ -1316,7 +1316,7 @@ LoadingBatchCommand* allocateFileGroupBatch(s32 fileIndex, LoadingBatchCommand* 
     count = getNegativeFileSize(fileIndex);
     if (count > 0) {
         if (cmds == NULL) {
-            cmds = allocateHeap(PC_HEAP_SIZED((count + 1) * (s32)sizeof(LoadingBatchCommand), (count + 1) * (s32)0xc), 0);
+            cmds = allocateHeap(PC_HEAP_OF(LoadingBatchCommand, PC_HEAP_SIZED((count + 1) * (s32)sizeof(LoadingBatchCommand), (count + 1) * (s32)0xc)), 0);
             allocated = 1;
             if (cmds == NULL) {
                 return NULL;

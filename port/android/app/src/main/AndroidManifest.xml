@@ -16,19 +16,32 @@
 
     <!-- appCategory="game" (xg-098): Android 16+ ignores an app's orientation and resizing limits on
          screens 600 dp wide or more (tablets, foldables, desktop windows), except for games. -->
+    <!-- The launcher icon (xg-bze9): res/mipmap-anydpi/ic_launcher.xml, the round one the same. -->
     <application android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:appCategory="game"
         android:allowBackup="false"
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
         android:enableOnBackInvokedCallback="false"
         android:hardwareAccelerated="true">
 
+        <!-- configChanges: every change the activity may be told about instead of being made again
+             (xg-7xkb). Android destroys and recreates an activity for a change it does not take, and
+             SDL ends the game when its activity is destroyed (SDLActivity.onDestroy), so the game
+             closed, unsaved, on a theme or wallpaper colour change (assetsPaths: the resource
+             overlays changed; measured on Android 13 and 16), a display density change (another
+             screen, the display size setting), a SIM or network change (mcc, mnc) and the rest.
+             SDL's own template leaves out mcc, mnc, touchscreen, density, colorMode and assetsPaths.
+             The game draws everything itself, so nothing it shows needs the activity made again.
+             assetsPaths is a bit the system compares, honoured on Android 13 although named in
+             later SDKs (tools/android_start_check.py changes a theme overlay in every run). -->
         <activity android:name=".XgActivity"
             android:label="@string/app_name"
             android:alwaysRetainTaskState="true"
             android:launchMode="singleInstance"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="layoutDirection|locale|grammaticalGender|fontScale|fontWeightAdjustment|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontScale|fontWeightAdjustment|assetsPaths"
             android:preferMinimalPostProcessing="true"
             android:exported="true">
             <intent-filter>

@@ -55,6 +55,10 @@ static void put16(uint8_t* p, unsigned v) {
     p[0] = (uint8_t)v;
     p[1] = (uint8_t)(v >> 8);
 }
+static void put32(uint8_t* p, uint32_t v) {
+    put16(p, v & 0xFFFF);
+    put16(p + 2, v >> 16);
+}
 
 static void seal(uint8_t* b) {
     unsigned sum = 0;
@@ -77,6 +81,8 @@ static void member(uint8_t* b, int c, int level, int hp, int maxHp, int ep, int 
     put16(r + F(m52_MaxMP), maxEp);
     r[F(m56_battleCommandLoadout)] = (uint8_t)c;
     r[F(m62_Level)] = r[F(m63_Level2)] = (uint8_t)level;
+    put32(r + F(m44_expToNextLevel), 100 * (uint32_t)level); /* as a real save has them: 1 or more */
+    put32(r + F(m48_expToNextLevel2), 90 * (uint32_t)level);
     r[F(mA0_gearNum)] = (uint8_t)gear;
     r[F(m58_attack)] = (uint8_t)(10 + c); /* something of its own, to see it copied */
     b[CARD_SAVE_ABILITIES + c * XG_PARTY_ABILITY + offsetof(GameStateSize20, m17_energyPerTurn)] = (uint8_t)ap;
@@ -295,7 +301,7 @@ static void testPack(void) {
     /* the same bytes everywhere (Linux, Windows): a fixed save packs to a fixed record */
     uint32_t h = fnv(&good, sizeof(good));
     printf("card_savestest: record %u bytes, fnv1a %08x\n", (unsigned)sizeof(good), h);
-    CHECK(h == (cardGameRegion() == 'J' ? 0xcf7031d0u : 0xef6d66f9u));
+    CHECK(h == (cardGameRegion() == 'J' ? 0x1a792886u : 0x87aba63bu));
 
     /* a member's numbers */
     XgPartyMember m;
@@ -467,6 +473,18 @@ static void testPack(void) {
     CHECK(withRecord(2, F(m63_Level2), 100, 0) == XG_PARTY_BAD_LEVEL);
     /* AP per turn 1-7 */
     CHECK(withAp(2, 1) == XG_PARTY_OK);
+    /* experience to the next levels: 1 or more (battle_result's level-up loop) */
+    CHECK(withRecord(2, F(m44_expToNextLevel), 1, 1) == XG_PARTY_OK);
+    CHECK(withRecord(2, F(m44_expToNextLevel), 0, 1) == XG_PARTY_BAD_EXP);
+    CHECK(withRecord(2, F(m48_expToNextLevel2), 0, 1) == XG_PARTY_BAD_EXP);
+    {
+        XgPartyRecord r = good;
+        uint8_t* c = r.m10_characters[1];
+        put32(c + F(m48_expToNextLevel2), 0x80000000u); /* negative */
+        CHECK(checkOf(&r) == XG_PARTY_BAD_EXP);
+        put32(c + F(m48_expToNextLevel2), 0x7FFFFFFFu);
+        CHECK(checkOf(&r) == XG_PARTY_OK);
+    }
     CHECK(withAp(2, 0) == XG_PARTY_BAD_AP);
     CHECK(withAp(2, 7) == XG_PARTY_OK);
     CHECK(withAp(2, 8) == XG_PARTY_BAD_AP);

@@ -5,7 +5,10 @@
 // height (carl chose them from in-game captures: strips 5% of the height at
 // the top and bottom, then the sides too, the corners rounded, and the fade
 // eased in from three strips' depth).
-const float TILT_REACH = 0.15;
+// (carl, testing: the blur a step softer and reaching less far in: 0.15 to
+// 0.10, then 0.07; then, at 9x, a third as strong (scene.c tiltRadius) over
+// 0.12, so it fades in gradually rather than smearing a thin strip)
+const float TILT_REACH = 0.12;
 const float TILT_CORNER = 0.10;
 
 // The share of the tilt-shift's radius at a point (PS1 pixels from the top

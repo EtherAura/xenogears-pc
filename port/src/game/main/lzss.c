@@ -13,15 +13,27 @@
 #include "main/memory.h"
 #include "pc_gametext.h"
 
+u8* pcHeapBlockEnd(const void* p); /* main/heap.c */
+
 /* Noah: decompress. The PS1 checks for the end only before each flag byte
  * (all eight items of a group are decoded), so a stream must end exactly on a
  * group boundary: the PS1 loops for ever if it overshoots. The PC stops
  * instead (`<` for `!=`); every stream that terminates on the PS1 decodes
- * identically. */
+ * identically.
+ *
+ * Some streams' last group decodes more than the stream holds: its items read
+ * past the end of the source's heap block (the next block's header) or, as a
+ * back reference, before the output's start (the output block's own header).
+ * Those bytes land past the data the game reads, but they are heap headers'
+ * pointers, which a save state then carries as numbers (another build's are
+ * elsewhere: tools/state_untyped.py). The PC reads both as zeros, so every
+ * build decodes the same bytes. */
+#define IN(p) ((limit == NULL || (p) < limit) ? *(p) : 0)
 void decompress(void* src, void* dst) {
     u8* in = (u8*)src;
     u8* out = (u8*)dst;
     u8* end = out + *(u32*)in;
+    u8* limit = pcHeapBlockEnd(src); /* NULL: not in the heap, unbounded */
     u8* from;
     u32 flags;
     u32 hi;
@@ -30,21 +42,25 @@ void decompress(void* src, void* dst) {
 
     in += 4;
     while (out < end) {
-        flags = *in++;
+        flags = IN(in);
+        in++;
         for (i = 8; i != 0; i--, flags >>= 1) {
             if (!(flags & 1)) {
-                *out++ = *in++;
+                *out++ = IN(in);
+                in++;
                 continue;
             }
-            hi = in[1];
-            from = out - (in[0] | ((hi & 0xF) << 8));
+            hi = IN(in + 1);
+            from = out - (IN(in) | ((hi & 0xF) << 8));
             in += 2;
             for (n = (hi >> 4) + 3; n != 0; n--) {
-                *out++ = *from++;
+                *out++ = from < (u8*)dst ? 0 : *from;
+                from++;
             }
         }
     }
 }
+#undef IN
 
 /* Noah: mallocAndDecompress. Allocates the decompressed size (the stream's
  * first word) with the caller's heap flags and decodes into it; NULL when the

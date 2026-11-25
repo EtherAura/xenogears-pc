@@ -699,8 +699,8 @@ s32 worldmapMode16_taskScreenWarp_init(s32 index) {
     u16* q;
     s32 i;
 
-    worldmapMode16WarpPolys[0] = allocateHeap(192 * (s32)sizeof(POLY_FT4), 0);
-    worldmapMode16WarpPolys[1] = allocateHeap(192 * (s32)sizeof(POLY_FT4), 0);
+    worldmapMode16WarpPolys[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, 192 * (s32)sizeof(POLY_FT4)), 0);
+    worldmapMode16WarpPolys[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, 192 * (s32)sizeof(POLY_FT4)), 0);
     worldmapMode16WarpAmplitudes = allocateHeap(0x180, 0);
     p = worldmapMode16WarpPolys[0];
     for (i = 0; i < 0xC0; i++, p++) {

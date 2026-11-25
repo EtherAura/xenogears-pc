@@ -657,6 +657,30 @@ def overlapping_storage(objs: list[tuple[str, str, int, int, str]], extents: dic
     return out
 
 
+def short_tails(shorter: list[tuple[str, str, int, int, int]], placed: list[tuple[str, str, int, int, str]],
+                images: dict[str, Image], extents: dict[str, tuple[int, int]]) -> list[str]:
+    """The PS1 data the PC drops past the end of objects of a declared size (tails.txt): for each
+    of `shorter` (module, name, address, declared size, label extent), the bytes from its declared
+    end to the first object of `placed` (module, name, address, size, why) in a module loaded with
+    it, or to its label's end. Whether they are data or BSS comes from the image's layout; no byte
+    is read (tools/tailcheck.py reads them), so every way of linking writes the same lines."""
+    starts = sorted((a, m) for m, _, a, size, _ in placed if size)
+    out = []
+    for m, n, a, q, ext in shorter:
+        end = a + ext
+        i = bisect.bisect_left(starts, (a + q, ""))
+        while i < len(starts) and starts[i][0] < end:
+            if starts[i][1] in extents and coresident(m, starts[i][1], extents):
+                end = starts[i][0]
+                break
+            i += 1
+        if end > a + q:
+            img = images.get(m)
+            kind = "data" if img is not None and img.filled(a + q, end - a - q) else "bss"
+            out.append(f"{m} {n} 0x{a:08X} declared 0x{q:X} extent 0x{end - a:X} {kind}")
+    return sorted(out)
+
+
 def sdk_functions(game_root: Path = ROOT) -> set[str]:
     names = set()
     for h in [game_root / "include/psyq.h", *sorted((game_root / "include/psyq").glob("*.h"))]:
@@ -1867,18 +1891,23 @@ def link() -> int:
             raise SystemExit(f"pc_link: {mod} names 0x{a:08X} {name}, but {definer}'s C defines {name} "
                              f"at 0x{d:08X}: one name for two addresses")
 
-    def ps1_extent(name: str, mod: str, addr: int) -> int | None:
-        s = sizes.get(name, {})
-        if s.get("ps1"):
-            return s["ps1"]
-        if addr == bss_ends.get(mod):
-            return END_MARKER  # the end of the module's BSS (main's D_8006FAF0: the heap start)
+    def label_extent(mod: str, addr: int) -> int | None:
+        """The bytes from `addr` to the next address `mod` names (a data label, a symbol file's
+        name, the end of its data or of its BSS)."""
         lst = known_addrs.get(mod)
         if lst:
             i = bisect.bisect_right(lst, addr)
             if i < len(lst):
                 return lst[i] - addr
         return None
+
+    def ps1_extent(name: str, mod: str, addr: int) -> int | None:
+        s = sizes.get(name, {})
+        if s.get("ps1"):
+            return s["ps1"]
+        if addr == bss_ends.get(mod):
+            return END_MARKER  # the end of the module's BSS (main's D_8006FAF0: the heap start)
+        return label_extent(mod, addr)
 
     generated_by: dict[str, str] = {}
     for gowner, gname in needed:
@@ -1905,6 +1934,8 @@ def link() -> int:
     # Every PC object that stands for PS1 memory: (module, name, address, PS1 extent, why it may
     # overlap another: '' when it must not).
     storage: list[tuple[str, str, int, int, str]] = []
+    # Objects of their declared size whose label runs on: (module, name, address, size, label extent).
+    shorter: list[tuple[str, str, int, int, int]] = []
     alias_offsets: dict[tuple[str, str], int] = {}  # (module, alias) -> its offset in its container
     for owner in modules:
         keys = sorted(k for k in needed if k[0] == owner)
@@ -1983,6 +2014,8 @@ def link() -> int:
                 known = "inside a container whose PC layout differs (unconverted.txt)"
             else:
                 known = ""
+            if addr >= 0 and q and q == sizes.get(name, {}).get("ps1") and (ext := label_extent(owner, addr)) and ext > q:
+                shorter.append((owner, name, addr, q, ext))
             size_pc = pc if pc else q
             if not size_pc:
                 size_pc = 16
@@ -2171,6 +2204,10 @@ def link() -> int:
         raise SystemExit("pc_link: two PC objects for one PS1 address (each module's copy would miss the "
                          "other's writes):\n  " + "\n  ".join(collisions))
 
+    # The PS1 data past the declared end of objects of a declared size (tails.txt, xg-htn.35.154):
+    # cut at the generated objects only, so a link without the PS1 build's objects writes the same.
+    tails = short_tails(shorter, storage, images, extents)
+
     # Names the link (or the port's bss.c blocks) puts inside another object need not sit on the
     # 16 bytes the x86-64 ABI promises a global array of 16 bytes or more; clang relies on that
     # promise (aligned SSE stores: xg-htn.49). Every such name declared as an array of 16 bytes
@@ -2273,13 +2310,22 @@ def link() -> int:
     (args.outdir / "stubs.c").write_text("\n".join(out_stubs) + "\n")
     (args.outdir / "modules.c").write_text("\n".join(out_modules) + "\n")
     (args.outdir / "unconverted.txt").write_text("\n".join(unconverted) + ("\n" if unconverted else ""))
+    engine = {ROOT: "original", ROOT / "engine": "enhanced"}.get(args.game_root.resolve(), args.game_root.name)
+    (args.outdir / "tails.txt").write_text(
+        f"# xenogears-pc-link-tails region={args.ver} engine={engine}\n"
+        "# Objects of a declared size whose PS1 data runs on past it, to the next object the PC has\n"
+        "# (tools/pc_link.py): the PC copies the declared size, so a read past it gets other memory on\n"
+        "# the PC and these bytes on the PS1. tools/tailcheck.py reviews them (tools/tailcheck_allow.txt).\n"
+        "#     <module> <name> <address> declared <size> extent <bytes to the next object> <data|bss>\n"
+        + "".join(f"{t}\n" for t in tails))
     summary = [f"modules {len(modules)}, objects {len(args.objects)}",
                f"exports: " + ", ".join(f"{m} {len(exports[m])}" for m in modules if exports[m]),
                f"functions stubbed {len([n for n in funcs if n not in all_defined])}; host libc {len(libc)} "
                f"({' '.join(sorted(libc))})",
                f"data {len(needed)}: " + ", ".join(f"{k} {v}" for k, v in report.items()),
                f"one object per PS1 address: {len(storage)} generated and {len(c_objects)} C objects checked",
-               f"arrays off the ABI's 16-byte alignment, all declared PORT_ALIAS: {alias_arrays}"]
+               f"arrays off the ABI's 16-byte alignment, all declared PORT_ALIAS: {alias_arrays}",
+               f"declared shorter than their PS1 data (tails.txt, tools/tailcheck.py): {len(tails)}"]
     summary += [f"  apart on purpose: {' and '.join(' '.join(x) for x in sorted(pair))}: {SEPARATE[pair]}"
                 for pair in sorted(separate, key=sorted)]
     (args.outdir / "report.txt").write_text("\n".join(summary + numeric_refs) + "\n")

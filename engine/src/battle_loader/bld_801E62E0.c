@@ -421,7 +421,7 @@ void mainBattleSpriteCallback_phase1(TaskHeader* task) {
 }
 
 void createBattleSpriteLoadingTaskSub(void* config) {
-    sBattleSpriteLoaderTask* task = (sBattleSpriteLoaderTask*)allocateUpdateTask(NULL, (s32)sizeof(sBattleSpriteLoaderTask) - (s32)sizeof(TaskHeader));
+    sBattleSpriteLoaderTask* task = (sBattleSpriteLoaderTask*)allocateUpdateTask(NULL, PC_HEAP_OF(sBattleSpriteLoaderTask, (s32)sizeof(sBattleSpriteLoaderTask) - (s32)sizeof(TaskHeader)));
     setTaskUpdateFunction(&task->m0_task, mainBattleSpriteCallback_phase1);
     task->m20_spriteConfig = config;
 }

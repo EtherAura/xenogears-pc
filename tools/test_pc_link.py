@@ -11,7 +11,7 @@ import subprocess
 
 from pc_link import (SEPARATE, Image, ProbeError, alias_declarations, coresident, copy_runs, data_residues,
                      export_platform_symbols, fnv1a64, overlapping_storage, pointers_outside, probe_flags,
-                     probe_sizes, relayout)
+                     probe_sizes, relayout, short_tails)
 
 
 class PlatformExports(unittest.TestCase):
@@ -201,6 +201,21 @@ class OneObjectPerAddress(unittest.TestCase):
         for pair, why in SEPARATE.items():
             self.assertEqual(len(pair), 2)
             self.assertTrue(why)
+
+
+class Tails(unittest.TestCase):
+    def test_tails(self):
+        img = Image("battle", mem={a: 1 for a in range(0x80080000, 0x80080040)})
+        shorter = [("battle", "perAp", 0x80080003, 0x18, 0x19),  # its 25th byte: data the PC dropped
+                   ("battle", "cut", 0x80080020, 0x4, 0x20),  # up to the next object the PC has
+                   ("battle", "flag", 0x80090000, 0x1, 0x8),  # past the image: BSS
+                   ("battle", "whole", 0x80080010, 0x4, 0x8)]  # the next object starts at its end
+        placed = [("battle", "next", 0x80080030, 4, ""), ("field", "other", 0x80080024, 4, ""),
+                  ("main", "last", 0x80080014, 0, ""), ("battle", "start", 0x80080014, 4, "")]
+        self.assertEqual(short_tails(shorter, placed, {"battle": img}, EXTENTS), [
+            "battle cut 0x80080020 declared 0x4 extent 0x10 data",  # field is never loaded with battle
+            "battle flag 0x80090000 declared 0x1 extent 0x8 bss",
+            "battle perAp 0x80080003 declared 0x18 extent 0x19 data"])
 
 
 if __name__ == "__main__":

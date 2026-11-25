@@ -972,7 +972,7 @@ BattleShake* getOrCreateBattleCameraShake(void) {
     BattleShake* p;
 
     if (battleCameraShakeTask == 0) {
-        p = (BattleShake*)allocateUpdateTask(0, (s32)sizeof(BattleShake) - (s32)sizeof(TaskHeader));
+        p = (BattleShake*)allocateUpdateTask(0, PC_HEAP_OF(BattleShake, (s32)sizeof(BattleShake) - (s32)sizeof(TaskHeader)));
         setTaskUpdateFunction(&p->m0_task, (void (*)(TaskHeader*))updateBattleCameraShake);
         setTaskDeleteFunction(&p->m0_task, deleteBattleCameraShake);
         p->m24_start.vx = 0;

@@ -358,7 +358,7 @@ SETTINGS = [
     "gameplay_bugfixtest", "gameplay_combattest", "gameplay_deathblowtest",
     "gameplay_dialoguetest", "gameplay_encountertest", "gameplay_field60slowtest", "gameplay_gauntlettest",
     "gameplay_retrytest",
-    "gameplay_rewardtest",
+    "gameplay_rewardtest", "gameplay_uninterruptedtest", "gameplay_battlejumptest",
 ]
 
 def disc(region: str, n: int) -> Path:
@@ -800,6 +800,8 @@ class Runner:
             self.run(f"pad_profiletest-{mode}", b / "pad_profiletest", d, mode, target="pad_profiletest")
         d = self.scratch("pad_ini", "pad_profiletest-ini")
         self.run("pad_profiletest-ini", b / "pad_profiletest", d, "ini", target="pad_profiletest")
+        d = self.scratch("pad_camera", "pad_profiletest-camera")
+        self.run("pad_profiletest-camera", b / "pad_profiletest", d, "camera", target="pad_profiletest")
 
         for t in ("texturepacktest", "glyphtest", "portraitpacktest", "celgputest"):
             d = self.scratch(t, t, f"{t}-reload")

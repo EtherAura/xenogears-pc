@@ -19,6 +19,7 @@
 #include <string.h>
 
 #include "gallery.h"
+#include "audiotap.h"
 
 #include "cd/cd.h"
 #include "cd/regional.h"
@@ -104,12 +105,8 @@ static SDL_AudioStream* openStream(void) {
     if (!streamTried) {
         streamTried = 1;
         SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, XG_MOVIE_RATE};
-        if (SDL_WasInit(SDL_INIT_AUDIO) || SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-            stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
-        }
-        if (stream != NULL) {
-            SDL_ResumeAudioStreamDevice(stream);
-        } else {
+        stream = xgTapOpen(&spec); /* the device's, or a recording's (audiotap.h) */
+        if (stream == NULL) {
             fprintf(stderr, "extras: gallery: no audio device: %s\n", SDL_GetError());
         }
     }

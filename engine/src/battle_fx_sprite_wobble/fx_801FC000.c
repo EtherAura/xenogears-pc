@@ -5,6 +5,7 @@
 #include "psyq.h"
 #include "main/task.h"
 #include "main/sprite.h"
+#include "pc_state.h"
 #include "battle_fx_sprite_wobble/battle_fx_sprite_wobble.h"
 
 /* main */
@@ -151,7 +152,7 @@ void fxSpriteWobble_draw(TaskHeader* task) {
 }
 
 void createFxSpriteWobble(SpriteActorCore* actor, s32 phase, s32 amplitude, s32 amplitudeStep, s32 phaseStep, s32 phaseStepStep, s32 phaseSpeed) {
-    Fx04Effect* e = (Fx04Effect*)allocateTaskPair(sizeof(Fx04Effect), actor->m6C_owner, fxSpriteWobble_update, fxSpriteWobble_draw, NULL);
+    Fx04Effect* e = (Fx04Effect*)allocateTaskPair(PC_HEAP_OF(Fx04Effect, sizeof(Fx04Effect)), actor->m6C_owner, fxSpriteWobble_update, fxSpriteWobble_draw, NULL);
 
     e->m38_actor = actor;
     e->m3C_amplitude = amplitude;

@@ -235,11 +235,17 @@ std::vector<Spec>& table() {
     add("shadows", N_("Shadows"), [](int) { return sceneShadows(); }, [](int, int v) { sceneSetShadows(v); }, 0, dofLevels, 4);
     add("fog", N_("Fog"), [](int) { return sceneFog(); }, [](int, int v) { sceneSetFog(v); }, 0, dofLevels, 4);
     add("color_grade", N_("Colour grade"), [](int) { return sceneGrade(); }, [](int, int v) { sceneSetGrade(v); }, 0, dofLevels, 4);
+    add("color_grade_area", N_("Adapt to the area"), [](int) { return sceneGradeArea(); },
+        [](int, int v) { sceneSetGradeArea(v); }, 1, offOn, 2);
     add("particles", N_("Particles"), [](int) { return sceneParticles(); }, [](int, int v) { sceneSetParticles(v); }, 0,
         dofLevels, 4);
     static const char* const particleSizes[] = {N_("Small"), N_("Medium"), N_("Large")};
     add("particle_size", N_("Particle size"), [](int) { return sceneParticleSize(); },
         [](int, int v) { sceneSetParticleSize(v); }, 0, particleSizes, 3);
+    add("sun_glare", N_("Sun glare"), [](int) { return sceneSunGlare(); }, [](int, int v) { sceneSetSunGlare(v); }, 0,
+        dofLevels, 4);
+    add("particles_footsteps", N_("Footstep dust"), [](int) { return sceneFootstepDust(); },
+        [](int, int v) { sceneSetFootstepDust(v); }, 1, offOn, 2);
     add("vignette", N_("Vignette"), [](int) { return sceneVignette(); }, [](int, int v) { sceneSetVignette(v); }, 0,
         dofLevels, 4);
     add("light_shafts", N_("Light shafts"), [](int) { return sceneLightShafts(); },
@@ -423,6 +429,39 @@ std::vector<Spec>& table() {
         [](int, int v) { pcFirstPersonSet(v); }, 0);
     add("first_person_navigation", N_("First-person navigation"), [](int) { return pcFirstPersonNavigation(); },
         [](int, int v) { pcFirstPersonNavigationSet(v); }, 0);
+    add("camera_invert_x", N_("Invert horizontal"), [](int) { return padCameraInvertX(); },
+        [](int, int v) {
+            padSetCameraInvertX(v);
+            settingsSave();
+        },
+        0);
+    add("camera_invert_y", N_("Invert vertical"), [](int) { return padCameraInvertY(); },
+        [](int, int v) {
+            padSetCameraInvertY(v);
+            settingsSave();
+        },
+        0);
+    add("camera_turn_speed", N_("Camera horizontal speed"), [](int) { return padCameraTurnSpeed(); },
+        [](int, int v) {
+            padSetCameraTurnSpeed(v);
+            settingsSave();
+        },
+        100, nullptr)
+        .unit = "%";
+    add("camera_tilt_speed", N_("Camera vertical speed"), [](int) { return padCameraTiltSpeed(); },
+        [](int, int v) {
+            padSetCameraTiltSpeed(v);
+            settingsSave();
+        },
+        100, nullptr)
+        .unit = "%";
+    add("camera_stick_deadzone", N_("Right stick dead zone"), [](int) { return padCameraDeadzone(); },
+        [](int, int v) {
+            padSetCameraDeadzone(v);
+            settingsSave();
+        },
+        20, nullptr)
+        .unit = "%";
     static const char* const vibration[] = {N_("Off"), N_("The game's"), N_("Enhanced")};
     add("vibration", N_("Vibration"), [](int) { return rumbleMode(); },
         [](int, int v) {
@@ -448,6 +487,8 @@ std::vector<Spec>& table() {
         [](int, int v) { battleSpeedSetChosen(v); }, 0, battleSpeedNames, 4, battleSpeedValues);
     add("field_speed", N_("Field speed"), [](int) { return fieldSpeedChosen(); },
         [](int, int v) { fieldSpeedSetChosen(v); }, 0, battleSpeedNames, 4, battleSpeedValues);
+    add("speedup_transitions", N_("Speedup transitions"), [](int) { return transitionSpeedChosen() != 0 ? 1 : 0; },
+        [](int, int v) { transitionSpeedSetChosen(v); }, 0);
     add("dialogue_backlog", N_("Dialogue backlog"), [](int) { return backlogChosen() != 0 ? 1 : 0; },
         [](int, int v) { backlogSetChosen(v); }, 0);
     add("field60", N_("60 Hz fields"), [](int) { return pcGameplayField60(); },
@@ -470,6 +511,8 @@ std::vector<Spec>& table() {
         [](int, int v) { pcGameplaySetOriginalBugFixes(v); }, 0);
     add("deus_camera_fix", N_("Boss camera fix"), [](int) { return pcGameplayDeusCameraFix(); },
         [](int, int v) { pcGameplaySetDeusCameraFix(v); }, 1);
+    add("uninterrupted_combos", N_("Uninterrupted combos"), [](int) { return pcGameplayUninterruptedCombos(); },
+        [](int, int v) { pcGameplaySetUninterruptedCombos(v); }, 0);
     static const char* const difficulty[] = {N_("Normal"), N_("Hard")};
     add("difficulty", N_("Difficulty"), [](int) { return pcGameplayHardMode(); },
         [](int, int v) { pcGameplaySetHardMode(v); }, 0, difficulty);

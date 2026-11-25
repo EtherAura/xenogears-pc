@@ -415,7 +415,7 @@ void deleteBattleTileEffectTask(TaskHeader* task) {
 }
 
 sBattleTileEffect* createBattleTileEffect(void) {
-    sBattleTileEffect* e = allocateHeap(sizeof(sBattleTileEffect), 1);
+    sBattleTileEffect* e = allocateHeap(PC_HEAP_OF(sBattleTileEffect, sizeof(sBattleTileEffect)), 1);
     e->m0_updateTask.m4_data = e;
     e->m1C_drawTask.m4_data = e;
     wideTileInit();
@@ -934,7 +934,7 @@ void deleteBattleWaveEffectTask(TaskHeader* task) {
 
 sBattleWaveEffect* createBattleStartEffect(void);
 sBattleWaveEffect* createBattleStartEffect(void) {
-    sBattleWaveEffect* e = allocateHeap(sizeof(sBattleWaveEffect), 1);
+    sBattleWaveEffect* e = allocateHeap(PC_HEAP_OF(sBattleWaveEffect, sizeof(sBattleWaveEffect)), 1);
     e->m0_updateTask.m4_data = e;
     e->m1C_drawTask.m4_data = e;
     wideWaveInit();

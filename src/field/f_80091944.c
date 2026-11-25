@@ -1,6 +1,7 @@
 
 #include "common.h"
 #include "pc_retail_heap.h"
+#include "pc_speedup.h"
 #include "psyq.h"
 #include "main/memory.h"
 #include "main/filesystem.h"
@@ -245,7 +246,7 @@ void OP_DA(void) {
         size = readU16FromScript(9);
         fieldImageMoveCommands.m104_sizes[fieldImageMoveCommands.m0_count] = size;
         fieldImageMoveCommands.m84_buffers[fieldImageMoveCommands.m0_count] = allocateHeap(PC_HEAP_BYTES(size + 1), 0);
-        fieldImageMoveCommands.m4_commands[fieldImageMoveCommands.m0_count] = allocateHeap(PC_HEAP_SIZED((s32)sizeof(ImageMoveCommand), (s32)0x18), 0);
+        fieldImageMoveCommands.m4_commands[fieldImageMoveCommands.m0_count] = allocateHeap(PC_HEAP_OF(ImageMoveCommand, PC_HEAP_SIZED((s32)sizeof(ImageMoveCommand), (s32)0x18)), 0);
         fill = readU16FromScript(0xF);
         for (i = 0; i < size; i++) {
             ((u8*)fieldImageMoveCommands.m84_buffers[fieldImageMoveCommands.m0_count])[i] = fill;
@@ -364,6 +365,9 @@ s32 walkAndChangeField(s32 angle, s32 mode, s32 x, s32 z) {
     s32 a;
     s32 targetX;
     s32 targetZ;
+#ifdef PLATFORM_PC
+    s32 pcPlayerFree = fieldRandomBattleVar[0] == 0; /* Speedup transitions: an exit the player walked into, not a scene's change (a scene has already locked the player) */
+#endif
 
     fieldRandomBattleVar[0] = -1;
     entity = fieldSceneState.m290_actorArray[op9DVar1.mE8_playerControlledActor].m4C_scriptEntity;
@@ -384,6 +388,9 @@ s32 walkAndChangeField(s32 angle, s32 mode, s32 x, s32 z) {
             fieldChangePrevented = 0;
             setVar(2, var);
             fieldMapNumber = map;
+#ifdef PLATFORM_PC
+            pcTransitionRoom(pcPlayerFree); /* from the exit's request to the new room's control */
+#endif
         }
         a = pCurrentFieldEntity->m50_modelRotation.vy + angle - 0x400;
         targetX = pCurrentFieldScriptActor->m60_interactionOffset.vx + FP_INT(pCurrentFieldScriptActor->m20_position.vx) + ((getAngleSin(a) * 0x28) >> 12);
@@ -538,6 +545,9 @@ void OP_CHANGE_FIELD_WHEN_READY2(void) {
         iRam800adb70 != 0) {
         g_breakCurrentScript = 1;
     } else {
+#ifdef PLATFORM_PC
+        s32 pcPlayerFree = fieldRandomBattleVar[0] == 0; /* Speedup transitions: an exit the player walked into, not a scene's change (a scene has already locked the player) */
+#endif
         fieldRandomBattleVar[0] = -1;
         if (fieldChangePrevented != 0) {
             s32 var = getImmediateOrVariableUnsigned(3);
@@ -546,6 +556,9 @@ void OP_CHANGE_FIELD_WHEN_READY2(void) {
             fieldChangePrevented = 0;
             setVar(2, var);
             fieldMapNumber = map;
+#ifdef PLATFORM_PC
+            pcTransitionRoom(pcPlayerFree); /* from the exit's request to the new room's control */
+#endif
             OP_CHANGE_FIELD_WHEN_READY_Sub();
         }
         g_breakCurrentScript = 1;

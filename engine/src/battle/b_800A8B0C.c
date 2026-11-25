@@ -442,7 +442,7 @@ void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pDa
     initMechSub110_battle(pMecha);
     pMecha->m10E_num118 = p[8];
     if (pMecha->m10E_num118 != 0) {
-        pMecha->m118_colorAnims = allocateHeap(pMecha->m10E_num118 * sizeof(sLoadedMechas_118), 0);
+        pMecha->m118_colorAnims = allocateHeap(PC_HEAP_OF(sLoadedMechas_118, pMecha->m10E_num118 * sizeof(sLoadedMechas_118)), 0);
         for (i = 0; i < pMecha->m10E_num118; i++) {
             pMecha->m118_colorAnims[i].m1A_isActive = 0;
             pMecha->m118_colorAnims[i].m4_baseColors = 0;
@@ -453,7 +453,7 @@ void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pDa
     pMecha->m10D_num114 = p[9];
     if (pMecha->m10D_num114 != 0) {
         p += 10;
-        pMecha->m114_cloths = p114 = allocateHeap(pMecha->m10D_num114 * sizeof(sLoadedMechas_114), 0);
+        pMecha->m114_cloths = p114 = allocateHeap(PC_HEAP_OF(sLoadedMechas_114, pMecha->m10D_num114 * sizeof(sLoadedMechas_114)), 0);
         for (i = 0; i < pMecha->m10D_num114; i++, p114++) {
             count = (s16)p[17];
             p114->m0_boneIndex = *p++;
@@ -523,7 +523,7 @@ void createGearLoadingFileRequests(s32 entity) {
     if ((&battleGearLoadTable1[0][1])[gear * 2] < extra) {
         extra = 0;
     }
-    battleGearLoadCommands = cmds = allocateHeap(4 * (s32)sizeof(LoadingBatchCommand), 1);
+    battleGearLoadCommands = cmds = allocateHeap(PC_HEAP_OF(LoadingBatchCommand, 4 * (s32)sizeof(LoadingBatchCommand)), 1);
     it = cmds;
     base = (&battleGearLoadTable1[0][1])[gear * 2 - 1];
     file = base + 1;
@@ -554,7 +554,7 @@ void createEffectMechaLoadingFileRequests(s32 arg0) {
     getCurrentDirectory(&dir[0], &dir[1]);
     setCurrentDirectory(0x28, 0);
     resetMemoryAllocStats(4, 0);
-    battleGearLoadCommands = cmds = allocateHeap(3 * (s32)sizeof(LoadingBatchCommand), 1);
+    battleGearLoadCommands = cmds = allocateHeap(PC_HEAP_OF(LoadingBatchCommand, 3 * (s32)sizeof(LoadingBatchCommand)), 1);
     arg0 *= 2;
     file = arg0 + 1;
     getFilenameFromPC(file);
@@ -879,7 +879,7 @@ void initMechSub110_battle(sLoadedMechas* pMecha) {
     s32 i;
 
     if (pMecha->m10C_num110 != 0) {
-        p = allocateHeap(pMecha->m10C_num110 * sizeof(sLoadedMechas_110), 0);
+        p = allocateHeap(PC_HEAP_OF(sLoadedMechas_110, pMecha->m10C_num110 * sizeof(sLoadedMechas_110)), 0);
         for (i = 0; i < pMecha->m10C_num110; i++) {
             p[i].m0_boneIndex = -1;
             p[i].m8_segment = 0;
@@ -1472,7 +1472,7 @@ skip:
             op = *pNext++;
             for (tmp = 19; tmp < 31; tmp++) {
                 if (battleMechas[tmp] == NULL) {
-                    pNew = allocateHeap((s32)offsetof(sLoadedMechas, m11C_previousTranslation), 1);
+                    pNew = allocateHeap(PC_HEAP_OF(sLoadedMechas, (s32)offsetof(sLoadedMechas, m11C_previousTranslation)), 1);
                     break;
                 }
             }
@@ -1495,7 +1495,7 @@ skip:
             pNew->m10D_num114 = 0;
             pNew->m10E_num118 = 0;
             initMechSub110_battle(pNew);
-            newBones = allocateHeap(pMecha->m4_bones->mA_numBones * sizeof(sMechaBone), 1);
+            newBones = allocateHeap(PC_HEAP_OF(sMechaBone, pMecha->m4_bones->mA_numBones * sizeof(sMechaBone)), 1);
             pNew->m4_bones = newBones;
             for (tmp = 0; tmp < pMecha->m4_bones->mA_numBones; tmp++) {
                 newBones[tmp] = pMecha->m4_bones[tmp];

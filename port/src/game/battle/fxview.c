@@ -49,7 +49,7 @@ void battleFxViewStart(s32 enabled, s32 models) {
         }
         /* A flat owned stage gives native environment colour ramps and
          * framebuffer effects their backdrop, without borrowing a map. */
-        battleMechas[31] = allocateHeap(sizeof(sLoadedMechas), 0);
+        battleMechas[31] = allocateHeap(PC_HEAP_OF(sLoadedMechas, sizeof(sLoadedMechas)), 0);
         battleMechas[31]->m10E_num118 = 0;
         battleMechas[31]->m118_colorAnims = NULL;
         battleEnvTextureRectW = 16; battleEnvTextureRectH = 1;

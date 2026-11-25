@@ -31,6 +31,8 @@ static sFieldRenderContext context;
 sFieldRenderContext* pCurrentFieldRenderingContext = &context;
 void* allocateHeap(s32 n,s32 f) { (void)f; return calloc(1,(size_t)n); }
 s32 freeHeap(void* p) { free(p); return 0; }
+/* the allocations' type names for save states (include/pc_state.h PC_HEAP_OF): none here */
+s32 pcHeapRequestType(const char* name, s32 size) { (void)name; return size; }
 static int checks;
 #include "test/check.h"
 static GpuDisplay display = {0,0,320,224,0,1,0,0,0,0,0};

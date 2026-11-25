@@ -47,6 +47,7 @@ GitHub CI covers checks that need no game data; full builds and retail checks ru
 - **Linux x86-64 and Windows x64.** [Public downloads](https://github.com/EtherAura/xenogears-pc/releases/latest) are available.
 - **FreeBSD 15 amd64.** [Native package](https://github.com/EtherAura/xenogears-pc/releases/tag/v2026.11.20-freebsd) with Original and Enhanced engines for US and Japanese discs. Install and launch passed on FreeBSD 15.1 amd64 in a VM with software Vulkan.
 - **Android 13 or later, arm64 and x86-64.** Every [release](https://github.com/EtherAura/xenogears-pc/releases/latest) has a signed APK for each; the [Android page](docs/android.md) says which to take and how to install it. Tested on a Pixel 10 Pro XL (arm64) and in an Android 17 x86-64 emulator.
+- **Updates.** Releases can check for new ones, only if you allow it when first asked, and install them where the app owns its files; the `.deb` has an APT repository. See [Updates](docs/building.md#updates).
 
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Code of conduct](CODE_OF_CONDUCT.md) · [Discussions](https://github.com/EtherAura/xenogears-pc/discussions)
 

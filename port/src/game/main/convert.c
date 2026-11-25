@@ -147,10 +147,43 @@ s32 pcModelBlockPrimBufferSize(void* block) {
     return ((ModelBlock*)block)->m34_primBufferSize;
 }
 
+/* A lone model block outside the heap (a module's data: Battling's
+ * battlingGearExtraModel) keeps its native block here, typed, not in its own
+ * bytes: a save state's converter types the ranges recorded by PC_STATE_AT
+ * inside heap blocks only, and a module variable's bytes are its declared
+ * type (u8 there), so a pointer kept in them would carry to another build as
+ * the number it was (xg-ety3's scan: tools/state_untyped.py). */
+typedef struct {
+    void* raw;
+    ModelBlock* block;
+} PcStaticModelBlock;
+PcStaticModelBlock pcStaticModelBlocks[4];
+
+u8* portHeapStart(void); /* port/src/system/memory.c */
+u8* portHeapEnd(void);
+
+static PcStaticModelBlock* staticModelBlock(void* raw, s32 add) {
+    s32 i;
+
+    if ((u8*)raw >= portHeapStart() && (u8*)raw < portHeapEnd()) return NULL;
+    for (i = 0; i < 4; i++) {
+        if (pcStaticModelBlocks[i].raw == raw) return &pcStaticModelBlocks[i];
+    }
+    for (i = 0; add && i < 4; i++) {
+        if (pcStaticModelBlocks[i].raw == NULL) {
+            pcStaticModelBlocks[i].raw = raw;
+            return &pcStaticModelBlocks[i];
+        }
+    }
+    if (add) pcHeapUnsupported(); /* more lone model blocks in modules' data than the table holds */
+    return NULL;
+}
+
 /* A lone model block (relocateModelBlock): the same block format, with its
  * offsets from the block itself. The native block is built once, in the
  * heap; the loaded block's m8/mC words (the vertex and normal offsets, which
- * nothing reads once it is relocated) then hold its address. */
+ * nothing reads once it is relocated) then hold its address, or, for a block
+ * outside the heap, pcStaticModelBlocks does. */
 void pcConvertModelBlock(void* raw) {
     u8* base = raw;
     DiscModelBlock* d = raw;
@@ -189,13 +222,22 @@ void pcConvertModelBlock(void* raw) {
         b->m1C_dynamicVertices = dv;
         PC_STATE_AT(dv, ModelDynVerts, 1);
     }
+    {
+        PcStaticModelBlock* e = staticModelBlock(raw, 1);
+        if (e != NULL) {
+            e->block = b;
+            return;
+        }
+    }
     memcpy(base + 8, &b, sizeof(b));
     PC_STATE_AT(base + 8, ModelBlock*, 1); /* the block's bytes keep the native block */
 }
 
 void* pcModelBlockOf(void* raw) {
+    PcStaticModelBlock* e = staticModelBlock(raw, 0);
     ModelBlock* b;
 
+    if (e != NULL) return e->block;
     memcpy(&b, (u8*)raw + 8, sizeof(b));
     return b;
 }

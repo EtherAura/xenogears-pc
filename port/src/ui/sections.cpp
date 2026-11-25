@@ -937,8 +937,9 @@ void displaySection() {
         if (offOnList("##lighting_firelight", &on)) sceneSetFirelight(on ? 1 : 0);
         ImGui::EndDisabled();
         hint("Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is "
-             "around them and their glow rise and fall, each fire in its own rhythm. Windows, the sky and white or blue "
-             "lights stay steady. On by default, with Lighting or Glow.");
+             "around them and their glow rise and fall, each fire in its own rhythm, and they keep their painted "
+             "brightness under the lighting's shade. Windows, the sky and white or blue lights stay steady. On by "
+             "default, with Lighting or Glow.");
         overrideNote("lighting_firelight");
     }
     // The characters in the light (xg-rgcf.5.19): part of Lighting.
@@ -1006,6 +1007,17 @@ void displaySection() {
             hint("Not shown now: %s.", tr(sceneLightingStatus()));
         overrideNote("color_grade");
     }
+    // The colour grade adapting to the area (xg-rgcf.5.22): part of Colour grade.
+    if (row("Adapt to the area", "color_grade_area", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneGrade() == 0);
+        bool on = sceneGradeArea() != 0;
+        if (offOnList("##color_grade_area", &on)) sceneSetGradeArea(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("The colour grade also leans gently into each place's own colour: a sandy place a little warmer, a green "
+             "one a little greener, a dark one a little bluer in its shadows. Dialogue, portraits and the HUD are not "
+             "touched. On by default, with Colour grade.");
+        overrideNote("color_grade_area");
+    }
     // Ambient particles (docs/PORT_HD2D.md section 33), drawn after the depth of field.
     if (row("Particles", "particles", opt::ENHANCED)) {
         static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
@@ -1027,6 +1039,16 @@ void displaySection() {
         if (chosen != size) sceneSetParticleSize(chosen);
         hint("How big the particles are. Small by default.");
         overrideNote("particle_size");
+    }
+    // Footstep dust (xg-rgcf.5.23): part of Particles.
+    if (row("Footstep dust", "particles_footsteps", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneParticles() == 0);
+        bool on = sceneFootstepDust() != 0;
+        if (offOnList("##particles_footsteps", &on)) sceneSetFootstepDust(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("Characters kick up a little dust where they walk on sand, dirt or a dusty floor, more when they run, a "
+             "step paler than the ground, lingering a moment. On by default, with Particles.");
+        overrideNote("particles_footsteps");
     }
     // The vignette (xg-rgcf.5.13), on the shown colour with the colour grade.
     if (row("Vignette", "vignette", opt::ENHANCED)) {
@@ -1051,6 +1073,19 @@ void displaySection() {
         hint("In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft "
              "sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default.");
         overrideNote("light_shafts");
+    }
+    // Sun glare (xg-rgcf.5.24).
+    if (row("Sun glare", "sun_glare", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneSunGlare();
+        int chosen = listChoice("##sun_glare", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetSunGlare(chosen);
+        hint("On the world map and in fields outdoors by day, a soft warm glow spills in from the sun's side of the "
+             "picture, with a few faint lens rings across it, where sky or far scenery shows that way. Dialogue, "
+             "portraits and the HUD are not touched. Off by default.");
+        overrideNote("sun_glare");
     }
     // Cloud shadows (xg-rgcf.5.17), with the cast shadows in the composite.
     if (row("Cloud shadows", "cloud_shadows", opt::ENHANCED)) {
@@ -2184,6 +2219,43 @@ void controlsSection() {
         overrideNote("first_person_navigation");
     }
 
+    if (row("Camera stick", "camera_invert_x camera_invert_y camera_turn_speed camera_tilt_speed camera_stick_deadzone",
+            opt::ENHANCED)) {
+        bool invertX = padCameraInvertX() != 0, invertY = padCameraInvertY() != 0;
+        if (checkbox("Invert horizontal", &invertX)) {
+            padSetCameraInvertX(invertX);
+            settingsSave();
+        }
+        if (checkbox("Invert vertical", &invertY)) {
+            padSetCameraInvertY(invertY);
+            settingsSave();
+        }
+        hint("%s", tr("Invert the right stick's turning (horizontal) or tilting (vertical) for the free camera, the world "
+                      "map's camera and first-person look; a right mouse drag in first-person look follows. The keys "
+                      "and L2's zoom keep their directions."));
+        overrideNote("camera_invert_x");
+        overrideNote("camera_invert_y");
+        markBlock();
+        int turn = padCameraTurnSpeed(), tilt = padCameraTiltSpeed(), dead = padCameraDeadzone();
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##camera_turn_speed", &turn, 25, 300, tr("Horizontal speed: %d%%"))) padSetCameraTurnSpeed(turn);
+        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##camera_tilt_speed", &tilt, 25, 300, tr("Vertical speed: %d%%"))) padSetCameraTiltSpeed(tilt);
+        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
+        hint("The camera's sensitivity: how fast the right stick, the camera keys and first-person mouse look turn it "
+             "(horizontal) and tilt it (vertical). Zoom keeps its speed. Default: 100%%.");
+        overrideNote("camera_turn_speed");
+        overrideNote("camera_tilt_speed");
+        markBlock();
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##camera_stick_deadzone", &dead, 0, 60, tr("Right stick dead zone: %d%%"))) padSetCameraDeadzone(dead);
+        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
+        hint("How far the right stick must move before the camera does (the left stick's dead zone, under Stick and "
+             "mouse, is the D-pad's). Default: 20%%.");
+        overrideNote("camera_stick_deadzone");
+    }
+
     if (row("Vibration", "vibration vibration_strength")) {
         static const char* const modes[] = {"Off", "The game's", "Enhanced"};
         static const char* const about[] = {
@@ -2628,6 +2700,16 @@ void gameplaySection() {
              "the control does nothing.");
         overrideNote("field_speed");
     }
+    if (row("Speedup transitions", "speedup_transitions")) {
+        bool transitions = transitionSpeedChosen() != 0;
+        if (offOnList("##speedup_transitions", &transitions)) transitionSpeedSetChosen(transitions);
+        hint("Opening the main menu from the field or the world map and closing it, and going from room to room on "
+             "the field, at 4x: the fades, the loads and the menu's own animation pass in a quarter of the time "
+             "(with Speedup as well, about half a second for the menu each way and a quarter of a second for a "
+             "room change). The menu itself, the field and every other screen keep their speed; music keeps its "
+             "tempo. Off: the original transitions.");
+        overrideNote("speedup_transitions");
+    }
     if (row("Dialogue backlog", "dialogue_backlog")) {
         bool backlog = backlogChosen() != 0;
         if (offOnList("##dialogue_backlog", &backlog)) backlogSetChosen(backlog);
@@ -2653,7 +2735,8 @@ void gameplaySection() {
         if (offOnList("##original_bug_fixes", &originalFixes)) pcGameplaySetOriginalBugFixes(originalFixes);
         hint("Fixes Gear-shop Ether amp, Billy's ammo elements on equipment/status refresh, "
              "missing/stray portrait pixels on the next portrait load, Def UP, a name's final 's' (US), the shop's "
-             "Buy/Sell/Exit arrow (US), MP for EP in the party menu, and field sound loops a menu cut off.");
+             "Buy/Sell/Exit arrow (US), MP for EP in the party menu, field sound loops a menu cut off, and a jump "
+             "pressed just as a random battle comes (the battle then starts when you land).");
         overrideNote("original_bug_fixes");
     }
     if (row("Boss camera fix", "deus_camera_fix")) {
@@ -2811,6 +2894,15 @@ void gameplaySection() {
         hint("Practice each normal attack gives toward new deathblows. 100%% is original; 0%% adds none. "
              "Deathblows are still learned after a battle, at their original levels and in their original order.");
         overrideNote("deathblow_learning");
+    }
+    if (row("Uninterrupted combos", "uninterrupted_combos")) {
+        bool uninterrupted = pcGameplayUninterruptedCombos() != 0;
+        if (offOnList("##uninterrupted_combos", &uninterrupted)) pcGameplaySetUninterruptedCombos(uninterrupted);
+        hint("A Combo's deathblows follow one another without a break: no charge-up pose before each one after "
+             "the first, and the jump back into the ready stance only where a deathblow needs it (to start on the "
+             "enemy's far side, or well away from where the last one ended). The moves, their damage, AP and "
+             "deathblow learning stay the game's own. Off: the original.");
+        overrideNote("uninterrupted_combos");
     }
 
     // ---- the multipliers behind Difficulty and the rewards

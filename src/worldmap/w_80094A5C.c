@@ -1400,8 +1400,8 @@ void createWorlmapPolyFT3Array(void) {
     s32 i;
     POLY_FT3* p;
 
-    worldmapRenderingStructs[0].m74_polyFT3 = allocateHeap(2048 * (s32)sizeof(POLY_FT3), 1);
-    worldmapRenderingStructs[1].m74_polyFT3 = allocateHeap(2048 * (s32)sizeof(POLY_FT3), 1);
+    worldmapRenderingStructs[0].m74_polyFT3 = allocateHeap(PC_HEAP_OF(POLY_FT3, 2048 * (s32)sizeof(POLY_FT3)), 1);
+    worldmapRenderingStructs[1].m74_polyFT3 = allocateHeap(PC_HEAP_OF(POLY_FT3, 2048 * (s32)sizeof(POLY_FT3)), 1);
     for (i = 0, p = worldmapRenderingStructs[0].m74_polyFT3; i < 0x800; i++, p++) {
         setlen(p, 7);
         setcode(p, 0x24);

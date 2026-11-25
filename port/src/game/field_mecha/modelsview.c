@@ -15,7 +15,7 @@ extern sMechaInitVar2 mechaInitVar2;
 
 s32 modelsViewSoundStubs(void) {
     s32 size = (s32)(sizeof(SoundInstance) + 2 * sizeof(SoundTrack));
-    SoundInstance* inst = allocateHeap(size, 0);
+    SoundInstance* inst = allocateHeap(PC_HEAP_OF(SoundInstance, size), 0);
     SeqFile* seq = allocateHeap((s32)sizeof(SeqFile), 0);
 
     if (inst == NULL || seq == NULL) {

@@ -37,6 +37,11 @@ Each release has two APKs. Phones and tablets take the one whose name has
    one at the start; System > Discs and BIOS chooses another file, the
    folder's, or none.
 
+The app can also check for new releases and install them itself, if you
+allow it when it first asks ([Updates](building.md#updates)). Android asks
+you once to let the app install apps. Obtainium can track the releases too:
+add `https://github.com/EtherAura/xenogears-pc` and take the `arm64-v8a` APK.
+
 To update, install the new APK over the old one. An APK signed with the same
 certificate keeps your saves, settings and save states; uninstalling deletes
 them. Saves > Backup in the menu writes the save folder to one `.zip` file

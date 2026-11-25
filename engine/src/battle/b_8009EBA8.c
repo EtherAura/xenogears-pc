@@ -1943,7 +1943,7 @@ sMechaInitVar3* initMechaInitVar3_battle(sMechaInitVar3* arg0, s32 count) {
     resetMemoryAllocStats(4, 0);
     arg0->m4_count = count;
     arg0->m6_next = 0;
-    arg0->m0_entries = allocateHeap((count + 1) * sizeof(sMechaInitVar3Sub), 0);
+    arg0->m0_entries = allocateHeap(PC_HEAP_OF(sMechaInitVar3Sub, (count + 1) * sizeof(sMechaInitVar3Sub)), 0);
     if (arg0->m0_entries != NULL) {
         initMechaInitVar3Sub_battle(arg0);
     } else {

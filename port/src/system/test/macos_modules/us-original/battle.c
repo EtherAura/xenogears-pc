@@ -295,7 +295,7 @@ __attribute__((aligned(16))) void* startBattleAttackAnimationVar8[8] = {
 };
 __attribute__((aligned(16))) unsigned char battlePartyMemberCount[1];
 __attribute__((aligned(16))) unsigned char startBattleAttackAnimationVar1[1];
-__attribute__((aligned(16), section("__DATA,__data"))) unsigned char perApTable[24];
+__attribute__((aligned(16), section("__DATA,__data"))) unsigned char perApTable[25];
 __attribute__((aligned(16), section("__DATA,__data"))) unsigned char gearDeathblowAbilityIds[16];
 __attribute__((aligned(16))) void* startGearAttackAnimationVar8[11] = {
     (void*)startGearAttackAnimationVar8_0,
@@ -625,7 +625,7 @@ const XgDataCopy xgDataCopies_battle[] = {
     {(char*)comboMenuMoveGlyphY, 0x53914, 0x40},
     {(char*)bitmaskCharacter, 0x53958, 0x20},
     {(char*)bitmaskCharacterReverse, 0x53978, 0x24},
-    {(char*)perApTable, 0x539C3, 0x18},
+    {(char*)perApTable, 0x539C3, 0x19},
     {(char*)gearDeathblowAbilityIds, 0x539DC, 0x10},
     {(char*)battleGearLoadTable1, 0x53A18, 0x28},
     {(char*)battleMechaExtraAnimFiles, 0x53A40, 0x12},

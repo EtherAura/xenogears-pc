@@ -19,7 +19,13 @@
  *   - Select as the port's chord button there (selectchord.c, linked
  *     whole): a chord with a shoulder button is kept from the game, a lone
  *     Select reaches it as it is let go, and with the option off, on other
- *     screens, online or with Start held the buttons go through as they are.
+ *     screens, online or with Start held the buttons go through as they are;
+ *   - Speedup transitions (xg-htn.35.157): the main menu's way in and out
+ *     and a room change, as the game marks them (include/pc_speedup.h), at
+ *     HW_GAME_SPEED_MAX with the setting on, whatever the screen's kind; the
+ *     menu's loop, the field and other menus at their own speed; off, the
+ *     marks change nothing; the rules above hold; the marks travel in a
+ *     state and a reset clears them.
  *
  * With arguments it is the setting in a process of its own
  * (tools/test_field_speed.py: XG_SETTINGS names the file):
@@ -35,6 +41,7 @@
 #include "../fieldspeed.h"
 #include "common.h"
 #include "field/field.h"
+#include "pc_speedup.h"
 #include "pc_wide.h"
 
 static int checks;
@@ -180,6 +187,7 @@ int main(int argc, char** argv) {
     setEnv("XG_SETTINGS", "none");
     setEnv("XG_BATTLE_SPEED", "");
     setEnv("XG_FIELD_SPEED", "");
+    setEnv("XG_SPEEDUP_TRANSITIONS", "");
     setEnv("XG_BATTLE_SPEED_LOG", "");
     CHECK(SDL_Init(0));
     CHECK(hwInit() && stepClock);
@@ -439,7 +447,14 @@ int main(int argc, char** argv) {
     CHECK(steady(20, 1));
     replaying = 0;
     CHECK(vblank() == 4);
-    cdQueued = 1;
+    cdQueued = 100;
+    CHECK(steady(20, 1));
+    cdQueued = 0;
+    CHECK(steady(CD_AUDIO_HOLD, 1));
+    CHECK(vblank() == 4);
+    cdQueued = 3; /* what a stream leaves in the CD input (cdin.c starves on it): no hold */
+    CHECK(steady(20, 4));
+    cdQueued = CD_AUDIO_RESIDUE + 1;
     CHECK(steady(20, 1));
     cdQueued = 0;
     CHECK(steady(CD_AUDIO_HOLD, 1));
@@ -466,6 +481,140 @@ int main(int argc, char** argv) {
         }
     }
     CHECK(fieldSpeedChosen() == 0 && battleSpeedChosen() == 0 && hwGameSpeed() == 1);
+
+    /* Speedup transitions: off, the game's marks change nothing; on, the
+     * main menu's way in (the field's or the world map's fade and load, then
+     * the menu's opening) and its way out run at HW_GAME_SPEED_MAX, the
+     * menu's loop at 1x, the audio clock a quarter of the game's meanwhile. */
+    section = "menu transitions";
+    {
+        const int T = HW_GAME_SPEED_MAX;
+        CHECK(transitionSpeedChosen() == 0 && transitionSpeedWanted() == 1);
+        for (int p = 0; p < 2; p++) {
+            pcWideSetMode(places[p]);
+            pcTransitionMenu(1); /* off */
+            CHECK(steady(6, 1));
+            int old = pcWideSetMode(PC_WIDE_MENU);
+            CHECK(steady(6, 1));
+            pcTransitionMenuIdle(1);
+            CHECK(steady(6, 1));
+            pcTransitionMenuIdle(0);
+            CHECK(steady(6, 1));
+            pcWideSetMode(old);
+            pcTransitionMenu(0);
+            CHECK(steady(6, 1));
+
+            transitionSpeedSetChosen(1); /* on */
+            CHECK(transitionSpeedChosen() == 1);
+            CHECK(steady(8, 1)); /* the field or the world map itself */
+            pcTransitionMenu(1); /* the way in */
+            CHECK(vblank() == T);
+            double g0 = hwNow(), a0 = hwAudioTime(g0);
+            CHECK(steady(16, T));
+            double g1 = hwNow(), a1 = hwAudioTime(g1);
+            CHECK(fabs((a1 - a0) - (g1 - g0) / T) < 1e-9);
+            old = pcWideSetMode(PC_WIDE_MENU); /* the menu's opening */
+            CHECK(steady(16, T));
+            pcTransitionMenuIdle(1); /* its loop waits for the player */
+            CHECK(vblank() == 1 && steady(30, 1));
+            pcTransitionMenuIdle(0); /* the way out */
+            CHECK(vblank() == T && steady(16, T));
+            pcWideSetMode(old); /* the reload and the fade back */
+            CHECK(steady(16, T));
+            pcTransitionMenu(0); /* the screen is the field's again */
+            CHECK(vblank() == 1 && steady(8, 1));
+
+            pcTransitionMenu(0); /* another menu (a shop, the party): not marked */
+            old = pcWideSetMode(PC_WIDE_MENU);
+            CHECK(steady(12, 1));
+            pcWideSetMode(old);
+
+            fieldSpeedSetChosen(2); /* with Field speed: the faster of the two */
+            CHECK(vblank() == 2 && steady(8, 2));
+            pcTransitionMenu(1);
+            CHECK(vblank() == T && steady(8, T));
+            pcTransitionMenuIdle(1);
+            old = pcWideSetMode(PC_WIDE_MENU);
+            CHECK(vblank() == 1 && steady(8, 1)); /* the menu: Field speed's 1x, not the field's */
+            pcWideSetMode(old);
+            pcTransitionMenu(0);
+            CHECK(vblank() == 2);
+            fieldSpeedSetChosen(0);
+
+            pcTransitionMenu(1); /* the rules hold */
+            CHECK(vblank() == T);
+            online = 1;
+            CHECK(steady(10, 1));
+            online = 0;
+            CHECK(vblank() == T);
+            replaying = 1;
+            CHECK(steady(10, 1));
+            replaying = 0;
+            CHECK(vblank() == T);
+            cdQueued = 100;
+            CHECK(steady(10, 1));
+            cdQueued = 0;
+            CHECK(steady(CD_AUDIO_HOLD, 1));
+            CHECK(vblank() == T);
+
+            stateSave(&before); /* the marks in a state: on the way in */
+            pcTransitionMenuIdle(1);
+            stateSave(&after); /* in the menu's loop */
+            CHECK(after.at == before.at && after.at > 0);
+            CHECK(vblank() == 1);
+            stateLoad(&before);
+            CHECK(vblank() == T && steady(8, T));
+            stateLoad(&after);
+            CHECK(vblank() == 1 && steady(8, 1));
+            pcTransitionMenu(0);
+            CHECK(vblank() == 1);
+            stateLoad(&before); /* back onto the way in from the field */
+            CHECK(vblank() == T);
+            pcTransitionMenu(0);
+            transitionSpeedSetChosen(0); /* off again: the marks are ignored */
+            pcTransitionMenu(1);
+            CHECK(vblank() == 1 && steady(8, 1));
+            pcTransitionMenu(0);
+        }
+
+        /* A room change (transitionFields): its stretch at T; the new room's
+         * fade-in after it, the player in control, at the field's own speed. */
+        pcWideSetMode(PC_WIDE_FIELD);
+        pcTransitionRoom(1); /* off */
+        CHECK(steady(6, 1));
+        pcTransitionRoom(0);
+        transitionSpeedSetChosen(1);
+        CHECK(steady(4, 1));
+        pcTransitionRoom(1);
+        CHECK(vblank() == T && steady(12, T));
+        pcTransitionRoom(0);
+        CHECK(vblank() == 1 && steady(6, 1));
+        fieldSpeedSetChosen(2); /* with Field speed: T in the change, 2 after it */
+        CHECK(vblank() == 2);
+        pcTransitionRoom(1);
+        CHECK(vblank() == T && steady(8, T));
+        pcTransitionRoom(0);
+        CHECK(vblank() == 2 && steady(8, 2));
+        fieldSpeedSetChosen(0);
+        pcTransitionRoom(1); /* in a state */
+        stateSave(&before);
+        pcTransitionRoom(0);
+        CHECK(vblank() == 1);
+        stateLoad(&before);
+        CHECK(vblank() == T);
+        transitionSpeedReset(); /* a soft reset: every mark off */
+        CHECK(vblank() == 1 && steady(6, 1));
+        pcTransitionMenu(1);
+        CHECK(vblank() == T);
+        transitionSpeedReset();
+        CHECK(vblank() == 1);
+        pcTransitionRoom(1); /* an exit to the world map: the field mode ends without transitionFields */
+        CHECK(vblank() == T);
+        pcFieldWideExit();
+        CHECK(vblank() == 1 && steady(6, 1));
+        transitionSpeedSetChosen(0);
+        CHECK(transitionSpeedChosen() == 0 && hwGameSpeed() == 1);
+    }
 
     /* The control: Tab and Select+R2 step field_speed on the field and the
      * world map, with the option on; nowhere else, and in a battle they are

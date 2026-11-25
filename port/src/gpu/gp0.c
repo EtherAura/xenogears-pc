@@ -59,6 +59,13 @@ static struct {
     uint32_t e1;        /* draw mode: texpage, semi-transparency, depth, dither (bits 0-13) */
     uint32_t texWindow; /* E2 bits 0-19 */
     int clipX0, clipY0, clipX1, clipY1;
+    /* Where this scene's own redraws have written (VRAM, inclusive; valid
+     * from the first): a later redraw reading from there reads this frame's
+     * picture too, staged off screen (xg-rgcf.5.21). */
+    int scratchOn, scratchX0, scratchY0, scratchX1, scratchY1;
+    /* And where its VRAM copies of this frame's picture went (exact rectangles). */
+    int stagedCount;
+    VRect staged[16];
     int offX, offY;
     int setMask, checkMask;
 
@@ -811,6 +818,29 @@ static float preciseSnap(double v) {
     return (float)(floor(v * 256.0 + 0.5) * (1.0 / 256.0));
 }
 
+/* Whether a VRAM rectangle (inclusive) holds this frame's picture: wholly in
+ * the drawing area (the clip), or where this scene's redraws or copies of it
+ * have staged it. */
+static int inThisFrame(int x0, int y0, int x1, int y1) {
+    if (x0 >= gp.clipX0 && x1 <= gp.clipX1 && y0 >= gp.clipY0 && y1 <= gp.clipY1) return 1;
+    if (gp.scratchOn && x0 >= gp.scratchX0 && x1 <= gp.scratchX1 && y0 >= gp.scratchY0 && y1 <= gp.scratchY1) return 1;
+    for (int i = 0; i < gp.stagedCount; i++) {
+        const VRect* r = &gp.staged[i];
+        if (x0 >= r->x0 && x1 <= r->x1 && y0 >= r->y0 && y1 <= r->y1) return 1;
+    }
+    return 0;
+}
+
+/* Whether a 15-bit texture's sampled rectangle (tpage tex, texels uvMin to
+ * uvMax, each u | v << 16) is this frame's own picture: wholly in the
+ * drawing area (the clip), or where this scene's redraws have staged it. */
+static int readsThisFrame(uint32_t tex, uint32_t uvMin, uint32_t uvMax) {
+    int tx = (int)(tex & 15) * 64, ty = (int)((tex >> 4) & 1) * 256;
+    int x0 = tx + (int)(uvMin & 0xFFFFu), y0 = ty + (int)(uvMin >> 16);
+    int x1 = tx + (int)(uvMax & 0xFFFFu), y1 = ty + (int)(uvMax >> 16);
+    return inThisFrame(x0, y0, x1, y1);
+}
+
 static void hiVertex(HiVertex* o, float x, float y, float u, float v, float r, float g, float b, uint32_t mode,
                      uint32_t tex, uint32_t uvMin, uint32_t uvMax) {
     o->x = x;
@@ -839,9 +869,27 @@ static void hiVertex(HiVertex* o, float x, float y, float u, float v, float r, f
     o->rasterShift = !gp.wide && gp.replayed
         ? ((uint32_t)(gp.wd.shift + (gp.pkt != NULL ? gp.pkt->dx : 0)) & 0xFFFFu) | (uint32_t)gp.wd.shiftY << 16 : 0;
     /* A picture sampled as 15-bit texels (a frame buffer an effect redraws,
-     * an uploaded picture) is kept in focus: a frame is never blurred twice. */
-    o->z = !gp.sceneOn ? SCENE_Z_NONE
-         : (mode & DRAW_TEXTURED) && ((tex >> 7) & 3) >= 2 && gp.sceneZ != SCENE_Z_NONE ? SCENE_Z_SHARP : gp.sceneZ;
+     * an uploaded picture) is kept in focus: a frame is never blurred twice.
+     * But one read wholly from the area being drawn now is this frame's own
+     * picture, redrawn before the effects run (a heat shimmer's tiles, as in
+     * Lahan burning), or staged off screen by an earlier redraw of this
+     * scene: it keeps the depth of what is under it (xg-rgcf.5.21). */
+    int redrawn = (mode & DRAW_TEXTURED) && ((tex >> 7) & 3) >= 2 && gp.sceneZ != SCENE_Z_NONE;
+    int own = redrawn && gp.sceneOn && readsThisFrame(tex, uvMin, uvMax);
+    if (own) { /* where it writes is this frame's picture too */
+        int px = (int)floorf(x), py = (int)floorf(y);
+        if (!gp.scratchOn) {
+            gp.scratchOn = 1;
+            gp.scratchX0 = gp.scratchX1 = px;
+            gp.scratchY0 = gp.scratchY1 = py;
+        } else {
+            if (px < gp.scratchX0) gp.scratchX0 = px;
+            if (px > gp.scratchX1) gp.scratchX1 = px;
+            if (py < gp.scratchY0) gp.scratchY0 = py;
+            if (py > gp.scratchY1) gp.scratchY1 = py;
+        }
+    }
+    o->z = !gp.sceneOn ? SCENE_Z_NONE : redrawn ? (own ? SCENE_Z_NONE : SCENE_Z_SHARP) : gp.sceneZ;
     /* A sprite's pixels are marked as a figure's (negative depth). */
     if (SCENE_Z_IS_DEPTH(o->z) && gp.pkt != NULL && gp.pkt->classified && gp.pkt->texClass == PC_TEX_SPRITE) o->z = -o->z;
 }
@@ -853,6 +901,7 @@ static void sceneVertexZ(HiVertex* o, const PVertex* p) {
 }
 
 void gp0SceneDepth(int on, float z) {
+    if (on && !gp.sceneOn) gp.scratchOn = gp.stagedCount = 0; /* a scene's walk starts: nothing staged yet */
     gp.sceneOn = on;
     gp.sceneZ = on ? z : SCENE_Z_NONE;
 }
@@ -991,6 +1040,11 @@ static void recordPolygon(const PVertex* v, int count, uint32_t mode, uint32_t t
             out[k].y = preciseSnap(projected[index[k]].y) + (float)(gp.offY + gp.wideShiftY);
             if (hiresPerspective() && hiresPrecision()) out[k].w = (float)projected[index[k]].z / 4096.0f;
         }
+    }
+    /* The triangles hiTriangle seals (opaque, precise, projected) carry their perimeter edges, as
+     * triangle() hands them (a quad's halves 5 and 6), so the replay seals them alike (xg-ugy.9). */
+    if ((mode & DRAW_PRECISE) && !(mode & DRAW_SEMI) && kind == PC_TEX_3D && hiresSeamGuard()) {
+        for (int k = 0; k < n; k++) out[k].mode |= (count == 4 ? (k < 3 ? 5u : 6u) : 7u) << DRAW_SEAL_SHIFT;
     }
     interpolationDraw(out, n, kind, gp.wide, gp.wideShift, gp.wideShiftY, piece);
 }
@@ -1177,19 +1231,24 @@ static void hiTriangle(const PVertex* a, const PVertex* b, const PVertex* c, uin
     }
 
     HiVertex sealed[21];
-    int n = seal ? hiSeal(o, sealed, perimeter, 2) : 0;
-    if (n > 3 && gp.sceneOn && SCENE_Z_IS_DEPTH(o[0].z) && o[0].z > 0 && o[1].z > 0 && o[2].z > 0) {
+    int n = seal ? gp0SealTriangle(o, sealed, perimeter, gp.sceneOn) : 0;
+    hiEmit(n ? sealed : o, n ? n : 3);
+}
+
+int gp0SealTriangle(const HiVertex src[3], HiVertex out[21], unsigned perimeter, int sceneDepth) {
+    int n = hiSeal(src, out, perimeter, 2);
+    if (n > 3 && sceneDepth && SCENE_Z_IS_DEPTH(src[0].z) && src[0].z > 0 && src[1].z > 0 && src[2].z > 0) {
         /* The fringe's depth: the face's plane carried on (1/z is linear on screen). */
-        double area = (double)(o[1].x - o[0].x) * (o[2].y - o[0].y) - (double)(o[2].x - o[0].x) * (o[1].y - o[0].y);
+        double area = (double)(src[1].x - src[0].x) * (src[2].y - src[0].y) - (double)(src[2].x - src[0].x) * (src[1].y - src[0].y);
         for (int k = 3; k < n; k++) {
-            double dx = sealed[k].x - o[0].x, dy = sealed[k].y - o[0].y;
-            double l1 = (dx * (o[2].y - o[0].y) - dy * (o[2].x - o[0].x)) / area;
-            double l2 = ((o[1].x - o[0].x) * dy - (o[1].y - o[0].y) * dx) / area;
-            double inv = (1 - l1 - l2) / o[0].z + l1 / o[1].z + l2 / o[2].z;
-            if (inv > 0 && isfinite(inv)) sealed[k].z = (float)(1 / inv);
+            double dx = out[k].x - src[0].x, dy = out[k].y - src[0].y;
+            double l1 = (dx * (src[2].y - src[0].y) - dy * (src[2].x - src[0].x)) / area;
+            double l2 = ((src[1].x - src[0].x) * dy - (src[1].y - src[0].y) * dx) / area;
+            double inv = (1 - l1 - l2) / src[0].z + l1 / src[1].z + l2 / src[2].z;
+            if (inv > 0 && isfinite(inv)) out[k].z = (float)(1 / inv);
         }
     }
-    hiEmit(n ? sealed : o, n ? n : 3);
+    return n;
 }
 
 /* An axis-aligned rectangle (x0, y0)-(x1, y1), exclusive right and bottom,
@@ -3648,6 +3707,9 @@ static void copyCommand(void) {
     int dy = (int)((gp.cmd[2] >> 16) & 0x1FF);
     int w = (int)(((gp.cmd[3] & 0xFFFF) - 1) & 0x3FF) + 1;
     int h = (int)(((gp.cmd[3] >> 16) - 1) & 0x1FF) + 1;
+    /* A copy of this frame's picture during a scene stages it (xg-rgcf.5.21). */
+    if (gp.sceneOn && gp.stagedCount < 16 && inThisFrame(sx, sy, sx + w - 1, sy + h - 1))
+        gp.staged[gp.stagedCount++] = (VRect){dx, dy, dx + w - 1, dy + h - 1};
     gpuMove(sx, sy, dx, dy, w, h);
 }
 

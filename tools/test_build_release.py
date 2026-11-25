@@ -126,7 +126,8 @@ class ReleaseTests(unittest.TestCase):
         with patch.object(sys, "argv", ["build-release.sh", *argv]), patch.object(release, "python_pins", return_value=[]), \
              patch.object(release, "fetch") as fetch, patch.object(release, "fetch_free") as builder, \
              patch.object(release, "build") as build, patch.object(release, "build_free") as free, \
-             patch.object(release, "build_tables") as self.tables, contextlib.redirect_stderr(io.StringIO()):
+             patch.object(release, "build_tables") as self.tables, \
+             patch.object(release, "build_linux_tarball") as self.linux, contextlib.redirect_stderr(io.StringIO()):
             try:
                 status = release.main()
             except SystemExit as stop:
@@ -158,11 +159,16 @@ class ReleaseTests(unittest.TestCase):
                      ["--fetch-only", "--only", "windows"], ["--only", "macos"],
                      ["--discs", "d", "--write-tables", "tables", "--out", "out"],
                      ["--discs", "d", "--write-tables", "tables", "--version", "2026.11.0"],
-                     ["--discs", "d", "--write-tables", "tables", "--makensis", "makensis"]):
+                     ["--discs", "d", "--write-tables", "tables", "--makensis", "makensis"],
+                     ["--write-linux", "dir"], ["--fetch-only", "--write-linux", "dir"],
+                     ["--discs", "d", "--write-linux", "dir", "--out", "out"],
+                     ["--discs", "d", "--write-linux", "dir", "--makensis", "makensis"],
+                     ["--discs", "d", "--write-linux", "dir", "--write-tables", "tables"],
+                     ["--discs", "d", "--write-linux", "dir", "--only", "linux"]):
             with self.subTest(argv=argv):
                 status, fetch, builder, build, free = self.main(*argv)
                 self.assertEqual(status, 2)
-                for call in (fetch, builder, build, free, self.tables):
+                for call in (fetch, builder, build, free, self.tables, self.linux):
                     call.assert_not_called()
 
     def test_write_tables_makes_tables_and_no_asset(self):
@@ -175,6 +181,69 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(self.tables.call_args.args[0].region, "us")
         self.assertEqual(self.main("--discs", "d", "--write-tables", "tables", "--region", "jp")[0], 0)
         self.assertEqual(self.tables.call_args.args[0].region, "jp")
+
+    def test_write_linux_makes_one_regions_tarball_and_no_asset(self):
+        status, fetch, builder, build, free = self.main("--discs", "d", "--cache", "cache", "--version", "2026.11.0",
+                                                        "--region", "jp", "--write-linux", "local")
+        self.assertEqual(status, 0)
+        for call in (fetch, builder, build, free, self.tables):
+            call.assert_not_called()
+        args = self.linux.call_args.args[0]
+        self.assertEqual((args.write_linux, args.region, self.linux.call_args.args[-1]),
+                         (Path("local"), "jp", "v2026.11.0"))
+        self.assertEqual(self.main("--discs", "d", "--cache", "cache", "--write-linux", "local")[0], 0)
+        self.assertEqual(self.linux.call_args.args[0].region, "us")
+
+    def test_write_linux_builds_and_packages_as_the_release_does(self):
+        """build_linux_tarball(): the region's split from its disc, both engines by build-linux-executables.sh,
+        linux_release.py package for that region in the builder; only the tarball and its .sha256 reach the folder."""
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            python, ubuntu, dest = root / "python", root / "ubuntu", root / "local"
+            self.tools(python, ubuntu, root / "mingw")
+            tag, calls, hosts = "v2026.11.0", [], []
+            names = release.linux_release.release_names(tag)
+
+            def builder(rootfs, tree, build, *command, out=None, writable=False):
+                calls.append(command)
+                if command[0] == "/bin/bash":
+                    for rel in release.ENGINES.values():
+                        (build / "jp-stage" / rel).parent.mkdir(parents=True, exist_ok=True)
+                        (build / "jp-stage" / rel).write_text(rel)
+                else:
+                    (out / names["tarball"]).write_bytes(b"tarball")
+                    (out / names["sha256"]).write_text(f"{hashlib.sha256(b'tarball').hexdigest()}  {names['tarball']}\n")
+                    if self.stray:  # anything else the packaging left is refused, and nothing is written
+                        (out / "stray.txt").write_text("more")
+
+            def host(*argv, **kwargs):
+                hosts.append([str(a) for a in argv[-5:]])
+
+            args = argparse.Namespace(discs=root / "discs", write_linux=dest, scratch=root, region="jp")
+            for self.stray in (True, False):
+                calls.clear()
+                with patch.object(release.release_inputs, "disc_image", return_value=root / "jp.bin"), \
+                     patch.object(release.release_inputs, "copy_tree"), \
+                     patch.object(release.release_inputs, "module_count", return_value=25), \
+                     patch.object(release, "run", side_effect=host), patch.object(release, "builder", side_effect=builder), \
+                     patch.object(release.shutil, "which", return_value="bwrap"), contextlib.redirect_stdout(io.StringIO()):
+                    if self.stray:
+                        with self.assertRaisesRegex(release.ReleaseError, "complete release bundle"):
+                            release.build_linux_tarball(args, root / "cache", python, ubuntu, tag)
+                        self.assertFalse(dest.exists())
+                        continue
+                    release.build_linux_tarball(args, root / "cache", python, ubuntu, tag)
+                    with self.assertRaisesRegex(release.ReleaseError, "already holds"):
+                        release.build_linux_tarball(args, root / "cache", python, ubuntu, tag)
+            self.assertEqual(sorted(p.name for p in dest.iterdir()), [names["tarball"], names["sha256"]])
+            self.assertEqual(calls[0], ("/bin/bash", "/work/source/packaging/build-linux-executables.sh", "jp", tag))
+            package = list(calls[1])
+            self.assertEqual(package[:5], ["python3", "-I", "-B", "/work/source/packaging/linux_release.py", "package"])
+            self.assertEqual(package[package.index("--ver") + 1], "jp")
+            self.assertEqual(package[package.index("--stage") + 1], "/work/build/jp-stage")
+            self.assertIn(["tools/extract.py", "jp", "--image", str(root / "jp.bin"), "--check-image"], hosts)
+            self.assertIn(["-s", "-B", "tools/configure.py", "jp"], [h[-4:] for h in hosts])
+            self.assertFalse(list(root.glob(".xenogears-release-*")))
 
     def test_tree_digest_names_the_sources_not_the_tables(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The icon's cursor (mipmap-anydpi/ic_launcher.xml): the favicon's two triangles, its points
+     (5,28) (21,3) (21,14) (30,14) in a 32-unit square, at 1.68 dp a unit and centred on their
+     own middle, a 42 dp square in the 108 dp layer. Its farthest corner is 29.7 dp from the
+     centre, inside the 33 dp every launcher's mask keeps. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:fillColor="#FF2A22" android:pathData="M33,75 L59.88,33 L59.88,51.48 Z" />
+    <path android:fillColor="#C70B0B" android:pathData="M33,75 L59.88,51.48 L75,51.48 Z" />
+</vector>

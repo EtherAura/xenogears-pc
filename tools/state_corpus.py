@@ -4,7 +4,7 @@
     tools/state_corpus.py BUILD [BUILD ...] OUT_DIR [--release NAME] [--case ID ...] [--jobs N] [--no-verify]
     tools/state_corpus.py list [--jp]
     tools/state_corpus.py check CORPUS
-    tools/state_corpus.py release TAG [--tarball FILE] [--build CONFIG=DIR ...] [--gate]
+    tools/state_corpus.py release TAG [--tarball FILE] [--build FILE.tar.gz | [CONFIG=]DIR ...] [--gate] [--replace]
 
 A corpus is the portable slots one release saves, each with what a later or earlier release needs to load it
 and to tell whether it went on as it should: per region (us, jp) and engine (original, enhanced), a
@@ -36,6 +36,7 @@ The layout:
     OUT_DIR/<config>/<case>/pad.txt              its input
     OUT_DIR/<config>/<case>/invariants.log       the reference continuation (V+1..V+RUN)
     OUT_DIR/<config>/<case>/sweep.log
+    OUT_DIR/executables/...                      a release's executables that are no asset (below)
 
 States hold game memory read from the disc: a corpus never leaves this host (work/state-corpus/<release>/,
 carl).
@@ -45,8 +46,16 @@ for a release whose executables write portable slots and, with --gate, pass stat
 against every earlier canonical release; releases before (no portable slots) never get a corpus, so they are
 never in the set. `release TAG` takes the release's Linux tarball (--tarball, as the release run made it,
 before the upload; else downloaded from GitHub into the cache, checksum-verified), unpacks it in the cache
-and makes the corpus of both its engines (US: the tarball is US only; --build jp-original=DIR adds the JP
-executables of the same release), into work/state-corpus/TAG.
+and makes the corpus of both its engines (US: the tarball is US only), into work/state-corpus/TAG.
+
+--build adds executables of the same release that are no asset: the JP ones (carl "JP for the
+gate only": the release run builds them, packaging/build_release.py --write-linux, and never publishes them).
+Either that region's Linux tarball of the tag (FILE.tar.gz, FILE.sha256 beside it: both engines) or a folder
+(a build folder, an install; CONFIG=DIR to take one configuration of it). The corpus keeps them, since no
+later release can download them: the tarball and its .sha256 as executables/<region>/<name>, a folder's
+executable and schema as executables/<config>/bin/ and share/; the manifest's executable records name them
+by their path in the corpus and their SHA-256, and state_compat.py runs them from there (the backward
+direction of every later release).
 """
 
 from __future__ import annotations
@@ -80,6 +89,7 @@ FORMAT = 1
 RUN = 600  # vblanks a loaded case runs (docs/CANONICAL_STATES.md 9: invariants hold for 600 vblanks)
 WAIT = 120  # a slot save waits this long for a safe point (port/src/system/savestate.c), then saves as it is
 CORPORA = ROOT / "work" / "state-corpus"
+KEPT = "executables"  # a corpus' folder of the release's executables that are no asset (release --build)
 CACHE = Path(os.environ.get("XG_RELEASE_CACHE", "/mnt/Games/scratch/xg-release-cache"))
 REPO = "EtherAura/xenogears-pc"
 PACKAGE = "xenogears-pc"
@@ -93,6 +103,12 @@ BOOT_KEYS = ("XG_FIELD", "XG_BOOT_MODE", "XG_PARTY", "XG_PRESET", "XG_GAMESTATE"
 # XG_STATE_DIR or dump folders must not reach a case).
 KEEP_ENV = ("XG_VK_DEVICE", "XG_YIELD_JOBS")
 OFF_TEXT = b"slots that other versions load come in a later release"  # stateportable.c, XG_PORTABLE_SLOTS off
+# What portable_off finds of it: its first 32 bytes. A compiler may copy the literal in pieces: the release builder's
+# GCC (packaging/deb_ubuntu.Dockerfile) loads its first 48 bytes from .rodata in 16-byte chunks and stores the rest as
+# immediates, so the whole sentence is in no XG_DIST image (every release would have looked canonical, and
+# its corpus failed). The text is in that #ifdef alone: no build with portable slots holds its start. A build whose
+# image holds less of it is taken for portable and its corpus fails (no portable slot): held, never passed.
+OFF_MARK = OFF_TEXT[:32]
 SAFE_NAMES = {1: "field", 2: "battle", 3: "world map", 4: "Battling", 5: "menu"}  # include/pc_state.h PC_SAFE_*
 
 
@@ -349,10 +365,10 @@ def cache_region(path: Path) -> str | None:
 
 def portable_off(exe: Path) -> bool:
     """A build whose portable slots are switched off (port/CMakeLists.txt XG_PORTABLE_SLOTS=OFF, a release's
-    until P5) carries stateportable.c's reason for it."""
+    until P5) carries stateportable.c's reason for it (OFF_MARK: its start)."""
     with open(exe, "rb") as f:
         data = f.read()
-    return OFF_TEXT in data
+    return OFF_MARK in data
 
 
 # ---- running the game -----------------------------------------------------------------------------------
@@ -438,8 +454,9 @@ def check_load(reader: Build, corpus: Path, rec: dict, work: Path, discs: Path |
     and by the state-compat gate:
 
       no refusal  the reader's log says "state: Loaded slot 1" and no "Cannot load slot"; a reader of
-                  another build than the writer's must have converted it ("converted from another build"),
-                  the writer's own build loads it raw;
+                  another build than the writer's must have converted it (", converted from <writer>":
+                  "version X" when both builds carry a release version and they differ, else "another build
+                  of the port"; stateportable.c statePortableWriter), the writer's own build loads it raw;
       no crash    the run exits 0 at XG_QUIT_AT = V + 600 (V: the vblank the slot was saved at; the count a
                   load restores), within the time limit;
       invariants  the reader's invariant log (invariants.c: per vblank the screen kind, a hash of gameState,
@@ -480,7 +497,7 @@ def check_load(reader: Build, corpus: Path, rec: dict, work: Path, discs: Path |
     elif not loaded:
         problems.append("no load (" + ("; ".join(state_lines(log)[-3:]) or "the log says nothing of slot 1") + ")")
     else:
-        how = "converted" if "converted from another build" in loaded.group(0) else "raw"
+        how = "converted" if ", converted from " in loaded.group(0) else "raw"
         same = reader.image_id() == rec["build"]
         if same and how != "raw":
             problems.append("the writer's own build converted its slot instead of loading it raw")
@@ -737,7 +754,25 @@ def read_manifest(corpus: Path) -> dict:
             raise CorpusError(f"{path}: case {r['id']} of an unlisted configuration {r['config']}")
         if ".." in Path(r["dir"]).parts or Path(r["dir"]).is_absolute():
             raise CorpusError(f"{path}: case {r['id']} outside the corpus")
+    for config, info in m["configs"].items():
+        for rel, _ in kept_files(info.get("executable") if isinstance(info, dict) else None):
+            if not rel or ".." in Path(rel).parts or Path(rel).is_absolute() or Path(rel).parts[0] != KEPT:
+                raise CorpusError(f"{path}: {config}'s executable outside the corpus' {KEPT}/")
     return m
+
+
+def kept_files(executable: dict | None) -> list[tuple[str, str | None]]:
+    """The files a configuration's executable record keeps in the corpus (release --build), as (path in the corpus,
+    SHA-256): a kind "tarball" record with "kept" (the tarball), a kind "kept" one (the executable and its schema)."""
+    if not isinstance(executable, dict):
+        return []
+    if executable.get("kind") == "tarball" and "kept" in executable:
+        return [(str(executable["kept"]), executable.get("sha256"))]
+    if executable.get("kind") == "kept":
+        schema = executable.get("schema") if isinstance(executable.get("schema"), dict) else None
+        return [(str(executable.get("path") or ""), executable.get("sha256"))] + (
+            [(str(schema.get("path") or ""), schema.get("sha256"))] if schema else [])
+    return []
 
 
 def check_corpus(corpus: Path) -> list[str]:
@@ -760,6 +795,12 @@ def check_corpus(corpus: Path) -> list[str]:
                 problems.append(f"{r['id']}: {what}.log changed")
         if not (corpus / r["config"] / "schemas" / f"{r['schema']}.xgschema").is_file():
             problems.append(f"{r['id']}: its writer's schema {r['schema']} is missing")
+    for config, info in m["configs"].items():
+        for rel, digest in kept_files(info.get("executable")):
+            if not (corpus / rel).is_file():
+                problems.append(f"{config}: no {rel} (kept in the corpus: the release has no such asset)")
+            elif not digest or sha256(corpus / rel) != digest:
+                problems.append(f"{config}: {rel} changed")
     return problems
 
 
@@ -899,12 +940,19 @@ class ReleaseCache:
         """The release's folder, unpacked from its verified tarball (again when the tarball changed)."""
         path = self.tarball(tag, expect, local)
         digest = json.loads((self.root / tag / "verified.json").read_text())["sha256"]
+        return self.unpack(tag, path, digest)
+
+    def unpack(self, tag: str, path: Path, digest: str) -> Path:
+        """A verified tarball of the release (its digest given) unpacked once into the cache, by its digest: the
+        published one, or one the release kept in its corpus (release --build: another region's, of the same
+        name)."""
         top = self.root / tag / f"unpacked-{digest[:16]}"
         folder = top / tarball_name(tag).removesuffix(".tar.gz")
         with self.lock:
             if (top / ".complete").is_file() and folder.is_dir():
                 return folder
             shutil.rmtree(top, ignore_errors=True)
+            (self.root / tag).mkdir(parents=True, exist_ok=True)
             tmp = Path(tempfile.mkdtemp(prefix=".unpack-", dir=self.root / tag))
             try:
                 safe_extract(path, tmp, folder.name)
@@ -914,34 +962,26 @@ class ReleaseCache:
                 shutil.rmtree(tmp, ignore_errors=True)
         return folder
 
-    def keep(self, tag: str, build: Build) -> dict:
-        """A release's executable that is no asset (JP: the Linux tarball is US only), kept in the cache with
-        its schema for the backward runs of later releases: the executable record of the manifest."""
-        dest = self.root / tag / "kept" / build.config
-        with self.lock:
-            shutil.rmtree(dest, ignore_errors=True)
-            (dest / "bin").mkdir(parents=True)
-            (dest / "share" / PACKAGE).mkdir(parents=True)
-            shutil.copy2(build.exe, dest / "bin" / build.exe.name)
-            if build.schema is not None:
-                name = f"{build.exe.name}.xgschema"
-                if build.schema.name.endswith(".json"):
-                    (dest / "share" / PACKAGE / name).write_bytes(sc.schema_file(build.schema.read_bytes()))
-                else:
-                    shutil.copyfile(build.schema, dest / "share" / PACKAGE / name)
-        return {"kind": "kept", "tag": tag, "path": f"kept/{build.config}/bin/{build.exe.name}",
-                "sha256": sha256(dest / "bin" / build.exe.name)}
-
-    def executable(self, release: str, executable: dict) -> Path:
-        """A corpus configuration's executable from its manifest record."""
+    def executable(self, release: str, executable: dict, corpus: Path | None = None) -> Path:
+        """A corpus configuration's executable from its manifest record (corpus: the corpus' folder, where
+        release --build kept the executables that are no asset)."""
         kind = executable.get("kind")
-        if kind == "tarball":
+        kept = kept_files(executable)
+        if kept and corpus is None:
+            raise CorpusError(f"{release}: its executable is kept in its corpus, and no corpus was named")
+        for rel, digest in kept:
+            if not (corpus / rel).is_file():
+                raise CorpusError(f"{release}: no {corpus / rel} (kept in its corpus: no asset has it)")
+            if not digest or sha256(corpus / rel) != digest:
+                raise CorpusError(f"{release}: {corpus / rel} changed since its corpus was made")
+        if kind == "tarball" and kept:
+            folder = self.unpack(executable["tag"], corpus / kept[0][0], kept[0][1])
+            exe = folder / executable["path"]
+        elif kind == "tarball":
             folder = self.unpacked(executable["tag"], executable.get("sha256"))
             exe = folder / executable["path"]
         elif kind == "kept":
-            exe = self.root / executable["tag"] / executable["path"]
-            if exe.is_file() and executable.get("sha256") and sha256(exe) != executable["sha256"]:
-                raise CorpusError(f"{release}: the kept {exe} changed")
+            exe = corpus / kept[0][0]
         elif kind == "local":
             exe = Path(executable["path"])
         else:
@@ -1029,6 +1069,78 @@ def cmd_check(argv: list[str]) -> int:
     return 1 if problems else 0
 
 
+def other_build(tag: str, spec: str, cache: ReleaseCache) -> tuple[list[Build], list[tuple[str, Path | bytes]]]:
+    """One --build of `release`: executables of the release that are no asset, and what its corpus keeps of them.
+
+    FILE.tar.gz: the tag's Linux tarball of another region (packaging/build_release.py --write-linux), its
+    FILE.sha256 beside it and matching; unpacked in the cache by its digest; both engines; kept as
+    executables/<region>/FILE and FILE.sha256. [CONFIG=]DIR: a build folder, an install or an unpacked tarball
+    (CONFIG: only that configuration of it); each executable and its schema kept as executables/<config>/bin/ and
+    share/xenogears-pc/, as an install lays them out. Every one must write portable slots."""
+    config, eq, path = spec.partition("=")
+    if not eq:
+        config, path = "", spec
+    given = Path(path)
+    files: list[tuple[str, Path | bytes]] = []
+    if given.name.endswith(".tar.gz"):
+        if config:
+            raise CorpusError(f"--build {spec}: a tarball holds both engines of its region: give it alone")
+        if given.name != tarball_name(tag):
+            raise CorpusError(f"--build {spec}: not {tag}'s Linux tarball ({tarball_name(tag)})")
+        side = given.with_name(given.name + ".sha256")
+        if not given.is_file() or not side.is_file():
+            raise CorpusError(f"--build {spec}: no such tarball, or no {side.name} beside it")
+        digest = sha256(given)
+        if side.read_text() != f"{digest}  {given.name}\n":
+            raise CorpusError(f"--build {spec}: it does not match its {side.name}")
+        folder = cache.unpack(tag, given, digest)
+        more = resolve_builds(folder)
+        regions = sorted({b.region for b in more})
+        if len(regions) != 1:
+            raise CorpusError(f"--build {spec}: engines of {' and '.join(regions)} in one tarball")
+        kept = f"{KEPT}/{regions[0]}/{given.name}"
+        for b in more:
+            b.source = {"executable": {"kind": "tarball", "tag": tag, "sha256": digest, "kept": kept,
+                                       "path": str(b.exe.relative_to(folder))}}
+        files += [(kept, given), (kept + ".sha256", side)]
+    else:
+        more = resolve_builds(given)
+        if config:
+            more = [b for b in more if b.config == config]
+            if not more:
+                raise CorpusError(f"--build {spec}: that folder holds {', '.join(b.config for b in resolve_builds(given))}")
+        for b in more:
+            if b.schema is None:
+                raise CorpusError(f"--build {spec}: {b.exe} has no state schema beside it")
+            data = b.schema.read_bytes()
+            packed = sc.schema_file(data) if b.schema.name.endswith(".json") else data
+            rel = f"{KEPT}/{b.config}"
+            exe, schema = f"{rel}/bin/{b.exe.name}", f"{rel}/share/{PACKAGE}/{b.exe.name}.xgschema"
+            b.source = {"executable": {"kind": "kept", "path": exe, "sha256": sha256(b.exe),
+                                       "schema": {"path": schema, "sha256": hashlib.sha256(packed).hexdigest()}}}
+            files += [(exe, b.exe), (schema, packed)]
+    for b in more:
+        if portable_off(b.exe) or b.schema is None:
+            raise CorpusError(f"--build {spec}: {b.exe.name} ({b.config}) writes no portable slots")
+    return more, files
+
+
+def keep_in_corpus(corpus: Path, keep: list[tuple[str, Path | bytes]], manifest: dict) -> None:
+    """The --build files into the corpus, checked against the manifest's records once there."""
+    for rel, source in keep:
+        dest = corpus / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(source, bytes):
+            dest.write_bytes(source)
+        else:
+            shutil.copy2(source, dest)
+    for config, info in manifest["configs"].items():
+        for rel, digest in kept_files(info.get("executable")):
+            if not (corpus / rel).is_file() or sha256(corpus / rel) != digest:
+                raise CorpusError(f"{config}: {rel} is not what was given")
+    manifest["bytes"] = sum(p.stat().st_size for p in corpus.rglob("*") if p.is_file())
+
+
 def cmd_release(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="state_corpus.py release",
                                  description="A release's corpus into CORPORA/TAG, from its Linux tarball; "
@@ -1036,8 +1148,10 @@ def cmd_release(argv: list[str]) -> int:
     ap.add_argument("tag")
     ap.add_argument("--tarball", type=Path, help="the release's Linux tarball (FILE.sha256 beside it), as the release "
                     "run made it; default: the published one, downloaded into the cache")
-    ap.add_argument("--build", action="append", default=[], metavar="CONFIG=DIR",
-                    help="more executables of the same release, not in the tarball (jp-original=DIR, jp-enhanced=DIR)")
+    ap.add_argument("--build", action="append", default=[], metavar="FILE.tar.gz|[CONFIG=]DIR",
+                    help="more executables of the same release that are no asset, kept in its corpus: the tag's "
+                         "Linux tarball of another region (FILE.sha256 beside it; the release run's JP one), or a "
+                         "folder (CONFIG=DIR: one configuration of it)")
     ap.add_argument("--corpora", type=Path, default=CORPORA)
     ap.add_argument("--cache", type=Path, default=CACHE)
     ap.add_argument("--assets-from", type=Path, help="a local stand-in of the GitHub release assets: DIR/<tag>/<asset>")
@@ -1064,15 +1178,14 @@ def cmd_release(argv: list[str]) -> int:
                   f"write{'s' if len(off) == 1 else ''} no portable slots (XG_PORTABLE_SLOTS off, or no state schema): "
                   "no corpus written")
             return 0
+        keep: list[tuple[str, Path | bytes]] = []  # what the corpus keeps of --build: (path in it, file or bytes)
         for spec in args.build:
-            config, _, path = spec.partition("=")
-            more = resolve_builds(Path(path))
-            if [b.config for b in more] != [config]:
-                raise CorpusError(f"--build {spec}: that folder holds {', '.join(b.config for b in more)}")
-            if portable_off(more[0].exe):
-                raise CorpusError(f"--build {spec}: its portable slots are off")
-            more[0].source = {"executable": cache.keep(args.tag, more[0])}
+            more, files = other_build(args.tag, spec, cache)
+            twice = sorted({b.config for b in more} & {b.config for b in builds})
+            if twice:
+                raise CorpusError(f"--build {spec}: two builds of one configuration: {', '.join(twice)}")
             builds += more
+            keep += files
         dest = args.corpora / args.tag
         if dest.exists() and not args.replace:
             raise CorpusError(f"{dest} exists (--replace makes it again)")
@@ -1082,6 +1195,7 @@ def cmd_release(argv: list[str]) -> int:
         m = make_corpus(builds, staged, args.tag, args.case, args.jobs, args.discs, True, False,
                         {"kind": "release", "tag": args.tag, "tarball": tarball_name(args.tag), "sha256": digest},
                         keep_going=not args.strict)
+        keep_in_corpus(staged, keep, m)
         gate = None
         if args.gate:
             import state_compat

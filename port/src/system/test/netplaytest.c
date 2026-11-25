@@ -12,9 +12,14 @@
  * through for a while, at the largest delay: the lockstep goes on from where
  * it stopped, the inputs sent before the drop sent again from the first the
  * other side lacks), an address change (the other side followed by its
- * session token), the versus formation player 2 chooses (or must), and the
- * settings a
- * session holds (settingsPin). Each side runs in its own thread, as two
+ * session token), the versus formation player 2 chooses (or must), the
+ * settings a session holds (settingsPin), party vs party (each side's party
+ * record in PARTY pages: lost, repeated, out of order, a decoy record's pages
+ * between them, a page with other bytes; a party the check refuses, either
+ * side's, with the reason both ends get; none brought), and older builds
+ * (an older joiner's HELLO answered "another build" in its own version, an
+ * older host's answer to the joiner's older HELLO, a newer joiner's older
+ * HELLO left by the host). Each side runs in its own thread, as two
  * processes would. Settings stay in memory (XG_SETTINGS=none). */
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -31,7 +36,7 @@ static int checks;
 
 #define FRAMES 600
 
-typedef struct {
+typedef struct Side {
     NpSession s;
     const NetAddr* joinTo; /* the joiner's host */
     uint64_t waitNs;       /* the handshake's */
@@ -48,6 +53,8 @@ typedef struct {
     int endedAt;    /* the vblank whose npFrame returned 0 (-1: none) */
     int notes[NP_NOTE_COUNT]; /* NP_NOTE_* seen */
     unsigned p1[FRAMES], p2[FRAMES];
+    SDL_AtomicInt finished; /* run() is over */
+    struct Side* other;     /* pair(): the other side, which this one answers until it is over too */
 } Side;
 
 static unsigned input(int host, uint32_t n) {
@@ -64,8 +71,27 @@ static void noted(NpSession* s, int what, const char* text) {
     if (what >= 0 && what < NP_NOTE_COUNT) d->notes[what]++;
 }
 
+static int SDLCALL session(Side* d);
+
+/* A side's session; once it has had all its vblanks it goes on answering
+ * (as a game's next vblanks would) until the other side has had all of its:
+ * the other may still lack the last inputs (sent again from the first it
+ * lacks), and would otherwise wait for them in silence. */
 static int SDLCALL run(void* data) {
     Side* d = data;
+    int r = session(d);
+    if (d->connected && !d->s.over && d->other != NULL) {
+        uint64_t until = SDL_GetTicksNS() + 5000000000ull;
+        while (!SDL_GetAtomicInt(&d->other->finished) && SDL_GetTicksNS() < until) {
+            npTestResend(&d->s);
+            SDL_Delay(5);
+        }
+    }
+    SDL_SetAtomicInt(&d->finished, 1);
+    return r;
+}
+
+static int SDLCALL session(Side* d) {
     d->endedAt = -1;
     d->connected = d->s.host ? npHost(&d->s, d->waitNs) : npJoin(&d->s, d->joinTo, d->waitNs);
     if (!d->connected) return 0;
@@ -112,6 +138,8 @@ static int pair(Side* h, Side* j) {
     if (!npOpen(&h->s, 0) || !npOpen(&j->s, 0)) return 0;
     netLoopback(&hostAddr, v6, netLocalPort(h->s.s));
     j->joinTo = &hostAddr;
+    h->other = j;
+    j->other = h;
     SDL_Thread* a = SDL_CreateThread(run, "host", h);
     SDL_Thread* b = SDL_CreateThread(run, "join", j);
     SDL_WaitThread(a, NULL);
@@ -162,8 +190,13 @@ static int packets(void) {
     NpSession c;
     npInit(&c, 0, "orangf", 1, 'U');
     CHECK(!npValid(&c, p, NP_PACKET)); /* another code */
-    npSeal(&a, p, NP_SETTINGS + 1);
+    npSeal(&a, p, NP_PARTY + 1);
     CHECK(!npValid(&a, p, NP_PACKET)); /* a kind of no use */
+    npSealVersion(&a, p, NP_INPUT, NP_VERSION - 1);
+    CHECK(!npValid(&a, p, NP_PACKET) && npOlder(&a, p, NP_PACKET, NP_INPUT) == NP_VERSION - 1 &&
+          npOlder(&a, p, NP_PACKET, NP_HELLO) == 0); /* an older build's: not one of this version's */
+    npSealVersion(&a, p, NP_INPUT, NP_VERSION_OLDEST - 1);
+    CHECK(npOlder(&a, p, NP_PACKET, NP_INPUT) == 0);
 
     /* the terms: within range in and out, out of range refused */
     NpTerms t, u;
@@ -179,11 +212,11 @@ static int packets(void) {
     v.table = NP_TABLES - 1;
     v.config = 15;
     v.party[0] = 0;
-    v.party[1] = 15;
+    v.party[1] = 10;
     v.party[2] = 255;
     npPutTerms(p, &v);
     CHECK(npGetTerms(p, &u) && u.mode == NP_MODE_VERSUS && u.table == NP_TABLES - 1 && u.config == 15 &&
-          u.party[0] == 0 && u.party[1] == 15 && u.party[2] == 255);
+          u.party[0] == 0 && u.party[1] == 10 && u.party[2] == 255);
     NpTerms w = v;
     w.table = NP_TABLES;
     npPutTerms(p, &w);
@@ -201,7 +234,11 @@ static int packets(void) {
     npPutTerms(p, &w);
     CHECK(!npGetTerms(p, &u));
     w = v;
-    w.mode = NP_MODE_VERSUS + 1;
+    w.party[1] = 11; /* past the 11 characters (m26C_party[11]) */
+    npPutTerms(p, &w);
+    CHECK(!npGetTerms(p, &u));
+    w = v;
+    w.mode = NP_MODE_PARTY + 1;
     npPutTerms(p, &w);
     CHECK(!npGetTerms(p, &u));
     t.delay = 0;
@@ -480,9 +517,326 @@ static int drops(void) {
     return 0;
 }
 
+/* ---- party vs party ---- */
+
+#define RECORD 952 /* a format 1 party record's bytes (card/party.h): only bytes here */
+static uint8_t partyA[RECORD], partyB[RECORD], partyBad[RECORD];
+
+static void makeRecord(uint8_t* r, int seed) {
+    for (int i = 0; i < RECORD; i++) r[i] = (uint8_t)(i * 31 + seed * 7 + 1);
+    if (r[0] == 0xEE) r[0] = 0;
+}
+
+/* The program's check, here: a record of another length, or one whose first
+ * byte is 0xEE (refused as reason 9 at place 1). */
+static int checkRecord(NpSession* s, const uint8_t* r, int bytes, int* member) {
+    (void)s;
+    *member = -1;
+    if (bytes != RECORD) return 1;
+    if (r[0] == 0xEE) {
+        *member = 1;
+        return 9;
+    }
+    return 0;
+}
+
+static void put64le(uint8_t* p, uint64_t v) {
+    for (int i = 0; i < 8; i++) p[i] = (uint8_t)(v >> (8 * i));
+}
+
+static uint64_t get64le(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 7; i >= 0; i--) v = v << 8 | p[i];
+    return v;
+}
+
+/* The pages one by one into an assembly: in order or not, again, lost, a
+ * decoy's (another record's hash, the same nonce), another nonce or length,
+ * a page with other bytes. */
+static int partyPages(void) {
+    NpSession a;
+    NpAssembly in;
+    uint8_t p[NP_PACKET];
+    int done = 0, pages = npPartyPages(RECORD);
+    uint64_t ha = npPartyHash(partyA, RECORD), hb = npPartyHash(partyB, RECORD);
+    npInit(&a, 1, "orange", 1, 'U');
+    CHECK(pages == 22 && npPartyPages(0) == 0 && npPartyPages(-1) == 0 && npPartyPages(NP_PARTY_MAX) == NP_PARTY_PAGES &&
+          npPartyPages(NP_PARTY_MAX + 1) == 0 && npPartyPages(1) == 1 && npPartyPages(NP_PARTY_DATA + 1) == 2);
+    CHECK(ha != hb && npSetParty(&a, partyA, RECORD) && a.partyHash == ha && !npSetParty(&a, partyA, NP_PARTY_MAX + 1));
+    npPutParty(p, 77, partyA, RECORD, ha, 0);
+    npSeal(&a, p, NP_PARTY);
+    CHECK(npValid(&a, p, NP_PACKET)); /* the new kind */
+    /* last to first, each twice: done with the last one, the bytes the record's */
+    memset(&in, 0, sizeof in);
+    npAssemblyStart(&in, 77, ha, RECORD);
+    for (int k = pages - 1; k >= 0; k--) {
+        for (int again = 0; again < 2; again++) {
+            npPutParty(p, 77, partyA, RECORD, ha, k);
+            CHECK(npAssemblyTake(&in, p, &done));
+            CHECK(done == (k == 0));
+        }
+    }
+    CHECK(done && in.bytes == RECORD && memcmp(in.data, partyA, RECORD) == 0);
+    /* one lost: not done until it comes */
+    memset(&in, 0, sizeof in);
+    npAssemblyStart(&in, 77, ha, RECORD);
+    for (int k = 0; k < pages; k++) {
+        if (k == 5) continue;
+        npPutParty(p, 77, partyA, RECORD, ha, k);
+        CHECK(npAssemblyTake(&in, p, &done) && !done);
+    }
+    npAssemblyStart(&in, 77, ha, RECORD); /* announced again: its pages kept */
+    CHECK(in.got == pages - 1);
+    npPutParty(p, 77, partyA, RECORD, ha, 5);
+    CHECK(npAssemblyTake(&in, p, &done) && done && memcmp(in.data, partyA, RECORD) == 0);
+    /* a decoy's pages between them (the same nonce, another hash): left out */
+    memset(&in, 0, sizeof in);
+    npAssemblyStart(&in, 77, ha, RECORD);
+    for (int k = 0; k < pages; k++) {
+        npPutParty(p, 77, partyB, RECORD, hb, k);
+        CHECK(!npAssemblyTake(&in, p, &done) && !done);
+        npPutParty(p, 77, partyA, RECORD, ha, k);
+        CHECK(npAssemblyTake(&in, p, &done));
+    }
+    CHECK(done && memcmp(in.data, partyA, RECORD) == 0);
+    /* another nonce, another length, a page past the end, another page count: left out */
+    memset(&in, 0, sizeof in);
+    npAssemblyStart(&in, 77, ha, RECORD);
+    npPutParty(p, 78, partyA, RECORD, ha, 0);
+    CHECK(!npAssemblyTake(&in, p, &done));
+    npPutParty(p, 77, partyA, RECORD - 1, ha, 0);
+    CHECK(!npAssemblyTake(&in, p, &done));
+    npPutParty(p, 77, partyA, RECORD, ha, 0);
+    p[16] = (uint8_t)pages;
+    CHECK(!npAssemblyTake(&in, p, &done));
+    npPutParty(p, 77, partyA, RECORD, ha, 0);
+    p[17] = (uint8_t)(pages + 1);
+    CHECK(!npAssemblyTake(&in, p, &done) && in.got == 0);
+    /* a page with other bytes under the record's hash: the whole record again */
+    for (int k = 0; k < pages; k++) {
+        npPutParty(p, 77, partyA, RECORD, ha, k);
+        if (k == 3) p[28 + 10] ^= 0x40;
+        CHECK(npAssemblyTake(&in, p, &done) && !done);
+    }
+    CHECK(in.got == 0);
+    for (int k = 0; k < pages; k++) {
+        npPutParty(p, 77, partyA, RECORD, ha, k);
+        CHECK(npAssemblyTake(&in, p, &done));
+    }
+    CHECK(done && memcmp(in.data, partyA, RECORD) == 0);
+    /* another record announced: the pages start over; nothing announced: none taken */
+    npAssemblyStart(&in, 77, hb, RECORD);
+    CHECK(in.got == 0 && in.hash == hb);
+    memset(&in, 0, sizeof in);
+    npPutParty(p, 77, partyA, RECORD, ha, 0);
+    CHECK(!npAssemblyTake(&in, p, &done));
+    npAssemblyStart(&in, 77, ha, NP_PARTY_MAX + 1); /* too long: none */
+    CHECK(in.bytes == 0);
+    /* the terms: party vs party in range, the next mode out */
+    NpTerms t, u;
+    memset(&t, 0, sizeof t);
+    t.delay = 3;
+    t.mode = NP_MODE_PARTY;
+    memset(p, 0, sizeof p);
+    npPutTerms(p, &t);
+    CHECK(npGetTerms(p, &u) && u.mode == NP_MODE_PARTY);
+    t.mode = NP_MODE_PARTY + 1;
+    npPutTerms(p, &t);
+    CHECK(!npGetTerms(p, &u));
+    return 0;
+}
+
+static void partySide(Side* d, int host, const uint8_t* record) {
+    side(d, host, "orange", 42);
+    d->s.partyCheck = checkRecord;
+    if (record != NULL) npSetParty(&d->s, record, RECORD);
+    if (host) d->s.terms.mode = NP_MODE_PARTY;
+    d->frames = 30;
+    settings(&d->s, host);
+}
+
+static int party(void) {
+    /* each side's record to the other, with the settings and the lockstep */
+    partySide(&H, 1, partyA);
+    partySide(&J, 0, partyB);
+    CHECK(pair(&H, &J));
+    CHECK(H.connected && J.connected && H.endedAt == -1 && J.endedAt == -1);
+    CHECK(J.s.terms.mode == NP_MODE_PARTY && H.s.peerPartyBytes == RECORD && J.s.peerPartyBytes == RECORD);
+    CHECK(memcmp(H.s.peerParty, partyB, RECORD) == 0 && memcmp(J.s.peerParty, partyA, RECORD) == 0);
+    CHECK(H.s.peerPartyHash == npPartyHash(partyB, RECORD) && J.s.peerPartyHash == npPartyHash(partyA, RECORD));
+    for (int i = 0; i < 20; i++) CHECK(J.s.terms.settings[i] == i * 7);
+    for (int n = 0; n < 30; n++) CHECK(H.p1[n] == J.p1[n] && H.p2[n] == J.p2[n]);
+
+    /* lost datagrams (every third), the pages last to first and twice, and the
+     * joiner's decoy record's pages between its own: the same two records */
+    partySide(&H, 1, partyA);
+    partySide(&J, 0, partyB);
+    H.s.testDrop = J.s.testDrop = 3;
+    H.s.testPartyShuffle = J.s.testPartyShuffle = 1;
+    J.s.testDecoy = partyBad;
+    J.s.testDecoyBytes = RECORD;
+    CHECK(pair(&H, &J));
+    CHECK(H.connected && J.connected && H.endedAt == -1 && J.endedAt == -1);
+    CHECK(memcmp(H.s.peerParty, partyB, RECORD) == 0 && memcmp(J.s.peerParty, partyA, RECORD) == 0);
+
+    /* the joiner's party refused (the check's reason and place, on both
+     * sides); the host waits on and takes the next player */
+    partySide(&H, 1, partyA);
+    partySide(&X, 0, partyBad);
+    partySide(&J, 0, partyB);
+    CHECK(npOpen(&H.s, 0) && npOpen(&X.s, 0) && npOpen(&J.s, 0));
+    netLoopback(&hostAddr, 0, netLocalPort(H.s.s));
+    X.joinTo = J.joinTo = &hostAddr;
+    X.frames = 0;
+    SDL_Thread* a = SDL_CreateThread(run, "host", &H);
+    SDL_Thread* x = SDL_CreateThread(run, "refused", &X);
+    SDL_WaitThread(x, NULL);
+    SDL_Thread* b = SDL_CreateThread(run, "join", &J);
+    SDL_WaitThread(a, NULL);
+    SDL_WaitThread(b, NULL);
+    npClose(&H.s);
+    npClose(&X.s);
+    npClose(&J.s);
+    CHECK(!X.connected && X.s.reason == NP_END_PARTY_REFUSED && X.s.partyReason == 9 && X.s.partyMember == 1);
+    CHECK(H.notes[NP_NOTE_REFUSED_PARTY] >= 1 && H.s.partyReason == 9 && H.s.partyMember == 1);
+    CHECK(H.connected && J.connected && H.endedAt == -1 && J.endedAt == -1 &&
+          memcmp(H.s.peerParty, partyB, RECORD) == 0);
+
+    /* no party brought: refused, said so */
+    partySide(&H, 1, partyA);
+    partySide(&J, 0, NULL);
+    H.waitNs = J.waitNs = 800000000ull;
+    CHECK(pair(&H, &J));
+    CHECK(!J.connected && J.s.reason == NP_END_NO_PARTY && H.notes[NP_NOTE_REFUSED] >= 1);
+
+    /* the host's party refused by the joiner: the joiner ends, and tells the
+     * host, which ends with the same reason */
+    partySide(&H, 1, partyBad);
+    partySide(&J, 0, partyB);
+    CHECK(pair(&H, &J));
+    CHECK(!J.connected && J.s.reason == NP_END_PEER_PARTY && J.s.partyReason == 9 && J.s.partyMember == 1);
+    CHECK(H.connected && H.endedAt >= 0 && H.s.reason == NP_END_PARTY_REFUSED && H.s.partyReason == 9 &&
+          H.s.partyMember == 1);
+
+    /* a party brought to a host that plays something else: not taken */
+    partySide(&H, 1, NULL);
+    partySide(&J, 0, partyB);
+    H.s.terms.mode = NP_MODE_BATTLING;
+    CHECK(pair(&H, &J));
+    CHECK(H.connected && J.connected && H.s.peerPartyBytes == 0 && J.s.peerPartyBytes == 0 &&
+          J.s.terms.mode == NP_MODE_BATTLING);
+
+    /* a host in party vs party without a party of its own does not start */
+    partySide(&H, 1, NULL);
+    H.waitNs = 100000000ull;
+    CHECK(npOpen(&H.s, 0));
+    CHECK(!npHost(&H.s, H.waitNs) && H.s.reason == NP_END_ERROR);
+    npClose(&H.s);
+    return 0;
+}
+
+/* ---- older builds ---- */
+
+static NpSession older; /* an older build's side: the same code (the same key), its packets by hand */
+static NetSocket* olderSocket;
+static int olderAnswers;
+
+/* An older host (version 5): every version 5 HELLO gets a version 5 WELCOME
+ * refusing it as another build, for 1.5 s. */
+static int SDLCALL olderHost(void* data) {
+    (void)data;
+    uint64_t until = SDL_GetTicksNS() + 1500000000ull;
+    while (SDL_GetTicksNS() < until) {
+        uint8_t p[NP_PACKET], w[NP_PACKET] = {0};
+        NetAddr from;
+        if (!netWait(olderSocket, 20)) continue;
+        int size = netRecv(olderSocket, &from, p, sizeof p);
+        if (npOlder(&older, p, size, NP_HELLO) != 5) continue;
+        memcpy(w + 8, p + 8, 8);
+        memcpy(w + 16, p + 16, 8);
+        w[24] = 3;
+        w[25] = NP_REFUSE_BUILD;
+        npSealVersion(&older, w, NP_WELCOME, 5);
+        netSend(olderSocket, &from, w, NP_PACKET);
+        olderAnswers++;
+    }
+    return 0;
+}
+
+/* An older joiner's HELLO (version `version`, its byte 64 `sender`) to the
+ * host: its answer's version, or 0 for none within 400 ms. */
+static int olderHello(int version, int sender, uint8_t* answer) {
+    uint8_t p[NP_PACKET] = {0};
+    NetAddr from;
+    put64le(p + 8, 42);
+    put64le(p + 16, 0x1234 + (uint64_t)version);
+    p[24] = 'U';
+    p[64] = (uint8_t)sender;
+    npSealVersion(&older, p, NP_HELLO, version);
+    netSend(olderSocket, &hostAddr, p, NP_PACKET);
+    uint64_t until = SDL_GetTicksNS() + 400000000ull;
+    while (SDL_GetTicksNS() < until) {
+        if (!netWait(olderSocket, 20)) continue;
+        int size = netRecv(olderSocket, &from, answer, NP_PACKET);
+        int v = npOlder(&older, answer, size, NP_WELCOME);
+        if (v != 0 && get64le(answer + 16) == 0x1234 + (uint64_t)version) return v;
+    }
+    return 0;
+}
+
+static int olderBuilds(void) {
+    uint8_t w[NP_PACKET];
+    npInit(&older, 0, "orange", 41, 'U');
+    netInit();
+    /* older joiners (versions 3 and 5) to a new host: "another build" in their
+     * version, noted; a newer joiner's older HELLO (byte 64 its own version)
+     * left; then the right player joins */
+    side(&H, 1, "orange", 42);
+    side(&J, 0, "orange", 42);
+    H.frames = J.frames = 20;
+    olderSocket = netOpen(0);
+    CHECK(olderSocket != NULL && npOpen(&H.s, 0) && npOpen(&J.s, 0));
+    netLoopback(&hostAddr, 0, netLocalPort(H.s.s));
+    J.joinTo = &hostAddr;
+    SDL_Thread* a = SDL_CreateThread(run, "host", &H);
+    CHECK(olderHello(5, 0, w) == 5 && w[25] == NP_REFUSE_BUILD);
+    CHECK(olderHello(3, 0, w) == 3 && w[25] == NP_REFUSE_BUILD);
+    CHECK(olderHello(5, NP_VERSION, w) == 0); /* a newer joiner's: its own HELLO is the one answered */
+    CHECK(olderHello(2, 0, w) == 0);          /* before the 80-byte packets: no such peer */
+    SDL_Thread* b = SDL_CreateThread(run, "join", &J);
+    SDL_WaitThread(a, NULL);
+    SDL_WaitThread(b, NULL);
+    CHECK(H.notes[NP_NOTE_REFUSED] == 2);
+    CHECK(H.connected && J.connected && H.endedAt == -1 && J.endedAt == -1);
+    npClose(&H.s);
+    npClose(&J.s);
+    /* a new joiner to an older host: refused at its first HELLO, "another version" */
+    side(&J, 0, "orange", 42);
+    olderAnswers = 0;
+    CHECK(npOpen(&J.s, 0));
+    netLoopback(&hostAddr, 0, netLocalPort(olderSocket));
+    J.joinTo = &hostAddr;
+    uint64_t t0 = SDL_GetTicksNS();
+    SDL_Thread* o = SDL_CreateThread(olderHost, "older host", NULL);
+    b = SDL_CreateThread(run, "join", &J);
+    SDL_WaitThread(b, NULL);
+    uint64_t took = SDL_GetTicksNS() - t0;
+    SDL_WaitThread(o, NULL);
+    npClose(&J.s);
+    CHECK(!J.connected && J.s.reason == NP_END_REFUSED_BUILD && strstr(J.s.why, "another version") != NULL);
+    CHECK(olderAnswers >= 1 && took < 1000000000ull);
+    netClose(olderSocket);
+    netQuit();
+    return 0;
+}
+
 int main(void) {
+    makeRecord(partyA, 1);
+    makeRecord(partyB, 2);
+    makeRecord(partyBad, 3);
+    partyBad[0] = 0xEE;
     if (pins() || packets() || addresses() || lockstep(3, 0, 0) || lockstep(1, 0, haveV6()) || lockstep(6, 4, 0) ||
-        handshake() || picks() || ends() || drops()) {
+        handshake() || picks() || ends() || drops() || partyPages() || party() || olderBuilds()) {
         fprintf(stderr, "netplaytest: failed after %d checks\n", checks);
         return 1;
     }

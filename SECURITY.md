@@ -16,9 +16,9 @@ welcome and not required.
 
 ## What counts here
 
-The port is a program you build yourself and run with your own disc images. It
-ships no executable and no game data. What matters is what it does with files
-that did not come from you:
+The port is a program you download from a release or build yourself, and run
+with your own disc images. Releases ship the executables, never game data. What
+matters is what it does with files that did not come from you:
 
 - **Packs.** Texture, sprite, text, portrait and movie packs are files made by
   other people, and the port reads them. A pack that crashes the port in a way
@@ -28,6 +28,11 @@ that did not come from you:
   the same kind of input.
 - **Disc images** are yours, but a damaged or altered one must not do more than
   fail to load.
+- **Online sessions.** In a session (F1 > Extras > Battle arena > Online) the
+  other player's packets reach the port over UDP, whatever program sent them.
+  A packet that crashes the port in a way that corrupts memory, or makes it do
+  more than refuse or end the session, is a vulnerability. The other player
+  sees your IP address, as you see theirs.
 - **The build tools.** `tools/setup.sh` downloads the PlayStation toolchain
   into `tools/toolchain` and the Python packages into `.venv`, without root,
   each download pinned by checksum. A download that is not checked against its
@@ -35,8 +40,11 @@ that did not come from you:
 
 Not vulnerabilities: bugs of the game itself (the game logic is the original
 code, bugs included), cheats and anything else a player does to their own
-game, and anything that needs a modified build to work.
+game, and anything that needs a modified build to work (other than a peer's packets
+online).
 
 ## Supported versions
 
-The newest commit on `main`. There are no releases.
+The newest [release](https://github.com/EtherAura/xenogears-pc/releases/latest)
+and the newest commit on `main`. A fix lands on `main` first and comes with the
+next release.

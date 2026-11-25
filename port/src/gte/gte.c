@@ -366,10 +366,13 @@ static void precisionProjected(u32 sxy2, const s64 row[3], s64 sx, s64 sy, int s
         !(flags & (F_MAC_POS(0) | F_MAC_POS(1) | F_MAC_POS(2) | F_MAC_NEG(0) | F_MAC_NEG(1) | F_MAC_NEG(2))) &&
         h < 2 * sz3 && (sx >> 16) >= -1024 && (sx >> 16) <= 1023 && (sy >> 16) >= -1024 && (sy >> 16) <= 1023 &&
         (row[0] >> 12) == ir1 && (row[1] >> 12) == ir2) {
-        p->z = (double)row[2] / 4096.0;
+        /* the field's drawn view's fraction (gtePrecisionViewOffset), on the shadow only */
+        double off[3] = {0, 0, 0};
+        gtePrecisionViewOffsetGet(off);
+        p->z = (double)row[2] / 4096.0 + off[2];
         double ratio = (double)h / p->z;
-        p->x = (double)ofx / 65536.0 + (double)row[0] / 4096.0 * ratio;
-        p->y = (double)ofy / 65536.0 + (double)row[1] / 4096.0 * ratio;
+        p->x = (double)ofx / 65536.0 + ((double)row[0] / 4096.0 + off[0]) * ratio;
+        p->y = (double)ofy / 65536.0 + ((double)row[1] / 4096.0 + off[1]) * ratio;
         double dx = p->x - (s16)(u16)p->word, dy = p->y - (s16)(u16)(p->word >> 16);
         p->valid = dx >= -4 && dx <= 4 && dy >= -4 && dy <= 4;
     }

@@ -70,6 +70,27 @@ bash build-release.sh --discs bin --cache release-cache --version YYYY.MM.N --ou
 
 2 つ目のコマンドは北米版ディスク 1 のイメージを使い、オフラインでビルドします。中身の検査に通ると、Windows のインストーラーと ZIP、Linux の tarball、Ubuntu amd64 の `.deb` を書き出します。tarball と Windows のパッケージには両方のエンジンが、`.deb` にはオリジナルエンジンが入ります。
 
+## アップデート
+
+リリースのパッケージは、新しいリリースが出ているかを確認できます。確認するかどうかは初回起動時に尋ねます。答えは F1 > System > Updates で変えられ、`settings.ini` の `update_check=off` で確認を止められます。確認は 1 日に 1 回までで、GitHub のリリースから小さなファイルを 2 つ（アップデートの一覧とその署名）取得します。リクエストにはあなたやお使いのコピーについての情報を含みません。署名が検証できない一覧は使いません。Linux では確認にシステムの libcurl（`libcurl.so.4`）を使い、ない場合は確認しません。
+
+新しいリリースが出ると、F1 > System > Updates に表示されます。Windows のインストーラー版と ZIP 版、Linux の tarball、Android アプリは自分でインストールします（Install and restart）。`.deb`、Arch、Gentoo のパッケージは新しいリリースが出たことを知らせるだけなので、パッケージマネージャーで更新してください。アップデートを確認するリリースのセーブステートのスロットは、そうしたほかのリリースでも、古いものでも新しいものでも読み込めます。「This version only」と表示されるスロットは、作ったリリースでしか読み込めません。
+
+### APT リポジトリ
+
+リリースは `.deb` 用の APT リポジトリにもなっているので、`apt upgrade` で移植版を最新に保てます。
+
+```bash
+sudo install -d /etc/apt/keyrings
+sudo curl -fsSLo /etc/apt/keyrings/xenogears-pc-archive-keyring.asc \
+    https://github.com/EtherAura/xenogears-pc/releases/latest/download/xenogears-pc-archive-keyring.asc
+echo 'deb [signed-by=/etc/apt/keyrings/xenogears-pc-archive-keyring.asc] https://github.com/EtherAura/xenogears-pc/releases/latest/download/ ./' \
+    | sudo tee /etc/apt/sources.list.d/xenogears-pc.list
+sudo apt update && sudo apt install xenogears-pc
+```
+
+`gpg --show-keys /etc/apt/keyrings/xenogears-pc-archive-keyring.asc` で鍵を確認できます。フィンガープリントは `98D8 FE73 4486 2E22 A6CC 4BD1 F8DB C452 62B8 B7A6` です。
+
 ## ディスクなしでのビルド
 
 リリースの Linux 向けと Windows 向けの実行ファイルは、ディスクのないマシンでもビルドし直せます。各リリースにはリンク用の表 `xenogears-pc-VERSION-link-tables.tar.gz` が付いています。そのリリースのタグをチェックアウトし、このファイルをダウンロードして、次を実行します。

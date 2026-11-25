@@ -66,6 +66,9 @@ extern int fieldSpeedWanted(void) __attribute__((weak));
 extern int fieldSpeedOnScreen(void) __attribute__((weak));
 extern int fieldSpeedStep(void) __attribute__((weak));
 extern void fieldSpeedStateIo(XgState* s) __attribute__((weak));
+/* fieldspeed.c too: Speedup transitions, the main menu's way in and out. */
+extern int transitionSpeedChosen(void) __attribute__((weak));
+extern int transitionSpeedWanted(void) __attribute__((weak));
 /* gameplay.c: the class of the battle that started last (weak: fieldspeedtest
  * links this file without it, and every battle is then the saved speed's). */
 extern int pcGameplayBattleClass(void) __attribute__((weak));
@@ -75,6 +78,12 @@ extern int pcGameplayBattleClass(void) __attribute__((weak));
 #define BATTLE_GAP 8
 /* CD audio seen this many vblanks ago still holds 1x (XA arrives in bursts). */
 #define CD_AUDIO_HOLD 120
+/* A stream's last few input samples wait in the SPU's CD input for ones that
+ * never come (cdin.c: the resampler starves until more arrive), so a queue
+ * this short is what a stream left, not one playing (xg-htn.35.157: the boot
+ * movie left 3 frames, and every speed held 1x for the rest of the session).
+ * A playing stream keeps a sector's 2016 frames and more. */
+#define CD_AUDIO_RESIDUE 32
 /* A new name on the screen: its first battle frames at 1x (0.75 s). */
 #define TEXT_HOLD 45
 
@@ -196,20 +205,23 @@ int battleSpeedHidden(void) {
 
 /* The factor the next frame runs at: a battle's by battle_speed, and outside
  * battles the field's and the world map's by field_speed (fieldspeed.c, 1
- * when the screen is neither). Neither setting reaches the other's frames.
- * With both off or at 1x nothing here is touched; with either on, CD audio
- * is watched on every screen, so its hold is known when a fast one comes. */
+ * when the screen is neither), or the main menu's way in and out by
+ * speedup_transitions, whichever is faster. Neither speed setting reaches the
+ * other's frames. With all off or at 1x nothing here is touched; with any on,
+ * CD audio is watched on every screen, so its hold is known when a fast one
+ * comes. */
 static int wanted(void) {
     int chosen = battleSpeedChosen();
     int fieldOn = fieldSpeedChosen != NULL && fieldSpeedChosen() > 1;
+    int transitionOn = transitionSpeedChosen != NULL && transitionSpeedChosen();
     if (chosen > 0 && battleSpeedInBattle() && storyBattle()) {
         chosen = story.speed > 1 ? story.speed : 1; /* a scripted battle: its own speed, not the saved one */
     }
-    if (chosen <= 1 && !fieldOn) {
+    if (chosen <= 1 && !fieldOn && !transitionOn) {
         return 1;
     }
     uint32_t now = hwVSyncCount();
-    if (spuCdQueued() > 0) {
+    if (spuCdQueued() > CD_AUDIO_RESIDUE) {
         lastCdAudio = now;
         seenCdAudio = 1;
     }
@@ -218,6 +230,9 @@ static int wanted(void) {
         factor = battleWait || textHold > 0 ? 1 : chosen;
     } else {
         factor = fieldOn ? fieldSpeedWanted() : 1;
+        if (transitionOn && transitionSpeedWanted() > factor) {
+            factor = transitionSpeedWanted();
+        }
     }
     if (factor <= 1 || netplayActive()) {
         return 1;

@@ -281,7 +281,7 @@ void setupBattleDialogWindow(u8 idx) {
 
 void initBattleVar0_A230(void);
 void initBattleVar0_A230(void) {
-    sBattleVar0_a230* p = allocateBattleHeap((s32)sizeof(sBattleVar0_a230), 0);
+    sBattleVar0_a230* p = allocateBattleHeap(PC_HEAP_OF(sBattleVar0_a230, (s32)sizeof(sBattleVar0_a230)), 0);
     battleVar0->mA230_menuPanel = p;
     bzero(p, (s32)sizeof(sBattleVar0_a230));
     initBattleVar0_A230_content();

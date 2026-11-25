@@ -17,6 +17,10 @@
  * starts where the game is. The heading it ends with is written to m10E_cameraTan (every sprite's 8-way facing,
  * the compass) and m10C_camera2Tan (the pad's walking directions), so those follow the view.
  *
+ * The player's camera settings (pad.c: camera_invert_x/y, camera_turn_speed, camera_tilt_speed,
+ * camera_stick_deadzone) reach it through padCameraInput: TURN_SPEED and TILT_SPEED below are
+ * their 100%.
+ *
  * XG_FREECAM=pitch,zoom[,turn] (tests) turns it on regardless of the setting and starts it at
  * that pitch (degrees), zoom (times the game's distance) and turn (degrees from the game's
  * heading).
@@ -28,6 +32,10 @@
  * the camera does not turn into a heading the room refuses, tilting stays inside the band, and a
  * band that moves (turning, zooming) draws the pitch in, eased. Near the game's own heading the
  * band widens to the game's pitch, so the room's own view always passes.
+ *
+ * XG_FREECAM_TRACE=1 logs the camera every frame on stderr ("freecam trace: ..."): the turn, pitch,
+ * zoom and wall lift asked for, the game's own heading, pitch and distance, and the eye and target;
+ * "freecam raw: ..." has the eye and target at full precision (16.16).
  *
  * XG_FREECAM_SWEEP=first,gap,cycles (tools/freecam_sweep.py, the per-room limits): from vblank
  * `first`, `cycles` times with `gap` vblanks between (the pad script walks the party on), the
@@ -79,7 +87,15 @@ static struct {
     double clip;                   /* radians the walls lift the camera's pitch (wallClip) */
 } fc;
 
-/* ---- walls: the camera kept inside the room (xg-ugy.3) ----------------------------------------
+/* ---- walls: the camera kept inside the room (xg-ugy.3; off by default, XG_FREECAM_WALLS=1) ----
+ *
+ * Off by default (user xg-ugy.8): in interiors the camera's floor point leaves the
+ * room's walkmesh at almost every low angle, so the lift held Fei's house's camera about 30
+ * degrees above the tilt asked for and raised it in 2-degree jumps as the party walked (the
+ * picture shook). Nothing needed clearing there: the near walls are back faces from outside the
+ * room and are not drawn, the dollhouse view of the game's own interior shots. Outdoors, behind
+ * a house, the house filled the view lifted or not. Scenery covering the party fades
+ * (pcSceneryFade) either way. XG_FREECAM_WALLS=1 lifts as before (A/B).
  *
  * The camera's offset from its target, laid on the floor, is followed through the tracked actor's
  * walkmesh from the actor (triangle to neighbouring triangle across the edge the line leaves by).
@@ -308,11 +324,13 @@ static void firstPersonAim(void) {
     uint32_t now = hwVSyncCount();
     double dt = fmin(now - look.vblank, 4) / 60.0;
     look.vblank = now;
-    look.yaw = wrap(look.yaw + turn * TURN_SPEED * dt + look.mouseX * 0.004);
+    float mouseX = look.mouseX, mouseY = look.mouseY;
+    padCameraMouse(&mouseX, &mouseY);   /* camera_invert_x/y, camera_turn_speed/tilt_speed */
+    look.yaw = wrap(look.yaw + turn * TURN_SPEED * dt + mouseX * 0.004);
     /* The world's sky gradient is a band above the horizon. Keep it covering
      * the view even with the ship's pitch added as the player climbs. */
     double up = look.mode == PC_WIDE_WORLDMAP ? M_PI / 9 : M_PI / 3;
-    look.pitch = clampd(look.pitch + tilt * TILT_SPEED * dt - look.mouseY * 0.004, -M_PI / 3, up);
+    look.pitch = clampd(look.pitch + tilt * TILT_SPEED * dt - mouseY * 0.004, -M_PI / 3, up);
     look.mouseX = look.mouseY = 0;
 }
 
@@ -536,8 +554,17 @@ void pcFieldCamera(VECTOR* eye, VECTOR* at) {
     eye->vy = at->vy + (int32_t)(gy + (fy - gy) * b);
     eye->vz = at->vz + (int32_t)(gz + (fz - gz) * b);
     static int walls = -1;
-    if (walls < 0) { const char* w = getenv("XG_FREECAM_WALLS"); walls = !(w && *w == '0'); }
+    if (walls < 0) { const char* w = getenv("XG_FREECAM_WALLS"); walls = w && *w == '1'; }
     if (walls) wallClip(at, eye, dt);
+    static int trace = -1;
+    if (trace < 0) { const char* t = getenv("XG_FREECAM_TRACE"); trace = t && *t == '1'; }
+    if (trace)
+        fprintf(stderr, "freecam trace: vb %u free %d blend %.3f turn %.2f pitch %.2f zoom %.3f clip %.2f game %.2f %.2f %.1f "
+                        "eye %d %d %d at %d %d %d\n", now, free, fc.blend, fc.turn * 180 / M_PI, fc.pitch * 180 / M_PI, fc.zoom,
+                fc.clip * 180 / M_PI, gHeading * 180 / M_PI, gPitch * 180 / M_PI, gdist / 65536, (int)(eye->vx >> 16),
+                (int)(eye->vy >> 16), (int)(eye->vz >> 16), (int)(at->vx >> 16), (int)(at->vy >> 16), (int)(at->vz >> 16));
+    if (trace) fprintf(stderr, "freecam raw: vb %u eye %d %d %d at %d %d %d\n", now, (int)eye->vx, (int)eye->vy, (int)eye->vz,
+                       (int)at->vx, (int)at->vy, (int)at->vz);
     /* the view's heading, as the game derives it from eye and target (ratan2 - 0x400). The
      * sprites' facing and the compass read m10E; walking (OP_UPDATE_CHARACTER) reads m10C, the
      * heading of the camera's target pair, which the game recomputes after movement each frame,
@@ -545,6 +572,61 @@ void pcFieldCamera(VECTOR* eye, VECTOR* at) {
     double h = atan2((double)at->vz - eye->vz, (double)at->vx - eye->vx);
     fieldSceneState.m10E_cameraTan = (s16)(lround(h * 2048 / M_PI) - 0x400);
     fieldSceneState.m10C_camera2Tan = fieldSceneState.m10E_cameraTan;
+}
+
+/* ---- the drawn view at full precision (xg-ugy.9) ------------------------------------------
+ *
+ * lookAtDivided (engine/src/field/f_80072140.c) builds the field's view from the eye and target
+ * in whole world units (>> 16): a camera following the party about 2.3 units a frame is drawn
+ * 2, 3, 2, 2, 3 units on, and the direction between the two whole points turns up to a
+ * milliradian back and forth. At 60 Hz in an upscaled picture the room shook (user 
+ * the free camera in Fei's house; the game's own camera does it too, zoomed in twice as much).
+ * The same view from the 16.16 points: the direction exact to the matrix's 4.12 and the
+ * translation in the view's own unit (a third of a world unit: lookAtDivided's eye * 3), and
+ * the exact translation for the GTE's shadow positions (gtePrecisionViewOffset), so the
+ * upscaled picture moves by the fraction too. The engine draws with it and decides with
+ * lookAtDivided's (the off-screen verdicts, the dialogue's place), as the first-person look
+ * does. */
+static int unit3(const double v[3], double out[3]) {
+    double n = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    if (n < 1e-9) return 0;
+    for (int k = 0; k < 3; k++) out[k] = v[k] / n;
+    return 1;
+}
+static void cross3(const double a[3], const double b[3], double out[3]) {
+    double r[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+    for (int k = 0; k < 3; k++) out[k] = r[k];
+}
+int pcFieldLookAtPrecise(MATRIX* m, double exactT[3], const VECTOR* eye, const VECTOR* at, const VECTOR* up) {
+    static int on = -1;
+    if (on < 0) { const char* e = getenv("XG_PRECISE_CAMERA"); on = !(e && *e == '0'); }
+    if (!on) return 0;
+    const s32* pe = &eye->vx;
+    const s32* pa = &at->vx;
+    const s32* pu = &up->vx;
+    double d[3], u[3], x[3], y[3], z[3], e[3];
+    for (int k = 0; k < 3; k++) {
+        d[k] = ((double)pa[k] - pe[k]) / 65536.0;
+        u[k] = pu[k] >> 16;                    /* lookAtDivided's up, as it takes it */
+        e[k] = pe[k] / 65536.0 * 3;
+        if (fabs(e[k]) > 32767) return 0;      /* past lookAtDivided's 16-bit eye: the game's own */
+    }
+    /* rows right, up, forward: z the direction, x = up x z, y = z x x (lookAtDivided's order) */
+    if (!unit3(d, z)) return 0;
+    cross3(u, z, x);
+    if (!unit3(x, x)) return 0;
+    cross3(z, x, y);
+    if (!unit3(y, y)) return 0;
+    const double* rows[3] = {x, y, z};
+    for (int r = 0; r < 3; r++)
+        for (int c = 0; c < 3; c++) m->m[r][c] = (s16)lround(rows[r][c] * 4096);
+    for (int r = 0; r < 3; r++) {
+        double t = 0;
+        for (int c = 0; c < 3; c++) t += m->m[r][c] * e[c];
+        exactT[r] = -t / 4096;
+        m->t[r] = (s32)lround(exactT[r]);
+    }
+    return 1;
 }
 
 /* ---- the world map (xg-ugy.5) -------------------------------------------------------------

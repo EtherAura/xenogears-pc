@@ -180,7 +180,7 @@ void initEtherListMenu(u8 mode) {
     s32 set;
 
     set = 0;
-    gMenuContext->m430_etherMenu = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_430), (s32)0x1094), 0);
+    gMenuContext->m430_etherMenu = allocateHeap(PC_HEAP_OF(MenuContext_430, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_430), (s32)0x1094)), 0);
     bzero(gMenuContext->m430_etherMenu, (s32)sizeof(struct MenuContext_430));
     switch (mode) {
     case 0:

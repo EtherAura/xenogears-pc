@@ -460,7 +460,7 @@ void runDirectorScriptImmediately(s32 scriptIndex) {
 
     pCurrentFieldEntity = &D_800AFA54.mBC_actorArray[0];
     pCurrentFieldScriptActor = pCurrentFieldEntity->m4C_scriptEntity;
-    backup = allocateHeap(PC_HEAP_SIZED(sizeof(sFieldScriptEntity), 0x138), 1);
+    backup = allocateHeap(PC_HEAP_OF(sFieldScriptEntity, PC_HEAP_SIZED(sizeof(sFieldScriptEntity), 0x138)), 1);
     *backup = *pCurrentFieldEntity->m4C_scriptEntity;
     for (i = 0; i < 8; i++) {
         pCurrentFieldScriptActor->m8C_scriptSlots[i].m2_delay = 0;

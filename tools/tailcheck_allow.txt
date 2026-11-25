@@ -1,0 +1,111 @@
+# Reviewed tails for tools/tailcheck.py: objects of a declared size whose PS1 data runs on
+# past it (<build>/gen/tails.txt, tools/pc_link.py) and that no read takes past the declared
+# end, so the bytes the PC leaves out are never wanted (xg-htn.35.154). One per line:
+#     <module> | <name> | <declared>/<extent> | <reason>
+# with the sizes in hex as tails.txt gives them (a JP or Enhanced extent that differs is a line
+# of its own). A read that does reach a tail is fixed instead: under PLATFORM_PC the table is
+# declared of unknown size, or of its true size, so the PC copies the retail bytes the PS1
+# reads (battle's perApTable [8][3], whose 25th byte performAttack reads: 926020d1).
+
+# Tables read through a bounded index or through their fields.
+battle | battleFader2 | 0x4C/0x50 | an sBattleFader, reached through its fields only (up to 0x4B, battleCreateFader and its tasks)
+battle | itemLabelsIds | 0x28/0x2C | ten digit images, filled and freed ten at a time; indexed by a decimal digit of an item count (99 at most) or a cost (its own two- or three-digit loops); entry 10 is never written on the PS1 either
+battle | mechaInitVar5_battle | 0x28/0x2C | two gear lights: every loop is i < 2; the light event's unguarded index (b_800A8B0C.c) stores m6 at +0x2E for index 2, past this tail
+battle | startBattleAttackAnimationVar8 | 0x20/0x21 | 8 handlers by m16_effectType; a 9th would take 3 bytes of the next object too (a crash on the PS1 as well)
+battle | strHexDigits | 0x10/0x20 | indexed by a nibble (& 0xF, formatDamageStringHex)
+battle_loader | battleTileShardVertsBottomRight | 0x18/0x28 | one triangle: only v[0..2] are read (renderBattleTileEffect and its wide copy)
+battling | battlingDemoBlurSprites | 0x78/0xA0 | 6 sprites: [n], [2 + n], [4 + n] by battlingBufferIndex (0 or 1); initBattlingArena fills [1..5] from [0]
+battling | battlingDemoBlurTPages | 0x20/0x30 | 4 tpages: [n] and [2 + n] by battlingBufferIndex (0 or 1)
+battling | battlingEffect2FrameV | 0xC/0x10 | 12 frame V values: adjusted by i < 12; effect template 2 has 12 frames (m51_frame 1..12)
+battling | battlingFadeDrawModes | 0x18/0xA0 | 2 draw modes by battlingBufferIndex (0 or 1)
+field | compassTimVramCoords | 0x60/0x6C | 8 TIMs of 6 coordinates: the loop is i < 8 (initCompassData)
+field | gDialogRects | 0x80/0x84 | 16 rects: the loop is i < 16 (initDialogWindows)
+field | mechaOverlayBatchLoadingTable | 0x80/0x108 | 2 entries per gear and a terminator; a field lists 4 gears at most (FieldMechaState.m0_mechaList[4]): entries 0-9
+field | partyPortraitsRects | 0x30/0x40 | 3 portraits of 2 rects: the loop is i < 3 (isDialogAvatarLoaded)
+main | battleBlinkingPolyBuffer | 0x170/0x1183C | a custom poly model inside main's .text: code follows it (config/<ver>/main.yaml ends it at the next function), no data
+main | battleBlinkingPolyBuffer | 0x170/0x118B8 | a custom poly model inside main's .text: code follows it (config/<ver>/main.yaml ends it at the next function), no data
+main | battleLoadDataVar0_raw | 0x4/0x8 | a pointer: its address goes to loadBattleMechaAndEnvironment, which stores the one pointer
+main | battleLoadDataVar2 | 0x4/0x8 | a pointer: its address goes to loadBattleEnvironment, which stores the one pointer
+main | fieldMouseState | 0x14/0x80 | getMouseState stores out[0..4]
+main | gameState | 0x2358/0x235C | the GameState struct is 0x2358 bytes: every copy and walk stops there (game_init, the save's 0x1920 + 0xA38)
+main | mechaDataTable1 | 0x10/0x24 | one per gear; a field lists 4 gears at most (FieldMechaState.m0_mechaList[4])
+main | mechaDataTable2 | 0x10/0x24 | one per gear; a field lists 4 gears at most (FieldMechaState.m0_mechaList[4])
+main | overlayStateSaveBlock | 0x8000/0x8030 | the field save: 0x115C bytes plus at most 0x1A0 per actor (under 0x8000 up to 68 actors); the worldmap's backup is one sWorldmapMenuBackup
+main | previousCameraAt2 | 0xC/0x10 | an FP_VEC3, read and written whole (12 bytes)
+main | previousCameraEye2 | 0xC/0x10 | an FP_VEC3, read and written whole (12 bytes)
+menu | processLoadSaveMenuSub6Sub2Var1 | 0x20/0x24 | [port][slot]: slots from i < 16 and i < 15 loops, and a save summary's own slot byte (0-14 as the game writes it)
+worldmap | worldmapMinimapPOIsCoordinates | 0x80/0xB4 | 32 markers of x, y: the loop is i < 32 (worldmapRenderMinimap)
+
+# Scalars and pointers the game only loads and stores whole: every retail reference to the
+# name is a load or store of the object itself (no index, no address taken; the full
+# disassembly, tools/fullasm.py), so what follows is other data that no name reaches.
+battle | autoPartyMemberTurnActive | 0x1/0x4 | a scalar, loaded and stored whole
+battle | battleCameraControlSpriteActiveCount | 0x1/0x8 | a scalar, loaded and stored whole
+battle | battleCameraVar0 | 0x1/0x4 | a scalar, loaded and stored whole
+battle | battleCameraVar2 | 0x4/0xC | a scalar, loaded and stored whole
+battle | battleConfigFile2 | 0x4/0xC | a pointer, loaded and stored whole
+battle | battleDeathBlowMusicOverride | 0x1/0x4 | a scalar, loaded and stored whole
+battle | battleEnvColliders | 0x4/0x8 | a pointer, loaded and stored whole
+battle | battleEventOverlayHeap | 0x4/0x8 | a pointer, loaded and stored whole
+battle | battleEventVar0 | 0x4/0x8 | a pointer, loaded and stored whole
+battle | createDamageDisplayPolysTask2Var0 | 0x4/0x8 | a scalar, loaded and stored whole
+battle | customPolyPacketIndex | 0x4/0x8 | a scalar, loaded and stored whole
+battle | damageDisplayPolysTask2Disabled | 0x1/0x4 | a scalar, loaded and stored whole
+battle | environmentModelConfigs | 0x4/0x5 | a pointer, loaded and stored whole
+battle | gCurrentBattleEventSeq | 0x4/0x6 | a pointer, loaded and stored whole
+battle | healWhileOnGear | 0x1/0x4 | a scalar, loaded and stored whole
+battle | healWhileOnGear | 0x1/0x8 | a scalar, loaded and stored whole
+battle | pCurrentBattleMusic | 0x4/0x8 | a pointer, loaded and stored whole
+battle | selectedItemColumn | 0x1/0x8 | a scalar, loaded and stored whole
+battle | startBattleAttackAnimationVar0 | 0x1/0x8 | a scalar, loaded and stored whole
+battle | startJumpAnimationVar2 | 0x4/0x8 | a scalar, loaded and stored whole
+battle_debug | debugGeomOffsetToggle | 0x4/0x18 | a scalar, loaded and stored whole
+battle_debug | debugPerfInfoEnabled | 0x4/0x8 | a scalar, loaded and stored whole
+battle_loader | battleSpriteX | 0x2/0x4 | a scalar, loaded and stored whole
+battle_result | resultFanfareSoundsPlayed | 0x1/0x4 | a scalar, loaded and stored whole
+battling | D_80091C98 | 0x1/0x8 | a scalar, loaded and stored whole
+battling | battlingBufferIndex | 0x1/0xC | a scalar, loaded and stored whole
+battling | battlingCameraHeight | 0x4/0x8 | a scalar, loaded and stored whole
+battling | battlingGearDefs | 0x4/0x8 | a pointer, loaded and stored whole
+battling | battlingHeapDumpStart | 0x4/0xC | a scalar, loaded and stored whole
+battling | battlingHeightMap | 0x4/0x8 | a pointer, loaded and stored whole
+battling | battlingHitPointZ | 0x4/0xC | a scalar, loaded and stored whole
+battling | battlingModelBackColorEnabled | 0x4/0x8 | a scalar, loaded and stored whole
+battling | battlingOtSkipLayer | 0x4/0x44 | a pointer, loaded and stored whole
+battling | battlingSfxSequence | 0x4/0x8 | a pointer, loaded and stored whole
+battling | battlingShadowV | 0x1/0xC | a scalar, loaded and stored whole
+battling | battlingStageColorIndex | 0x1/0xC | a scalar, loaded and stored whole
+battling | battlingStartRequested | 0x4/0x8 | a scalar, loaded and stored whole
+field | currentScriptFinished | 0x4/0x58 | a scalar, loaded and stored whole
+field | mouseCursorMaxY | 0x4/0x8 | a scalar, loaded and stored whole
+field_debug | fieldDebugTimeEntryCount | 0x2/0x8 | a scalar, loaded and stored whole
+field_mecha | mechaBytecodeToggle | 0x4/0x28 | a scalar, loaded and stored whole
+main | battleLoaderMemoryBlock | 0x4/0x8 | a pointer, loaded and stored whole
+main | gBattleCurrentSoundEffectSeq | 0x4/0xC | a pointer, loaded and stored whole
+main | playSoundEffectVar0 | 0x4/0x5 | a scalar, loaded and stored whole
+main | rawFieldBundleSize | 0x4/0x8 | a scalar, loaded and stored whole
+main | wdsFile5 | 0x4/0x10 | a pointer, loaded and stored whole
+menu | discChangeSaveActive | 0x1/0x3 | a scalar, loaded and stored whole
+menu | saveSlotLevelPositionY | 0x4/0xC | a scalar, loaded and stored whole
+movie | cdCheckErrorCount | 0x4/0x10 | a scalar, loaded and stored whole
+movie | cdCheckRandomMode | 0x4/0xC | a scalar, loaded and stored whole
+movie | cdCheckVSyncCount | 0x4/0x8 | a scalar, loaded and stored whole
+movie | moviePadRepeatDelay | 0x4/0x24 | a scalar, loaded and stored whole
+worldmap | worldmapCellLoadSlot | 0x4/0x8 | a scalar, loaded and stored whole
+worldmap | worldmapMenuVramBackup1 | 0x4/0x8 | a pointer, loaded and stored whole
+worldmap | worldmapNumModels | 0x2/0x8 | a scalar, loaded and stored whole
+worldmap | worldmapPlayerDirection | 0x2/0x8 | a scalar, loaded and stored whole
+worldmap | worldmapStreamingDest | 0x4/0xC | a pointer, loaded and stored whole
+worldmap | worldmapStreamingShellOpenCount | 0x4/0x8 | a scalar, loaded and stored whole
+worldmap | worldmapWaterWave2 | 0x4/0x8 | a scalar, loaded and stored whole
+
+# The last name before an overlay's BSS ends: the end is not recorded (tools/pc_link.py,
+# module_bss), so the extent runs on to the next module's names.
+battle | battleAttackNameStrings | 0x4/0xF1FC0 | the last name in battle's BSS, whose end is not recorded: a pointer, loaded and stored whole
+battle | battleAttackNameStrings | 0x4/0xF7790 | the last name in battle's BSS, whose end is not recorded: a pointer, loaded and stored whole
+field | pCurrentFieldRenderingContext | 0x4/0x101990 | the last name in field's BSS, whose end is not recorded: a pointer, loaded and stored whole
+field | pCurrentFieldRenderingContext | 0x4/0x106F14 | the last name in field's BSS, whose end is not recorded: a pointer, loaded and stored whole
+movie | movieRgb24 | 0x4/0x14E5EC | the last name in movie's BSS, whose end is not recorded: a scalar, loaded and stored whole
+movie | movieRgb24 | 0x4/0x153D2C | the last name in movie's BSS, whose end is not recorded: a scalar, loaded and stored whole
+worldmap | worldmapEncounterTriggered | 0x4/0x1284DC | the last name in worldmap's BSS, whose end is not recorded: a scalar, loaded and stored whole
+worldmap | worldmapEncounterTriggered | 0x4/0x12D974 | the last name in worldmap's BSS, whose end is not recorded: a scalar, loaded and stored whole

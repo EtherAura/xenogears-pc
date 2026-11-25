@@ -57,6 +57,11 @@ int pcRetryRestore(void);
 /* Shared opt-in for other original-game fixes. The Deus fix defaults on. */
 int pcGameplayOriginalBugFixes(void);
 int pcGameplayDeusCameraFix(void);
+/* Uninterrupted combos (F1 > Gameplay, default off): a Combo's deathblows go
+ * one into the next, without the jump into the ready stance or, after the
+ * first, the charge-up (port/src/game/battle/combo.c, from the battle sprite
+ * VM, b_800C11CC.c: the opening guard of a deathblow script, and the call op). */
+int pcGameplayUninterruptedCombos(void);
 /* A field channel's looping sound effect, which a menu's sounds cut, starts
  * again after the menu (port/src/game/field/sfxkeep.c): OP_C4SubSub1 notes
  * each start; openFieldMenu takes the mask before the menu, restores after. */

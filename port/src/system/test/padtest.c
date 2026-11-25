@@ -150,6 +150,75 @@ int main(int argc, char** argv) {
         printf("pad settings.ini (%s): %d checks passed\n", argv[2], checks);
         SDL_Quit(); return 0;
     }
+    if (strcmp(argv[2], "camera") == 0) {
+        /* The right-stick camera's settings (xenogears-pc #5): the stick at the defaults (a
+         * 20% dead zone, the speeds 100%), then inverted, faster and slower, and with other
+         * dead zones; L2's zoom keeps its direction; first-person mouse look follows. */
+        uint8_t first[8] = {0}, second[8] = {0};
+        float turn, tilt, zoom;
+        int recenter;
+        InitPAD(first, sizeof(first), second, sizeof(second));
+        StartPAD();
+        CHECK(padProfileDevice(0) == ps);
+#define NEAR(a, b) ((a) > (b) - 0.002f && (a) < (b) + 0.002f)
+#define STICK(x, y)                                                     \
+    (SDL_SetJoystickVirtualAxis(pj, SDL_GAMEPAD_AXIS_RIGHTX, x),        \
+     SDL_SetJoystickVirtualAxis(pj, SDL_GAMEPAD_AXIS_RIGHTY, y), SDL_UpdateJoysticks(), padVBlank(), \
+     padCameraInput(&turn, &tilt, &zoom, &recenter))
+        CHECK(padCameraTurnSpeed() == 100 && padCameraTiltSpeed() == 100 && padCameraDeadzone() == 20);
+        CHECK(!padCameraInvertX() && !padCameraInvertY());
+        STICK(16384, -16384); /* half right, half up: (0.5 - 0.2) / 0.8 */
+        CHECK(NEAR(turn, 0.375f) && NEAR(tilt, 0.375f) && zoom == 0);
+        STICK(6000, 6000); /* inside the dead zone */
+        CHECK(turn == 0 && tilt == 0 && zoom == 0);
+        STICK(32767, 32767);
+        CHECK(NEAR(turn, 1) && NEAR(tilt, -1));
+        padSetCameraInvertX(1);
+        STICK(16384, -16384);
+        CHECK(NEAR(turn, -0.375f) && NEAR(tilt, 0.375f) && setting("camera_invert_x", "1"));
+        padSetCameraInvertY(1);
+        STICK(16384, -16384);
+        CHECK(NEAR(turn, -0.375f) && NEAR(tilt, -0.375f) && setting("camera_invert_y", "1"));
+        SDL_SetJoystickVirtualAxis(pj, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_JOYSTICK_AXIS_MAX); /* L2: zoom */
+        STICK(0, 16384);
+        CHECK(tilt == 0 && NEAR(zoom, 0.375f));
+        SDL_SetJoystickVirtualAxis(pj, SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_JOYSTICK_AXIS_MIN);
+        float dx = 10, dy = -4;
+        padCameraMouse(&dx, &dy);
+        CHECK(dx == -10 && dy == 4);
+        padSetCameraInvertX(0);
+        padSetCameraInvertY(0);
+        padSetCameraTurnSpeed(200);
+        padSetCameraTiltSpeed(50);
+        STICK(16384, -16384);
+        CHECK(NEAR(turn, 0.75f) && NEAR(tilt, 0.1875f) && setting("camera_turn_speed", "200"));
+        padSetCameraTurnSpeed(300);
+        STICK(32767, 0); /* full stick at 300%: three times the turn */
+        CHECK(NEAR(turn, 3) && zoom == 0);
+        dx = 10, dy = -4;
+        padCameraMouse(&dx, &dy);
+        CHECK(dx == 30 && dy == -2);
+        padSetCameraTurnSpeed(100);
+        padSetCameraTiltSpeed(100);
+        padSetCameraDeadzone(0);
+        STICK(6000, 0);
+        CHECK(NEAR(turn, 6000 / 32767.0f));
+        padSetCameraDeadzone(60);
+        STICK(16384, 0);
+        CHECK(turn == 0 && setting("camera_stick_deadzone", "60"));
+        /* out of range: clamped */
+        padSetCameraTurnSpeed(1000);
+        padSetCameraTiltSpeed(1);
+        padSetCameraDeadzone(-4);
+        CHECK(padCameraTurnSpeed() == 300 && padCameraTiltSpeed() == 25 && padCameraDeadzone() == 0);
+        settingsSet("camera_stick_deadzone", "95");
+        CHECK(padCameraDeadzone() == 60);
+#undef STICK
+#undef NEAR
+        InitPAD(NULL, 0, NULL, 0);
+        printf("pad camera (%s): %d checks passed\n", argv[2], checks);
+        SDL_Quit(); return 0;
+    }
     /* Regional conventions compose with bindings; both face pairs change,
      * and directions/shoulders/Start are untouched. */
     padSetRegionalControls(0, 1);

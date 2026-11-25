@@ -771,8 +771,8 @@ void lifeGameInit(void) {
     s32 row;
     s32 col;
 
-    lifeGameTiles[0] = allocateHeap(1120 * (s32)sizeof(KernelTile), 1);
-    lifeGameTiles[1] = allocateHeap(1120 * (s32)sizeof(KernelTile), 1);
+    lifeGameTiles[0] = allocateHeap(PC_HEAP_OF(KernelTile, 1120 * (s32)sizeof(KernelTile)), 1);
+    lifeGameTiles[1] = allocateHeap(PC_HEAP_OF(KernelTile, 1120 * (s32)sizeof(KernelTile)), 1);
     lifeGameCells = allocateHeap(PC_HEAP_BYTES(0x460), 1);
     lifeGameNeighbourCounts = allocateHeap(PC_HEAP_BYTES(0x460), 1);
     for (row = 0; row < 28; row++) {

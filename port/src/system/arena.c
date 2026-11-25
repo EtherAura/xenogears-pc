@@ -49,14 +49,45 @@
  * session is a process of its own and its own start (netplay.c): nothing
  * is kept here.
  * XG_ARENA_MATCH=<vblank>:battling | <vblank>:versus,<table>,<config>[,current|new|a.b.c]
- * | <vblank>:mirror[,current|new|a.b.c] asks for a match as the menu does,
- * at that vblank (headless runs).
+ * | <vblank>:mirror[,current|new|a.b.c] | <vblank>:party,<save>,<save> asks for
+ * a match as the menu does, at that vblank (headless runs). A party vs party
+ * <save> is <card>.<number>[.<id>[.<id>[.<id>]]]: card 1 or 2, the save's
+ * number (No.12 in its title), then the members' character ids in order (the
+ * save's own party without them), player 1's first: party,2.12.0.2.4,1.2
+ * is card 2's No.12 with Fei, Citan and Billy against card 1's No.02 as it
+ * was saved. A mirror match or party vs party takes ,arena=<n> at the end:
+ * stage n (the game's number, 0..74, one of the stage list's below), else
+ * the setting arena_stage's: 800:mirror,0.2.4,arena=23 and
+ * 800:party,2.12.0.2.4,1.2,arena=23 are fought on stage 23 (the Zeboim
+ * ruins); a stage not in the list is refused (the match not asked).
  *
  * Mirror matches (xg-htn.35.143; the battle's side: port/src/game/battle/
  * mirror.c): a versus battle where player 2 commands a copy of player 1's
- * party, in the mirror's stage (include/pc_arena.h VERSUS_MIRROR_TABLE and
- * CONFIG); from the menu as a match (ARENA_MATCH_MIRROR), XG_VERSUS=mirror
- * from the start. Local only for now: online sessions offer none.
+ * party, the mirror's formation (include/pc_arena.h VERSUS_MIRROR_TABLE and
+ * CONFIG) on the stage the players chose (the stage list below, Blackmoon
+ * Forest by default: pcVersusStage);
+ * from the menu as a match (ARENA_MATCH_MIRROR), XG_VERSUS=mirror from the
+ * start. Local only for now: online sessions offer none.
+ *
+ * Party vs party (xg-htn.35.143, ARENA_MATCH_PARTY): a mirror match whose
+ * two sides each come from a party record (port/src/card/party.h: a memory
+ * card save's members, packed and checked), player 1's in slots 0-2 and
+ * player 2's in 3-5, on foot. The two records are the match's only input
+ * from the saves (online they will be what each machine sends): player 1's
+ * is applied here at each canonical start (partyFromRecord: its members'
+ * records, abilities and names, HP and EP full, no Gear, its items and
+ * rounds; nothing else of the save), player 2's by the battle
+ * (port/src/game/battle/mirror.c, pcVersusPartyRecord). A rematch applies
+ * both again from the same bytes: the same parties, fresh.
+ *
+ * Online party vs party (xg-htn.35.143, step 2.4; netplay.c): the session's
+ * process is handed both records once its handshake is over
+ * (pcArenaSessionParties: the host's as player 1, the joiner's as player 2,
+ * each checked by both machines), and each of its boots starts the match
+ * the way a local one starts (pcArenaStartState: the same code, player 1's
+ * record applied the same way), player 2's taken by the battle as above. A
+ * rematch (the session's soft reset) applies them again; nothing is sent
+ * again.
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -66,6 +97,8 @@
 #include "common.h"
 #include "main/game_state.h"
 #include "arena.h"
+#include "card/party.h"
+#include "card/saves.h"
 #include "cd/cd.h"
 #include "hw.h"
 #include "pc_arena.h"
@@ -80,6 +113,24 @@ _Static_assert((int)ARENA_PHASE_LEAVING == (int)PC_VERSUS_LEAVING && (int)ARENA_
                "the menu's phases are the versus session's");
 
 void padSetKeyboardPort(int port) __attribute__((weak));
+
+/* Party vs party: the record's bytes as the game's C reads them (pc_arena.h),
+ * and the game's records they hold */
+_Static_assert(sizeof(XgPartyRecord) == PC_PARTY_BYTES && offsetof(XgPartyRecord, m3_count) == PC_PARTY_COUNT &&
+                   offsetof(XgPartyRecord, m4_members) == PC_PARTY_MEMBERS &&
+                   offsetof(XgPartyRecord, m10_characters) == PC_PARTY_CHARACTERS &&
+                   offsetof(XgPartyRecord, m1FC_abilities) == PC_PARTY_ABILITIES &&
+                   offsetof(XgPartyRecord, m25C_names) == PC_PARTY_NAMES &&
+                   offsetof(XgPartyRecord, m298_itemIds) == PC_PARTY_ITEM_IDS &&
+                   offsetof(XgPartyRecord, m2C8_itemCounts) == PC_PARTY_ITEM_COUNTS &&
+                   offsetof(XgPartyRecord, m2F8_ammoIds) == PC_PARTY_AMMO_IDS &&
+                   offsetof(XgPartyRecord, m328_ammoCounts) == PC_PARTY_AMMO_COUNTS &&
+                   offsetof(XgPartyRecord, m358_ammoTable) == PC_PARTY_AMMO_TABLE,
+               "the party record's layout as pc_arena.h gives it to the game");
+_Static_assert(sizeof(GameStateCharacter) == XG_PARTY_RECORD && sizeof(GameStateSize20) == XG_PARTY_ABILITY &&
+                   sizeof(gameState.m0_names[0]) == XG_PARTY_NAME &&
+                   sizeof(gameState.m22B8_ammoCounts) == XG_PARTY_AMMO_TABLE,
+               "the party record holds the game's own records");
 
 static int pending;
 static int envRead;
@@ -234,6 +285,81 @@ int pcArenaMusicSelector(int id, int* wave, int* flags) {
     return 1;
 }
 
+/* ---- the stage of a mirror match or party vs party (xg-htn.35.143) ----
+ *
+ * The players choose the battle's stage (its arena: the config's +2,
+ * m2_arenaId; directory 0x0F files 2n + 6 and 2n + 7, the model bundle and
+ * the stage data with its slot positions and cameras) from this list; the
+ * formation stays the mirror's (its enemy set loads as before). Each one is
+ * checked by a run (work/agents/BD/PVP/NOTES.md, the stage section): player
+ * 2's sprites (their VRAM column, x 0x180, y 0x1C0: no upload of the stage's
+ * there), all six places 3 v 3 and 1 v 3, the camera. The slot bytes are a
+ * real battle's of that stage (the field's or world map's table the game
+ * reads; named beside each): the party's position slots (+4..+6) and player
+ * 2's places, as the first three enemies (+0x18..+0x1A), so each side
+ * stands where the game puts a party and its enemies there. The menu names
+ * them (port/src/ui/arena.cpp). Online (step 2.4) the host's choice will be
+ * one of the session's terms, as arena_music: the setting below, which a
+ * session pins. */
+static const struct {
+    unsigned char id;        /* the stage */
+    unsigned char party[3];  /* the config's +4..+6 */
+    unsigned char places[3]; /* +0x18..+0x1A */
+} stages[] = {
+    {3, {0, 0, 0}, {0, 0, 0}},  /* Mountain Path: field 15 config 7 (random; places of its 2nd-4th enemies) */
+    {1, {0, 0, 0}, {0, 0, 0}},  /* Blackmoon Forest: field 22 config 3 (random) */
+    {7, {0, 0, 0}, {0, 0, 0}},  /* Duneman Isle: field 47 config 0 (random) */
+    {14, {0, 0, 0}, {0, 0, 0}}, /* Nisan: field 474 config 0 (the town gate's battle) */
+    {13, {0, 0, 0}, {0, 0, 0}}, /* Aveh Castle: field 147 config 8 (random) */
+    {9, {1, 1, 1}, {1, 1, 1}},  /* Nortune sewers: field 239 config 1 (random) */
+    {10, {0, 0, 0}, {0, 0, 0}}, /* Nortune Gear dock: field 256 config 1 (random) */
+    {50, {0, 0, 0}, {0, 0, 0}}, /* Ethos headquarters: field 339 config 0 (random) */
+    {71, {0, 0, 0}, {0, 0, 0}}, /* Ethos transport, on deck: field 333 config 0 (random) */
+    {23, {0, 0, 0}, {0, 0, 0}}, /* Zeboim: field 363 config 7 (the dig site's; the ruins' slot 2 cuts player 1 off) */
+    {30, {0, 0, 0}, {1, 1, 1}}, /* Lighthouse: field 403 config 0 (random) */
+    {35, {0, 0, 0}, {0, 0, 0}}, /* Shevat: field 449 config 1 (random) */
+    {59, {0, 0, 0}, {0, 0, 0}}, /* Solaris: field 546 config 0 (random) */
+    {32, {1, 1, 1}, {1, 1, 1}}, /* Anima Relic 1: field 632 config 0 (random) */
+    {44, {0, 0, 0}, {0, 0, 0}}, /* world map grassland: world map 0 area 2 config 0 */
+    {47, {0, 0, 0}, {0, 0, 0}}, /* world map badlands: world map 0 area 8 config 4 */
+    {43, {0, 0, 0}, {0, 0, 0}}, /* world map snowfield: world map 0 area 13 config 3 */
+};
+#define STAGES ((int)(sizeof stages / sizeof stages[0]))
+/* The default (a setting's value: stage n is n + 1): Blackmoon Forest, the
+ * mirror match's stage before there was a list, with the places of a real
+ * battle there (the old ones put player 2's third member at the back, by
+ * the status bar). */
+#define STAGE_DEFAULT (1 + 1)
+
+/* The list's entry for a setting's value (n stage n - 1), -1 none. */
+static int stageEntry(int value) {
+    for (int i = 0; i < STAGES; i++) {
+        if (value == stages[i].id + 1) return i;
+    }
+    return -1;
+}
+
+int pcArenaStageCount(void) {
+    return STAGES;
+}
+
+int pcArenaStageId(int i) {
+    return i >= 0 && i < STAGES ? stages[i].id : -1;
+}
+
+int pcArenaStageSetting(void) {
+    settingsDescribe("arena_stage", "Battle arena: the stage of a mirror match or party vs party, n stage n - 1 of "
+                                    "those F1 > Extras > Battle arena lists (default 2, Blackmoon Forest; online the "
+                                    "host's)");
+    int v = settingsInt("arena_stage", STAGE_DEFAULT);
+    return stageEntry(v) >= 0 ? v : STAGE_DEFAULT;
+}
+
+void pcArenaSetStage(int value) {
+    settingsSetInt("arena_stage", stageEntry(value) >= 0 ? value : STAGE_DEFAULT);
+    settingsSave();
+}
+
 /* buildBattlingGearList (src/battling/bl_8007E528.c), as Battling starts:
  * only a Battle arena session, never the reception's own Bonus Battling. */
 int pcArenaAllGears(void) {
@@ -303,7 +429,7 @@ void pcArenaKeyboard(int arena) {
 static int versusTable;
 static int versusConfig;
 static int versusEnvRead;
-static int versusMirror; /* the request is a mirror match */
+static int versusMirror; /* the request is a mirror match or party vs party (VERSUS_KIND_*), 0 not */
 
 /* a versus battle asked for or running */
 int pcVersusSessionBusy(void) {
@@ -326,7 +452,7 @@ int pcVersusRequestMirror(void) {
     if (!pcVersusRequest(VERSUS_MIRROR_TABLE, VERSUS_MIRROR_CONFIG)) {
         return 0;
     }
-    versusMirror = 1;
+    versusMirror = VERSUS_KIND_MIRROR;
     return 1;
 }
 
@@ -405,7 +531,7 @@ void netplaySoftReset(void) __attribute__((weak));
 
 static struct {
     int phase;        /* MATCH_* */
-    int kind;         /* ARENA_MATCH_BATTLING, ARENA_MATCH_VERSUS or ARENA_MATCH_MIRROR */
+    int kind;         /* ARENA_MATCH_BATTLING, ARENA_MATCH_VERSUS, ARENA_MATCH_MIRROR or ARENA_MATCH_PARTY */
     int table, config; /* versus: the formation */
     int party[3];     /* versus: character ids, 255 none */
     int fromSave;     /* versus: the members as the kept game has them */
@@ -413,7 +539,16 @@ static struct {
     int rematch;      /* Battling: the game set its entry bytes for the rematch */
     int seen;         /* the match's mode reached since the start (Battling; the versus battle) */
     uint32_t askedAt; /* the vblank asked at */
+    XgPartyRecord records[2]; /* party vs party: player 1's and player 2's parties (checked) */
+    int stage;        /* mirror match, party vs party: the stage as arena_stage gives it (0 the match's own) */
 } M;
+/* An online party vs party's records (netplay.c, pcArenaSessionParties):
+ * player 1's (the host's) and player 2's (the joiner's), checked. */
+static struct {
+    int on;
+    XgPartyRecord records[2];
+    int party[3]; /* player 1's members (character ids, 255 none) */
+} S;
 static GameState keptState; /* the kept game's gameState, as the match was asked for */
 static int gameSeen;        /* a field past the title, the world map or a battle since the boot: a game is loaded */
 
@@ -466,16 +601,16 @@ int pcArenaMatchAvailable(const char** why) {
     return stateRestartAvailable(why);
 }
 
-int pcArenaMatchStart(int kind, int table, int config, const int party[3], int fromSave) {
-    if (!pcArenaMatchAvailable(NULL) ||
-        (kind != ARENA_MATCH_BATTLING && kind != ARENA_MATCH_VERSUS && kind != ARENA_MATCH_MIRROR)) {
+static int matchStart(int kind, int table, int config, const int party[3], int fromSave, int stage) {
+    if (!pcArenaMatchAvailable(NULL) || (kind != ARENA_MATCH_BATTLING && kind != ARENA_MATCH_VERSUS &&
+                                         kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_PARTY)) {
         return 0;
     }
-    if (kind == ARENA_MATCH_MIRROR) {
+    if (kind == ARENA_MATCH_MIRROR || kind == ARENA_MATCH_PARTY) {
         table = VERSUS_MIRROR_TABLE;
         config = VERSUS_MIRROR_CONFIG;
     }
-    if (kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_MIRROR) {
+    if (kind != ARENA_MATCH_BATTLING) {
         int members = 0;
         if (table < 0 || table > 252 || config < 0 || config > 15 || party == NULL || party[0] < 0 || party[0] > 10) {
             return 0;
@@ -490,14 +625,20 @@ int pcArenaMatchStart(int kind, int table, int config, const int party[3], int f
     M.kind = kind;
     M.table = table;
     M.config = config;
-    M.fromSave = fromSave && gameSeen;
+    M.fromSave = fromSave && gameSeen && kind != ARENA_MATCH_PARTY;
+    M.stage = kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_PARTY ? 0 : stageEntry(stage) >= 0 ? stage : STAGE_DEFAULT;
     M.rematch = 0;
     M.seen = 0;
     M.armed = 1;
     M.askedAt = hwVSyncCount();
     M.phase = MATCH_ASKED;
     __builtin_memcpy(&keptState, &gameState, sizeof keptState);
-    if (kind != ARENA_MATCH_BATTLING) {
+    if (kind == ARENA_MATCH_PARTY) {
+        pcArenaLog("match asked at vblank %u in mode %d (a game %s): party vs party table %d config %d, player 1 %d,%d,%d, "
+                   "player 2 %d,%d,%d (their records)",
+                   M.askedAt, portGameMode(), gameSeen ? "loaded" : "not loaded", table, config, M.party[0], M.party[1],
+                   M.party[2], M.records[1].m4_members[0], M.records[1].m4_members[1], M.records[1].m4_members[2]);
+    } else if (kind != ARENA_MATCH_BATTLING) {
         pcArenaLog("match asked at vblank %u in mode %d (a game %s): %s table %d config %d, party %d,%d,%d%s",
                    M.askedAt, portGameMode(), gameSeen ? "loaded" : "not loaded",
                    kind == ARENA_MATCH_MIRROR ? "mirror match" : "versus battle", table, config, M.party[0],
@@ -507,8 +648,82 @@ int pcArenaMatchStart(int kind, int table, int config, const int party[3], int f
                    portGameMode(), keptState.m231A_fieldID, gameSeen ? "loaded" : "not loaded",
                    keptState.m1930_fieldVarsBackup[0]);
     }
+    if (M.stage != 0) pcArenaLog("match stage: %d", M.stage - 1);
     stateRequestRestart(1, softReboot);
     return 1;
+}
+
+/* A mirror match's or party vs party's stage: the setting's (arena_stage), as
+ * the menu shows it when the match is asked; kept for its rematches. */
+int pcArenaMatchStart(int kind, int table, int config, const int party[3], int fromSave) {
+    return kind != ARENA_MATCH_PARTY && matchStart(kind, table, config, party, fromSave, pcArenaStageSetting());
+}
+
+/* The FNV-1a of a record's bytes, for the log: the same on every machine. */
+static uint32_t recordHash(const XgPartyRecord* r) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < sizeof *r; i++) h = (h ^ ((const uint8_t*)r)[i]) * 16777619u;
+    return h;
+}
+
+static int matchStartParty(const XgPartyRecord* p1, const XgPartyRecord* p2, int stage, const char** why) {
+    uint8_t codes[XG_PARTY_CODE_TABLE];
+    XgPartyWhy refused;
+    int party[3];
+    if (why) *why = NULL;
+    if (p1 == NULL || p2 == NULL || !pcArenaMatchAvailable(why)) return 0;
+    int haveCodes = xgPartyGameCodes(codes);
+    for (int p = 0; p < 2; p++) {
+        /* the browser checked them; checked again here, as a peer's will be */
+        if (xgPartyCheck(p ? p2 : p1, haveCodes ? codes : NULL, &refused) != XG_PARTY_OK) {
+            pcArenaLog("party vs party: player %d's party refused: %s", p + 1, refused.text);
+            if (why) *why = "A party could not be used.";
+            return 0;
+        }
+    }
+    for (int i = 0; i < 3; i++) party[i] = i < p1->m3_count ? p1->m4_members[i] : 255;
+    M.records[0] = *p1;
+    M.records[1] = *p2;
+    pcArenaLog("party vs party: player 1's record fnv1a %08x, player 2's %08x", (unsigned)recordHash(p1),
+               (unsigned)recordHash(p2));
+    return matchStart(ARENA_MATCH_PARTY, 0, 0, party, 0, stage);
+}
+
+int pcArenaMatchStartParty(const XgPartyRecord* p1, const XgPartyRecord* p2, const char** why) {
+    return matchStartParty(p1, p2, pcArenaStageSetting(), why);
+}
+
+int pcVersusStage(unsigned char party[3], unsigned char places[3]) {
+    /* a local match's own (as asked); else the setting (XG_VERSUS=mirror, and
+     * online, where the session pins it to the host's) */
+    int local = M.phase == MATCH_ON && (M.kind == ARENA_MATCH_MIRROR || M.kind == ARENA_MATCH_PARTY);
+    int i = stageEntry(local ? M.stage : pcArenaStageSetting());
+    if (i < 0) return -1;
+    for (int k = 0; k < 3; k++) {
+        party[k] = stages[i].party[k];
+        places[k] = stages[i].places[k];
+    }
+    return stages[i].id;
+}
+
+const unsigned char* pcVersusPartyRecord(int player) {
+    if (player != 1 && player != 2) return NULL;
+    if (S.on && matchOnline()) return (const unsigned char*)&S.records[player - 1]; /* online: the session's */
+    if (M.phase != MATCH_ON || M.kind != ARENA_MATCH_PARTY) return NULL;
+    return (const unsigned char*)&M.records[player - 1];
+}
+
+void pcArenaSessionParties(const XgPartyRecord* player1, const XgPartyRecord* player2) {
+    if (player1 == NULL || player2 == NULL) {
+        memset(&S, 0, sizeof S);
+        return;
+    }
+    S.records[0] = *player1;
+    S.records[1] = *player2;
+    for (int i = 0; i < 3; i++) S.party[i] = i < player1->m3_count ? player1->m4_members[i] : 255;
+    S.on = 1;
+    pcArenaLog("party vs party online: player 1's record fnv1a %08x, player 2's %08x", (unsigned)recordHash(player1),
+               (unsigned)recordHash(player2));
 }
 
 /* Back to the kept game (at the next vblank). */
@@ -594,8 +809,76 @@ static void memberFromSave(int c) {
     }
 }
 
+/* Party vs party: player 1's party into the fresh game from its record (the
+ * header): its members' records, abilities and names, HP and EP full, the
+ * Gear number 0xFF (on foot: no Gear to call) and the command loadout the
+ * member's own (as the game keeps it); inventory 0 its items and inventory 1
+ * its rounds, nothing else, and the rounds' ammo-count table. Nothing else
+ * of the save: the game stays a new game's (story 0). Player 2's, the same
+ * way, in the battle: port/src/game/battle/mirror.c partyRecordRows. */
+static void partyFromRecord(const XgPartyRecord* r) {
+    for (int k = 0; k < r->m3_count && k < XG_PARTY_MEMBERS; k++) {
+        int c = r->m4_members[k];
+        GameStateCharacter* m = &gameState.m26C_party[c];
+        memcpy(m, r->m10_characters[k], sizeof *m);
+        m->m4C_HP = m->m4E_MaxHP;
+        m->m50_MP = m->m52_MaxMP;
+        m->mA0_gearNum = 0xFF;
+        m->m56_battleCommandLoadout = (u8)c;
+        memcpy(&gameState.m16C0_abilities[c], r->m1FC_abilities[k], sizeof gameState.m16C0_abilities[c]);
+        memcpy(gameState.m0_names[c], r->m25C_names[k], sizeof gameState.m0_names[c]);
+        gameState.m1D32_partyFrameMask |= 1 << c; /* as the field's join op */
+    }
+    memset(gameState.m2026_inventory0Ids, 0, sizeof gameState.m2026_inventory0Ids);
+    memset(gameState.m1F90_inventory0Counts, 0, sizeof gameState.m1F90_inventory0Counts);
+    memset(gameState.m1D9C_inventory1Ids, 0, sizeof gameState.m1D9C_inventory1Ids);
+    memset(gameState.m1D38_inventory1Counts, 0, sizeof gameState.m1D38_inventory1Counts);
+    for (int i = 0; i < XG_PARTY_ITEMS && r->m298_itemIds[i] != 0; i++) {
+        gameState.m2026_inventory0Ids[i] = r->m298_itemIds[i];
+        gameState.m1F90_inventory0Counts[i] = r->m2C8_itemCounts[i];
+    }
+    for (int i = 0; i < XG_PARTY_ITEMS && r->m2F8_ammoIds[i] != 0; i++) {
+        gameState.m1D9C_inventory1Ids[i] = r->m2F8_ammoIds[i];
+        gameState.m1D38_inventory1Counts[i] = r->m328_ammoCounts[i];
+    }
+    memcpy(gameState.m22B8_ammoCounts, r->m358_ammoTable, sizeof gameState.m22B8_ammoCounts);
+    for (int i = 0; i < 3; i++) gameState.m22B1_isOnGear[i] = 0;
+}
+
+/* A versus battle's start (a local match's, an online party vs party's):
+ * field 22 at the story's start, the party, player 1's record for party vs
+ * party (else the members from the kept save, or a new game's), and the
+ * versus battle asked for at once. */
+static void versusStart(int kind, const int party[3], int table, int config, const XgPartyRecord* player1, int fromSave) {
+    for (int i = 0; i < 3; i++) {
+        gameState.m1D34_currentParty[i] = (u8)party[i];
+        if (party[i] != 255) gameState.m1D30_partyMemberBitField |= 1 << party[i];
+    }
+    gameState.m1930_fieldVarsBackup[0] = 0;
+    gameState.m231A_fieldID = VERSUS_FIELD;
+    if (kind == ARENA_MATCH_PARTY) {
+        partyFromRecord(player1);
+    } else if (fromSave) {
+        for (int i = 0; i < 3; i++) {
+            if (party[i] != 255) memberFromSave(party[i]);
+        }
+    }
+    versusTable = table;
+    versusConfig = config;
+    versusPending = 1;
+    versusMirror = kind == ARENA_MATCH_MIRROR ? VERSUS_KIND_MIRROR : kind == ARENA_MATCH_PARTY ? VERSUS_KIND_PARTY : 0;
+    versusEnvRead = 1;
+    pcArenaLog("match start: %s table %d config %d in field %d, party %d,%d,%d",
+               kind == ARENA_MATCH_PARTY ? "party vs party" : versusMirror ? "mirror match" : "versus battle", table,
+               config, VERSUS_FIELD, party[0], party[1], party[2]);
+}
+
 /* options.c portStartState: the match's start, applied to the fresh game. */
 int pcArenaStartState(void) {
+    if (S.on && matchOnline()) { /* an online party vs party: each of the session's boots (the header) */
+        versusStart(ARENA_MATCH_PARTY, S.party, VERSUS_MIRROR_TABLE, VERSUS_MIRROR_CONFIG, &S.records[0], 0);
+        return 1;
+    }
     if (!M.armed) return 0;
     if (M.kind == ARENA_MATCH_BATTLING) {
         gameState.m1930_fieldVarsBackup[0] = keptState.m1930_fieldVarsBackup[0];
@@ -611,29 +894,58 @@ int pcArenaStartState(void) {
                    battlingEntryGear2, battlingEntryWinsNeeded);
         M.rematch = 0;
     } else {
-        for (int i = 0; i < 3; i++) {
-            gameState.m1D34_currentParty[i] = (u8)M.party[i];
-            if (M.party[i] != 255) gameState.m1D30_partyMemberBitField |= 1 << M.party[i];
-        }
-        gameState.m1930_fieldVarsBackup[0] = 0;
-        gameState.m231A_fieldID = VERSUS_FIELD;
-        if (M.fromSave) {
-            for (int i = 0; i < 3; i++) {
-                if (M.party[i] != 255) memberFromSave(M.party[i]);
-            }
-        }
-        versusTable = M.table;
-        versusConfig = M.config;
-        versusPending = 1;
-        versusMirror = M.kind == ARENA_MATCH_MIRROR;
-        versusEnvRead = 1;
-        pcArenaLog("match start: %s table %d config %d in field %d, party %d,%d,%d",
-                   versusMirror ? "mirror match" : "versus battle", M.table, M.config, VERSUS_FIELD, M.party[0],
-                   M.party[1], M.party[2]);
+        versusStart(M.kind, M.party, M.table, M.config, &M.records[0], M.fromSave);
     }
     M.armed = 2;
     M.phase = MATCH_ON;
     return 1;
+}
+
+/* A party vs party <save> (the header: XG_ARENA_MATCH's, and netplay's
+ * --save): its record packed from the cards as the save browser packs it
+ * (port/src/ui/arena_saves.cpp), its names decoded with `codes`. */
+int pcArenaPackSave(const char* spec, const uint8_t* codes, XgPartyRecord* out) {
+    int v[5] = {0, 0, 255, 255, 255};
+    int n = sscanf(spec, "%d.%d.%d.%d.%d", &v[0], &v[1], &v[2], &v[3], &v[4]);
+    static CardGameSave envSaves[2 * 15]; /* both cards' blocks */
+    XgPartyWhy why;
+    int members[3] = {255, 255, 255};
+    if (n < 2) {
+        fprintf(stderr, "arena: a save is <card>.<number>[.<id>...], not '%s'\n", spec);
+        return 0;
+    }
+    CardGameSave* list = envSaves;
+    int count = cardGameSaves(list, (int)(sizeof envSaves / sizeof envSaves[0]), cardGameRegion());
+    for (int i = 0; i < count; i++) {
+        if (list[i].card != v[0] - 1 || list[i].number != v[1]) continue;
+        const uint8_t* block = cardGameSaveBlock(&list[i]);
+        if (n > 2) {
+            for (int k = 0; k < 3; k++) members[k] = v[2 + k];
+        } else {
+            for (int k = 0, m = 0; k < 3; k++) { /* the save's own party, as far as its members have joined */
+                int id = list[i].party[k];
+                if (id < CARD_SAVE_MEMBERS && (list[i].joined & 1 << id) && (m == 0 || members[0] != id) &&
+                    (m < 2 || members[1] != id)) {
+                    members[m++] = id;
+                }
+            }
+        }
+        if (block == NULL || codes == NULL || xgPartyPack(out, block, members, codes, &why) != XG_PARTY_OK) {
+            fprintf(stderr, "arena: card %d No.%02d: %s\n", v[0], v[1],
+                    block == NULL ? "the save changed" : codes == NULL ? "no character-code table (the disc)" : why.text);
+            return 0;
+        }
+        pcArenaLog("party vs party: card %d No.%02d (%s), members %d,%d,%d", v[0], v[1], list[i].location, members[0],
+                   members[1], members[2]);
+        return 1;
+    }
+    fprintf(stderr, "arena: no save No.%02d of this game on card %d\n", v[1], v[0]);
+    return 0;
+}
+
+static int envParty(const char* spec, XgPartyRecord* out) {
+    uint8_t codes[XG_PARTY_CODE_TABLE];
+    return pcArenaPackSave(spec, xgPartyGameCodes(codes) ? codes : NULL, out);
 }
 
 /* XG_ARENA_MATCH (the header): a request as the menu makes it. */
@@ -647,8 +959,36 @@ static void envMatch(void) {
         if (s == NULL || sscanf(s, "%u:%159s", &at, what) != 2) what[0] = '\0';
     }
     if (what[0] == '\0' || hwVSyncCount() < at || !pcArenaMatchAvailable(NULL)) return;
+    /* ,arena=<n>: a mirror match's or party vs party's stage n (one of the
+     * list's), else the setting's */
+    int stage = pcArenaStageSetting();
+    char* field = strstr(what, ",arena=");
+    if (field != NULL) {
+        int n = atoi(field + 7);
+        char* rest = strchr(field + 1, ',');
+        if (rest == NULL) rest = field + strlen(field);
+        memmove(field, rest, strlen(rest) + 1);
+        stage = n + 1;
+        if (n < 0 || stageEntry(stage) < 0) {
+            fprintf(stderr, "arena: XG_ARENA_MATCH: arena=%d is not one of the stages listed (system/arena.c)\n", n);
+            what[0] = '\0';
+            return;
+        }
+    }
     if (strncmp(what, "battling", 8) == 0) {
         pcArenaMatchStart(ARENA_MATCH_BATTLING, 0, 0, NULL, 0);
+    } else if (strncmp(what, "party,", 6) == 0) {
+        static XgPartyRecord envSides[2];
+        XgPartyRecord* sides = envSides;
+        char* second = strchr(what + 6, ',');
+        if (second == NULL) {
+            fprintf(stderr, "arena: XG_ARENA_MATCH: expected <vblank>:party,<save>,<save>\n");
+        } else {
+            *second++ = '\0';
+            if (envParty(what + 6, &sides[0]) && envParty(second, &sides[1])) {
+                matchStartParty(&sides[0], &sides[1], stage, NULL);
+            }
+        }
     } else {
         int t = 0, c = 0, party[3] = {0, 2, 255}, fromSave = 1;
         int kind = ARENA_MATCH_VERSUS;
@@ -660,11 +1000,11 @@ static void envMatch(void) {
             if (what[6] == ',') snprintf(how, sizeof how, "%s", what + 7);
         }
         if (kind == ARENA_MATCH_VERSUS && sscanf(what, "versus,%d,%d,%63s", &t, &c, how) < 2) {
-            fprintf(stderr, "arena: XG_ARENA_MATCH: expected <vblank>:battling, <vblank>:versus,T,C[,party] or "
-                            "<vblank>:mirror[,party]\n");
+            fprintf(stderr, "arena: XG_ARENA_MATCH: expected <vblank>:battling, <vblank>:versus,T,C[,party], "
+                            "<vblank>:mirror[,party][,arena=N] or <vblank>:party,<save>,<save>[,arena=N]\n");
         } else if (strcmp(how, "new") == 0) {
             fromSave = 0;
-            pcArenaMatchStart(kind, t, c, party, fromSave);
+            matchStart(kind, t, c, party, fromSave, stage);
         } else {
             if (strcmp(how, "current") == 0) {
                 for (int i = 0; i < 3; i++) party[i] = gameState.m1D34_currentParty[i] > 10 ? 255 : gameState.m1D34_currentParty[i];
@@ -673,7 +1013,7 @@ static void envMatch(void) {
                 party[1] = party[2] = 255;
                 sscanf(how, "%d.%d.%d", &party[0], &party[1], &party[2]);
             }
-            pcArenaMatchStart(kind, t, c, party, fromSave);
+            matchStart(kind, t, c, party, fromSave, stage);
         }
     }
     what[0] = '\0'; /* once */

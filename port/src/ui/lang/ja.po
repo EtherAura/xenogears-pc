@@ -2524,10 +2524,11 @@ msgid ""
 "Fixes Gear-shop Ether amp, Billy's ammo elements on equipment/status "
 "refresh, missing/stray portrait pixels on the "
 "next portrait load, Def UP, a name's final 's' (US), the shop's "
-"Buy/Sell/Exit arrow (US), MP for EP in the party menu, and field sound "
-"loops a menu cut off."
+"Buy/Sell/Exit arrow (US), MP for EP in the party menu, field sound loops a "
+"menu cut off, and a jump pressed just as a random battle comes (the battle "
+"then starts when you land)."
 msgstr ""
-"ギアショップのエーテルアンプ、装備やステータス更新時のビリーの弾の属性、次の顔グラフィック読み込み時の欠けたり余分なピクセル、防御UP、名前の最後の「s」(US 版)、ショップの買う/売る/出るの矢印(US 版)、パーティメニューの EP が MP になる表示、メニューで途切れるフィールドのループ音を修正します。"
+"ギアショップのエーテルアンプ、装備やステータス更新時のビリーの弾の属性、次の顔グラフィック読み込み時の欠けたり余分なピクセル、防御UP、名前の最後の「s」(US 版)、ショップの買う/売る/出るの矢印(US 版)、パーティメニューの EP が MP になる表示、メニューで途切れるフィールドのループ音、ランダムバトルが始まる時に押したジャンプ(バトルはジャンプの後に始まります)を修正します。"
 
 #: port/src/ui/sections.cpp
 msgid "Boss camera fix"
@@ -2648,6 +2649,23 @@ msgid ""
 msgstr ""
 "通常攻撃 1 回で新しい必殺技に向けて得られる練習量。100%% は原作どおり、0%% "
 "は増えません。必殺技はこれまでどおりバトルの後に、原作のレベルと順番で覚えます。"
+
+#: port/src/ui/sections.cpp
+msgid "Uninterrupted combos"
+msgstr "途切れないコンボ"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"A Combo's deathblows follow one another without a break: no charge-up pose "
+"before each one after the first, and the jump back into the ready stance "
+"only where a deathblow needs it (to start on the enemy's far side, or well "
+"away from where the last one ended). The moves, their damage, AP and "
+"deathblow learning stay the game's own. Off: the original."
+msgstr ""
+"コンボの必殺技が途切れずに続きます。2 つ目からは技の前の力をためるポーズがなく"
+"なり、かまえ直しのジャンプは、技が敵の向こうから始まるときや、前の技の終わった"
+"所から大きくずれているときだけになります。技そのもの、ダメージ、AP、必殺技の習"
+"得は原作のままです。オフにすると原作どおりです。"
 
 #: port/src/ui/sections.cpp
 msgid "Enemy info"
@@ -3898,6 +3916,155 @@ msgstr "ミラーマッチ"
 #: port/src/ui/arena.cpp
 msgid "Opponent's HP and EP"
 msgstr "相手の HP と EP"
+
+#: port/src/ui/arena.cpp
+msgid "Battle stage"
+msgstr "戦闘ステージ"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Stage %d"
+msgstr "ステージ %d"
+
+#: port/src/ui/arena.cpp
+msgid "The party and player 2 stand where the game's own battles there put a party and its enemies."
+msgstr "パーティとプレイヤー2は、そこでのゲーム本来の戦闘でパーティと敵が立つ位置に立ちます。"
+
+#: port/src/ui/arena.cpp
+msgid "Mountain Path"
+msgstr "シタン家へつづく やまみち"
+
+#: port/src/ui/arena.cpp
+msgid "The trail from Lahan up to Citan's house."
+msgstr "ラハン村からシタン家へのぼる やまみち。"
+
+#: port/src/ui/arena.cpp
+msgid "Blackmoon Forest"
+msgstr "黒月の森"
+
+#: port/src/ui/arena.cpp
+msgid "Its entrance, the large tree and the Rankar clearing."
+msgstr "森の入口、大木のそば、奥の広場。"
+
+#: port/src/ui/arena.cpp
+msgid "Duneman Isle"
+msgstr "サンドマンズ"
+
+#: port/src/ui/arena.cpp
+msgid "The Aveh desert's dunes, below the sandfall and by the skeleton remains."
+msgstr "アヴェの砂の海: 砂の流れの下と、大きなほねのそば。"
+
+#: port/src/ui/arena.cpp
+msgid "Nisan"
+msgstr "ニサン"
+
+#: port/src/ui/arena.cpp
+msgid "The town gate."
+msgstr "町の入口。"
+
+#: port/src/ui/arena.cpp
+msgid "Aveh Castle"
+msgstr "アヴェのおしろ"
+
+#: port/src/ui/arena.cpp
+msgid "A castle hall: up the ladder from the Bledavik sewers, and the tower passage."
+msgstr "おしろの広間: ブレイダブリクの地下から はしごを上った先と、とうへの通り。"
+
+#: port/src/ui/arena.cpp
+msgid "Nortune sewers"
+msgstr "キスレブの下水"
+
+#: port/src/ui/arena.cpp
+msgid "Under Kislev's capital: the channels and the maintenance passages."
+msgstr "キスレブの街の地下を流れる下水のあたり。"
+
+#: port/src/ui/arena.cpp
+msgid "Nortune Gear dock"
+msgstr "キスレブのギアドック"
+
+#: port/src/ui/arena.cpp
+msgid "Under the battle arena: the hangar stairs, the storerooms and passages."
+msgstr "ギアバトル会場の地下: ハンガーの階段、物置と通り。"
+
+#: port/src/ui/arena.cpp
+msgid "Ethos headquarters"
+msgstr "「教会」本部"
+
+#: port/src/ui/arena.cpp
+msgid "The front hall, the bishop's stairs and the landings."
+msgstr "正面の広間と、おくの階段とおどり場。"
+
+#: port/src/ui/arena.cpp
+msgid "Ethos transport"
+msgstr "「教会」のふね"
+
+#: port/src/ui/arena.cpp
+msgid "On deck, outside the Ethos ship."
+msgstr "「教会」のふねの外、デッキの上。"
+
+#: port/src/ui/arena.cpp
+msgid "Zeboim"
+msgstr "ゼボイム"
+
+#: port/src/ui/arena.cpp
+msgid "The buried city under the Ethos dig site, and the dig site's transfer lobby."
+msgstr "「教会」のはっくつ現場の地下にうもれた街と、はっくつ現場のロビー。"
+
+#: port/src/ui/arena.cpp
+msgid "Lighthouse"
+msgstr "とうだい"
+
+#: port/src/ui/arena.cpp
+msgid "The underground landing below the lighthouse: a ruined city."
+msgstr "とうだいの地下: こわれた街。"
+
+#: port/src/ui/arena.cpp
+msgid "Shevat"
+msgstr "シェバト"
+
+#: port/src/ui/arena.cpp
+msgid "The outer escape lift and the terrace."
+msgstr "外へ出るリフトとテラス。"
+
+#: port/src/ui/arena.cpp
+msgid "Solaris"
+msgstr "ソラリス"
+
+#: port/src/ui/arena.cpp
+msgid "Etrenank's lower levels, the Soylent System and Krelian's laboratory."
+msgstr "エテメンアンキの下の方、ソイレントシステム、カレルレンのラボ。"
+
+#: port/src/ui/arena.cpp
+msgid "Anima Relic 1"
+msgstr "アニマのうつわ 1"
+
+#: port/src/ui/arena.cpp
+msgid "The relic's corridors and lift lobby, and the Nisan mausoleum's metal bridge."
+msgstr "アニマのうつわの通りとリフトのロビー、ニサンの地下のはし。"
+
+#: port/src/ui/arena.cpp
+msgid "Grassland (world map)"
+msgstr "平原 (ワールドマップ)"
+
+#: port/src/ui/arena.cpp
+msgid "The world map's grassland, where most random battles on foot are."
+msgstr "ワールドマップの平原: 歩いての戦闘の多くがここです。"
+
+#: port/src/ui/arena.cpp
+msgid "Badlands (world map)"
+msgstr "あれ地 (ワールドマップ)"
+
+#: port/src/ui/arena.cpp
+msgid "The world map's rocky wastes."
+msgstr "ワールドマップの、いわだらけの あれ地。"
+
+#: port/src/ui/arena.cpp
+msgid "Snowfield (world map)"
+msgstr "ゆきの平原 (ワールドマップ)"
+
+#: port/src/ui/arena.cpp
+msgid "The world map's snowfields."
+msgstr "ワールドマップの ゆきの平原。"
 
 #: port/src/ui/arena.cpp
 msgid ""
@@ -7571,6 +7738,57 @@ msgstr "ファーストパーソン視点のまま移動する"
 msgid "With first-person look enabled, move relative to the view. When navigation is off, moving leaves first-person view."
 msgstr "ファーストパーソン視点が有効なとき、視線に合わせて前後左右に移動できます。この設定がオフのときは、移動すると元の視点にもどります。"
 
+#: port/src/ui/sections.cpp
+msgid "Camera stick"
+msgstr "カメラのスティック操作"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Invert horizontal"
+msgstr "左右を反転"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Invert vertical"
+msgstr "上下を反転"
+
+#: port/src/ui/sections.cpp
+msgid "Invert the right stick's turning (horizontal) or tilting (vertical) for the free camera, the world map's camera and first-person look; a right mouse drag in first-person look follows. The keys and L2's zoom keep their directions."
+msgstr "自由カメラ、ワールドマップのカメラ、ファーストパーソン視点で、右スティックで回す向き(左右)や上下に向ける向き(上下)を反転します。ファーストパーソン視点でのマウスの右ドラッグも同じです。キーと L2 でのズームの向きは変わりません。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Horizontal speed: %d%%"
+msgstr "左右の速さ: %d%%"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Vertical speed: %d%%"
+msgstr "上下の速さ: %d%%"
+
+#: port/src/ui/sections.cpp
+msgid "The camera's sensitivity: how fast the right stick, the camera keys and first-person mouse look turn it (horizontal) and tilt it (vertical). Zoom keeps its speed. Default: 100%%."
+msgstr "カメラの感度です。右スティック、カメラのキー、ファーストパーソン視点のマウス操作でカメラを回す速さ(左右)と上下に向ける速さ(上下)です。ズームの速さは変わりません。標準: 100%%。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Right stick dead zone: %d%%"
+msgstr "右スティックの遊び: %d%%"
+
+#: port/src/ui/sections.cpp
+msgid "How far the right stick must move before the camera does (the left stick's dead zone, under Stick and mouse, is the D-pad's). Default: 20%%."
+msgstr "カメラが動き出すまでに右スティックを倒す必要がある量です(「スティックとマウス」にある左スティックの遊びは方向キー用です)。標準: 20%%。"
+
+#: port/src/ui/options.cpp
+msgid "Camera horizontal speed"
+msgstr "カメラの左右の速さ"
+
+#: port/src/ui/options.cpp
+msgid "Camera vertical speed"
+msgstr "カメラの上下の速さ"
+
+#: port/src/ui/options.cpp
+msgid "Right stick dead zone"
+msgstr "右スティックの遊び"
+
 msgid "Binaural (headphones)"
 msgstr "バイノーラル(ヘッドホン)"
 
@@ -7622,8 +7840,8 @@ msgstr "ライティング"
 msgid "Firelight flicker"
 msgstr "火のゆらめき"
 
-msgid "Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is around them and their glow rise and fall, each fire in its own rhythm. Windows, the sky and white or blue lights stay steady. On by default, with Lighting or Glow."
-msgstr "室内、夜、戦闘で、たき火、たいまつ、ランプがゆらめきます。まわりを照らす光とその輝きが、火ごとにそれぞれの調子で強まったり弱まったりします。窓、空、白や青の光はゆらぎません。ライティングかグローと合わせて、初期設定はオンです。"
+msgid "Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is around them and their glow rise and fall, each fire in its own rhythm, and they keep their painted brightness under the lighting's shade. Windows, the sky and white or blue lights stay steady. On by default, with Lighting or Glow."
+msgstr "室内、夜、戦闘で、たき火、たいまつ、ランプがゆらめきます。まわりを照らす光とその輝きが、火ごとにそれぞれの調子で強まったり弱まったりし、ライティングの陰の中でも描かれたままの明るさを保ちます。窓、空、白や青の光はゆらぎません。ライティングかグローと合わせて、初期設定はオンです。"
 
 msgid "Light on characters"
 msgstr "キャラクターへの光"
@@ -7655,11 +7873,29 @@ msgstr "フィールド、戦闘、ワールドマップで、キャラクター
 msgid "Colour grade"
 msgstr "カラーグレード"
 
+msgid "Adapt to the area"
+msgstr "場所に合わせる"
+
+msgid "The colour grade also leans gently into each place's own colour: a sandy place a little warmer, a green one a little greener, a dark one a little bluer in its shadows. Dialogue, portraits and the HUD are not touched. On by default, with Colour grade."
+msgstr "カラーグレードが、その場所の色にもやわらかく寄せます。砂の多い場所は少し暖かく、緑の多い場所は少し緑に、暗い場所は陰が少し青くなります。会話、顔グラフィック、HUDは変わりません。カラーグレードと合わせて、初期設定はオンです。"
+
 msgid "Particles"
 msgstr "パーティクル"
 
 msgid "Particle size"
 msgstr "パーティクルの大きさ"
+
+msgid "Footstep dust"
+msgstr "足もとの土ぼこり"
+
+msgid "Sun glare"
+msgstr "太陽のまぶしさ"
+
+msgid "On the world map and in fields outdoors by day, a soft warm glow spills in from the sun's side of the picture, with a few faint lens rings across it, where sky or far scenery shows that way. Dialogue, portraits and the HUD are not touched. Off by default."
+msgstr "ワールドマップと昼の屋外のフィールドで、太陽のある側に空や遠くの景色が見えていると、そちらから暖かな光がやわらかく差し込み、画面にうっすらとレンズの輪が浮かびます。会話、顔グラフィック、HUDには影響しません。初期設定はオフです。"
+
+msgid "Characters kick up a little dust where they walk on sand, dirt or a dusty floor, more when they run, a step paler than the ground, lingering a moment. On by default, with Particles."
+msgstr "キャラクターが砂や土、ほこりっぽい床の上を歩くと足もとに土ぼこりが立ち、走るとさらに多くなります。地面より少し明るく、しばらく残ります。パーティクルと合わせて、初期設定はオンです。"
 
 msgid "Small"
 msgstr "小"
@@ -8284,6 +8520,14 @@ msgstr "ディスプレイ同期"
 #: port/src/ui/options.cpp port/src/ui/sections.cpp
 msgid "Field speed"
 msgstr "フィールド速度"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Speedup transitions"
+msgstr "切り替えの高速化"
+
+#: port/src/ui/sections.cpp
+msgid "Opening the main menu from the field or the world map and closing it, and going from room to room on the field, at 4x: the fades, the loads and the menu's own animation pass in a quarter of the time (with Speedup as well, about half a second for the menu each way and a quarter of a second for a room change). The menu itself, the field and every other screen keep their speed; music keeps its tempo. Off: the original transitions."
+msgstr "フィールドやワールドマップからメインメニューを開くときと閉じるとき、フィールドで部屋から部屋へ移るときを 4 倍で進めます。フェード、読み込み、メニュー自身の動きが 4 分の 1 の時間で終わります(高速化も使えば、メニューは開くのも閉じるのもおよそ 0.5 秒、部屋の移動はおよそ 0.25 秒です)。メニューの中、フィールド、ほかの画面は自分の速さのままで、音楽のテンポも変わりません。オフで原作どおりの切り替えになります。"
 
 #: port/src/ui/options.cpp port/src/ui/sections.cpp
 msgid "Dialogue backlog"
@@ -9160,8 +9404,12 @@ msgid "In this order: %s."
 msgstr "この順番: %s。"
 
 #: port/src/ui/arena_saves.cpp
-msgid "Your party, from a save"
-msgstr "あなたのパーティ(セーブから)"
+msgid "Player 1's party, from a save"
+msgstr "プレイヤー 1 のパーティ(セーブから)"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Player 2's party, from a save"
+msgstr "プレイヤー 2 のパーティ(セーブから)"
 
 #: port/src/ui/arena_saves.cpp
 msgid "No saves of this game on the memory cards (F1 > Saves > Memory cards)."
@@ -9169,7 +9417,7 @@ msgstr "メモリーカードにこのゲームのセーブがありません(F1
 
 #: port/src/ui/arena_saves.cpp
 msgid ""
-"Choose a save: your members come as it has them (levels, equipment, "
+"Choose a save: the members come as it has them (levels, equipment, "
 "abilities), with its items."
 msgstr "セーブを選んでください。メンバーはそのセーブのとおり(レベル、装備、技)で、そのアイテムを持って戦います。"
 
@@ -9185,12 +9433,6 @@ msgid ""
 msgstr "編集したセーブも使えます。使えないのは、ゲーム本来の範囲を外れた値があるときだけです。"
 
 #: port/src/ui/arena_saves.cpp
-msgid ""
-"The other player's party comes from their own save, on their own machine: "
-"this game cannot verify it."
-msgstr "相手のパーティは、相手のマシンにある相手のセーブから来ます。このゲームでは確かめられません。"
-
-#: port/src/ui/arena_saves.cpp
 msgid "Read the memory cards again"
 msgstr "メモリーカードを読み直す"
 
@@ -9200,9 +9442,19 @@ msgstr "パーティ対パーティ"
 
 #: port/src/ui/arena.cpp
 msgid ""
-"Each player brings a party from a memory-card save on their own machine, on "
-"foot. Choose your save and its members."
-msgstr "それぞれのプレイヤーが、自分のマシンにあるメモリーカードのセーブからパーティを持ってきます(生身で戦います)。セーブとそのメンバーを選んでください。"
+"Each player brings a party from a memory-card save, on foot: player 1 "
+"commands theirs on pad 1, player 2 theirs on pad 2, each member with "
+"everything it has in that save (attacks and combos within its AP, the "
+"deathblows it knows, its Ether, Defend, Items from its own save's items). "
+"Both may come from the same save, with the same members. Escape gives up the "
+"battle. At its end both players choose Rematch or Leave, and Leave brings "
+"your game back as it was."
+msgstr ""
+"それぞれのプレイヤーがメモリーカードのセーブからパーティを持ってきて、生身で戦います: "
+"プレイヤー 1 はパッド 1 で、プレイヤー 2 はパッド 2 で自分のパーティを操り、どのメンバーもそのセーブで"
+"持っているものがすべて使えます(AP の範囲の攻撃とコンボ、覚えている必殺技、エーテル、防御、"
+"そのセーブのアイテム)。同じセーブの同じメンバーどうしでも戦えます。「逃げる」はバトルの降参です。"
+"終わると両方のプレイヤーが「再戦」か「やめる」を選び、「やめる」でゲームは元のとおりに戻ります。"
 
 #: port/src/ui/arena.cpp
 #, c-format
@@ -9211,9 +9463,94 @@ msgstr "%s(レベル %d)"
 
 #: port/src/ui/arena.cpp
 #, c-format
-msgid "Your party: %s, with %d kinds of items and %d kinds of rounds."
-msgstr "あなたのパーティ: %s。アイテム %d 種類と弾 %d 種類を持っていきます。"
+msgid "Party: %s, with %d kinds of items and %d kinds of rounds."
+msgstr "パーティ: %s。アイテム %d 種類と弾 %d 種類を持っていきます。"
 
 #: port/src/ui/arena.cpp
-msgid "Party vs party matches are not ready yet: this is the party you would bring."
-msgstr "パーティ対パーティの対戦はまだできません。これは持っていくパーティです。"
+msgid "Choose a party for each player."
+msgstr "それぞれのプレイヤーのパーティを選んでください。"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"Each player brings a party from a memory-card save on their own machine, on "
+"foot: yours (player 1) against theirs, each member with everything it has in "
+"that save. The battle music, the stage and whether each sees the other's HP "
+"and EP are yours, for both players."
+msgstr ""
+"それぞれのプレイヤーが自分のマシンのメモリーカードのセーブからパーティを持ってきて、生身で戦います: "
+"あなた(プレイヤー 1)のパーティと相手のパーティで、どのメンバーもそのセーブで持っているものがすべて"
+"使えます。バトルの音楽、ステージ、相手の HP と EP が見えるかどうかは、あなたの選んだものが二人に使われます。"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"The other player's party comes from their own save, on their machine: it is "
+"not verified. Edited saves are accepted; only values outside the game's "
+"ranges are refused, and both players see why."
+msgstr ""
+"相手のパーティは相手のマシンにあるセーブのもので、確かめられてはいません。編集したセーブも使えます。"
+"使えないのはゲームの範囲を外れた値があるときだけで、そのわけは二人とも見られます。"
+
+#: port/src/ui/arena.cpp
+msgid "Bring a party from a save (party vs party)"
+msgstr "セーブからパーティを持っていく(パーティ対パーティ)"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"For a host who plays party vs party: your party against theirs (you are "
+"player 2). Their party comes from their own save, on their machine: it is "
+"not verified. Edited saves are accepted; only values outside the game's "
+"ranges are refused, and both players see why."
+msgstr ""
+"パーティ対パーティをするホストのために: あなたのパーティと相手のパーティで戦います(あなたはプレイヤー 2)。"
+"相手のパーティは相手のマシンにあるセーブのもので、確かめられてはいません。編集したセーブも使えます。"
+"使えないのはゲームの範囲を外れた値があるときだけで、そのわけは二人とも見られます。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid ""
+"A player joined with a party that cannot be used, and was refused (they see "
+"why): %s Waiting for another."
+msgstr "使えないパーティで参加したプレイヤーをことわりました(相手にもわけが見えます): %s ほかのプレイヤーを待っています。"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "The other player's game refused your party: %s"
+msgstr "相手のゲームがあなたのパーティをことわりました: %s"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "The host's party could not be used here: %s"
+msgstr "ホストのパーティはこちらで使えませんでした: %s"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Your party could not be used: %s"
+msgstr "あなたのパーティは使えませんでした: %s"
+
+#: port/src/ui/arena.cpp
+msgid ""
+"The host plays party vs party: bring a party from a save (below), then join "
+"again."
+msgstr "ホストはパーティ対パーティをします: 下でセーブからパーティを持っていくようにしてから、もう一度参加してください。"
+
+#: port/src/ui/arena.cpp
+msgid "The host's battle stage is not one of this game's."
+msgstr "ホストの戦闘ステージは、このゲームのものではありません。"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "%s's experience to the next level is outside the game's range (1 or more)."
+msgstr "%s の次のレベルまでの経験値がゲームの範囲外です(1 以上)。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "A member"
+msgstr "メンバー"
+
+#: port/src/ui/arena_saves.cpp
+#, c-format
+msgid "That party could not be used (reason %d)."
+msgstr "そのパーティは使えませんでした(理由 %d)。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Your party, from a save"
+msgstr "あなたのパーティ(セーブから)"

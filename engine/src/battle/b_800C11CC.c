@@ -28,6 +28,10 @@ extern s32 allocateJumpAnimationStructVar0;
 extern SpriteActorCore* processBattleAnimationSub0_var1;
 extern s16 numActiveSpriteCores;
 void executeSpriteBytecode2_battle(SpriteActorCore* actor);
+/* Uninterrupted combos (port/src/game/battle/combo.c). */
+s32 pcComboSkipJump(SpriteActorCore* actor);
+s32 pcComboSkipCall(SpriteActorCore* actor, const u8* op, const u8* target);
+s32 pcComboSkipSound(SpriteActorCore* actor, const u8* op);
 void addToSpriteTransferList(SpriteActorCore* actor, s32 frame);
 void executeSpriteBytecode2Sub1(SpriteActorCore* actor);
 void spriteActorSetPlayingAnimation(SpriteActorCore* actor, s32 animationId);
@@ -83,6 +87,10 @@ loop:
     }
     op = *actor->m64_spriteByteCode;
     p = actor->m64_spriteByteCode + 1;
+    if (op == 0xB0 && pcComboSkipSound(actor, actor->m64_spriteByteCode)) {
+        actor->m64_spriteByteCode += 2; /* Uninterrupted combos: the focus sound once */
+        goto loop;
+    }
     if (op < 0x80) {
         actor->m64_spriteByteCode = p;
         if (op < 0x10) {
@@ -271,6 +279,9 @@ loop:
         switch (p[2] & 0x7F) {
         case 8:
             cond = battleBssBlock.mA78_startPlayingAttackAnimationVar0 != 0;
+            if (cond && pcComboSkipJump(actor)) {
+                cond = 0; /* Uninterrupted combos: this deathblow opens as outside a combo */
+            }
             break;
         case 9:
             cond = actor->m74_targetEntitySprite == processBattleAnimationSub0_var1;
@@ -338,7 +349,7 @@ loop:
         if (off != 0) {
             data = (u8*)(off + (sptr)p);
             size = getCustomPolySubBufferSize(getCustomPolySubBuffer(data, 0));
-            buf = allocateHeap(size * 2, 0);
+            buf = allocateHeap(PC_HEAP_OF(PC_PRIMS, size * 2), 0);
             if ((u16)actor->m3A_scaleModifier != 0) {
                 scaleCustomPolyVertices(getCustomPolySubBuffer(data, 0), 3);
             }
@@ -390,6 +401,10 @@ loop:
         return;
     case 0xE2: {
         s16 off = p[0] + ((s8)p[1] << 8);
+        if (pcComboSkipCall(actor, actor->m64_spriteByteCode, actor->m64_spriteByteCode + off)) {
+            actor->m64_spriteByteCode += 3; /* Uninterrupted combos: no charge-up */
+            goto loop;
+        }
         pushU24OnAnimationStack(actor, pcU24Of(actor->m64_spriteByteCode + 3));
         actor->m64_spriteByteCode += off;
         goto loop;

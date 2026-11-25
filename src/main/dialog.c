@@ -114,13 +114,13 @@ void setupWindowSize2(DialogWindow18* p, s16 x1, s16 y1, s16 x, s16 y, s16 width
     if (p->mC_height <= 0) {
         u32* z;
 
-        p->m28_perLineBuffer = allocateHeap(PC_HEAP_SIZED(sizeof(DialogWindow18Line), 0x60), 2);
+        p->m28_perLineBuffer = allocateHeap(PC_HEAP_OF(DialogWindow18Line, PC_HEAP_SIZED(sizeof(DialogWindow18Line), 0x60)), 2);
         for (z = (u32*)p->m28_perLineBuffer; z < (u32*)(p->m28_perLineBuffer + 1); z++) {
             *z = 0;
         }
     } else
 #endif
-    p->m28_perLineBuffer = allocateHeap(PC_HEAP_SIZED(p->mC_height * sizeof(DialogWindow18Line), p->mC_height * 0x60), 2);
+    p->m28_perLineBuffer = allocateHeap(PC_HEAP_OF(DialogWindow18Line, PC_HEAP_SIZED(p->mC_height * sizeof(DialogWindow18Line), p->mC_height * 0x60)), 2);
     traceNextAlloc(0x28);
     p->m2C_inRamDialogTextImage = allocateHeap(PC_HEAP_SIZED(p->m12_widthPadded * 14 * sizeof(u16), p->m12_widthPadded * 14 * 0x2), 2);
 #ifdef PLATFORM_PC
@@ -989,7 +989,7 @@ s32 addDialogWindowsToOTSub2(DialogWindow18* w, u8* text) {
     p = w->m8C_queue;
     w->m82_queueCount++;
     traceNextAlloc(0x2A);
-    node = allocateHeap(PC_HEAP_SIZED(sizeof(DialogQueue), 0x8), 2);
+    node = allocateHeap(PC_HEAP_OF(DialogQueue, PC_HEAP_SIZED(sizeof(DialogQueue), 0x8)), 2);
     node->m4_dialogPointer = text;
     node->m0_pNext = NULL;
     if (p == NULL) {

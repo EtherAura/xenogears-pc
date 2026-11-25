@@ -146,12 +146,13 @@ DynVertices* initModelDynamicVertices(ModelBlock* block, s32 flags) {
         return NULL;
     }
     traceNextAlloc(0x2B);
-    dyn = allocateHeap(PC_HEAP_SIZED(src->m0_count * sizeof(DynVertData) + sizeof(DynVertices), src->m0_count * 0x20 + 0x14), flags);
+    dyn = allocateHeap(PC_HEAP_ONE(DynVertices, PC_HEAP_SIZED(src->m0_count * sizeof(DynVertData) + sizeof(DynVertices), src->m0_count * 0x20 + 0x14)), flags);
     dyn->m0_block = block;
     dyn->m4_vertices = block->m8_vertices;
     dyn->m8_normals = block->mC_normals;
     data = (DynVertData*)(dyn + 1);
     dyn->m10_data = data;
+    PC_STATE_AT(data, DynVertData, src->m0_count); /* the block's T is the header (PC_HEAP_ONE): its entries behind it */
     dyn->mC_count = src->m0_count;
     traceNextAlloc(0x2C);
     block->m8_vertices = allocateHeap(PC_HEAP_SIZED(block->m2_numVertices * sizeof(SVECTOR), block->m2_numVertices * 0x8), flags);

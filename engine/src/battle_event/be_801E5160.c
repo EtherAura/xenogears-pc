@@ -114,9 +114,9 @@ void battleEventEntry(void) {
     data = (sBattleEventData*)mallocAndDecompress(PC_RELOC_ENTRY(file2, D_8006F9DF.m0_eventDataIndex * 2 + 1), 0);
     battleEventVarDialogueBundle = mallocAndDecompress(PC_RELOC_ENTRY(file2, D_8006F9DF.m0_eventDataIndex * 2 + 2), 0);
     freeHeap(file2);
-    battleEventVar0 = allocateBattleHeap((s32)sizeof(sBattleRunningVar0), 0);
+    battleEventVar0 = allocateBattleHeap(PC_HEAP_OF(sBattleRunningVar0, (s32)sizeof(sBattleRunningVar0)), 0);
     bzero(battleEventVar0, (s32)sizeof(sBattleRunningVar0));
-    battleEventVar1 = allocateBattleHeap((s32)sizeof(DialogWindow18) + 8, 0);
+    battleEventVar1 = allocateBattleHeap(PC_HEAP_ONE(DialogWindow18, (s32)sizeof(DialogWindow18) + 8), 0);
     bzero(battleEventVar1, (s32)offsetof(DialogWindow18, m70_vars[2]));
     battleEventVar2 = data;
     battleEventVar0->m390_scriptByteCode = (u8*)(data->m40_count * 16 + (uptr)data + 0x44);

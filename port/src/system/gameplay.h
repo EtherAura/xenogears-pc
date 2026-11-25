@@ -67,6 +67,9 @@ int pcGameplayOriginalBugFixes(void);
 void pcGameplaySetOriginalBugFixes(int enabled);
 int pcGameplayDeusCameraFix(void);
 void pcGameplaySetDeusCameraFix(int enabled);
+/* Uninterrupted combos (default off; port/src/game/battle/combo.c). */
+int pcGameplayUninterruptedCombos(void);
+void pcGameplaySetUninterruptedCombos(int enabled);
 /* The Enhanced engine's 60 Hz field (default on there; the Original never asks). */
 int pcGameplayField60(void);
 void pcGameplaySetField60(int on);

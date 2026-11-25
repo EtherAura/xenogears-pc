@@ -57,9 +57,12 @@
  * of whole bitmap words of pages (the result is the same page sets).
  *
  * This file is linked into the battling module, so its statics would sit in
- * the BSS the sandbox restores: everything that changes lives in host memory
- * behind one pointer, set once before the first record (every snapshot then
- * holds the same value), and the two flags beside it are set before it too.
+ * the BSS the sandbox restores and a save state holds: everything that changes
+ * lives in host memory behind one pointer, and that pointer and the flag that
+ * says it is set up live on the host side too (port/src/system/memory.c), so
+ * neither a sandbox restore nor a state loaded in another process brings back
+ * an old one (xg-xf02: the writer's malloc address, written through on the
+ * first frame after the load).
  */
 #include "common.h"
 #include "psyq.h"
@@ -85,6 +88,8 @@ unsigned char* portHeapStart(void); /* port/src/system/memory.c */
 unsigned char* portHeapEnd(void);
 int portModuleRange(const char* name, void** dataStart, void** dataEnd, void** bssStart, void** bssEnd);
 void* portSandboxAlloc(uptr n);
+extern void* portBattlingSandbox;   /* port/src/system/memory.c: the Sandbox, host memory outside every state */
+extern int portBattlingSandboxState; /* 0 not set up yet, 1 ready, -1 failed */
 u32 portRandSeed(void); /* port/src/system/libc.c */
 void srand(u32 seed);
 int pcGameplayBattle60(void);
@@ -185,8 +190,7 @@ typedef struct {
     uptr bytes[LANES_MAX];
 } Lanes;
 
-static int sandboxReady, sandboxFailed;
-static Sandbox* sb;
+#define sb ((Sandbox*)portBattlingSandbox)
 
 /* The next segment of the image, at a page-aligned offset: a page belongs
  * to one segment, whole or its tail. */
@@ -205,17 +209,12 @@ static int sandboxInit(void) {
     void *ds, *de, *bs, *be;
     int i;
 
-    if (sandboxReady) return 1;
-    if (sandboxFailed) return 0;
-    if (!portModuleRange("battling", &ds, &de, &bs, &be)) {
-        sandboxFailed = 1;
-        return 0;
-    }
-    sb = portSandboxAlloc(sizeof *sb);
-    if (sb == NULL) {
-        sandboxFailed = 1;
-        return 0;
-    }
+    if (portBattlingSandboxState > 0) return 1;
+    if (portBattlingSandboxState < 0) return 0;
+    portBattlingSandboxState = -1; /* until every allocation below is done */
+    if (!portModuleRange("battling", &ds, &de, &bs, &be)) return 0;
+    portBattlingSandbox = portSandboxAlloc(sizeof *sb);
+    if (sb == NULL) return 0;
     __builtin_memset(sb, 0, sizeof *sb);
     segmentAdd(portHeapStart(), (uptr)(portHeapEnd() - portHeapStart()));
     segmentAdd(ds, (unsigned char*)de > (unsigned char*)ds ? (uptr)((unsigned char*)de - (unsigned char*)ds) : 0);
@@ -224,21 +223,15 @@ static int sandboxInit(void) {
     sb->pages = sb->imageLen >> PAGE_SHIFT;
     sb->diffWords = (sb->pages + 63) / 64;
     sb->both = portSandboxAlloc(sb->diffWords * sizeof(u64));
-    if (sb->both == NULL) {
-        sandboxFailed = 1;
-        return 0;
-    }
+    if (sb->both == NULL) return 0;
     for (i = 0; i < 3; i++) {
         Memory* m = i < 2 ? &sb->records[i] : &sb->live;
         m->image = portSandboxAlloc(sb->imageLen);
         m->diff = portSandboxAlloc(sb->diffWords * sizeof(u64));
-        if (m->image == NULL || m->diff == NULL) {
-            sandboxFailed = 1;
-            return 0;
-        }
+        if (m->image == NULL || m->diff == NULL) return 0;
         m->frame = -2;
     }
-    sandboxReady = 1;
+    portBattlingSandboxState = 1;
     return 1;
 }
 

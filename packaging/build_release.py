@@ -21,6 +21,15 @@ With --discs and --write-tables DIR: those tables as files in DIR and nothing
 else (for a checkout of one's own: DIR is its port/link-tables), for the US
 release or, with --region jp and the JP Disc 1 image in --discs, the JP one.
 
+With --discs and --write-linux DIR: one region's Linux tarball and its
+.sha256 (--region, default us; for jp, the JP Disc 1 image in --discs), built
+in the Linux builder with the release's configuration and packaged as the
+release's is (both engines, the payload audit, the state schemas checked), in
+DIR and nothing else. It is no release asset: the releases' Linux tarball is
+US. The release run keeps a JP one beside its save-state corpus, so the
+state-compat gate loads states both ways in JP too (tools/state_corpus.py
+release --build).
+
 Without --discs: the Linux and Windows executables of one region (--region,
 default us; --only linux or windows for one of them), built in the same
 builders from link tables: --tables FILE, a release's link-tables.tar.gz, else
@@ -607,6 +616,48 @@ def build_tables(args, cache: Path, python: Path, ubuntu: Path, mingw: Path, tag
         install_tables(gather_tables(work, tree, python, builds), dest)
 
 
+def build_linux_tarball(args, cache: Path, python: Path, ubuntu: Path, tag: str) -> None:
+    """One region's Linux tarball and its .sha256 from that region's disc, into --write-linux: both engines built in
+    the Linux builder as the release's tables build builds them (packaging/build-linux-executables.sh, the release's
+    configuration and version), then packaged by linux_release.py as build-linux-release.sh packages the release's
+    (each executable's payload audit, each state schema against its executable). No asset."""
+    region = args.region
+    discs = args.discs.resolve()
+    image = release_inputs.disc_image(ROOT, discs, region)
+    dest = args.write_linux.absolute()
+    names = [linux_release.release_names(tag)[key] for key in ("tarball", "sha256")]
+    check_out(dest, names)
+    for folder in (discs, cache):
+        if dest.resolve().is_relative_to(folder) or folder.is_relative_to(dest.resolve()):
+            raise ReleaseError(f"--write-linux {dest} overlaps {folder}")
+    if ROOT.is_relative_to(dest.resolve()):
+        raise ReleaseError(f"--write-linux {dest} contains the source checkout")
+    if not all(path.is_file() for path in (python / "bin/python3", ubuntu / UBUNTU_MARK)):
+        raise ReleaseError(f"the build cache is incomplete. Run bash build-release.sh --fetch-only --cache {cache}")
+    if not shutil.which("bwrap"):
+        raise ReleaseError("the build needs bubblewrap")
+    scratch = args.scratch or next(folder for folder in dest.parents if folder.is_dir())
+    with tempfile.TemporaryDirectory(prefix=".xenogears-release-", dir=scratch) as temp:
+        work = Path(temp)
+        tree, pending, build_dir = work / "tree", work / "pending", work / "linux"
+        for folder in (pending, build_dir, work / "tmp"):
+            folder.mkdir()
+        release_inputs.copy_tree(ROOT, tree, work, cache, discs, dest)
+        for argv in (("tools/extract.py", region, "--image", image, "--check-image"),
+                     ("tools/configure.py", region)):
+            run(*host_sandbox(work, tree, python, image.parent), python / "bin/python3", "-E", "-s", "-B", *argv)
+        count = release_inputs.module_count(tree, region)
+        print(f"Linux {region} tarball: {count} checked module images", flush=True)
+        builder(ubuntu, tree, build_dir, "/bin/bash", "/work/source/packaging/build-linux-executables.sh", region, tag)
+        stage = build_dir / f"{region}-stage"
+        staged_executables(stage)
+        builder(ubuntu, tree, build_dir, "python3", "-I", "-B", "/work/source/packaging/linux_release.py", "package",
+                "--tag", tag, "--stage", f"/work/build/{region}-stage", "--out-dir", "/work/out", "--ver", region,
+                "--build", f"/work/build/{region}-original", "--enhanced-build", f"/work/build/{region}-enhanced",
+                out=pending)
+        promote(pending, dest, names)
+
+
 def build(args, cache: Path, python: Path, ubuntu: Path, mingw: Path, tag: str) -> None:
     names, deb = asset_names(tag)
     discs = args.discs.resolve()
@@ -655,11 +706,15 @@ def main() -> int:
     parser.add_argument("--write-tables", type=Path, metavar="DIR",
                         help="with --discs: write the Linux executables' link tables as files into DIR (a checkout's "
                         "port/link-tables) and build no asset")
+    parser.add_argument("--write-linux", type=Path, metavar="DIR",
+                        help="with --discs: build one region's Linux tarball and its .sha256 into DIR, packaged as the "
+                        "release's, and no asset (the state-compat gate's JP executables)")
     parser.add_argument("--tables", type=Path, metavar="FILE",
                         help="without --discs: a release's link-tables.tar.gz to link from, in place of the "
                         "checkout's port/link-tables")
     parser.add_argument("--region", choices=REGIONS,
-                        help="without --discs, or with --write-tables: the region to build (default us)")
+                        help="without --discs, or with --write-tables or --write-linux: the region to build "
+                        "(default us)")
     parser.add_argument("--only", choices=PLATFORMS, help="without --discs: build this platform's executables alone")
     parser.add_argument("--reproduce", action="store_true",
                         help="without --discs: fail unless each executable is the one the tables record")
@@ -670,15 +725,20 @@ def main() -> int:
     args = parser.parse_args()
     if args.fetch_only and any((args.discs, args.version, args.out, args.scratch, args.makensis)):
         parser.error("--fetch-only accepts only --cache")
-    if args.fetch_only and any((args.write_tables, args.tables, args.region, args.reproduce, args.only)):
+    if args.fetch_only and any((args.write_tables, args.write_linux, args.tables, args.region, args.reproduce,
+                                args.only)):
         parser.error("--fetch-only accepts only --cache")
-    if args.discs and (args.tables or args.reproduce or args.only or (args.region and not args.write_tables)):
+    if args.discs and (args.tables or args.reproduce or args.only
+                       or (args.region and not (args.write_tables or args.write_linux))):
         parser.error("--tables, --only and --reproduce are for a build without --discs, --region for one or for "
-                     "--write-tables")
-    if not args.discs and (args.write_tables or args.makensis):
-        parser.error("--write-tables and --makensis need --discs")
-    if args.write_tables and any((args.version, args.out, args.makensis)):
+                     "--write-tables or --write-linux")
+    if not args.discs and (args.write_tables or args.write_linux or args.makensis):
+        parser.error("--write-tables, --write-linux and --makensis need --discs")
+    if args.write_tables and any((args.version, args.out, args.makensis, args.write_linux)):
         parser.error("--write-tables makes the tables only: it takes --discs, --cache and --scratch")
+    if args.write_linux and any((args.out, args.makensis)):
+        parser.error("--write-linux makes the Linux tarball only: it takes --discs, --region, --cache, --version and "
+                     "--scratch")
     try:
         cache = (args.cache or DEFAULT_CACHE).expanduser().resolve()
         pins = python_pins()
@@ -696,6 +756,9 @@ def main() -> int:
                 if args.write_tables:
                     args.region = args.region or "us"
                     build_tables(args, cache, python, ubuntu, mingw, tag)
+                elif args.write_linux:
+                    args.region = args.region or "us"
+                    build_linux_tarball(args, cache, python, ubuntu, tag)
                 else:
                     build(args, cache, python, ubuntu, mingw, tag)
             else:

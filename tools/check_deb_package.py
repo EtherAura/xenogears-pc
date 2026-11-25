@@ -95,6 +95,9 @@ def settings(build: Path, version: str) -> tuple[dict[str, str], str]:
     check(cpack.get("CPACK_DEBIAN_PACKAGE_SHLIBDEPS") == "ON", "Depends from dpkg-shlibdeps")
     check("libvulkan1" in re.split(r"[,\s]+", cpack.get("CPACK_DEBIAN_PACKAGE_DEPENDS", "")),
           "libvulkan1 in the extra Depends (the Vulkan loader, opened at run time)")
+    if cmake_sets(build / "CMakeCache.txt").get("XG_UPDATER") == "ON":
+        check("libcurl4t64" in re.split(r"[,\s|]+", cpack.get("CPACK_DEBIAN_PACKAGE_RECOMMENDS", "")),
+              "libcurl4t64 in Recommends (the update check's fetcher, opened at run time)")
     return cpack, deb
 
 
@@ -244,6 +247,9 @@ def main() -> int:
               f"Architecture: {control.get('Architecture')}")
         depends = [d.split("(")[0].strip() for d in control.get("Depends", "").split(",") if d.strip()]
         check("libvulkan1" in depends, f"Depends: {control.get('Depends')}")
+        if cmake_sets(build / "CMakeCache.txt").get("XG_UPDATER") == "ON":
+            check("libcurl4t64" in re.split(r"[,\s|]+", control.get("Recommends", "")),
+                  f"Recommends: {control.get('Recommends')}")
     else:
         print("LIMITATION  no dpkg-deb: the .deb's contents and control fields are not read; "
               "the install plan and the CPack settings above stand in")

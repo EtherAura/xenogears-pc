@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import shutil
 import sys
 import tarfile
 from pathlib import Path
@@ -283,6 +284,15 @@ class CheckLoadTest(TestCase):
         self.assertTrue(got.ok, got.problems)
         self.assertEqual((got.how, got.lines), ("converted", (2, 1)))
 
+    def test_pass_from_a_release(self):
+        # a release's slot read by another release names the writer's version (stateportable.c
+        # statePortableWriter); the pre-flight of failed all 256 loads on this wording
+        for line in ("Loaded slot 1 (Field 8), converted from version 2099.04.0",
+                     "Loaded slot 1 (Battle), converted from version 2099.04.1: 8 values not carried (the log lists them)"):
+            got = self.run_load(f"state: converting ...\nstate: {line}\n")
+            self.assertTrue(got.ok, got.problems)
+            self.assertEqual(got.how, "converted")
+
     def test_refused(self):
         got = self.run_load("state: Cannot load slot 1: saved by version X, which this one cannot read\n")
         self.assertFalse(got.ok)
@@ -340,7 +350,7 @@ class GateTest(TestCase):
             builds = {"us-original": cs.Build("us", "original", Path("/new/xenogears"), None),
                       "us-enhanced": cs.Build("us", "enhanced", Path("/new/xenogears-enhanced"), None)}
             with patch.object(cs, "check_load", side_effect=fake), \
-                    patch.object(cs.ReleaseCache, "executable", side_effect=lambda rel, e: Path(e["path"])), \
+                    patch.object(cs.ReleaseCache, "executable", side_effect=lambda rel, e, *a: Path(e["path"])), \
                     patch.object(cs, "image_id", side_effect=lambda exe: {"us-original": "aa" * 16}.get(exe.name, "?")):
                 r = state_compat.run(root / "corpora", new, builds, work=root / "w", quiet=True, jobs=2)
             fwd = sorted(x for x in seen if x[1] == "v2026.12.0")
@@ -356,7 +366,7 @@ class GateTest(TestCase):
                 "us-enhanced: v2026.12.0 has no executable of it (backward not run)"])
             seen.clear()
             with patch.object(cs, "check_load", side_effect=fake), \
-                    patch.object(cs.ReleaseCache, "executable", side_effect=lambda rel, e: Path(e["path"])), \
+                    patch.object(cs.ReleaseCache, "executable", side_effect=lambda rel, e, *a: Path(e["path"])), \
                     patch.object(cs, "image_id", side_effect=lambda exe: {"us-original": "aa" * 16}.get(exe.name, "?")):
                 r = state_compat.run(root / "corpora", new, builds, work=root / "w", quiet=True, sample=1,
                                      directions=("forward",))
@@ -388,12 +398,188 @@ class GateTest(TestCase):
             new = write_corpus(root, "new", {"us-original": ("bb" * 16, ["field"])})
             builds = {"us-original": cs.Build("us", "original", Path("/new/xenogears"), None)}
             with patch.object(cs, "check_load", return_value=cs.Loaded(True, [], [], "converted")), \
-                    patch.object(cs.ReleaseCache, "executable", side_effect=lambda rel, e: Path(e["path"])), \
+                    patch.object(cs.ReleaseCache, "executable", side_effect=lambda rel, e, *a: Path(e["path"])), \
                     patch.object(cs, "image_id", return_value="ee" * 16):
                 r = state_compat.run(root / "corpora", new, builds, work=root / "w", quiet=True,
                                      directions=("backward",))
             self.assertFalse(r.passed)
             self.assertIn("not the build that wrote its corpus", r.errors[0])
+
+
+class KeptExecutablesTest(TestCase):
+    """Executables that are no asset (JP: carl "JP for the gate only") live in their release's corpus:
+    state_corpus.py release --build keeps them there, state_compat.py runs them from there."""
+    TAG = "v2099.01.0"
+
+    def tarball(self, d: Path, region: str, off: bool = False) -> Path:
+        name = cs.tarball_name(self.TAG)
+        d.mkdir(parents=True, exist_ok=True)
+        exe = b"\x7fELF " + region.encode() + (cs.OFF_TEXT if off else b"")
+        make_tarball(d / name, name.removesuffix(".tar.gz"), {
+            "bin/xenogears": exe + b" original", "bin/xenogears-enhanced": exe + b" enhanced",
+            "share/xenogears-pc/xenogears.xgschema": b"XGSCHEMA " + region.encode(),
+            "share/xenogears-pc/xenogears-enhanced.xgschema": b"XGSCHEMA " + region.encode()})
+        (d / f"{name}.sha256").write_text(f"{cs.sha256(d / name)}  {name}\n")
+        return d / name
+
+    @staticmethod
+    def region_of(path: Path) -> str:
+        return "jp" if path.read_bytes().endswith(b"jp") else "us"
+
+    def release(self, root: Path, *more: str, gate_passes: bool | None = None) -> tuple[int, str]:
+        """state_corpus.py release with the game left out: make_corpus writes a manifest of the builds it is given,
+        the gate's verdict is given."""
+        made = []
+
+        def fake_make(builds, out, release, *a, **k):
+            made.append([b.config for b in builds])
+            out.mkdir(parents=True)
+            m = {"format": cs.FORMAT, "kind": "xenogears-pc state corpus", "release": release, "canonical": False,
+                 "created": "", "order": cs.release_order(release), "run": 600, "cases": [], "failed": [],
+                 "configs": {b.config: {"region": b.region, "engine": b.engine, "build": "aa" * 16,
+                                        "executable": b.source.get("executable")} for b in builds}}
+            cs.write_json(out / "manifest.json", m)
+            return {**m, "bytes": 0, "seconds": 0.0}
+
+        verdict = state_compat.Result(root)
+        if gate_passes is False:
+            verdict.loads = [{"ok": False, "direction": "forward", "what": "x", "problems": ["exit -11"]}]
+        else:
+            verdict.vacuous = "no canonical release yet"
+        with patch.object(cs, "schema_version", side_effect=self.region_of), \
+                patch.object(cs, "make_corpus", side_effect=fake_make), \
+                patch.object(state_compat, "run", return_value=verdict), \
+                patch("sys.stdout", new_callable=io.StringIO) as out, patch("sys.stderr", new_callable=io.StringIO) as err:
+            code = cs.main(["release", self.TAG, "--assets-from", str(root / "assets"), "--cache", str(root / "cache"),
+                            "--corpora", str(root / "corpora"), *more, *(["--gate"] if gate_passes is not None else [])])
+        self.made = made
+        return code, out.getvalue() + err.getvalue()
+
+    def test_a_jp_tarball_is_kept_in_the_corpus_and_read_from_there(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            self.tarball(root / "assets" / self.TAG, "us")
+            jp = self.tarball(root / "local", "jp")
+            code, said = self.release(root, "--build", str(jp), gate_passes=True)
+            self.assertEqual(code, 0, said)
+            self.assertEqual(self.made, [["us-original", "us-enhanced", "jp-original", "jp-enhanced"]])
+            corpus = root / "corpora" / self.TAG
+            kept = corpus / "executables" / "jp" / jp.name
+            self.assertEqual(kept.read_bytes(), jp.read_bytes())
+            self.assertEqual((corpus / "executables/jp" / f"{jp.name}.sha256").read_text(),
+                             (root / "local" / f"{jp.name}.sha256").read_text())
+            m = cs.read_manifest(corpus)
+            self.assertTrue(m["canonical"])
+            rec = m["configs"]["jp-enhanced"]["executable"]
+            self.assertEqual((rec["kind"], rec["kept"], rec["path"], rec["sha256"]),
+                             ("tarball", f"executables/jp/{jp.name}", "bin/xenogears-enhanced", cs.sha256(jp)))
+            self.assertNotIn("kept", m["configs"]["us-original"]["executable"])  # the published one: downloaded
+            self.assertEqual(cs.check_corpus(corpus), [])
+            # A later release's backward run: from the corpus alone (the local build and the cache gone).
+            shutil.rmtree(root / "local")
+            shutil.rmtree(root / "cache")
+            cache = cs.ReleaseCache(root / "cache2", offline=True)
+            exe = cache.executable(self.TAG, rec, corpus)
+            self.assertEqual(exe.read_bytes(), b"\x7fELF jp enhanced")
+            with self.assertRaisesRegex(cs.CorpusError, "no corpus was named"):
+                cache.executable(self.TAG, rec)
+            kept.write_bytes(b"other")
+            with self.assertRaisesRegex(cs.CorpusError, "changed since its corpus was made"):
+                cache.executable(self.TAG, rec, corpus)
+            self.assertIn(f"jp-enhanced: executables/jp/{jp.name} changed", cs.check_corpus(corpus))
+
+    def test_a_failed_gate_rejects_the_corpus_with_its_executables(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            self.tarball(root / "assets" / self.TAG, "us")
+            jp = self.tarball(root / "local", "jp")
+            code, said = self.release(root, "--build", str(jp), gate_passes=False)
+            self.assertEqual(code, 1)
+            self.assertIn("FAILS state-compat", said)
+            self.assertFalse((root / "corpora" / self.TAG).exists())
+            rejected = list((root / "corpora" / ".rejected").iterdir())
+            self.assertEqual(len(rejected), 1)
+            self.assertTrue((rejected[0] / "executables/jp" / jp.name).is_file())
+            self.assertFalse(cs.read_manifest(rejected[0])["canonical"])
+
+    def test_what_a_build_given_must_be(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            self.tarball(root / "assets" / self.TAG, "us")
+            jp = self.tarball(root / "local", "jp")
+            other = root / "other" / cs.tarball_name("v2099.01.1")
+            other.parent.mkdir()
+            shutil.copyfile(jp, other)
+            for args, said in ((["--build", str(other)], "not v2099.01.0's Linux tarball"),
+                               (["--build", f"jp-original={jp}"], "give it alone"),
+                               (["--build", str(root / "missing" / jp.name)], "no such tarball"),
+                               (["--build", str(root / "assets" / self.TAG / jp.name)], "two builds of one configuration")):
+                with self.subTest(args=args):
+                    code, out = self.release(root, *args)
+                    self.assertEqual(code, 1)
+                    self.assertIn(said, out)
+            (root / "local" / f"{jp.name}.sha256").write_text(f"{'0' * 64}  {jp.name}\n")
+            code, out = self.release(root, "--build", str(jp))
+            self.assertEqual((code, "does not match" in out), (1, True))
+            off = self.tarball(root / "off", "jp", off=True)
+            code, out = self.release(root, "--build", str(off))
+            self.assertEqual((code, "writes no portable slots" in out), (1, True))
+            self.assertFalse((root / "corpora" / self.TAG).exists())
+
+    def test_a_build_folder_keeps_its_executable_and_schema(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            self.tarball(root / "assets" / self.TAG, "us")
+            folder = root / "jp-build"
+            folder.mkdir()
+            (folder / "xenogears").write_bytes(b"\x7fELF jp dev build")
+            (folder / "xenogears.xgschema").write_bytes(b"XGSCHEMA jp")
+            code, said = self.release(root, "--build", f"jp-original={folder}", gate_passes=True)
+            self.assertEqual(code, 0, said)
+            corpus = root / "corpora" / self.TAG
+            rec = cs.read_manifest(corpus)["configs"]["jp-original"]["executable"]
+            self.assertEqual((rec["kind"], rec["path"]), ("kept", "executables/jp-original/bin/xenogears"))
+            self.assertEqual((corpus / rec["schema"]["path"]).read_bytes(), b"XGSCHEMA jp")
+            self.assertEqual(cs.check_corpus(corpus), [])
+            exe = cs.ReleaseCache(root / "cache").executable(self.TAG, rec, corpus)
+            self.assertEqual(exe, corpus / "executables/jp-original/bin/xenogears")
+            self.assertEqual(exe.read_bytes(), b"\x7fELF jp dev build")
+
+    def test_a_kept_path_outside_the_corpus_is_refused(self):
+        with TemporaryDirectory() as t:
+            d = write_corpus(Path(t), "v2026.12.0", {"jp-original": ("aa" * 16, ["field"])})
+            good = json.loads((d / "manifest.json").read_text())
+            for executable in ({"kind": "kept", "path": "../../bin/sh", "sha256": "0"},
+                               {"kind": "tarball", "tag": "v2026.12.0", "path": "bin/xenogears", "kept": "/etc/x.tar.gz"},
+                               {"kind": "kept", "path": "jp-original/field/slot1.xgs"}):
+                bad = {**good, "configs": {"jp-original": {**good["configs"]["jp-original"], "executable": executable}}}
+                (d / "manifest.json").write_text(json.dumps(bad))
+                with self.subTest(executable=executable), self.assertRaisesRegex(cs.CorpusError, "outside the corpus"):
+                    cs.read_manifest(d)
+
+    def test_the_gate_runs_an_earlier_release_from_its_corpus(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            earlier = write_corpus(root / "corpora", "v2026.12.0", {"jp-original": ("aa" * 16, ["field"])})
+            m = json.loads((earlier / "manifest.json").read_text())
+            m["configs"]["jp-original"]["executable"] = {"kind": "kept", "path": "executables/jp-original/bin/xenogears",
+                                                        "sha256": "x"}
+            (earlier / "manifest.json").write_text(json.dumps(m))
+            new = write_corpus(root, "new", {"jp-original": ("bb" * 16, ["field"])})
+            seen = []
+
+            def executable(cache, rel, rec, corpus=None):
+                seen.append(corpus)
+                return Path("/kept/xenogears")
+
+            builds = {"jp-original": cs.Build("jp", "original", Path("/new/xenogears"), None)}
+            with patch.object(cs, "check_load", return_value=cs.Loaded(True, [], [], "converted")), \
+                    patch.object(cs.ReleaseCache, "executable", executable), \
+                    patch.object(cs, "image_id", return_value="aa" * 16):
+                r = state_compat.run(root / "corpora", new, builds, work=root / "w", quiet=True,
+                                     directions=("backward",))
+            self.assertTrue(r.passed, r.line())
+            self.assertEqual(seen, [earlier])
 
 
 class ReleaseTest(TestCase):
@@ -414,6 +600,17 @@ class ReleaseTest(TestCase):
             self.assertEqual(code, 0)
             self.assertIn("is not a canonical release", out.getvalue())
             self.assertFalse((root / "corpora").exists())
+
+    def test_the_reason_in_pieces_still_says_off(self):
+        """The release builder's GCC copies stateportable.c's literal in pieces: its first 48 bytes from .rodata, the
+        rest as immediates (an XG_DIST build of held "slots that other versions load come in a later r"
+        and then other text). The start of it is enough; a build with portable slots has none of it."""
+        with TemporaryDirectory() as t:
+            exe = Path(t) / "xenogears"
+            exe.write_bytes(b"\x7fELF ..." + cs.OFF_TEXT[:48] + b"there is no such ...")
+            self.assertTrue(cs.portable_off(exe))
+            exe.write_bytes(b"\x7fELF ... slots that other builds load ...")
+            self.assertFalse(cs.portable_off(exe))
 
 
 class CasesTest(TestCase):

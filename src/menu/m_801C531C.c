@@ -6,6 +6,7 @@
  */
 #include "common.h"
 #include "pc_retail_heap.h"
+#include "pc_speedup.h"
 #include "menu/menu.h"
 #include "main/memory.h"
 #include "main/filesystem.h"
@@ -114,6 +115,7 @@ void mainMenuExecute(void) {
     do {
 #ifdef PLATFORM_PC
     mainLoop:
+        pcTransitionMenuIdle(1); /* Speedup transitions: the menu waits for the player */
         pcSafePoint(pcMenuSafeId(PC_SAFE_SUB_MENU)); /* between frames: a canonical state's place */
 #endif
         menuDraw();
@@ -157,6 +159,9 @@ void mainMenuExecute(void) {
             gMenuContext->m337_previousMenuSelectedEntry = gMenuContext->m336_menuSelectedEntry;
         }
     } while (cont);
+#ifdef PLATFORM_PC
+    pcTransitionMenuIdle(0); /* the way out */
+#endif
 }
 
 /* menuToEnter 6: memory card check then load menu */

@@ -20,6 +20,12 @@ int pcFirstPersonWanted(void);
 int pcFirstPersonActive(void);
 void pcFirstPersonMouse(float dx, float dy);
 int pcFirstPersonView(VECTOR* eye, VECTOR* at, s16* spriteHeading, int playerControl);
+/* The field's drawn view at the eye's and target's full precision (lookAtDivided's math without
+ * its whole-unit steps): 1 with m filled and its exact translation in exactT (m->t holds it
+ * rounded), or 0 to draw the game's own (XG_PRECISE_CAMERA=0, or a view lookAtDivided could not
+ * build either). The Enhanced field draws with it and decides with the game's
+ * (f_80072140.c updateFieldEntitiesForView). */
+int pcFieldLookAtPrecise(MATRIX* m, double exactT[3], const VECTOR* eye, const VECTOR* at, const VECTOR* up);
 int pcFreeCameraEnabled(void);  /* settings.ini free_camera (or XG_FREECAM) */
 void pcFreeCameraSet(int on);
 /* Whether the free camera shows this frame (its blend with the game's camera above zero). */

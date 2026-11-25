@@ -4,9 +4,11 @@
  *
  *   xenogears --netplay host --code WORD [--port P] [--delay N]
  *             [--progress N | --all-gears] [--versus TABLE,CONFIG|joiner [--party A,B,C]]
- *             [disc.cue]
- *   xenogears --netplay join HOST:PORT --code WORD [--formation TABLE,CONFIG] [disc.cue]
- *   (the code also from XG_NETPLAY_CODE)
+ *             [--party-vs-party --save CARD.NUMBER[.ID...]] [disc.cue]
+ *   xenogears --netplay join HOST:PORT --code WORD [--formation TABLE,CONFIG]
+ *             [--save CARD.NUMBER[.ID...]] [disc.cue]
+ *   (the code also from XG_NETPLAY_CODE; the party record also from
+ *   XG_NETPLAY_PARTY, its bytes in hex: the menu's)
  *
  * The host is player 1 (port 1, the left Gear), the one who joins player 2.
  * LAN, a direct address with a forwarded UDP port (default 7461), or the
@@ -48,6 +50,27 @@
  * when the field first lets the party walk. "Party in its Gears" is the
  * host's (the settings below).
  *
+ * --party-vs-party (xg-htn.35.143): each player's own party from a memory-card
+ * save on their own machine, on foot, the host's in slots 0-2 against the
+ * joiner's in 3-5 (port/src/game/battle/mirror.c), on the host's choice of
+ * stage. Each side's party is a party record (port/src/card/party.h): the
+ * menu packs it from the save chosen in its browser (XG_NETPLAY_PARTY), or
+ * --save packs it here from this machine's cards (card 1 or 2, the save's
+ * number, the members' character ids in order; the save's own party
+ * without them) before the session puts the cards away. Each side checks
+ * its own and the other's with the same rules (xgPartyCheck: every value
+ * the battle indexes with in the game's ranges; edited saves are accepted
+ * within them, so the other's party is theirs and not verified), sends its
+ * own in the handshake (netplay_core.c PARTY pages; a joiner's refused gets
+ * the reason in its WELCOME, a host's in the joiner's BYE: both sides say
+ * why), and both machines apply both records from those bytes at each boot
+ * of the session (system/arena.c pcArenaSessionParties: the same start as a
+ * local party vs party), so a rematch is the same two parties, sent once.
+ * Its start: power-on into field 22 at the story's start with the host's
+ * party, the match asked for at once; the battle music, the opponent's HP
+ * and the stage are the host's (the settings below). Each machine shows its
+ * own player's side (the perspective: host 1, joiner 2).
+ *
  * A match's end (xg-htn.35.142): when the versus battle is over (whoever
  * won), or a PLAYER1 VS PLAYER2 bout's victory screen is up, both players
  * choose Rematch or Leave (port/src/game/main/arena.c), each on their own
@@ -75,7 +98,7 @@
  * Settings: those that change the game (gameplay: difficulty, enemy and
  * reward multipliers, encounters, deathblows, retry, text speed and its
  * holding and auto-advance, the original-game fixes; the arena's party in
- * Gears, battle music and opponent's HP) are the host's on both sides: it sends them in the handshake
+ * Gears, battle music, opponent's HP and the stage) are the host's on both sides: it sends them in the handshake
  * (SETTINGS, each range-checked), and both hold them for the session
  * (settingsPin: the settings menu shows them locked, a change is ignored,
  * nothing is written). Both also play without what one may have and the
@@ -93,7 +116,12 @@
  * lost, resumed, moved <address>,
  * over <why> [vblank] (why: error nobody noanswer build region busy desync
  * disc left silent battling quit address leave; versus p1|p2|escaped: who
- * won), rematch.
+ * won; party vs party: noparty, partyrefused R ID (the other side refused
+ * this side's party), peerparty R ID (this side refused the other's),
+ * ownparty R ID (this side's own fails the check), stage (the host's stage
+ * is not one of this game's list); R a card/party.h reason, ID the member's
+ * character id or 255), rematch; and the host's refused party R ID (a
+ * player's party refused: it waits on).
  *
  * Desyncs: every vblank each side hashes its state (rand()'s seed, gameState,
  * and in Battling both Gears' records) and sends the hash with its input; a
@@ -103,20 +131,35 @@
  * XG_NETPLAY_TEST_BLACKOUT=n:ms sends nothing for ms milliseconds from vblank
  * n (a drop: the session waits, then goes on);
  * XG_NETPLAY_DUMP_AT=n:file writes the seed and gameState at vblank n (to
- * compare two sides: so the names' tails below were found).
+ * compare two sides: so the names' tails below were found);
+ * XG_NETPLAY_TEST_UNCHECKED=1 sends this side's party record even where
+ * its own check refuses it (as another build's might: the other side's
+ * check is the one that counts);
+ * XG_NETPLAY_HASH_LOG=file writes each vblank's hash ("vblank hash" lines:
+ * the two sides' files are the same up to where either stopped). In party
+ * vs party the hash also takes the two records (their hash, from the
+ * handshake) and, in the battle, player 2's side as mirror.c keeps it
+ * between its turns (pcVersusPartyHash): what gameState and the fighters do
+ * not hold.
  *
  * The protocol, the handshake and the lockstep queue are netplay_core.c
  * (apart from the game, for the unit test); this file puts them to the game.
  *
- * Security: every datagram is one fixed 64-byte packet whose last 8 bytes
+ * Security: every datagram is one fixed 80-byte packet whose last 8 bytes
  * are a SipHash-2-4 tag keyed by the session code (both players type the same
  * code: anyone else's packets, and stray ones, are dropped); the host talks
  * to the first player who joins with the right code and build, nobody else;
- * what comes from the other side is only pad bytes, hashes, the delay and
- * the progress (both range-checked): never a file, a path, code or game data.
- * Each disc is the player's own. Nothing is saved during a session. The other
- * player learns your address. The code is a word, not a strong password: it
- * keeps strangers and stray traffic out, it does not encrypt.
+ * what comes from the other side is pad bytes, hashes, the terms (the delay,
+ * the progress, the mode and a versus battle's formation and party) and the
+ * host's settings, each range-checked, and in party vs party the other
+ * player's party record: game data, but only that record's bytes (at most
+ * NP_PARTY_MAX, assembled only from the pages of the one record announced),
+ * taken only once it passes xgPartyCheck, which bounds every value of it the
+ * battle uses as an index, an offset or a count (card/party.c lists them);
+ * never a file, a path or code. Each disc is the player's own. Nothing is
+ * saved during a session. The other player learns your address. The code is
+ * a word, not a strong password: it keeps strangers and stray traffic out, it
+ * does not encrypt.
  */
 #include <SDL3/SDL.h>
 #include <signal.h>
@@ -132,6 +175,7 @@
 #include "pc_arena.h"
 #include "cd/cd.h"
 #include "card/card.h"
+#include "card/party.h"
 #include "arena.h"
 #include "gameplay.h"
 #include "hw.h"
@@ -192,6 +236,18 @@ static struct {
     int64_t blackoutAt; /* XG_NETPLAY_TEST_BLACKOUT=<vblank>:<ms> */
     uint64_t blackoutNs;
     int after; /* a command-line session ended: the game plays on from the title, still held to real time */
+    /* party vs party: this side's party (--save or XG_NETPLAY_PARTY), the
+     * disc's code table the names are checked with, and both sides' once
+     * connected (the host's first) */
+    char save[64];
+    int hasParty;
+    XgPartyRecord party;
+    uint8_t codes[XG_PARTY_CODE_TABLE];
+    int haveCodes;
+    XgPartyRecord sides[2];
+    uint64_t sidesHash;
+    int checkedIds[3]; /* the members of the record checked last (for the notes) */
+    FILE* hashLog;     /* XG_NETPLAY_HASH_LOG */
 } N;
 
 void presentShowNote(const char* text); /* gpu/present.c */
@@ -199,7 +255,8 @@ void gpuPresentMenu(const char* shot);  /* gpu/libgpu.c: the last picture again 
 
 /* ---- the settings that change the game ---- */
 
-enum { K_BOOL, K_INT, K_DIFFICULTY, K_TEXT_SPEED };
+enum { K_BOOL, K_INT, K_DIFFICULTY, K_TEXT_SPEED, K_STAGE };
+#define STAGE_VALUES 75 /* arena_stage: stage n + 1, n one of the game's 75 (system/arena.c lists some) */
 static struct {
     const char* key;
     int lo, hi, kind;
@@ -225,6 +282,7 @@ static void logicList(NpSession* s) {
     logicAdd(s, "speedup", 0, 1, K_BOOL, speedupEnabled() != 0);
     logicAdd(s, "original_bug_fixes", 0, 1, K_BOOL, pcGameplayOriginalBugFixes() != 0);
     logicAdd(s, "deus_camera_fix", 0, 1, K_BOOL, pcGameplayDeusCameraFix());
+    logicAdd(s, "uninterrupted_combos", 0, 1, K_BOOL, pcGameplayUninterruptedCombos() != 0);
     logicAdd(s, "difficulty", 0, 1, K_DIFFICULTY, pcGameplayHardMode() != 0);
     for (int i = 0; i < GAMEPLAY_ENEMY_STAT_COUNT; i++) {
         logicAdd(s, pcGameplayEnemyKey(i), 25, 400, K_INT, pcGameplayEnemyMultiplier(i));
@@ -244,6 +302,16 @@ static void logicList(NpSession* s) {
     /* the opponent's HP and EP in a versus battle: a picture only, but the match's
      * terms (both players see the same of each other) */
     logicAdd(s, "arena_opponent_hp", 0, 1, K_BOOL, pcVersusOpponentHpSetting() != 0);
+    /* the stage of party vs party: one of the list's (the joiner checks it is) */
+    logicAdd(s, "arena_stage", 1, STAGE_VALUES, K_STAGE, pcArenaStageSetting());
+}
+
+/* A stage setting's value is one of this game's list (system/arena.c). */
+static int stageListed(int value) {
+    for (int i = 0; i < pcArenaStageCount(); i++) {
+        if (value == pcArenaStageId(i) + 1) return 1;
+    }
+    return 0;
 }
 
 /* The session's settings held on this side (both sides). */
@@ -292,14 +360,29 @@ static void status(const char* fmt, ...) {
 
 /* An end's word on the status line. */
 static const char* endWord(const NpSession* s) {
-    static const char* const words[] = {"error", "error", "nobody", "noanswer", "build", "region",
-                                        "busy",  "pick",  "desync", "disc",     "left",  "silent"};
+    static const char* const words[] = {"error",  "error",   "nobody",       "noanswer", "build",
+                                        "region", "busy",    "pick",         "desync",   "disc",
+                                        "left",   "silent",  "noparty",      "partyrefused", "peerparty"};
     return s->reason >= 0 && s->reason < (int)(sizeof words / sizeof words[0]) ? words[s->reason] : "error";
 }
 
+/* A party's member at `place` (0-2) as a character id, 255 none. */
+static int memberId(const int ids[3], int place) {
+    return place >= 0 && place <= 2 && ids[place] >= 0 && ids[place] <= 10 ? ids[place] : 255;
+}
+
 static void statusEnd(const NpSession* s) {
-    if (s->reason == NP_END_DESYNC) status("over desync %u", s->endFrame);
-    else status("over %s", endWord(s));
+    if (s->reason == NP_END_DESYNC) {
+        status("over desync %u", s->endFrame);
+    } else if (s->reason == NP_END_PARTY_REFUSED || s->reason == NP_END_PEER_PARTY) {
+        /* the member: this side's own (its party refused), or the other's (refused here) */
+        int own[3];
+        for (int i = 0; i < 3; i++) own[i] = N.party.m4_members[i];
+        status("over %s %d %d", endWord(s), s->partyReason,
+               memberId(s->reason == NP_END_PARTY_REFUSED ? own : N.checkedIds, s->partyMember));
+    } else {
+        status("over %s", endWord(s));
+    }
 }
 
 /* How a session ends of itself, the same on both sides (the BYE carries it:
@@ -324,6 +407,7 @@ static void toTitle(void) {
      * the cards as newly inserted. */
     settingsUnpinAll();
     cardImagesReload();
+    pcArenaSessionParties(NULL, NULL); /* the title's game is the player's own */
     N.after = 1;
     if (!stateRestartAvailable(&why)) {
         say("the game cannot go back to the title (%s): it ends", why);
@@ -377,7 +461,12 @@ void netplaySoftReset(void) {
 static void note(NpSession* s, int what, const char* text) {
     (void)s;
     switch (what) {
-    case NP_NOTE_REFUSED: say("%s has another build or region: refused", text); break;
+    case NP_NOTE_REFUSED: say("%s was refused (another build or region, no formation or no party)", text); break;
+    case NP_NOTE_REFUSED_PARTY:
+        say("%s's party cannot be used (reason %d, member %d): refused; waiting on", text, N.np.partyReason,
+            memberId(N.checkedIds, N.np.partyMember));
+        status("refused party %d %d", N.np.partyReason, memberId(N.checkedIds, N.np.partyMember));
+        break;
     case NP_NOTE_WAITING: say("waiting for the other player..."); status("waiting"); break;
     case NP_NOTE_PAUSED: say("the other player paused (the menu, or the game in the background)"); status("paused"); break;
     case NP_NOTE_BACK: say("the other player is back"); status("back"); break;
@@ -435,8 +524,10 @@ static uint64_t compatId(void) {
 
 static void usage(void) {
     fprintf(stderr, "usage: xenogears --netplay host --code WORD [--port P] [--delay N] [--progress N | --all-gears]\n"
-                    "                 [--versus TABLE,CONFIG|joiner [--party A,B,C]] [disc.cue]\n"
-                    "       xenogears --netplay join HOST:PORT --code WORD [--formation TABLE,CONFIG] [disc.cue]\n");
+                    "                 [--versus TABLE,CONFIG|joiner [--party A,B,C]]\n"
+                    "                 [--party-vs-party --save CARD.NUMBER[.ID...]] [disc.cue]\n"
+                    "       xenogears --netplay join HOST:PORT --code WORD [--formation TABLE,CONFIG]\n"
+                    "                 [--save CARD.NUMBER[.ID...]] [disc.cue]\n");
 }
 
 int netplayArgs(int* argc, char*** argv) {
@@ -500,6 +591,11 @@ int netplayArgs(int* argc, char*** argv) {
             i++;
         } else if (SDL_strcmp(a[i], "--all-gears") == 0 && N.host) {
             N.terms.progress = 1000; /* past every unlock level, Argento's 999 too */
+        } else if (SDL_strcmp(a[i], "--party-vs-party") == 0 && N.host) {
+            N.terms.mode = NP_MODE_PARTY;
+        } else if (SDL_strcmp(a[i], "--save") == 0 && v != NULL) {
+            SDL_strlcpy(N.save, v, sizeof N.save);
+            i++;
         } else {
             usage();
             return -1;
@@ -540,8 +636,89 @@ static void setEnv(const char* name, const char* value) {
     SDL_SetEnvironmentVariable(SDL_GetEnvironment(), name, value, true);
 }
 
-int netplayConnect(void) {
+/* netplay_core's check of a record from the other side (and the one this
+ * side checks of its own): xgPartyCheck, with this disc's code table. */
+static int checkParty(NpSession* s, const uint8_t* record, int bytes, int* member) {
+    XgPartyRecord r;
+    XgPartyWhy why;
+    (void)s;
+    *member = -1;
+    for (int i = 0; i < 3; i++) N.checkedIds[i] = 255;
+    if (bytes != (int)sizeof r) {
+        say("a party record of %d bytes, not %d: refused", bytes, (int)sizeof r);
+        return XG_PARTY_BAD_HEADER;
+    }
+    memcpy(&r, record, sizeof r);
+    for (int i = 0; i < 3; i++) N.checkedIds[i] = r.m4_members[i];
+    int reason = xgPartyCheck(&r, N.haveCodes ? N.codes : NULL, &why);
+    if (reason != XG_PARTY_OK) {
+        *member = why.member;
+        say("a party refused: %s", why.text);
+    }
+    return reason;
+}
+
+/* XG_NETPLAY_PARTY: a record's bytes in hex (the menu's, netplay_launch.c). */
+static int partyFromHex(const char* hex, XgPartyRecord* out) {
+    uint8_t* b = (uint8_t*)out;
+    if (SDL_strlen(hex) != 2 * sizeof *out) return 0;
+    for (size_t i = 0; i < sizeof *out; i++) {
+        unsigned v;
+        char pair[3] = {hex[2 * i], hex[2 * i + 1], 0};
+        if (!SDL_isxdigit((unsigned char)pair[0]) || !SDL_isxdigit((unsigned char)pair[1]) ||
+            SDL_sscanf(pair, "%2x", &v) != 1) {
+            return 0;
+        }
+        b[i] = (uint8_t)v;
+    }
+    return 1;
+}
+
+/* This side's party, from the menu (XG_NETPLAY_PARTY) or --save (this
+ * machine's cards, read now, put away again once the session holds its
+ * settings: *cardsRead), checked as the other side's will be. 0 (said, and
+ * the status line) where there is one but it cannot be used. */
+static int ownParty(const char* disc, int* cardsRead) {
+    const char* hex = SDL_getenv("XG_NETPLAY_PARTY");
+    *cardsRead = 0;
+    if ((hex == NULL || hex[0] == '\0') && N.save[0] == '\0') return 1; /* none brought */
+    N.haveCodes = xgPartyImageCodes(disc, N.codes);
+    if (!N.haveCodes) say("the disc's character-code table could not be read (%s)", disc != NULL ? disc : "no disc");
+    if (hex != NULL && hex[0] != '\0') {
+        if (!partyFromHex(hex, &N.party)) {
+            say("XG_NETPLAY_PARTY is not a party record's %d bytes in hex", (int)sizeof N.party);
+            status("over ownparty %d 255", XG_PARTY_BAD_HEADER);
+            return 0;
+        }
+    } else {
+        cardImagesInit(); /* the player's cards as the settings have them, before the session's pins */
+        *cardsRead = 1;
+        if (!pcArenaPackSave(N.save, N.haveCodes ? N.codes : NULL, &N.party)) {
+            say("--save %s: no party from that save", N.save);
+            status("over ownparty %d 255", XG_PARTY_BAD_SAVE);
+            return 0;
+        }
+    }
+    int member = -1;
+    int reason = checkParty(&N.np, (const uint8_t*)&N.party, (int)sizeof N.party, &member);
+    const char* unchecked = SDL_getenv("XG_NETPLAY_TEST_UNCHECKED");
+    if (reason != XG_PARTY_OK && unchecked != NULL && atoi(unchecked) != 0) {
+        say("test: this side's party goes out unchecked (XG_NETPLAY_TEST_UNCHECKED), as another build's might");
+    } else if (reason != XG_PARTY_OK) {
+        say("this side's party cannot be used");
+        status("over ownparty %d %d", reason, memberId(N.checkedIds, member));
+        return 0;
+    }
+    N.hasParty = 1;
+    say("this side's party: %d member(s) %d,%d,%d, record fnv1a64 %016llx", N.party.m3_count, N.party.m4_members[0],
+        N.party.m4_members[1], N.party.m4_members[2],
+        (unsigned long long)npPartyHash((const uint8_t*)&N.party, (int)sizeof N.party));
+    return 1;
+}
+
+int netplayConnect(const char* disc) {
     NpSession* s = &N.np;
+    int cardsRead = 0;
 
     const char* st = SDL_getenv("XG_NETPLAY_STATUS");
     N.status = st != NULL && atoi(st) != 0;
@@ -556,6 +733,14 @@ int netplayConnect(void) {
     s->hasPick = N.hasPick;
     s->pickTable = N.pickTable;
     s->pickConfig = N.pickConfig;
+    s->partyCheck = checkParty;
+    if (!ownParty(disc, &cardsRead)) return 0;
+    if (N.host && N.terms.mode == NP_MODE_PARTY && !N.hasParty) {
+        say("party vs party needs this side's party: --save CARD.NUMBER[.ID...] (or the menu's)");
+        status("over ownparty %d 255", XG_PARTY_BAD_MEMBERS);
+        return 0;
+    }
+    if (N.hasParty) npSetParty(s, (const uint8_t*)&N.party, (int)sizeof N.party);
     logicList(s);
     if (!npOpen(s, N.host ? N.port : 0)) {
         say("%s", s->why);
@@ -589,12 +774,40 @@ int netplayConnect(void) {
         }
     }
     say("connected: input delay %d vblanks, story progress %d", s->terms.delay, s->terms.progress);
+    for (int i = 0; i < logicCount; i++) {
+        if (logic[i].kind == K_STAGE && !stageListed(s->terms.settings[i])) { /* within range, but not one of ours */
+            say("the host's stage (setting %d) is not one of this game's", s->terms.settings[i]);
+            status("over stage");
+            npBye(s, END_NONE);
+            return 0;
+        }
+    }
+    if (s->terms.mode == NP_MODE_PARTY) {
+        /* both checked (the handshake: each side's of the other's, here of its own) */
+        const XgPartyRecord* mine = &N.party;
+        XgPartyRecord theirs;
+        memcpy(&theirs, s->peerParty, sizeof theirs);
+        N.sides[0] = N.host ? *mine : theirs;
+        N.sides[1] = N.host ? theirs : *mine;
+        N.sidesHash = npFnv(npFnv(NP_FNV0, &N.sides[0], sizeof N.sides[0]), &N.sides[1], sizeof N.sides[1]);
+        pcArenaSessionParties(&N.sides[0], &N.sides[1]);
+        say("party vs party: player 1 %d,%d,%d (record fnv1a64 %016llx), player 2 %d,%d,%d (%016llx); the other "
+            "player's party is from their own save, not verified (only its ranges checked)",
+            N.sides[0].m4_members[0], N.sides[0].m4_members[1], N.sides[0].m4_members[2],
+            (unsigned long long)npPartyHash((const uint8_t*)&N.sides[0], (int)sizeof N.sides[0]),
+            N.sides[1].m4_members[0], N.sides[1].m4_members[1], N.sides[1].m4_members[2],
+            (unsigned long long)npPartyHash((const uint8_t*)&N.sides[1], (int)sizeof N.sides[1]));
+    }
     {
         char peer[64];
         netAddrText(&s->peer, peer, sizeof peer);
-        status("connected %s %d %s", peer, s->terms.delay, s->terms.mode == NP_MODE_VERSUS ? "versus" : "battling");
+        status("connected %s %d %s", peer, s->terms.delay,
+               s->terms.mode == NP_MODE_PARTY    ? "party"
+               : s->terms.mode == NP_MODE_VERSUS ? "versus"
+                                                 : "battling");
     }
     logicPin(&s->terms);
+    if (cardsRead) cardImagesReload(); /* --save read the player's cards: the session's game has none */
     char held[1024];
     size_t used = 0;
     held[0] = '\0';
@@ -607,7 +820,15 @@ int netplayConnect(void) {
     char value[64];
     setEnv("XG_CLOCK", "step");
     setEnv("XG_MUSIC", ""); /* a start's music (options.c) reads the disc: one side's alone would part them */
-    if (s->terms.mode == NP_MODE_VERSUS) {
+    if (s->terms.mode == NP_MODE_PARTY) {
+        /* field 22 (the boot into the field); the match's start itself is
+         * system/arena.c's (pcArenaStartState: the session's parties) */
+        SDL_snprintf(value, sizeof value, "%d", VERSUS_FIELD);
+        setEnv("XG_FIELD", value);
+        setEnv("XG_PARTY", "");
+        setEnv("XG_VERSUS", "");
+        setEnv("XG_GAMESTATE", "");
+    } else if (s->terms.mode == NP_MODE_VERSUS) {
         say("a versus battle: table %d config %d%s, party %d,%d,%d", s->terms.table, s->terms.config,
             N.host && s->terms.pick ? " (player 2's choice)" : "", s->terms.party[0],
             s->terms.party[1], s->terms.party[2]);
@@ -629,6 +850,8 @@ int netplayConnect(void) {
     t = SDL_getenv("XG_NETPLAY_TEST_BLACKOUT");
     N.blackoutAt = t != NULL && SDL_sscanf(t, "%u:%u", &at, &ms) == 2 ? (int64_t)at : -1;
     N.blackoutNs = (uint64_t)ms * 1000000ull;
+    t = SDL_getenv("XG_NETPLAY_HASH_LOG");
+    if (t != NULL && t[0] != '\0') N.hashLog = fopen(t, "w");
     s->poll = pollQuit;
     N.active = 1;
     /* each machine shows its own player's side of a mirror match (system/arena.c) */
@@ -702,7 +925,12 @@ static uint64_t stateHash(void) {
         h = gearHash(h, &battlingGear2);
     } else if (pcWideGetMode() == 2) {
         h = npFnv(h, &battleEntities.m0_entities, sizeof battleEntities.m0_entities);
+        if (N.np.terms.mode == NP_MODE_PARTY) {
+            u32 p2 = pcVersusPartyHash(); /* player 2's side between its turns (mirror.c) */
+            h = npFnv(h, &p2, sizeof p2);
+        }
     }
+    if (N.np.terms.mode == NP_MODE_PARTY) h = npFnv(h, &N.sidesHash, sizeof N.sidesHash); /* the two records */
     return h;
 }
 
@@ -748,7 +976,7 @@ void netplayPace(void) {
         return;
     }
     int mode = pcWideGetMode();
-    if (N.np.terms.mode == NP_MODE_VERSUS) {
+    if (N.np.terms.mode == NP_MODE_VERSUS || N.np.terms.mode == NP_MODE_PARTY) {
         int versus = pcVersusSession();
         if (versus == PC_VERSUS_IN) {
             N.seenVersus = 1;
@@ -808,7 +1036,13 @@ void netplayFrame(unsigned local, unsigned* port1, unsigned* port2) {
         srand(portRandSeed() ^ 1); /* XG_NETPLAY_DESYNC_TEST: a deliberate difference */
     }
     dumpState(n);
-    if (!npFrame(&N.np, n, local, stateHash(), port1, port2)) {
+    uint64_t h = stateHash();
+    if (N.hashLog != NULL) {
+        fprintf(N.hashLog, "%u %016llx\n", n, (unsigned long long)h);
+        if (n % 64 == 0) fflush(N.hashLog);
+    }
+    if (!npFrame(&N.np, n, local, h, port1, port2)) {
+        if (N.hashLog != NULL) fflush(N.hashLog);
         stop(END_NONE);
     }
 }

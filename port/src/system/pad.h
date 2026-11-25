@@ -18,7 +18,22 @@
 #define PAD_INPUT_LEFT_TRIGGER (-2)
 #define PAD_INPUT_RIGHT_TRIGGER (-3)
 
-void padCameraInput(float* turn, float* tilt, float* zoom, int* recenter); /* the free field camera's stick and keys (-1..1; recenter once) */
+void padCameraInput(float* turn, float* tilt, float* zoom, int* recenter); /* the free field camera's stick and keys (-1..1 times the speed below; recenter once) */
+/* The right-stick camera's settings (pad.c, settings.ini; F1 > Controls > Camera and vibration):
+ * the free camera in fields, the world map's and first-person look. */
+int padCameraInvertX(void);                /* camera_invert_x: the right stick turns the other way */
+void padSetCameraInvertX(int on);
+int padCameraInvertY(void);                /* camera_invert_y: the right stick tilts the other way */
+void padSetCameraInvertY(int on);
+int padCameraTurnSpeed(void);              /* camera_turn_speed: percentage, 25..300; default 100 */
+void padSetCameraTurnSpeed(int percent);
+int padCameraTiltSpeed(void);              /* camera_tilt_speed: percentage, 25..300; default 100 */
+void padSetCameraTiltSpeed(int percent);
+int padCameraDeadzone(void);               /* camera_stick_deadzone: percentage, 0..60; default 20 */
+void padSetCameraDeadzone(int percent);
+/* First-person mouse look's motion (pixels; right and down positive) through the invert and
+ * speed settings. */
+void padCameraMouse(float* dx, float* dy);
 const char* padButtonName(int button);  /* "cross": the settings keys' suffix */
 const char* padButtonLabel(int button); /* "Cross" */
 

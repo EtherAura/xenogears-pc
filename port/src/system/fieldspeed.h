@@ -44,7 +44,30 @@ void fieldSpeedMovie(int on);
  * map asks for at this vblank, 1 for off, 1x and every other screen. */
 int fieldSpeedWanted(void);
 
-/* The movie flag, in battlespeed.c's part of a state (battleSpeedStateIo). */
+/* Speedup transitions (xg-htn.35.157): speedup_transitions in settings.ini
+ * (0 off, the default; 1 on; XG_SPEEDUP_TRANSITIONS for one run). The main
+ * menu's way in from the field and the world map (their fade, the load, the
+ * menu's opening animation), its way out (the menu's closing, the reload,
+ * the fade back) and a room change the player walks into on the field
+ * (transitionFields: the old room's fade or strips, the new room's load; not
+ * a scene's own change) run at HW_GAME_SPEED_MAX on the
+ * same clock: the game's own frames, its pictures withheld between, the music
+ * at its tempo. The game marks the stretches (include/pc_speedup.h
+ * pcTransitionMenu, pcTransitionMenuIdle, pcTransitionRoom); the menu's loop,
+ * waiting for the player, and the new room's fade-in, with the player in
+ * control, are at 1x.
+ * battlespeed.c's rules hold it at 1x as they hold the others (online, the
+ * slowdown replay, CD audio). */
+int transitionSpeedChosen(void);
+void transitionSpeedSetChosen(int on); /* saved */
+/* battlespeed.c's vblank: HW_GAME_SPEED_MAX inside a marked stretch with the
+ * setting on, else 1. */
+int transitionSpeedWanted(void);
+/* Every mark off (reset.c: a soft reset never reaches the game's own ends). */
+void transitionSpeedReset(void);
+
+/* The movie flag and the transition's marks, in battlespeed.c's part of a
+ * state (battleSpeedStateIo). */
 void fieldSpeedStateIo(XgState* s);
 
 #endif /* PORT_FIELDSPEED_H */

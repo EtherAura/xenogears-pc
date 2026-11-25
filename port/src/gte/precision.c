@@ -114,10 +114,26 @@ void gteCopySxy(void* dst, const void* src) {
     gteCopyPrecision(dst, src);
 }
 
+/* The field's drawn view's fraction (xg-ugy.9; include/gte_pc.h): the camera's translation
+ * past its matrix's whole units, added to the shadow positions of what the field draws from the
+ * camera, so the upscaled picture follows a camera that moves by fractions evenly. */
+static double viewOffset[3];
+static int viewOffsetOn;
+void gtePrecisionViewOffset(const double* offset) {
+    viewOffsetOn = offset != NULL;
+    for (int k = 0; k < 3; k++) viewOffset[k] = offset ? offset[k] : 0;
+}
+int gtePrecisionViewOffsetGet(double offset[3]) {
+    if (!viewOffsetOn) return 0;
+    for (int k = 0; k < 3; k++) offset[k] = viewOffset[k];
+    return 1;
+}
+
 /* Save states (system/savestate.h): the projections recorded before a load
  * belong to another timeline. */
 void precisionStateLoaded(void) {
     memset(entries, 0, sizeof(entries));
     epoch = 1;
     pendingDraws = 0;
+    viewOffsetOn = 0;
 }

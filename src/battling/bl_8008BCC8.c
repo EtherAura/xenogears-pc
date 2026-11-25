@@ -550,7 +550,7 @@ BattlingInstance* createBattlingInstance(BattlingNode* src) {
     BattlingNode* root;
 
     traceNextAlloc(7);
-    inst = allocateHeap((s32)sizeof(BattlingInstance), 2);
+    inst = allocateHeap(PC_HEAP_OF(BattlingInstance, (s32)sizeof(BattlingInstance)), 2);
     type = src->m0_type;
     root = battlingShadowRoot;
     inst->m4_source = src;
@@ -587,7 +587,7 @@ BattlingNode* cloneBattlingShadowTree(BattlingNode* src, BattlingNode* parent) {
     if (inst->m0_type == 1) {
         block = ((BattlingModel*)src->m4_data)->m14_modelBlock;
         traceNextAlloc(5);
-        inst->mC_flatModel = allocateHeap((s32)sizeof(BattlingFlatModel), 2);
+        inst->mC_flatModel = allocateHeap(PC_HEAP_OF(BattlingFlatModel, (s32)sizeof(BattlingFlatModel)), 2);
         initBattlingShadowModel(inst->mC_flatModel, block);
     }
     battlingShadowNodeCount++;

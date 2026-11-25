@@ -49,10 +49,10 @@ void setupScreenDistortion(s32 noParams) {
 
     fieldScreenEffects.m0_screenDistortionRunning = 1;
     if (screenDistrotionAllocated == 0) {
-        fieldScreenEffects.m3C_drawMove[0] = allocateHeap(PC_HEAP_SIZED(16 * sizeof(DR_MOVE), 16 * 0x18), 0);
-        fieldScreenEffects.m3C_drawMove[1] = allocateHeap(PC_HEAP_SIZED(16 * sizeof(DR_MOVE), 16 * 0x18), 0);
-        fieldScreenEffects.m44_polys[0] = allocateHeap(PC_HEAP_SIZED(360 * sizeof(POLY_FT4), 360 * 0x28), 0);
-        fieldScreenEffects.m44_polys[1] = allocateHeap(PC_HEAP_SIZED(360 * sizeof(POLY_FT4), 360 * 0x28), 0);
+        fieldScreenEffects.m3C_drawMove[0] = allocateHeap(PC_HEAP_OF(DR_MOVE, PC_HEAP_SIZED(16 * sizeof(DR_MOVE), 16 * 0x18)), 0);
+        fieldScreenEffects.m3C_drawMove[1] = allocateHeap(PC_HEAP_OF(DR_MOVE, PC_HEAP_SIZED(16 * sizeof(DR_MOVE), 16 * 0x18)), 0);
+        fieldScreenEffects.m44_polys[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, PC_HEAP_SIZED(360 * sizeof(POLY_FT4), 360 * 0x28)), 0);
+        fieldScreenEffects.m44_polys[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, PC_HEAP_SIZED(360 * sizeof(POLY_FT4), 360 * 0x28)), 0);
         screenDistrotionAllocated = 1;
         for (i = 0; i < 17; i++) {
             for (j = 0; j < 20; j++) {

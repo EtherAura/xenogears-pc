@@ -5,8 +5,10 @@
  * Its state comes back on its stdout (XG_NETPLAY_STATUS=1: "XGNP ..." lines);
  * its log goes where this one's goes. The session code goes to it in its
  * environment (XG_NETPLAY_CODE), not on its command line, which other users
- * of the machine can read. The disc is the player's own (settings "disc", else
- * the image in the drive).
+ * of the machine can read; so does party vs party's party record, packed
+ * here from the save chosen in the menu (XG_NETPLAY_PARTY, its bytes in hex:
+ * the session's process has no memory cards). The disc is the player's own
+ * (settings "disc", else the image in the drive).
  *
  * The session's process gets this one's environment but for what belongs to
  * this run alone (a pad or menu script, a quit vblank, dumps, save-state
@@ -43,6 +45,7 @@ static struct {
     int delay;
     int paused;
     int lost;
+    int refusedReason, refusedMember; /* host, party vs party: the last party refused (reason 0: none) */
     char line[512];
     size_t used;
 } L;
@@ -76,6 +79,12 @@ static void parse(const char* line) {
         L.lost = 1;
     } else if (SDL_strcmp(line, "resumed") == 0) {
         L.lost = 0;
+    } else if (SDL_strncmp(line, "refused party ", 14) == 0) {
+        int reason = 0, member = 255;
+        if (sscanf(line + 14, "%d %d", &reason, &member) >= 1 && reason > 0) {
+            L.refusedReason = reason;
+            L.refusedMember = member;
+        }
     } else if (SDL_strncmp(line, "moved ", 6) == 0 && L.state == NETPLAY_CONNECTED) {
         copy(L.detail, sizeof L.detail, line + 6);
     } else if (SDL_strncmp(line, "over ", 5) == 0) {
@@ -127,7 +136,8 @@ static void stopAtExit(void) {
 int netplayLaunch(const NetplayStart* o) {
     static int atExit;
     char exe[4096], port[16], delay[16], progress[16], versus[32], party[32];
-    const char* args[20];
+    static char hex[2 * sizeof(XgPartyRecord) + 1];
+    const char* args[24];
     int n = 0;
 
     checkProcess();
@@ -145,7 +155,9 @@ int netplayLaunch(const NetplayStart* o) {
         args[n++] = delay;
         args[n++] = "--progress";
         args[n++] = progress;
-        if (o->versus) {
+        if (o->partyVsParty) {
+            args[n++] = "--party-vs-party";
+        } else if (o->versus) {
             if (o->joinerPicks) SDL_snprintf(versus, sizeof versus, "joiner");
             else SDL_snprintf(versus, sizeof versus, "%d,%d", o->table, o->config);
             SDL_snprintf(party, sizeof party, "%d,%d,%d", o->party[0], o->party[1], o->party[2]);
@@ -190,6 +202,13 @@ int netplayLaunch(const NetplayStart* o) {
     SDL_SetEnvironmentVariable(env, "XG_NETPLAY_STATUS", "1", true);
     SDL_SetEnvironmentVariable(env, "XG_ENGINE_LAUNCHED", "1", true); /* this engine, whatever the setting says */
     SDL_SetEnvironmentVariable(env, "XG_NETPLAY_CODE", o->code, true);
+    if (o->hasParty) {
+        const uint8_t* b = (const uint8_t*)&o->record;
+        for (size_t i = 0; i < sizeof o->record; i++) SDL_snprintf(hex + 2 * i, 3, "%02x", b[i]);
+        SDL_SetEnvironmentVariable(env, "XG_NETPLAY_PARTY", hex, true);
+    } else {
+        SDL_UnsetEnvironmentVariable(env, "XG_NETPLAY_PARTY");
+    }
     SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void*)args);
     SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, env);
     SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
@@ -203,6 +222,8 @@ int netplayLaunch(const NetplayStart* o) {
     L.paused = 0;
     L.lost = 0;
     L.delay = 0;
+    L.refusedReason = 0;
+    L.refusedMember = 255;
     if (L.proc == NULL) {
         L.state = NETPLAY_OVER;
         SDL_snprintf(L.detail, sizeof L.detail, "start %s", SDL_GetError());
@@ -237,6 +258,13 @@ int netplaySessionPaused(void) {
 
 int netplaySessionLost(void) {
     return L.lost;
+}
+
+int netplaySessionRefusedParty(int* reason, int* member) {
+    if (L.refusedReason <= 0) return 0;
+    *reason = L.refusedReason;
+    *member = L.refusedMember;
+    return 1;
 }
 
 void netplaySessionStop(void) {

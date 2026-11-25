@@ -292,7 +292,7 @@ void fxScreenRipple_delete(TaskHeader* task) {
 }
 
 Fx08Effect* createBattleStartEffect(void) {
-    Fx08Effect* e = allocateHeap(sizeof(Fx08Effect), 1);
+    Fx08Effect* e = allocateHeap(PC_HEAP_OF(Fx08Effect, sizeof(Fx08Effect)), 1);
     e->m0_updateTask.m4_data = e;
     e->m1C_drawTask.m4_data = e;
     return initFxScreenRipple(e);

@@ -345,7 +345,7 @@ add_executable(updateinstalltest EXCLUDE_FROM_ALL src/update/test/updateinstallt
 target_include_directories(updateinstalltest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/monocypher"
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/puff")
 if(WIN32)
-    target_link_libraries(updateinstalltest PRIVATE winhttp)
+    target_link_libraries(updateinstalltest PRIVATE winhttp ole32)
 endif()
 add_executable(seamreusetest EXCLUDE_FROM_ALL src/gpu/test/seamreusetest.c)
 add_executable(spansteptest EXCLUDE_FROM_ALL src/gpu/test/spansteptest.c)
@@ -467,6 +467,14 @@ xg_gameplay_test(gameplay_rewardtest SOURCES src/system/test/rewardtest.c GAME g
 xg_gameplay_code(gameplay_deathblow_code "${XG_GAME_ROOT}/src/battle/b_800941A4.c")
 xg_gameplay_test(gameplay_deathblowtest SOURCES src/system/test/deathblowtest.c GAME gameplay_deathblow_code)
 
+# Uninterrupted combos: the setting and its decisions for the battle sprite VM.
+xg_gameplay_code(gameplay_uninterrupted_code "${CMAKE_CURRENT_SOURCE_DIR}/src/game/battle/combo.c")
+xg_gameplay_test(gameplay_uninterruptedtest SOURCES src/system/test/uninterruptedtest.c GAME gameplay_uninterrupted_code)
+
+# A jump pressed as a random battle comes (Original-game bug fixes).
+xg_gameplay_code(gameplay_battlejump_code "${CMAKE_CURRENT_SOURCE_DIR}/src/game/field/battlejump.c")
+xg_gameplay_test(gameplay_battlejumptest SOURCES src/system/test/battlejumptest.c GAME gameplay_battlejump_code)
+
 # Dialogue speed, hold and auto-advance settings.
 xg_gameplay_test(gameplay_dialoguetest SOURCES src/system/test/dialoguetest.c)
 
@@ -572,16 +580,12 @@ if(XG_DIST)
 endif()
 target_compile_definitions(platform PRIVATE PLATFORM_PC VERSION_${XG_VERSION} ${XG_ROOT_DEFINE}
     XG_ENGINE_ENHANCED=${XG_ENGINE_ENHANCED})
-# Save state slots that other builds load (port/src/system/stateportable.c) stay out of builds to hand
-# out until canonical states' compatibility phase is in (docs/CANONICAL_STATES.md 17, carl):
-# the first release that writes them must pass the state-compat gate both ways.
-if(XG_DIST)
-    set(xg_portable_default OFF)
-else()
-    set(xg_portable_default ON)
-endif()
-option(XG_PORTABLE_SLOTS "save state slots that other builds load (off in a build to hand out until P5)"
-    ${xg_portable_default})
+# Save state slots that other builds load (port/src/system/stateportable.c), in every build since
+# canonical states' compatibility phase (carl): the first release that writes them is the
+# first canonical one, and from then on each release's slots load in every earlier canonical release
+# and theirs in it (the state-compat gate at each release cut). OFF writes and converts none: every
+# slot is "This version only", as in the releases before.
+option(XG_PORTABLE_SLOTS "save state slots that other builds load" ON)
 if(NOT XG_PORTABLE_SLOTS)
     target_compile_definitions(platform PRIVATE XG_PORTABLE_SLOTS_OFF=1)
 endif()
@@ -669,9 +673,12 @@ endif()
 target_link_libraries(ui PRIVATE SDL3::SDL3 Vulkan::Headers)
 # The opt-in update check (port/src/update, xg-4oq.14.3): the question before the game, F1 >
 # System > Updates, the system's own HTTPS (update_fetch.c: WinHTTP, Android's HttpURLConnection,
-# libcurl loaded at run time). Off by default, and in releases, until a release's save states load
-# both ways in every other canonical release's (xg-4oq.14.7); without it nothing of it is built.
-option(XG_UPDATER "the opt-in update check (port/src/update; off until xg-4oq.14.7)" OFF)
+# libcurl loaded at run time). On in every build to hand out (XG_DIST: each release's packages,
+# Linux, Windows, Arch and Gentoo; the Android APK by tools/build_android.sh --updater) since the
+# first canonical release, whose save states load both ways with every later one's (xg-4oq.14.7,
+# carl); off in a development build. The check is still asked before it ever runs.
+# Without it nothing of it is built.
+option(XG_UPDATER "the opt-in update check (port/src/update)" ${XG_DIST})
 if(XG_UPDATER)
     target_sources(platform PRIVATE src/update/update_check.c src/update/update_fetch.c
         src/update/update_manifest.c src/update/update_install.c src/update/update_archive.c
@@ -1042,6 +1049,10 @@ if(WIN32)
     target_link_options(xenogears PRIVATE -Wl,--image-base,0x400000 -Wl,--disable-dynamicbase
         -Wl,--disable-high-entropy-va -Wl,--stack,0x800000 -static
         "-Wl,-Map,$<TARGET_FILE:xenogears>.map")
+    # A GUI program (-mwindows): a start from Explorer or the Start menu opens no console window
+    # beside the game (carl xg-l5p4). A start from a terminal still logs there:
+    # main() attaches to its console (system/win32.c win32AttachConsole).
+    set_target_properties(xenogears PROPERTIES WIN32_EXECUTABLE TRUE)
     # COFF symbols do not carry ELF sizes. Keep exact input placement for
     # the payload audit, with hashes that reject a stale image or map.
     set_property(TARGET xenogears APPEND PROPERTY LINK_DEPENDS
@@ -1054,6 +1065,7 @@ if(WIN32)
     target_link_libraries(xenogears PRIVATE ws2_32) # netplay's UDP (system/net.c)
     if(XG_UPDATER)
         target_link_libraries(xenogears PRIVATE winhttp) # the update check's HTTPS (update/update_fetch.c)
+        target_link_libraries(xenogears PRIVATE ole32) # COM on the thread that starts the setup (update_install.c)
     endif()
     # The manifest: UTF-8 process code page (paths outside ASCII), long paths.
     enable_language(RC)

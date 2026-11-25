@@ -80,6 +80,10 @@
 #               on first use like the US one): it links; skipped when an
 #               explicit one is missing
 #   payload-enhanced  the payload gate on that executable
+#   tailcheck   tables the C declares shorter than the PS1 data at their label, which
+#               the PC link cuts at the declared size (tools/tailcheck.py, xg-htn.35.154):
+#               each gets a PC fix or a reason in tools/tailcheck_allow.txt; in the US,
+#               JP and Enhanced builds above (<build>/gen/tails.txt)
 #   state-compat save states between releases (tools/state_compat.py, xg-htn.60.5): every
 #               earlier canonical release's corpus ($XG_STATE_CORPORA, default
 #               work/state-corpus: made by tools/state_corpus.py release) loads in the
@@ -92,6 +96,16 @@
 #               $XG_STATE_COMPAT_FULL (3) most recent, the ones between sampled
 #               ($XG_STATE_COMPAT_SAMPLE, 8 cases per configuration and direction, about 15 s
 #               each); skipped when no build has a state schema
+#   state-untyped pointers no annotation types (tools/state_untyped.py, xg-ety3): each corpus
+#               case (tools/state_corpus.py's) saved in two layouts 16 MiB apart (build/pc/schema
+#               and schema2 for the US Original, $XG_UNTYPED_LAYOUTS/<config>-a and -b for the
+#               US Enhanced, JP Original and JP Enhanced: work/canon/untyped_layouts.sh), each
+#               built first; every word that moves by the shift where the converter would not
+#               move it, and the source's allocations of pointer-holding types that name none.
+#               Zero findings is the pass (reviewed leftovers: tools/state_untyped_allow.txt).
+#               A full run is about 4 min (128 cases); the gate samples
+#               $XG_STATE_UNTYPED_SAMPLE (10) cases per configuration, the three battle command
+#               menus always (about 1.5 min); "all" for every case. Skipped without layouts
 #   payload-android  the payload gate on each Android game library built in
 #               build/android (tools/build_android.sh); skipped when none is
 #   beetle-capture frame-boundary capture regressions, without a core or discs
@@ -100,6 +114,9 @@
 #   payload-tests synthetic PE/ELF payload attribution and rejection regressions
 #   deps-tests  the pinned source tarballs (tools/deps.json): fetch and sum checks
 #               on fixtures, no network (tools/test_deps.py)
+#   android-start-tests the release APKs' start check's judgement (tools/android_start_check.py:
+#               crashes, the app's processes, a game run's lines, the twin APK) on logcat
+#               fixtures, no emulator (tools/test_android_start_check.py)
 #   dav1d-helper which tarball tools/build_dav1d_mingw.sh takes, with stub tools
 #               (tools/check_dav1d_mingw.py)
 #   port-runner filtered fixtures and concurrent output ownership regressions
@@ -237,6 +254,7 @@ if [ "$TESTS" = 1 ]; then
     gate interpolation-coverage "$PY" tools/test_interpolation_coverage.py
     gate payload-tests "$PY" tools/test_payloadcheck.py
     gate deps-tests "$PY" tools/test_deps.py
+    gate android-start-tests "$PY" tools/test_android_start_check.py
     gate dav1d-helper "$PY" tools/check_dav1d_mingw.py --ver us
     gate port-runner "$PY" tools/test_port_tests.py
     gate state-runner "$PY" tools/test_statecheck.py
@@ -354,6 +372,18 @@ elif [ "$TESTS" = 1 ]; then
     record enhanced 0 "skipped: no configured build in $ENHANCED_BUILD"
 fi
 
+# The PS1 data past tables of a declared size, which the PC link leaves out (pc_link writes each
+# build's gen/tails.txt): reviewed in tools/tailcheck_allow.txt or fixed.
+tail_builds=()
+for b in "$TEST_BUILD" "$TEST_BUILD_JP" "$ENHANCED_BUILD"; do
+    [ -f "$b/CMakeCache.txt" ] && tail_builds+=(--build "$b")
+done
+if [ ${#tail_builds[@]} -gt 0 ]; then
+    gate tailcheck "$PY" tools/tailcheck.py "${tail_builds[@]}"
+else
+    record tailcheck 0 "skipped: no configured build in $TEST_BUILD, $TEST_BUILD_JP or $ENHANCED_BUILD"
+fi
+
 # Canonical save states between releases: the builds above (each with its state_schema.json) against
 # every earlier canonical release's corpus, both ways. Its runs and the builds' corpus in scratch of
 # this output folder's own, off the root disk when there is room for it elsewhere.
@@ -378,6 +408,20 @@ if [ "$TESTS" = 1 ]; then
     else
         record state-compat 0 "skipped: no build with a state schema in $TEST_BUILD, $ENHANCED_BUILD or $TEST_BUILD_JP"
     fi
+fi
+
+# Pointers in untyped memory across two layouts (each layout built first), a sample of the corpus'
+# cases unless XG_STATE_UNTYPED_SAMPLE=all; its runs in scratch of this output folder's own.
+if [ "$TESTS" = 1 ]; then
+    untyped_sample=(--sample "${XG_STATE_UNTYPED_SAMPLE:-10}")
+    [ "${XG_STATE_UNTYPED_SAMPLE:-}" = all ] && untyped_sample=()
+    if [ -d /mnt/Games/scratch ] && [ -w /mnt/Games/scratch ]; then
+        untyped_work="/mnt/Games/scratch/xg-state-untyped/$(printf '%s' "$OUT" | sha1sum | cut -c1-12)"
+    else
+        untyped_work="$OUT/state-untyped"
+    fi
+    gate state-untyped "$PY" tools/state_untyped.py --build "${untyped_sample[@]}" --work "$untyped_work" \
+        --report "$OUT/state-untyped.json"
 fi
 
 # The Android game libraries (tools/build_android.sh), when built in this tree: what an APK

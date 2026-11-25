@@ -1233,7 +1233,7 @@ void initTransitionFadeGrid(void) {
     POLY_GT4* p;
     POLY_GT4* p1;
 
-    transitionFadeGrid = allocateHeap(PC_HEAP_SIZED(sizeof(FadeGrid), 0x7A80), 1);
+    transitionFadeGrid = allocateHeap(PC_HEAP_OF(FadeGrid, PC_HEAP_SIZED(sizeof(FadeGrid), 0x7A80)), 1);
     pcInterpolationLifetime(transitionFadeGrid);
     for (i = 0; i < 4 * 16 * (20 + 2 * WIDE_GRID_COLS); i++) {
         (&wideGridColors[0][0][0])[i] = 0x80;
@@ -1856,8 +1856,8 @@ void initDebugCameraDigits(void) {
     abr = 0;
     debugCameraDigitsCursorFrame = 0;
     resetMemoryAllocStats(8, 0);
-    debugCameraDigitPolys[0] = allocateHeap(PC_HEAP_SIZED(0x6D * sizeof(POLY_FT4), 0x6D * 0x28), 0);
-    debugCameraDigitPolys[1] = allocateHeap(PC_HEAP_SIZED(0x6D * sizeof(POLY_FT4), 0x6D * 0x28), 0);
+    debugCameraDigitPolys[0] = allocateHeap(PC_HEAP_OF(POLY_FT4, PC_HEAP_SIZED(0x6D * sizeof(POLY_FT4), 0x6D * 0x28)), 0);
+    debugCameraDigitPolys[1] = allocateHeap(PC_HEAP_OF(POLY_FT4, PC_HEAP_SIZED(0x6D * sizeof(POLY_FT4), 0x6D * 0x28)), 0);
     for (i = 0, k = 0, k2 = 0, k3 = 0, off = 0; i < 0x6D;) {
         p = (POLY_FT4*)((u8*)debugCameraDigitPolys[0] + off);
         p1 = (POLY_FT4*)((u8*)debugCameraDigitPolys[1] + off);

@@ -1113,10 +1113,10 @@ void runBattleResultScreen(u32 gold) {
     savedRunning = battleRunningVar1[0];
     battleVar1->mCF_isWaitingForInput = 0;
     for (i = 0; i < 3; i++) {
-        battleResultCharWindows[i] = allocateBattleHeap(sizeof(sBattleResultChar), 0);
+        battleResultCharWindows[i] = allocateBattleHeap(PC_HEAP_OF(sBattleResultChar, sizeof(sBattleResultChar)), 0);
         bzero(battleResultCharWindows[i], sizeof(sBattleResultChar));
     }
-    battleResultScreen = allocateBattleHeap(sizeof(sBattleResultScreen), 0);
+    battleResultScreen = allocateBattleHeap(PC_HEAP_OF(sBattleResultScreen, sizeof(sBattleResultScreen)), 0);
     bzero(battleResultScreen, sizeof(sBattleResultScreen));
     battleResultCharWindows[0]->m15F8_showEther = !(gameState.m22B6_gameFlags & 0x8000);
     battleRenderDebugAndMain();

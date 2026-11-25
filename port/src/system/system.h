@@ -30,6 +30,11 @@ void etcSoftReset(void);      /* LIBETC's state as the PS1's cleared BSS leaves 
 /* reset.c: the soft reset (startKernel unwinds to main(), which calls this). */
 void portSoftReset(void);
 
+#ifdef _WIN32
+/* win32.c: a GUI program's log to the terminal it was started from (first thing in main). */
+void win32AttachConsole(void);
+#endif
+
 /* quit.c: window close, SIGINT and SIGTERM end the game at its next safe point. */
 void quitInit(void);          /* signal handlers and the watchdog */
 void quitRequest(void);       /* ask for a quit (any thread) */

@@ -122,11 +122,13 @@ F1 > Audio > Japanese audio.
 |---|---|
 | Speedup | Shorter memory card and loading waits; turns on smoothed motion |
 | Field speed | Fields and the world map at 2x or 4x, their scenes and dialogue included; menus, movies and battles keep their own speed. There Tab (or Select + R2) steps 1x, 2x, 4x; while it is on, Select does its own job there (the area map, the minimap) as you let it go |
+| Speedup transitions | Opening the main menu from the field or the world map and closing it, and going from room to room on the field, at 4x: the fades, the loads and the menu's own animation; the menu itself, the field and every other screen keep their speed |
 | Dialogue backlog | Keeps the text the game shows (field, world map, a battle's story lines, movie captions); H or Select + Square opens it over the paused game in the game's own window and letters, Up and Down scroll, L1 and R1 page |
 | PS1 frame rate | Heavy scenes drawn as slowly as on the PlayStation: each picture takes the time the console's CPU needed for it (a model of it); the game keeps its speed. Original engine |
-| Original-game bug fixes | Fixes a list of bugs in the original game |
+| Original-game bug fixes | Fixes a list of bugs in the original game: [Bug fixes](bugfixes.md) |
 | Boss camera fix | Prevents a camera stall during one late-game boss attack |
 | Text speed | Original, 2x, 3x, 4x, 8x, Instant |
 | Hold to show text | Holding confirm shows the rest of a page |
 | Auto-advance text | A finished page goes on by itself after 1 to 8 s |
 | Deathblow learning | Practice per attack, 0% to 1000% |
+| Uninterrupted combos | A Combo's deathblows back to back: no charge-up pose before each after the first, and the jump back into the ready stance only where a deathblow needs it (to start on the enemy's far side, or well away from where the last one ended) |

@@ -424,6 +424,15 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 #define READBACK_BYTES (WIDE_W * VRAM_H * 2u)
 #define MAX_SWAPCHAIN_IMAGES 8
 
+/* light.comp's passes (its main): the shadows' (14-17), the fog's colour,
+ * the composite at the copy's resolution, light shafts (22 and 23, before
+ * the composite); 20 and 21 place the particles and draw them, 24 the
+ * sprites' light. */
+#define LIGHT_SHADOWS 14
+#define LIGHT_FOG 18
+#define LIGHT_COMPOSITE 19
+#define LIGHT_SHAFTS 22 /* and 23: light shafts, before the composite */
+#define LIGHT_PASS_COUNT 25
 /* XG_GPU_TIMING=1: GPU time per kind of pass, from timestamp queries. */
 /* light.comp's working images: eight on the PS1's pixel grid, six on a quarter of it. */
 #define SCENE_LIGHT_GRID 8
@@ -435,8 +444,10 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 /* That block: a vec4 of the sun and the shadow's darkness, a vec4 of the
  * count, one vec4 per ground point, then the fog's colour, which light.comp's
  * fog pass writes there (FOG_SLOT), light shafts' settings (SHAFT_SLOT) and
- * the cloud shadows' (CLOUD_SLOT, two vec4s) and the firelight's (FLICKER_SLOT). */
-#define LIGHT_BLOCK_BYTES ((6 + SCENE_FIGURES) * 16 + 16)
+ * the cloud shadows' (CLOUD_SLOT, two vec4s), the firelight's (FLICKER_SLOT) and
+ * the area's colour (AREA_SLOT: the fog pass writes rgb), and footstep dust's
+ * puffs (DUST_SLOT: their count, then two vec4s each). */
+#define LIGHT_BLOCK_BYTES ((8 + SCENE_FIGURES + 1 + 2 * SCENE_DUST) * 16)
 /* With ambient particles (xg-rgcf.5.10), after it: the room's frame and the
  * particles' settings (5 vec4s), a record of 3 vec4s per particle (light.comp
  * pass 20 writes them), and a 2048-bit mask per 16x16 PS1-pixel tile of the
@@ -450,7 +461,8 @@ VK_DEVICE_FUNCS(VK_DECLARE)
  * time grows with the frame's slack (on the Pixel 6.6 ms with an idle field,
  * 3.9 with the HD-2D effects on, xg-mrj.3.30); GT_ROTATE the pre-rotation's
  * turn, GT_PREPASS the picture prepass. */
-enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_LIGHT, GT_PREPASS, GT_ROTATE, GT_KINDS };
+enum { GT_DRAW, GT_WIDE, GT_HIRES, GT_HIWIDE, GT_HIUTIL, GT_COPY, GT_PRESENT, GT_DOF, GT_LIGHT, GT_PREPASS, GT_ROTATE,
+       GT_COMPOSITE, GT_PLACE, GT_PARTICLES, GT_LP0, GT_KINDS = GT_LP0 + 25 };
 #define GT_QUERIES 4096
 
 typedef struct {
@@ -643,6 +655,10 @@ static struct {
         /* The lighting (shaders/light.comp): its pipeline with the rest, its
          * working images at the first scene that is lit. */
         VkPipeline light;
+        /* The passes that take the most time, each a pipeline made for
+         * that pass alone (light.comp ONLY_PASS; sceneCompile's list);
+         * VK_NULL_HANDLE: light's (lightPipeline). */
+        VkPipeline lightOnly[LIGHT_PASS_COUNT];
         VkPipelineLayout lightLayout;
         VkDescriptorSetLayout lightSetLayout;
         VkImage lightWork[SCENE_LIGHT_IMAGES]; VkDeviceMemory lightMemory[SCENE_LIGHT_IMAGES]; VkImageView lightView[SCENE_LIGHT_IMAGES];
@@ -1038,11 +1054,17 @@ static void imageBarrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from,
  * is reused, so a line is about one vblank late), per kind of pass: the
  * exact VRAM draws (draw), their wide copy (wide), the hi-res copy of both
  * (hires, hiwide), the hi-res copy's transfers (hiutil), VRAM copies and
- * uploads (copy) and the present pass (present). At exit, the run's mean and
- * worst vblank. XG_GPU_TIMING=summary: only that. */
+ * uploads (copy) and the present pass (present); the effects: the depth of
+ * field (dof), the lighting's passes on the PS1's grid (light), its
+ * composite over the copy (composite), the particles' placing (place) and
+ * drawing over the copy (particles). With XG_GPU_TIMING_PASSES, each of the
+ * lighting's passes on its own (lp<n>, light.comp's pass numbers). At exit,
+ * the run's mean and worst vblank. XG_GPU_TIMING=summary: only that. */
 
 static const char* const gtNames[GT_KINDS] = {"draw", "wide", "hires", "hiwide", "hiutil", "copy", "present", "dof", "light",
-                                                "prepass", "rotate"};
+                                                "prepass", "rotate", "composite", "place", "particles",
+    "lp0", "lp1", "lp2", "lp3", "lp4", "lp5", "lp6", "lp7", "lp8", "lp9", "lp10", "lp11", "lp12", "lp13", "lp14", "lp15", "lp16",
+    "lp17", "lp18", "lp19", "lp20", "lp21", "lp22", "lp23", "lp24"};
 
 static struct {
     int on;       /* 1: a line per vblank; 2: the summary only */
@@ -1201,7 +1223,7 @@ static void gtVBlank(uint32_t vblank) {
         return;
     }
     double total = 0;
-    char line[512];
+    char line[1536];
     int len = 0;
     for (int k = 0; k < GT_KINDS; k++) total += gt.ms[k];
     gt.last = total;
@@ -1443,10 +1465,14 @@ static DeviceChoice rateDevice(VkPhysicalDevice pd) {
     if (props.apiVersion < VK_API_VERSION_1_3) {
         return c;
     }
+    /* A device extension's features are asked for only when the device lists the extension (Vulkan's
+     * rule for physical-device queries; the tile image query in createDevice does the same): the
+     * Android 13 emulator's Vulkan aborts the whole emulator on a structure it does not know (xg-o1dx). */
+    int hasInterlock = hasDeviceExtension(pd, VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME);
     VkPhysicalDeviceFragmentShaderInterlockFeaturesEXT il = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_INTERLOCK_FEATURES_EXT};
     VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-    f13.pNext = &il;
+    f13.pNext = hasInterlock ? &il : NULL;
     VkPhysicalDeviceFeatures2 f2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     f2.pNext = &f13;
     vkGetPhysicalDeviceFeatures2(pd, &f2);
@@ -1484,7 +1510,7 @@ static DeviceChoice rateDevice(VkPhysicalDevice pd) {
     if (!c.usable) {
         return c;
     }
-    c.interlock = il.fragmentShaderPixelInterlock && hasDeviceExtension(pd, VK_EXT_FRAGMENT_SHADER_INTERLOCK_EXTENSION_NAME);
+    c.interlock = hasInterlock && il.fragmentShaderPixelInterlock;
     c.score = (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 4
                : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 2 : 1) * 2 + c.interlock;
     return c;
@@ -4263,6 +4289,21 @@ enum { SCENE_NARROW, SCENE_WIDE, SCENE_REPLAY, SCENE_TARGETS };
 static int sceneMake(void);
 static int sceneDepthImage(int t, int w, int h);
 static int sceneWorkImages(int w, int h);
+/* The blur's layers' pixels per PS1 pixel at n copy pixels per PS1 pixel
+ * (shaders/dof.comp): one up to 3x, then enough that a layer pixel is two or
+ * three of the copy's, so a blur can start small and grow with depth (carl,
+ * at 9x: "needs to be a smooth gradual transition"; on the PS1's grid the
+ * smallest blur was 1.5 PS1 pixels, cross-faded in over the sharp picture).
+ * XG_DOF_SCALE=<s> sets it (1: the PS1's grid, as before). */
+static int dofScale(int n) {
+    static int forced = -1;
+    if (forced < 0) {
+        const char* e = getenv("XG_DOF_SCALE");
+        forced = e != NULL && atoi(e) > 0 ? atoi(e) : 0;
+    }
+    if (forced > 0) return forced;
+    return n > 3 ? (n + 2) / 3 : 1;
+}
 static void sceneSets(FrameCtx* f, int t);
 static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int x, int y, int w, int h, int second,
                             int sx, int sy, int sw, int sh, int layerX, int layerY, int n, const DofParams* p);
@@ -4848,6 +4889,47 @@ static int interpolationNativePrefix(const InterpFrame* f, const HiVertex* verti
     return 1;
 }
 
+/* The seam fringe the native copy gives each opaque projected triangle (gp0SealTriangle), given to
+ * the replayed ones too (xg-ugy.9): without it every picture between two native ones drew the
+ * room's silhouettes up to a native pixel inside theirs, and edges against the dark past a room
+ * flickered with motion smoothing (seen with the free camera looking down into rooms). The strips
+ * follow their triangle; the operations (opAt, from f->ops) and the scene's end move with the
+ * vertices. Captured and frozen pictures are replayed as recorded. Every vertex loses its seal
+ * mark (DRAW_SEAL_MASK). Returns the new vertex count. */
+static int interpolationSealReplay(const InterpFrame* f, HiVertex* v, int count, uint32_t* opAt, uint32_t* sceneEnd) {
+    static HiVertex* out;
+    int marked = 0;
+    for (int i = 0; i < count; i += 3) marked |= (v[i].mode & DRAW_SEAL_MASK) != 0;
+    if (marked && hiresSeamGuard() && !f->capture && !f->frozen && !out) out = malloc(INTERP_MAX_VERTICES * sizeof(*out));
+    if (!marked || !hiresSeamGuard() || f->capture || f->frozen || !out) {
+        for (int i = 0; i < count; i++) v[i].mode &= ~DRAW_SEAL_MASK;
+        return count;
+    }
+    int n = 0, depth = f->sceneBlur || f->sceneLight;
+    uint32_t o = 0;
+    for (int i = 0; i < count; i += 3) {
+        while (o < f->opCount && f->ops[o].vertex == (uint32_t)i) opAt[o++] = (uint32_t)n;
+        if (f->sceneEnd == (uint32_t)i) *sceneEnd = (uint32_t)n;
+        unsigned perimeter = (v[i].mode & DRAW_SEAL_MASK) >> DRAW_SEAL_SHIFT;
+        HiVertex tri[3], sealed[21];
+        for (int k = 0; k < 3; k++) { tri[k] = v[i + k]; tri[k].mode &= ~DRAW_SEAL_MASK; }
+        int m = perimeter ? gp0SealTriangle(tri, sealed, perimeter, depth) : 3;
+        if (m <= 3) { m = 3; memcpy(sealed, tri, sizeof(tri)); }
+        if (n + m > INTERP_MAX_VERTICES) { /* no room: replayed as recorded */
+            for (uint32_t k = 0; k < f->opCount; k++) opAt[k] = f->ops[k].vertex;
+            *sceneEnd = f->sceneEnd;
+            for (int k = 0; k < count; k++) v[k].mode &= ~DRAW_SEAL_MASK;
+            return count;
+        }
+        memcpy(out + n, sealed, (size_t)m * sizeof(*out));
+        n += m;
+    }
+    while (o < f->opCount) opAt[o++] = (uint32_t)n;
+    if (f->sceneEnd >= (uint32_t)count) *sceneEnd = (uint32_t)n;
+    memcpy(v, out, (size_t)n * sizeof(*v));
+    return n;
+}
+
 static int interpolationRender(const GpuDisplay* d, double vblank, PresentConstants* pc, int sample) {
     if (!interpolationEnabled()) return 0;
     int before, after; double alpha;
@@ -4886,6 +4968,10 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 interpolationReport("native","capture-source-bounds",vblank,alpha); return 0;
             }
         }
+        static uint32_t opAt[INTERP_MAX_OPS]; /* where each operation runs in the (sealed) replay */
+        uint32_t sceneEnd = f->sceneEnd;
+        for (uint32_t o = 0; o < f->opCount; o++) opAt[o] = f->ops[o].vertex;
+        count = interpolationSealReplay(f, vk.interpolationVertices, count, opAt, &sceneEnd);
         /* A scene blurred by its depth (scene.c): the picture between gets the
          * same, at the same point of the replay. The scene itself must be
          * plain: no captures, and no frozen source, copy or triangle that
@@ -4901,18 +4987,18 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         DofParams blur = f->fx.dof;
         LightParams lit = f->fx.light;
         if (f->sceneBlur || f->sceneLight) {
-            int plain = !f->capture && vk.hiN != 0 && f->sceneEnd <= (uint32_t)count;
+            int plain = !f->capture && vk.hiN != 0 && sceneEnd <= (uint32_t)count;
             for (uint32_t o = 0; plain && o < f->opCount; o++)
                 if (f->ops[o].kind != INTERP_OP_FROZEN || f->ops[o].vertex < f->sceneEnd) plain = 0;
-            for (uint32_t i = 0; plain && i < f->sceneEnd; i += 3)
+            for (uint32_t i = 0; plain && i < sceneEnd; i += 3)
                 if (vk.interpolationVertices[i].sample[3] & (INTERP_SAMPLE_CAPTURE | INTERP_SAMPLE_EVOLVING | INTERP_SAMPLE_NATIVE_CACHE)) plain = 0;
             if (!plain || !sceneMake() ||
                 !sceneDepthImage(SCENE_REPLAY, vk.interpolationCanvasW * vk.interpolationN, vk.interpolationCanvasH * vk.interpolationN) ||
-                (f->sceneBlur && !sceneWorkImages(f->viewW, f->viewH)) ||
+                (f->sceneBlur && !sceneWorkImages(f->viewW * dofScale(vk.interpolationN), f->viewH * dofScale(vk.interpolationN))) ||
                 (f->sceneLight && !sceneLightImages(f->viewW, f->viewH))) {
                 interpolationReport("native", f->sceneBlur ? "depth-of-field-replay" : "scene-lighting-replay", vblank, alpha); return 0;
             }
-            blurAt = (int)f->sceneEnd;
+            blurAt = (int)sceneEnd;
             /* The focus, the view and the strengths move with the picture. */
             const InterpFrame* next = interpolationFrame(after);
             float a = (float)alpha;
@@ -5034,7 +5120,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         uint32_t operation = 0, first = 0;
         while (first < (uint32_t)count || operation < f->opCount) {
             int sourceChanged=0;
-            while (operation < f->opCount && f->ops[operation].vertex == first) {
+            while (operation < f->opCount && opAt[operation] == first) {
                 const InterpOp* op = &f->ops[operation++];
                 if (op->kind == INTERP_OP_CACHE) {
                     if (nativePrefix) { sourceChanged=1; continue; }
@@ -5058,7 +5144,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
             if (first >= (uint32_t)count) break;
             const HiVertex* v = &vk.interpolationVertices[first];
             if (nativeBatch && (v->sample[3]&INTERP_SAMPLE_EVOLVING)) {
-                uint32_t end=first+3,limit=operation<f->opCount?f->ops[operation].vertex:(uint32_t)count;
+                uint32_t end=first+3,limit=operation<f->opCount?opAt[operation]:(uint32_t)count;
                 while (end<limit && (vk.interpolationVertices[end].sample[3]&INTERP_SAMPLE_EVOLVING)) end+=3;
                 CaptureConstants cc={.n=1,.action=3,.first=(int)(base+f->pixelCount+batchBase+first/3*5),.seed=(int)((end-first)/3)};
                 interpolationPass(cmd,ctx->interpolationSet[slot],vk.capturePipeline,&cc,sizeof(cc),1,1,0,3,NULL);
@@ -5085,7 +5171,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                     }
                     interpolationPass(cmd,ctx->interpolationSet[slot],vk.hiDrawPipeline,&c,sizeof(c),canvasW,canvasH,first,3,f);
                 } else {
-                    uint32_t limit=operation<f->opCount?f->ops[operation].vertex:(uint32_t)count;
+                    uint32_t limit=operation<f->opCount?opAt[operation]:(uint32_t)count;
                     uint32_t parallel=interpolationWideParallel(vk.interpolationVertices,first,limit);
                     if(parallel>first) {
                         VkPipeline pipeline=hiBatchDisjoint(v,parallel-first)?vk.interpolationWidePipeline:vk.hiWidePipeline;
@@ -5099,7 +5185,7 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
                 }
                 interpolationBarrier(cmd); first += 3;
             } else {
-                uint32_t end = first+3, limit = operation < f->opCount ? f->ops[operation].vertex : (uint32_t)count;
+                uint32_t end = first+3, limit = operation < f->opCount ? opAt[operation] : (uint32_t)count;
                 /* The scene's triangles store their depth too, up to where it
                  * ended; there the canvas is blurred, and the rest (the UI)
                  * is drawn over it as in the native frame. */
@@ -5720,16 +5806,12 @@ typedef struct {
     float focus, band, gain, radius;
     /* scene_color.glsl; tilt: the tilt-shift's radius in 16ths of a PS1 pixel,
      * and (<< 16) the layers' rows the display shows, from their top (it shows
-     * all their columns) */
+     * all their columns), in PS1 pixels; scale: the layers' pixels per PS1
+     * pixel (dofScale) */
     int32_t color, tilt, ditherX, ditherY;
+    int32_t scale;
 } DofConstants;
 
-/* light.comp's passes: the shadows' (14-17), and the last, the composite at
- * the copy's resolution. */
-#define LIGHT_SHADOWS 14
-#define LIGHT_FOG 18
-#define LIGHT_COMPOSITE 19
-#define LIGHT_SHAFTS 22 /* and 23: light shafts, before the composite */
 /* light.comp's push constants. */
 typedef struct {
     int32_t pass, n, taps, flags;
@@ -5752,6 +5834,10 @@ static void sceneDestroy(void) {
     if (vk.scene.dof) vkDestroyPipeline(vk.device, vk.scene.dof, NULL);
     if (vk.scene.dofLayout) vkDestroyPipelineLayout(vk.device, vk.scene.dofLayout, NULL);
     if (vk.scene.light) vkDestroyPipeline(vk.device, vk.scene.light, NULL);
+    for (int k = 0; k < LIGHT_PASS_COUNT; k++) {
+        if (vk.scene.lightOnly[k]) vkDestroyPipeline(vk.device, vk.scene.lightOnly[k], NULL);
+        vk.scene.lightOnly[k] = VK_NULL_HANDLE;
+    }
     if (vk.scene.lightLayout) vkDestroyPipelineLayout(vk.device, vk.scene.lightLayout, NULL);
     if (vk.scene.pool) vkDestroyDescriptorPool(vk.device, vk.scene.pool, NULL);
     if (vk.scene.dofSetLayout) vkDestroyDescriptorSetLayout(vk.device, vk.scene.dofSetLayout, NULL);
@@ -5792,7 +5878,7 @@ static void sceneDestroy(void) {
  * vk.hiLayout; Vulkan's creation calls need no external synchronisation
  * with the game thread's. */
 typedef struct {
-    VkPipeline dof, light, draw[2][2][2];
+    VkPipeline dof, light, lightOnly[LIGHT_PASS_COUNT], draw[2][2][2];
 } ScenePipelines;
 static struct {
     SDL_Thread* thread;
@@ -5808,10 +5894,23 @@ static void sceneCompile(ScenePipelines* p) {
     ci.layout = vk.scene.dofLayout;
     if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &p->dof) != VK_SUCCESS) p->dof = VK_NULL_HANDLE;
     vkDestroyShaderModule(vk.device, ci.stage.module, NULL);
-    /* The lighting (light.comp). */
+    /* The lighting (light.comp), and the passes that gained most from a
+     * pipeline of their own (ONLY_PASS, constant 0; measured at 9x on an RTX
+     * 3070 Ti, xg-rgcf.5.26): the fog's colour (18), the composite (19) and
+     * the particles over the copy (21). The others ran no faster so (0, 7,
+     * 11, 14 tried). Without one of those, the general one. */
     ci.stage.module = shaderModule(lightCompSpv, sizeof(lightCompSpv));
     ci.layout = vk.scene.lightLayout;
     if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &p->light) != VK_SUCCESS) p->light = VK_NULL_HANDLE;
+    static const int32_t own[] = {LIGHT_FOG, LIGHT_COMPOSITE, 21};
+    for (size_t k = 0; k < sizeof(own) / sizeof(own[0]); k++) {
+        VkSpecializationMapEntry entry = {0, 0, sizeof(int32_t)};
+        VkSpecializationInfo spec = {1, &entry, sizeof(int32_t), &own[k]};
+        VkComputePipelineCreateInfo one = ci;
+        one.stage.pSpecializationInfo = &spec;
+        if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &one, NULL, &p->lightOnly[own[k]]) != VK_SUCCESS)
+            p->lightOnly[own[k]] = VK_NULL_HANDLE;
+    }
     vkDestroyShaderModule(vk.device, ci.stage.module, NULL);
     /* [wide][coarse][unordered]: as the copy's own eight pipelines (gvkInit). */
 #define SCENE_PIPELINE(w, c, u, vs, fsLocked, fsPlain) \
@@ -5840,6 +5939,7 @@ static int SDLCALL sceneBuildRun(void* arg) {
 static int sceneFinish(const ScenePipelines* p) {
     vk.scene.dof = p->dof;
     vk.scene.light = p->light;
+    memcpy(vk.scene.lightOnly, p->lightOnly, sizeof(vk.scene.lightOnly));
     memcpy(vk.scene.draw, p->draw, sizeof(vk.scene.draw));
     int ok = vk.scene.dof != VK_NULL_HANDLE && vk.scene.light != VK_NULL_HANDLE;
     for (int w = 0; w < 2; w++) for (int c = 0; c < 2; c++) for (int u = 0; u < 2; u++)
@@ -6254,7 +6354,7 @@ int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY) {
 static void sceneBlur(int primary, int x, int y, int w, int h, int second, int sx, int sy, int sw, int sh,
                       int layerX, int layerY, int n, const DofParams* p) {
     if (w <= 0 || h <= 0 || n <= 0) return;
-    if (!sceneWorkImages(w, h)) return;
+    if (!sceneWorkImages(w * dofScale(n), h * dofScale(n))) return;
     if (primary != SCENE_REPLAY && vk.hiN != n) return;
     cpuResolveFlush();
     endBatch();
@@ -6274,9 +6374,12 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
     int q = gtStart(cmd, GT_DOF);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.dof);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.dofLayout, 0, 1, &ctx->sceneDofSet[primary], 0, NULL);
-    /* The prefilter's samples per PS1 pixel: all of them up to 3x, nine beyond. */
-    DofConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->figures ? 2 : 0) | (p->debug == 2 ? 4 : 0), x * n, y * n, w * n, h * n, w, h, 0, 0,
+    /* The layers' pixels per PS1 pixel, and the prefilter's samples per layer
+     * pixel each way: all of the copy's under it, at most three. */
+    int s = dofScale(n), per = (n + s - 1) / s;
+    DofConstants c = {0, n, per < 3 ? per : 3, (p->debug ? 1 : 0) | (p->figures ? 2 : 0) | (p->debug == 2 ? 4 : 0), x * n, y * n, w * n, h * n, w * s, h * s, 0, 0,
                       p->focus * 16.0f, p->band, p->gain, p->radius};
+    c.scale = s;
     c.color = vk.hiColor;
     c.ditherX = vk.scene.ditherX; c.ditherY = vk.scene.ditherY;
     if (p->tilt > 0) { /* the tilt-shift (xg-rgcf.5.14) */
@@ -6286,7 +6389,7 @@ static void sceneBlurRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary, int
     for (int pass = 0; pass < 6; pass++) {
         c.pass = pass;
         vkCmdPushConstants(cmd, vk.scene.dofLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
-        int gw = pass == 5 ? w * n : w, gh = pass == 5 ? h * n : h;
+        int gw = pass == 5 ? w * n : w * s, gh = pass == 5 ? h * n : h * s;
         vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
         rasterBarrier(cmd);
     }
@@ -6321,7 +6424,8 @@ static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
     b[4] = (float)count; b[5] = b[6] = b[7] = 0;
     /* Light shafts' settings (light.comp SHAFT_SLOT: the block's last vec4). */
     b[4 * (3 + SCENE_FIGURES)] = p->shafts; b[4 * (3 + SCENE_FIGURES) + 1] = p->shaftTime;
-    b[4 * (3 + SCENE_FIGURES) + 2] = b[4 * (3 + SCENE_FIGURES) + 3] = 0;
+    b[4 * (3 + SCENE_FIGURES) + 2] = p->glare; /* sun glare (xg-rgcf.5.24); +3: how open, written by the fog pass */
+    b[4 * (3 + SCENE_FIGURES) + 3] = 0;
     /* Cloud shadows' settings (light.comp CLOUD_SLOT, xg-rgcf.5.17): how much
      * of the sun a cloud takes, a cloud's size, the drift; then the room's
      * origin in view space and whether the far backdrop is a painting. */
@@ -6331,6 +6435,18 @@ static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
     /* Firelight's settings (light.comp FLICKER_SLOT, xg-rgcf.5.20). */
     float* fl = b + 4 * (6 + SCENE_FIGURES);
     fl[0] = p->flicker; fl[1] = p->flickerTime; fl[2] = p->flickerSpeed; fl[3] = p->flickerIrregular;
+    /* The colour grade adapting to the area (light.comp AREA_SLOT, xg-rgcf.5.22). */
+    float* ar = b + 4 * (7 + SCENE_FIGURES);
+    ar[0] = ar[1] = ar[2] = 0.5f; ar[3] = p->gradeArea;
+    /* Footstep dust (light.comp DUST_SLOT, xg-rgcf.5.23). */
+    float* du = b + 4 * (8 + SCENE_FIGURES);
+    int puffs = p->dustCount < 0 ? 0 : p->dustCount > SCENE_DUST ? SCENE_DUST : p->dustCount;
+    du[0] = (float)puffs; du[1] = p->dustSize; du[2] = p->dustCover; du[3] = 0;
+    for (int k = 0; k < puffs; k++) {
+        float* q = du + 4 + 8 * k;
+        q[0] = p->dust[k][0]; q[1] = p->dust[k][1]; q[2] = p->dust[k][2]; q[3] = p->dust[k][3];
+        q[4] = p->dust[k][4]; q[5] = p->dust[k][5]; q[6] = q[7] = 0;
+    }
     for (int k = 0; k < count; k++) {
         b[8 + 4 * k] = p->figure[k][0]; b[9 + 4 * k] = p->figure[k][1]; b[10 + 4 * k] = p->figure[k][2]; b[11 + 4 * k] = 0;
     }
@@ -6353,6 +6469,16 @@ static int32_t lightBlock(FrameCtx* ctx, const LightParams* p) {
     return (int32_t)(at / 16);
 }
 
+/* light.comp's pipeline for a pass: its own when it has one (sceneCompile),
+ * else the general one; *bound: the one bound now. */
+static void lightPipeline(VkCommandBuffer cmd, int pass, VkPipeline* bound) {
+    VkPipeline want = pass >= 0 && pass < LIGHT_PASS_COUNT && vk.scene.lightOnly[pass] ? vk.scene.lightOnly[pass] : vk.scene.light;
+    if (*bound != want) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, want);
+        *bound = want;
+    }
+}
+
 /* light.comp's passes for a frame, as sceneBlurRecord's: the layers are made
  * from `primary` on the PS1's pixel grid and laid over it and over `second`.
  * (centerX, centerY): the projection centre in the primary's frame. */
@@ -6362,13 +6488,15 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
     rasterBarrier(cmd);
     vk.needBarrier = 0;
     int q = gtStart(cmd, GT_LIGHT);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.light);
+    VkPipeline bound = VK_NULL_HANDLE;
+    lightPipeline(cmd, 0, &bound);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
     /* prepare's samples per PS1 pixel: all of them up to 3x, nine beyond. */
     int shadows = p->all || p->shadow > 0, fog = p->all || p->fogMost > 0, particles = p->particles > 0;
     int shafts = p->shafts > 0, clouds = p->clouds > 0, figures = p->figureLight != 0, flicker = p->flicker > 0;
-    int32_t block = shadows || fog || particles || shafts || clouds || figures || flicker ? lightBlock(ctx, p) : -1;
-    if (block < 0) shadows = fog = particles = shafts = clouds = figures = 0; /* no room for the block: none of these here */
+    int area = p->gradeArea > 0 && p->grade > 0, dust = p->dustCount > 0, glare = p->glare > 0;
+    int32_t block = shadows || fog || particles || shafts || clouds || figures || flicker || area || dust || glare ? lightBlock(ctx, p) : -1;
+    if (block < 0) shadows = fog = particles = shafts = clouds = figures = dust = glare = 0; /* no room for the block: none of these here */
     LightConstants c = {0, n, n < 3 ? n : 3, (p->debug ? 1 : 0) | (p->all ? 2 : 0) | (figures ? 4 : 0), x * n, y * n, w * n,
                         h * n, w, h, 0, 0, {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus,
                         (float)block, p->top, p->shade, p->bounce, p->glow};
@@ -6383,7 +6511,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
     int surface = shade || p->top > 0;
     /* With particles alone the composite would change nothing: not run. */
     int composite = p->all || surface || glow || bounce || shadows || fog || p->grade > 0 || p->vignette > 0 || shafts ||
-                    clouds;
+                    clouds || dust || glare;
     for (int pass = 0; pass <= LIGHT_COMPOSITE; pass++) {
         int needed = pass == 0 || (pass == LIGHT_COMPOSITE && composite) ||
                      (pass >= 1 && pass <= 3 && (glow || bounce || particles)) || /* the surroundings (the particles' light too), the glow's wide spreads */
@@ -6392,25 +6520,40 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
                      ((pass == 8 || pass == 9) && shade) ||
                      ((pass == 12 || pass == 13) && glow) ||
                      (pass >= LIGHT_SHADOWS && pass < LIGHT_FOG && shadows) ||  /* cast shadows */
-                     (pass == LIGHT_FOG && (fog || particles || shafts));      /* the fog's colour; the room's brightness */
+                     (pass == LIGHT_FOG && (fog || particles || shafts || area || glare)); /* the fog's colour; the room's brightness and colour; the glare's openness */
         /* The sprites in the light (xg-rgcf.5.19): after the shade is
          * smoothed (9), each sprite pixel's part, on the PS1's grid. */
+        static int perPass = -1; /* XG_GPU_TIMING_PASSES: each pass its own kind (lp<n>) */
+        if (perPass < 0) perPass = getenv("XG_GPU_TIMING_PASSES") != NULL;
         if (pass == 10 && figures && surface) {
+            int pq = perPass ? (gtStop(cmd, q), gtStart(cmd, GT_LP0 + 24)) : -1;
             c.pass = 24;
+            lightPipeline(cmd, c.pass, &bound);
             vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
             vkCmdDispatch(cmd, (uint32_t)(w + 7) / 8, (uint32_t)(h + 7) / 8, 1);
             rasterBarrier(cmd);
+            if (perPass) { gtStop(cmd, pq); q = gtStart(cmd, GT_LIGHT); }
         }
         if (!needed) continue;
         /* Light shafts (xg-rgcf.5.16), on the quarter grid before the
          * composite: their sources, then the gather toward the sun. */
         for (int s = LIGHT_SHAFTS; pass == LIGHT_COMPOSITE && shafts && s <= LIGHT_SHAFTS + 1; s++) {
+            if (perPass) { gtStop(cmd, q); q = gtStart(cmd, GT_LP0 + s); }
             c.pass = s;
+            lightPipeline(cmd, c.pass, &bound);
             vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
             vkCmdDispatch(cmd, (uint32_t)((w + 3) / 4 + 7) / 8, (uint32_t)((h + 3) / 4 + 7) / 8, 1);
             rasterBarrier(cmd);
         }
         c.pass = pass;
+        if (pass == LIGHT_COMPOSITE) { /* XG_GPU_TIMING: the composite on its own ("composite") */
+            gtStop(cmd, q);
+            q = gtStart(cmd, GT_COMPOSITE);
+        } else if (perPass) {
+            gtStop(cmd, q);
+            q = gtStart(cmd, GT_LP0 + pass);
+        }
+        lightPipeline(cmd, c.pass, &bound);
         vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
         /* The PS1's grid, a quarter of it (the surroundings' brightness and
          * the glow's wide spreads, 1-3; the bounce, 10 and 11), and the
@@ -6424,6 +6567,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
         rasterBarrier(cmd);
     }
     if (second >= 0 && sw > 0 && sh > 0 && composite) {
+        lightPipeline(cmd, LIGHT_COMPOSITE, &bound);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[second], 0, NULL);
         c.pass = LIGHT_COMPOSITE;
         c.originX = sx * n; c.originY = sy * n; c.sizeW = sw * n; c.sizeH = sh * n;
@@ -6447,8 +6591,9 @@ static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary
     if (block < 0 || p->particles <= 0) return;
     rasterBarrier(cmd);
     vk.needBarrier = 0;
-    int q = gtStart(cmd, GT_LIGHT);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.light);
+    int q = gtStart(cmd, GT_PLACE); /* placing them ("place"), then each pixel's ("particles") */
+    VkPipeline bound = VK_NULL_HANDLE;
+    lightPipeline(cmd, brightness ? LIGHT_FOG : 20, &bound);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, vk.scene.lightLayout, 0, 1, &ctx->sceneLightSet[primary], 0, NULL);
     LightConstants c = {20, n, n < 3 ? n : 3, 0, x * n, y * n, w * n, h * n, w, h, 0, 0,
                         {p->up[0], p->up[1], p->up[2]}, p->screenZ, centerX, centerY, p->focus, (float)block,
@@ -6464,10 +6609,14 @@ static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary
         rasterBarrier(cmd);
         c.pass = 20;
     }
+    lightPipeline(cmd, 20, &bound);
     vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
     vkCmdDispatch(cmd, PARTICLES_MAX / 64, 1, 1); /* one invocation a particle */
     rasterBarrier(cmd);
+    gtStop(cmd, q);
+    q = gtStart(cmd, GT_PARTICLES);
     c.pass = 21;
+    lightPipeline(cmd, 21, &bound);
     vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
     vkCmdDispatch(cmd, (uint32_t)(w * n + 7) / 8, (uint32_t)(h * n + 7) / 8, 1);
     rasterBarrier(cmd);
@@ -6498,7 +6647,9 @@ static int32_t sceneLight(int primary, int x, int y, int w, int h, int second, i
     cpuResolveFlush();
     endBatch();
     /* Room for the shadows' and particles' block in this frame's span buffer. */
-    if ((p->all || p->shadow > 0 || p->fogMost > 0 || p->particles > 0) && frame()->spanUsed + lightBlockBytes(p) > SPAN_BYTES &&
+    if ((p->all || p->shadow > 0 || p->fogMost > 0 || p->particles > 0 || p->shafts > 0 || p->clouds > 0 || p->figureLight ||
+         p->flicker > 0 || (p->gradeArea > 0 && p->grade > 0) || p->dustCount > 0 || p->glare > 0) &&
+        frame()->spanUsed + lightBlockBytes(p) > SPAN_BYTES &&
         !vk.presentAcquired)
         submitFrame(NULL, NULL);
     VkCommandBuffer cmd = recording();

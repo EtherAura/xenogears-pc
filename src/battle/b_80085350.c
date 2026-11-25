@@ -75,7 +75,21 @@ void updateMonsterScriptEntitiesVarByAtttack(u8, u8);
 void performAttackSub6(u8);
 void executeAbilitySub0(u16 mask, u8 entity);
 void loadImageSync(RECT* rect, void* data);
+#ifndef PLATFORM_PC
 extern u8 perApTable[8][3]; /* 8 rows up to the next label; its first byte is pBattleEntities's top byte */
+#define PER_AP(row, ap) perApTable[row][ap]
+#else
+/* perApTable[row][ap]: the next attack of a chain, by the last one (row) and
+ * the AP the new one uses (1-3). Its rows are 3 bytes from the label's second
+ * (the first is pBattleEntities's top byte), so the last row's AP 3 entry is
+ * the label's 25th byte, one past [8][3]. On the PC an object is its type's size
+ * (tools/pc_link.py), and [8][3] left that byte out: a 3-AP attack after a
+ * 3-AP attack (no deathblow) read the zero after it, attack 0, and ran an
+ * attack row past the member's 38. Of unknown size the object is the label's
+ * whole extent, up to the next one (25 bytes), each the retail one. */
+extern u8 perApTable[];
+#define PER_AP(row, ap) perApTable[(row) * 3 + (ap)]
+#endif
 void moveEntityToOtherEntity(u8 entity, u8 target);
 void moveEntityToShootEntity(u8 entity, u8 target);
 #ifndef PLATFORM_PC
@@ -1021,7 +1035,7 @@ s32 performAttack(u8 entity, u8 arg1) {
     if (apConfigArray[entity].m1_gearState == 0) {
         if (battleVar2->m2DC_attackIndex < 8) {
             s32 column = arg1; /* an int copy: retail masks arg1 before the row index */
-            battleVar2->m2DC_attackIndex = perApTable[battleVar2->m2DC_attackIndex][column];
+            battleVar2->m2DC_attackIndex = PER_AP(battleVar2->m2DC_attackIndex, column);
         } else if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[0], battleVar2->m2DC_attackIndex - 8)) {
             result = 1;
         } else {

@@ -15,9 +15,9 @@ u8 openEquipMenu(u8 character, u8 arg1) {
     if (pcResumeMenu() == PC_SAFE_SUB_EQUIP) {
         goto equip; /* a stackless load: its context is the state's (include/pc_state.h) */
     }
-    gMenuContext->m35C_selectedStats = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_35C), 0x32f4), 0);
+    gMenuContext->m35C_selectedStats = allocateHeap(PC_HEAP_OF(MenuContext_35C, PC_HEAP_SIZED(sizeof(MenuContext_35C), 0x32f4)), 0);
     bzero(gMenuContext->m35C_selectedStats, sizeof(MenuContext_35C));
-    gMenuContext->m360_equipment = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_360), (s32)0x2ac), 0);
+    gMenuContext->m360_equipment = allocateHeap(PC_HEAP_OF(MenuContext_360, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_360), (s32)0x2ac)), 0);
     bzero(gMenuContext->m360_equipment, (s32)sizeof(struct MenuContext_360));
     loadSharedMenuData2(3);
 equip:
@@ -34,7 +34,7 @@ void initSkillMenu(void) {
     s32 i;
     s32 j;
 
-    gMenuContext->m438_skillMenu = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_438), (s32)0x25c0), 0);
+    gMenuContext->m438_skillMenu = allocateHeap(PC_HEAP_OF(MenuContext_438, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_438), (s32)0x25c0)), 0);
     bzero(gMenuContext->m438_skillMenu, (s32)sizeof(struct MenuContext_438));
     loadSharedMenuData2(4);
     j_setupMenuContext4E0(2, gMenuContext->m17E0_skillPageLabels, skillPageLabelConfig, gMenuContext->m33C_drawFlags->m4E_drawSkillPageLabels);
@@ -346,11 +346,11 @@ u8 initGearStatusMenu(void);
 u8 initGearStatusMenu(void) {
     s32 i;
 
-    gMenuContext->m358_selectedInfoCard = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_358), 0x2af0), 0);
+    gMenuContext->m358_selectedInfoCard = allocateHeap(PC_HEAP_OF(MenuContext_358, PC_HEAP_SIZED(sizeof(MenuContext_358), 0x2af0)), 0);
     bzero(gMenuContext->m358_selectedInfoCard, sizeof(MenuContext_358));
-    gMenuContext->m35C_selectedStats = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_35C), 0x32f4), 0);
+    gMenuContext->m35C_selectedStats = allocateHeap(PC_HEAP_OF(MenuContext_35C, PC_HEAP_SIZED(sizeof(MenuContext_35C), 0x32f4)), 0);
     bzero(gMenuContext->m35C_selectedStats, sizeof(MenuContext_35C));
-    gMenuContext->m360_equipment = allocateHeap(PC_HEAP_SIZED((s32)sizeof(struct MenuContext_360), (s32)0x2ac), 0);
+    gMenuContext->m360_equipment = allocateHeap(PC_HEAP_OF(MenuContext_360, PC_HEAP_SIZED((s32)sizeof(struct MenuContext_360), (s32)0x2ac)), 0);
     bzero(gMenuContext->m360_equipment, (s32)sizeof(struct MenuContext_360));
     loadSharedMenuData2(3);
     i = 0;

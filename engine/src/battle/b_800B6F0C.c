@@ -358,7 +358,7 @@ sBattleStartEffect* createBattleStartEffectTask(void) {
 }
 
 sBattleStartEffect* createBattleStartEffect(void) {
-    sBattleStartEffect* e = allocateHeap(sizeof(sBattleStartEffect), 1);
+    sBattleStartEffect* e = allocateHeap(PC_HEAP_OF(sBattleStartEffect, sizeof(sBattleStartEffect)), 1);
     e->m0_updateTask.m4_data = e;
     e->m1C_drawTask.m4_data = e;
     return initBattleStartEffect(e);

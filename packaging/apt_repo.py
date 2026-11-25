@@ -275,7 +275,8 @@ def verify(inrelease: Path, release: Path, pubkey: Path, fpr: str) -> str:
     return fpr
 
 
-def secret_fingerprints(home: Path) -> list[str]:
+def signing_fingerprints(home: Path) -> list[str]:
+    """The fingerprints of the primary keys this home can sign with (public values, safe to print)."""
     out = gpg_ok(gpg(home, "--with-colons", "--list-secret-keys"), "--list-secret-keys").decode()
     fprs, primary = [], False
     for line in out.splitlines():
@@ -342,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 gpg_ok(gpg(home, "--quick-generate-key", UID, "ed25519", "sign", "never", secret=True),
                        "--quick-generate-key")
-                fprs = secret_fingerprints(home)
+                fprs = signing_fingerprints(home)
             finally:
                 stop_agent(home)
             if len(fprs) != 1:
@@ -351,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         elif a.command == "public":
             fpr = check_fingerprint(a.key)
             try:
-                if fpr not in secret_fingerprints(a.gnupg_home):
+                if fpr not in signing_fingerprints(a.gnupg_home):
                     raise RepoError(f"{a.gnupg_home} has no secret key {fpr}")
                 key = gpg_ok(gpg(a.gnupg_home, "--armor", "--export", fpr), "--export")
             finally:

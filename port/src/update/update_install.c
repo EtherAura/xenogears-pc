@@ -17,6 +17,7 @@
 #include <string.h>
 #ifdef _WIN32
 #include <windows.h>
+#include <objbase.h>
 #include <shellapi.h>
 #else
 #include <sys/stat.h>
@@ -218,6 +219,9 @@ static struct {
     UpdateInstallPlace place;
     char setup[1300];       /* setup, android: the downloaded setup.exe or APK, run or installed as it is */
     int watch, ticks;       /* android: Android's answer looked at (XgActivity.updateInstallState) */
+    SDL_Thread* asker;      /* setup: the setup's start, which waits for Windows' admin prompt */
+    SDL_AtomicInt asking;   /* setup: 1 while Windows asks, then 2 started or 3 not (askWhy says) */
+    char askWhy[256];
 } I;
 
 static void stage(UpdateInstallStatus* st, UpdateInstallStage s) {
@@ -437,6 +441,7 @@ static int SDLCALL installThread(void* unused) {
 }
 
 int updateInstallStart(const UpdateInstallPlace* place) {
+    if (SDL_GetAtomicInt(&I.asking) != 0) return 0; /* Windows still asks about the last one's setup */
     if (I.thread != NULL) {
         int s = SDL_GetAtomicInt(&I.stage);
         if (s != INSTALL_READY && s != INSTALL_FAILED) return 0;
@@ -550,37 +555,56 @@ int updateInstallFinish(char* why, size_t whySize) {
     return updateInstallSwap(&I.place, why, whySize);
 }
 
+#ifdef _WIN32
+/* The setup started: 1, or 0 with why. "/UPDATE=<executable>": the setup waits for the game to end,
+ * installs, and starts that executable again as the player (packaging/xenogears-pc-installer.nsi.in);
+ * "/D=": into this copy's folder (NSIS's own option: last, unquoted, no trailing separator). Returns
+ * only once the player has answered Windows' admin prompt (the setup's manifest asks for admin). */
+static int setupStart(char* why, size_t whySize) {
+    wchar_t file[1300], params[1400];
+    char args[1400], dir[1100];
+    snprintf(dir, sizeof dir, "%s", I.place.root);
+    size_t n = strlen(dir);
+    while (n > 3 && (dir[n - 1] == '\\' || dir[n - 1] == '/')) dir[--n] = '\0';
+    snprintf(args, sizeof args, "/S /UPDATE=%s /D=%s", I.place.exe, dir);
+    if (MultiByteToWideChar(CP_UTF8, 0, I.setup, -1, file, 1300) == 0 ||
+        MultiByteToWideChar(CP_UTF8, 0, args, -1, params, 1400) == 0) {
+        say(why, whySize, "the setup's path is too long");
+        return 0;
+    }
+    SHELLEXECUTEINFOW info;
+    memset(&info, 0, sizeof info);
+    info.cbSize = sizeof info;
+    info.fMask = SEE_MASK_NOASYNC;
+    info.lpVerb = L"open";
+    info.lpFile = file;
+    info.lpParameters = params;
+    info.nShow = SW_SHOWNORMAL;
+    if (!ShellExecuteExW(&info)) {
+        DWORD e = GetLastError();
+        say(why, whySize, e == ERROR_CANCELLED ? "Windows did not let the setup run" : "cannot start the setup "
+                                                                                      "(error %lu)", (unsigned long)e);
+        return 0;
+    }
+    return 1;
+}
+
+/* setupStart on a thread of its own, so the game draws and runs on while Windows asks (the vblank
+ * takes the answer). COM as Microsoft asks of a thread that calls ShellExecuteEx. */
+static int askThread(void* unused) {
+    (void)unused;
+    HRESULT com = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    int started = setupStart(I.askWhy, sizeof I.askWhy);
+    if (SUCCEEDED(com)) CoUninitialize();
+    SDL_SetAtomicInt(&I.asking, started ? 2 : 3);
+    return 0;
+}
+#endif
+
 void updateInstallRestart(char* why, size_t whySize) {
     if (I.place.kind == RELEASE_SETUP) {
 #ifdef _WIN32
-        /* "/UPDATE=<executable>": the setup waits for the game to end, installs, and starts that
-         * executable again as the player (packaging/xenogears-pc-installer.nsi.in); "/D=": into this
-         * copy's folder (NSIS's own option: last, unquoted, no trailing separator). */
-        wchar_t file[1300], params[1400];
-        char args[1400], dir[1100];
-        snprintf(dir, sizeof dir, "%s", I.place.root);
-        size_t n = strlen(dir);
-        while (n > 3 && (dir[n - 1] == '\\' || dir[n - 1] == '/')) dir[--n] = '\0';
-        snprintf(args, sizeof args, "/S /UPDATE=%s /D=%s", I.place.exe, dir);
-        if (MultiByteToWideChar(CP_UTF8, 0, I.setup, -1, file, 1300) == 0 ||
-            MultiByteToWideChar(CP_UTF8, 0, args, -1, params, 1400) == 0) {
-            say(why, whySize, "the setup's path is too long");
-            return;
-        }
-        SHELLEXECUTEINFOW info;
-        memset(&info, 0, sizeof info);
-        info.cbSize = sizeof info;
-        info.fMask = SEE_MASK_NOASYNC;
-        info.lpVerb = L"open"; /* the setup asks for admin itself (its manifest): Windows asks the player */
-        info.lpFile = file;
-        info.lpParameters = params;
-        info.nShow = SW_SHOWNORMAL;
-        if (!ShellExecuteExW(&info)) {
-            DWORD e = GetLastError();
-            say(why, whySize, e == ERROR_CANCELLED ? "Windows did not let the setup run" : "cannot start the setup "
-                                                                                          "(error %lu)", (unsigned long)e);
-            return;
-        }
+        if (!setupStart(why, whySize)) return;
         fprintf(stderr, "update: install: %s started; the game quits for it\n", I.setup);
         if (quitNow != NULL) quitNow();
 #endif
@@ -647,9 +671,27 @@ void updateInstallVBlank(void) {
         }
     }
 #endif
+    char why[256] = "", note[300];
+#ifdef _WIN32
+    int asked = SDL_GetAtomicInt(&I.asking);
+    if (asked == 1) return; /* Windows still asks */
+    if (asked != 0) {       /* answered: the game quits for the setup, or goes on with a note */
+        SDL_WaitThread(I.asker, NULL);
+        I.asker = NULL;
+        SDL_SetAtomicInt(&I.asking, 0);
+        if (asked == 2) {
+            fprintf(stderr, "update: install: %s started; the game quits for it\n", I.setup);
+            if (quitNow != NULL) quitNow();
+            return;
+        }
+        fprintf(stderr, "update: install: %s\n", I.askWhy);
+        snprintf(note, sizeof note, "The setup did not run: %s", I.askWhy);
+        if (presentShowNote != NULL) presentShowNote(note);
+        return;
+    }
+#endif
     if (!I.wanted || SDL_GetAtomicInt(&I.stage) != INSTALL_READY) return;
     I.wanted = 0;
-    char why[256] = "", note[300];
 #ifdef __ANDROID__
     if (I.place.kind == RELEASE_ANDROID) { /* Android installs it, asking the player; this process then ends */
         fprintf(stderr, "update: install: %s handed to Android\n", I.setup);
@@ -662,6 +704,15 @@ void updateInstallVBlank(void) {
     if (!updateInstallFinish(why, sizeof why)) {
         snprintf(note, sizeof note, "The update stopped: %s", why);
     } else {
+#ifdef _WIN32
+        if (I.place.kind == RELEASE_SETUP) { /* Windows asks for admin on the asker's thread */
+            I.askWhy[0] = '\0';
+            SDL_SetAtomicInt(&I.asking, 1);
+            I.asker = SDL_CreateThread(askThread, "xg-update-setup", NULL);
+            if (I.asker != NULL) return;
+            SDL_SetAtomicInt(&I.asking, 0); /* no thread: asked here, as before */
+        }
+#endif
         updateInstallRestart(why, sizeof why); /* returns only when that could not start */
         fprintf(stderr, "update: install: %s\n", why);
         if (I.place.kind == RELEASE_SETUP) {

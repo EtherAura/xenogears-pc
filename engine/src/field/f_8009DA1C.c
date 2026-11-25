@@ -1,6 +1,7 @@
 
 #include "common.h"
 #include "pc_retail_heap.h"
+#include "pc_speedup.h"
 #include "psyq.h"
 #include "pc_camera.h"
 #include "main/memory.h"
@@ -605,6 +606,7 @@ void OP_UPDATE_CHARACTER(void) {
                 checkForRandomEncounter();
             }
             playerCanRun = 1;
+            pcTransitionRoom(0); /* Speedup transitions: a new room's player can move */
             if (pCurrentFieldScriptActor->m14_currentTriangleFlag & 0x400000) {
                 if (pCurrentFieldScriptActor->m68_oldPosition[0] == FP_INT(pCurrentFieldScriptActor->m20_position.vx) &&
                     pCurrentFieldScriptActor->m68_oldPosition[1] == FP_INT(pCurrentFieldScriptActor->m20_position.vy) &&

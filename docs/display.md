@@ -110,10 +110,11 @@ With Lighting or Glow on, fires, torches and lamps flicker indoors, at night
 and in battles (not in daylight, where a sunlit roof could pass for a
 flame): the light they throw on what is around them and their glow rise and
 fall, each fire in its own rhythm, while windows, the sky and white or blue
-lights stay steady. Only fires that are part of the scenery flicker; flames
-the game draws as a separate effect (such as Lahan's burning houses) do not
-light the scene yet. F1 > Display > Firelight flicker (On by default) turns
-it off.
+lights stay steady. They keep their painted brightness under the lighting's
+shade and fog, and so does a flame drawn see-through over a wall. Scenes the
+game redraws over itself, such as Lahan burning with its heat shimmer, take
+every effect too. F1 > Display > Firelight flicker (On by default) turns it
+off.
 
 ## Shadows
 
@@ -139,6 +140,11 @@ portraits and the HUD are not touched. The Enhanced engine only (F1 > System
 > Engine). F1 > Display > Fog and Colour grade (each Off, Subtle, Medium,
 Strong).
 
+Colour grade also leans gently into each place's own colour, read from the
+scenery itself: a sandy place a little warmer, a green one a little greener,
+a dark one a little bluer in its shadows, characters included. F1 > Display >
+Adapt to the area (On by default) turns that off.
+
 ## Particles
 
 In fields, battles and on the world map, fine dust drifts where the place is lit
@@ -149,6 +155,11 @@ as the depth of field makes things at its distance. Dialogue, portraits and
 the HUD are not touched. The Enhanced engine only (F1 > System > Engine).
 F1 > Display > Particles (Off, Subtle, Medium, Strong) and Particle size
 (Small, Medium, Large).
+
+With Particles on, characters also kick up dust where they walk on sand, dirt
+or a dusty floor, more when they run: soft clouds a step paler than the
+ground, lingering a moment, none on grass, water or snow. F1 > Display >
+Footstep dust (On by default) turns it off.
 
 ## Vignette
 
@@ -166,6 +177,16 @@ soft bands along the sun's way, and gentle sunbeams slant down from the
 top of the picture over the scenery. Dialogue, portraits and the HUD are
 not touched. The Enhanced engine only (F1 > System > Engine). F1 > Display
 > Light shafts (Off, Subtle, Medium, Strong).
+
+## Sun glare
+
+On the world map and in fields outdoors by day, a soft warm glow spills in
+from the sun's side of the picture (the side the shadows fall away from),
+with a few faint lens rings across it, as a camera facing the light would
+see. It shows only as far as sky or far scenery shows on that side: a wall or
+a cliff there blocks it. Dialogue, portraits and the HUD are not touched. The
+Enhanced engine only (F1 > System > Engine). F1 > Display > Sun glare (Off,
+Subtle, Medium, Strong).
 
 ## Cloud shadows
 
@@ -217,10 +238,13 @@ Frame, CPU, GPU and audio timings. F10; Shift+F10 writes them to a log.
 | Shadows | Off |
 | Fog | Off |
 | Colour grade | Off |
+| Adapt to the area | On |
 | Particles | Off |
 | Particle size | Small |
+| Footstep dust | On |
 | Vignette | Off |
 | Light shafts | Off |
+| Sun glare | Off |
 | Cloud shadows | Off |
 | Speedup | Off |
 | Motion display rate | 60 Hz |

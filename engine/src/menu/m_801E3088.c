@@ -1034,7 +1034,7 @@ void initMenuContext3A8_memoryCardDisplay(void) {
     s32 i;
 
     for (i = 0; i < 0x20; i++) {
-        gMenuContext->m3A8_memoryCardTiles[i] = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_3A8), 0x158), 0);
+        gMenuContext->m3A8_memoryCardTiles[i] = allocateHeap(PC_HEAP_OF(MenuContext_3A8, PC_HEAP_SIZED(sizeof(MenuContext_3A8), 0x158)), 0);
         bzero(gMenuContext->m3A8_memoryCardTiles[i], sizeof(MenuContext_3A8));
         initMenuContext3A8_MemoryCardPolys(i);
         initMenuContext3A8_Lines(i);
@@ -1148,7 +1148,7 @@ void initMenuContext34C(void);
 void initMenuContext34C(void) {
     RECT unused; /* never used; retail's frame keeps its 8 bytes */
 
-    gMenuContext->m34C_saveScreen = allocateHeap(PC_HEAP_SIZED(sizeof(MenuContext_34C), 0x2dc0), 0);
+    gMenuContext->m34C_saveScreen = allocateHeap(PC_HEAP_OF(MenuContext_34C, PC_HEAP_SIZED(sizeof(MenuContext_34C), 0x2dc0)), 0);
     bzero(gMenuContext->m34C_saveScreen, sizeof(MenuContext_34C));
     initMenuContext34C_polys();
     initMenuContext34C_polys2();

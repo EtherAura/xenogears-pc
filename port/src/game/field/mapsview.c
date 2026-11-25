@@ -220,7 +220,7 @@ s32 mapsFieldStart(s32 field, const void* state, s32 storyProgress, s32 entry) {
     if (fieldSceneState.m290_actorArray == NULL || fieldSceneState.m298_walkMesh == NULL) {
         return 0;
     }
-    mapsContext = (sFieldRenderContext*)allocateHeap(sizeof(sFieldRenderContext) + MAPS_OT_SLACK, 0);
+    mapsContext = (sFieldRenderContext*)allocateHeap(PC_HEAP_ONE(sFieldRenderContext, sizeof(sFieldRenderContext) + MAPS_OT_SLACK), 0);
     return mapsContext != NULL;
 }
 

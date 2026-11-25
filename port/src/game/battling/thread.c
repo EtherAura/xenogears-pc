@@ -253,9 +253,13 @@ static void* newStack(u8* base, uptr size, void (*start)(void)) {
 #define STACK_SIZE (1024 * 1024)
 #define STACK_COUNT 2
 
+/* The stack is scratch64 (include/common.h): its frames are native and this
+ * build's own, so a state converted for another build leaves them out (zero);
+ * a stackless load starts the thread again on a fresh stack
+ * (pcBattlingThreadRestart), and an abandoned thread is never resumed. */
 typedef struct {
     void* sp;                  /* saved while the thread is suspended */
-    u8 stack[STACK_SIZE];
+    scratch64 stack[STACK_SIZE / 8];
 } PcThread;
 
 /* Battling runs one thread; a new one may start while the previous battle's
@@ -285,7 +289,7 @@ void resumeBattlingThread(BattlingThread* t) {
     if (pc == NULL) {
         pc = &pcThreads[nextPcThread];
         nextPcThread = (nextPcThread + 1) % STACK_COUNT;
-        pc->sp = newStack(pc->stack, STACK_SIZE, battlingThreadStart);
+        pc->sp = newStack((u8*)pc->stack, STACK_SIZE, battlingThreadStart);
         t->m0_regs[0] = (uptr)pc;
     }
     portBattlingSwitch(&resumerSp, pc->sp);

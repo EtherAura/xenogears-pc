@@ -536,8 +536,8 @@ void initWorldmapTrackMarks(void) {
     POLY_FT4* p;
 
     worldmapTrackMarks = allocateHeap(0x80, 0);
-    worldmapTrackMarkPolys[0] = allocateHeap((s32)sizeof(MarkPolys16), 0);
-    worldmapTrackMarkPolys[1] = allocateHeap((s32)sizeof(MarkPolys16), 0);
+    worldmapTrackMarkPolys[0] = allocateHeap(PC_HEAP_OF(MarkPolys16, (s32)sizeof(MarkPolys16)), 0);
+    worldmapTrackMarkPolys[1] = allocateHeap(PC_HEAP_OF(MarkPolys16, (s32)sizeof(MarkPolys16)), 0);
     for (m = worldmapTrackMarks, i = 15; i != -1; i--) {
         m->m0_x = m->m2_type = m->m4_z = 0;
         m++;

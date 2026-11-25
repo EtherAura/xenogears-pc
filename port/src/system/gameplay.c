@@ -28,6 +28,18 @@ void pcGameplaySetOriginalBugFixes(int enabled) {
     settingsSave();
 }
 
+int pcGameplayUninterruptedCombos(void) {
+    return settingsBool("uninterrupted_combos", 0);
+}
+
+void pcGameplaySetUninterruptedCombos(int enabled) {
+    settingsDescribe("uninterrupted_combos",
+                     "A Combo's deathblows back to back: no charge-up after the first, the jump into the ready "
+                     "stance only where a deathblow needs it");
+    settingsSetInt("uninterrupted_combos", enabled != 0);
+    settingsSave();
+}
+
 int pcGameplayDeusCameraFix(void) {
     return settingsBool("deus_camera_fix", 1);
 }

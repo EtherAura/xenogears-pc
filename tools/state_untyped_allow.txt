@@ -1,0 +1,19 @@
+# Reviewed pointer words in untyped memory for tools/state_untyped.py (xg-ety3; docs/CANONICAL_STATES.md
+# 17.3): words a converted state carries as the number they were (or, for "stack", as an offset into a game
+# stack a stackless load does not keep), each one written again before anything reads it. One per line:
+#     <kind> | <place> | <path> | <reason>
+# kind, place and path as the scan prints them (a path's indices as []); an empty path is a whole variable.
+# A pointer the game does read after a load is not listed here: it gets a type (PC_HEAP_OF, a typed
+# variable, scratch64) and leaves the scan. "site" entries are for `state_untyped.py sites` (an allocation
+# of a pointer-holding type whose size names none): file (src/ path for both engines) and type.
+
+static | heapLastRequestCaller |  | the last allocation's return address (a code address, kept for the system error screen); every allocateHeap sets it before the screen prints the failing one's
+stack | hw.deliveringFrame |  | deliverDue's frame while it delivers interrupts (system/hw.c inDelivery); read only while `delivering` is set, and deliverDue sets both; at a safe point no delivery runs
+stack | currentNpcSpriteUploadRect |  | uploadNpcSpriteSheet points it at its local RECT just before each transfertNpcSpriteSheetElement, the only reader
+stack | renderStringWindow | .m1C_currentStringToPrint | main's scratch window: renderString sets the text (a menu's stack buffer, JP) before every print and nothing reads it after
+stack | pcButtonText | [].text | the text a window prints, for the button glyphs (dialog.c pcDialogButtonsBegin); renderString's scratch window records its caller's stack buffer and reads it only during that print; the next print records again
+stack | resumerSp |  | Battling's coroutine: the resumer's stack pointer, written by every resumeBattlingThread before the thread can yield to it (port/src/game/battling/thread.c)
+static | gteKept | .data[] | the GTE registers kept across the 60 Hz Gear pose's own work (port/src/game/battle/gearpose.c keep/putBack, in one draw); a GTE register here held a truncated heap address, and keep writes them all before putBack reads them
+host | mem.scratchpad | +0x128 | CheckCollisionWithMesh's scratch (field, f_8008083C.c sEntityMoveCheck0Sub1.mA4_vertices): set at the top of every call before its reads
+host | mem.scratchpad | +0x2f0 | the world map's draw scratch (sWorldmapScratch m2EC_vertices, drawWorldmapClouds): set before each use in the frame's draw
+site | port/src/game/main/mapsview.c | Wds | the map viewer (an extras sandbox, never the game) reads the disc's sound banks as bytes; loadWds copies each into the sound arena, typed there

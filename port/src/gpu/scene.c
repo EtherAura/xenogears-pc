@@ -85,7 +85,12 @@
  * pixels from the scene's by what is equal over both);
  * XG_DOF_BAND=<u>: the focus range as a number (1e9: nothing blurs, the
  * whole path still runs: the picture must equal the one with the option
- * off); XG_DOF_LOG=1: a line per scene; XG_LIGHT_GAIN=<x>: every lighting
+ * off); XG_DOF_RADIUS=<r>, XG_DOF_GAIN=<g>, XG_TILT_RADIUS=<r>: the
+ * largest radius (PS1 pixels), its rise per unit of relative depth past the
+ * range, and the tilt-shift's radius at the edges (when it is on), for
+ * comparing looks; XG_LIGHTING_GAIN=<x>, XG_GLOW_GAIN=<x>, XG_SHAFTS_GAIN=<x>:
+ * the lighting's top light, shade and bounce, the glow, the light shafts
+ * times x (comparing looks); XG_DOF_LOG=1: a line per scene; XG_LIGHT_GAIN=<x>: every lighting
  * strength times x (0: the lighting's whole path runs and must change
  * nothing); XG_LIGHT_DEBUG=1: the lighting's parts as colours (red shade,
  * green top light, blue glow and bounce); XG_SCENE_TEST_FAIL=1 and
@@ -114,9 +119,15 @@
 #define TABLES 2
 
 static const char* const levelNames[] = {"off", "subtle", "medium", "strong"};
-static const float levelRadius[] = {0, 1.25f, 2.5f, 4.0f};
+/* The largest radius by level and the focus range by setting. carl, testing
+ * at 9x: "a bit too strong still" (a step softer), then "still too blurry and
+ * tall, looks like smeared vaseline": half the screen was half blurred. He
+ * chose, from captures of Strong + Wide, the radius at 2/3 and the range
+ * 0.18 -> 0.65 (only the far backdrop and what is right before the camera
+ * soften), every level and range scaled the same way. */
+static const float levelRadius[] = {0, 0.65f, 1.25f, 2.0f};
 static const char* const focusNames[] = {"narrow", "normal", "wide"};
-static const float focusBand[] = {0.05f, 0.10f, 0.18f};
+static const float focusBand[] = {0.18f, 0.36f, 0.65f};
 /* Dialogue focus (xg-rgcf.5.18, carl's picks): while someone speaks the focus
  * moves to the speaker and the sharp range narrows to this share, easing over
  * DIALOGUE_EASE vblanks (half a second) each way. */
@@ -124,13 +135,17 @@ static const float focusBand[] = {0.05f, 0.10f, 0.18f};
 #define DIALOGUE_EASE 30.0f
 /* The tilt-shift's radius at the frame's edges per level (PS1 pixels; the
  * blur's sigma is half of it): carl chose Medium from the prototypes
- * (xg-rgcf.5.14; its shape: tilt_shift.glsl). */
-static const float tiltRadius[] = {0, 6.0f, 12.0f, 20.0f};
-/* Lighting and glow by level (light.comp has the fixed shares). */
-static const float lightTop[] = {0, 0.25f, 0.45f, 0.75f};
-static const float lightShade[] = {0, 0.6f, 1.0f, 1.4f};
-static const float lightBounce[] = {0, 0.6f, 1.0f, 1.5f};
-static const float glowGain[] = {0, 0.6f, 1.0f, 1.5f};
+ * (xg-rgcf.5.14; its shape: tilt_shift.glsl), then, testing at 9x ("blur
+ * stands out too much still, needs to be a smooth gradual transition"), a
+ * third of it over a taller strip. */
+static const float tiltRadius[] = {0, 1.5f, 3.0f, 5.0f};
+/* Lighting and glow by level (light.comp has the fixed shares). Half what
+ * was first chosen, the light shafts too (carl, testing at 9x: "tone down the
+ * lighting"; he chose all three at half from captures,). */
+static const float lightTop[] = {0, 0.125f, 0.225f, 0.375f};
+static const float lightShade[] = {0, 0.3f, 0.5f, 0.7f};
+static const float lightBounce[] = {0, 0.3f, 0.5f, 0.75f};
+static const float glowGain[] = {0, 0.3f, 0.5f, 0.75f};
 /* How dark a full shadow makes what it falls on, by level. */
 static const float shadowDark[] = {0, 0.25f, 0.45f, 0.6f};
 /* Fog (docs/PORT_HD2D.md section 27): the most it takes and how quickly it
@@ -141,9 +156,11 @@ static const float fogDensity[] = {0, 0.8f, 1.1f, 1.4f};
 static const float gradeAmount[] = {0, 0.5f, 1.0f, 1.5f};
 /* The vignette: the corners' darkening per level (xg-rgcf.5.13, carl's pick). */
 static const float vignetteAmount[] = {0, 0.12f, 0.22f, 0.35f};
-/* Light shafts: their strength per level (xg-rgcf.5.16; Medium is the
- * prototype carl chose, light.comp's shares). */
-static const float shaftAmount[] = {0, 0.6f, 1.0f, 1.5f};
+/* Light shafts: their strength per level (xg-rgcf.5.16; Medium was the
+ * prototype carl chose, light.comp's shares). Then half, as above, and then
+ * 35% of that (carl: "light shafts still too strong"; from captures at 60,
+ * 35 and 15%,). */
+static const float shaftAmount[] = {0, 0.105f, 0.175f, 0.2625f};
 /* Cloud shadows (xg-rgcf.5.17): how much of the sun a cloud takes per level
  * (Medium the prototype carl chose, work/hd2d/light/proto18.py), a cloud's
  * size (the width of a 16:9 picture, CLOUD_PICTURE PS1 pixels, at the focus
@@ -161,6 +178,22 @@ static const float cloudDark[] = {0, 0.24f, 0.38f, 0.52f};
  * somewhat irregular. */
 static const float flickerDepth[] = {0, 0.25f, 0.4f, 0.6f};
 #define FLICKER_SPEED 1.8f
+/* Footstep dust (xg-rgcf.5.23, carl chose the lingering "clouds", a step
+ * paler than the ground, from in-game prototypes: work/hd2d/light/proto22.py):
+ * how strong per level of Particles; a puff's life (vblanks), its radius when
+ * born and how much it covers at most; a step, the farthest a foot moves from
+ * one scene to the next, and a run's speed, in characters' heights
+ * (DUST_HEIGHT view units, as light.comp FIGURE_HEIGHT) and heights a vblank. */
+static const float dustAmount[] = {0, 0.5f, 0.8f, 1.2f};
+/* Sun glare (xg-rgcf.5.24): its strength per level (Medium the prototype carl chose). */
+static const float glareAmount[] = {0, 0.5f, 1.0f, 1.6f};
+#define DUST_LIFE 60u
+#define DUST_SIZE 0.5f
+#define DUST_COVER 0.9f
+#define DUST_HEIGHT 96.0f
+#define DUST_STEP 0.32f
+#define DUST_MATCH 0.6f
+#define DUST_RUN 0.055f /* Fei's pace in the fields, measured: 0.063 */
 #define FLICKER_IRREGULAR 0.6f
 /* The focus a room starts with is not yet its own (a field's first frame
  * carries a default): a cloud's size follows the focus for this many vblanks
@@ -186,6 +219,8 @@ static struct {
     int debug, log;
     float bandOverride;
     int haveBand;
+    float radiusOverride, gainOverride, tiltOverride; /* XG_DOF_RADIUS, XG_DOF_GAIN, XG_TILT_RADIUS; < 0 none */
+    float lightingTimes, glowTimes, shaftsTimes; /* XG_LIGHTING_GAIN, XG_GLOW_GAIN, XG_SHAFTS_GAIN (1: as set) */
     int lighting, glow, shadows, fog, grade; /* levels, 0 off */
     int particles, particleSize;             /* particles' level (0 off) and size (0 small .. 2 large) */
     int vignette;                            /* the vignette's level, 0 off */
@@ -193,6 +228,10 @@ static struct {
     int shafts;                              /* light shafts' level, 0 off */
     int clouds;                              /* cloud shadows' level, 0 off */
     int firelightPart;                       /* lighting_firelight: fires flicker, as part of lighting */
+    int gradeAreaPart;                       /* color_grade_area: the grade leans into the room's colour */
+    int dustPart;                            /* particles_footsteps: footstep dust, as part of particles */
+    int glare;                               /* sun glare's level, 0 off */
+    float viewScale;                         /* view units per room unit (the field's matrix's scale) */
     int frameRows;                           /* the scene's frame's rows (its drawing area) */
     int shadePart, bouncePart;
     int characterPart; /* lighting_characters: the sprites take the lighting too */
@@ -294,6 +333,18 @@ static void load(void) {
         sc.bandOverride = (float)atof(e);
         sc.haveBand = 1;
     }
+    e = getenv("XG_DOF_RADIUS");
+    sc.radiusOverride = e != NULL && e[0] != '\0' ? (float)atof(e) : -1.0f;
+    e = getenv("XG_DOF_GAIN");
+    sc.gainOverride = e != NULL && e[0] != '\0' ? (float)atof(e) : -1.0f;
+    e = getenv("XG_TILT_RADIUS");
+    sc.tiltOverride = e != NULL && e[0] != '\0' ? (float)atof(e) : -1.0f;
+    e = getenv("XG_LIGHTING_GAIN");
+    sc.lightingTimes = e != NULL && e[0] != '\0' ? (float)atof(e) : 1.0f;
+    e = getenv("XG_GLOW_GAIN");
+    sc.glowTimes = e != NULL && e[0] != '\0' ? (float)atof(e) : 1.0f;
+    e = getenv("XG_SHAFTS_GAIN");
+    sc.shaftsTimes = e != NULL && e[0] != '\0' ? (float)atof(e) : 1.0f;
 
     settingsDescribe("lighting", "lighting: off (default), subtle, medium or strong: light from above, shade in "
                                  "corners and light from bright spots on the scenery in fields (the Enhanced engine)");
@@ -313,6 +364,17 @@ static void load(void) {
     settingsDescribe("color_grade", "color_grade: off (default), subtle, medium or strong: shadows a little cool and "
                                     "highlights a little warm in fields (the Enhanced engine)");
     sc.grade = levelOf("color_grade");
+    settingsDescribe("sun_glare", "sun_glare: off (default), subtle, medium or strong: a soft warm glow and faint lens "
+                                  "rings from the sun's side of the picture, outdoors by day where sky shows (the Enhanced engine)");
+    sc.glare = levelOf("sun_glare");
+    settingsDescribe("particles_footsteps", "particles_footsteps: on (default) or off: dust kicked up where characters "
+                                            "walk and run on dusty ground, as part of particles");
+    s = settingsGet("particles_footsteps");
+    sc.dustPart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
+    settingsDescribe("color_grade_area", "color_grade_area: on (default) or off: the colour grade also leans into the "
+                                         "room's own colour (a sandy place warmer, a green one greener, a dark one bluer)");
+    s = settingsGet("color_grade_area");
+    sc.gradeAreaPart = !(s != NULL && (strcmp(s, "off") == 0 || strcmp(s, "0") == 0));
     settingsDescribe("particles", "particles: off (default), subtle, medium or strong: ambient particles in fields, "
                                   "battles and on the world map, dust where the place is lit and embers where it is dark "
                                   "(the Enhanced engine)");
@@ -448,6 +510,37 @@ int sceneGrade(void) {
 void sceneSetFog(int level) { setLevel("fog", &sc.fog, level); }
 void sceneSetGrade(int level) { setLevel("color_grade", &sc.grade, level); }
 
+int sceneSunGlare(void) {
+    load();
+    return engineThis() == ENGINE_ENHANCED ? sc.glare : 0;
+}
+
+void sceneSetSunGlare(int level) { setLevel("sun_glare", &sc.glare, level); }
+
+int sceneFootstepDust(void) {
+    load();
+    return sc.dustPart;
+}
+
+void sceneSetFootstepDust(int on) {
+    load();
+    sc.dustPart = on != 0;
+    settingsSet("particles_footsteps", sc.dustPart ? "on" : "off");
+    settingsSave();
+}
+
+int sceneGradeArea(void) {
+    load();
+    return sc.gradeAreaPart;
+}
+
+void sceneSetGradeArea(int on) {
+    load();
+    sc.gradeAreaPart = on != 0;
+    settingsSet("color_grade_area", sc.gradeAreaPart ? "on" : "off");
+    settingsSave();
+}
+
 int sceneParticles(void) {
     load();
     return engineThis() == ENGINE_ENHANCED ? sc.particles : 0;
@@ -518,12 +611,75 @@ const char* sceneLightingStatus(void) {
 int sceneWantsCopy(void) {
     return sceneDof() != 0 || sceneLighting() != 0 || sceneGlow() != 0 || sceneShadows() != 0 || sceneFog() != 0 ||
            sceneGrade() != 0 || sceneParticles() != 0 || sceneVignette() != 0 || sceneTiltShift() != 0 ||
-           sceneLightShafts() != 0 || sceneCloudShadows() != 0;
+           sceneLightShafts() != 0 || sceneCloudShadows() != 0 || sceneSunGlare() != 0;
 }
 
 static void normalize3(float v[3]) {
     float length = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     if (length > 0) for (int i = 0; i < 3; i++) v[i] /= length;
+}
+
+/* Footstep dust (xg-rgcf.5.23): the characters' feet (their ground points)
+ * matched from one scene to the next by nearness, how far each has gone, and
+ * the puffs dropped along the way: one a step when running, now and then at
+ * a walk, fainter. A new room starts with none. */
+static struct {
+    int room, count;
+    uint32_t vblank, rng;
+    float foot[SCENE_FIGURES][3], travel[SCENE_FIGURES];
+    struct { float room[3]; uint32_t born; float strength, seed; } puff[SCENE_DUST];
+    int next;
+    float fastest; /* the fastest foot this scene, heights a vblank (the log) */
+} dust;
+
+static float dustRandom(void) {
+    dust.rng = dust.rng * 1664525u + 1013904223u;
+    return (float)(dust.rng >> 8) / 16777216.0f;
+}
+
+static void dustStep(void) {
+    uint32_t now = hwVSyncCount();
+    if (dust.room != sc.sunRoomId) {
+        memset(dust.puff, 0, sizeof(dust.puff));
+        dust.count = 0;
+        dust.room = sc.sunRoomId;
+    }
+    if (now - dust.vblank > 30u) dust.count = 0; /* after a pause the feet start again */
+    float dt = dust.count > 0 && now > dust.vblank ? (float)(now - dust.vblank) : 1.0f;
+    float height = DUST_HEIGHT / (sc.viewScale > 0 ? sc.viewScale : 1.0f); /* a character's height, room units */
+    float step = DUST_STEP * height, match = DUST_MATCH * height;
+    float travel[SCENE_FIGURES];
+    dust.fastest = 0;
+    for (int k = 0; k < sc.sceneFigureCount; k++) {
+        const float* f = sc.sceneFigure[k];
+        int best = -1;
+        float bestD2 = match * match;
+        for (int j = 0; j < dust.count; j++) {
+            float dx = f[0] - dust.foot[j][0], dz = f[2] - dust.foot[j][2];
+            float d2 = dx * dx + dz * dz;
+            if (d2 < bestD2) { bestD2 = d2; best = j; }
+        }
+        float moved = best >= 0 ? sqrtf(bestD2) : 0, before = best >= 0 ? dust.travel[best] : 0;
+        travel[k] = before + moved;
+        float speed = moved / height / dt;
+        if (speed > dust.fastest) dust.fastest = speed;
+        if (moved < 0.01f * height || floorf(travel[k] / step) == floorf(before / step)) continue;
+        float run = (speed - 0.25f * DUST_RUN) / (0.75f * DUST_RUN);
+        run = run < 0 ? 0 : run > 1 ? 1 : run;
+        if (run < 0.5f && dustRandom() > 0.5f) continue; /* at a walk, now and then */
+        int i = dust.next;
+        dust.next = (dust.next + 1) % SCENE_DUST;
+        for (int c = 0; c < 3; c++) dust.puff[i].room[c] = f[c];
+        dust.puff[i].room[0] += (dustRandom() - 0.5f) * 0.12f * height;
+        dust.puff[i].room[2] += (dustRandom() - 0.5f) * 0.12f * height;
+        dust.puff[i].born = now;
+        dust.puff[i].strength = 0.3f + 0.7f * run;
+        dust.puff[i].seed = dustRandom();
+    }
+    dust.count = sc.sceneFigureCount;
+    memcpy(dust.foot, sc.sceneFigure, (size_t)dust.count * sizeof(dust.foot[0]));
+    memcpy(dust.travel, travel, (size_t)dust.count * sizeof(float));
+    dust.vblank = now;
 }
 
 static void params(SceneParams* p) {
@@ -537,12 +693,13 @@ static void params(SceneParams* p) {
         d->focus += k * ((float)sc.speakerLast - d->focus);
         d->band *= 1.0f + k * (DIALOGUE_BAND - 1.0f);
     }
-    d->gain = DOF_GAIN;
-    d->radius = sceneDof() ? levelRadius[sc.level] : 0;
+    d->gain = sc.gainOverride >= 0 ? sc.gainOverride : DOF_GAIN;
+    d->radius = sceneDof() ? (sc.radiusOverride >= 0 ? sc.radiusOverride : levelRadius[sc.level]) : 0;
     d->debug = sceneDof() ? sc.debug : 0;
     d->figures = sc.figures;
     /* The tilt-shift: fields and the world map (xg-rgcf.5.14). */
     d->tilt = sc.place == PC_SCENE_FIELD || sc.place == PC_SCENE_WORLDMAP ? tiltRadius[sceneTiltShift()] : 0;
+    if (d->tilt > 0 && sc.tiltOverride >= 0) d->tilt = sc.tiltOverride;
     /* The display shows its rows from the top of the frame (the game's
      * display and drawing environments start at the same row). */
     int shown = gpuDisplay()->h;
@@ -569,7 +726,9 @@ static void params(SceneParams* p) {
      * (Lahan's roofs and sunlit walls on the world map) would pass for a
      * flame, and a fire's flicker would not show in the sun anyway. */
     if (sc.place == PC_SCENE_WORLDMAP || (sc.place == PC_SCENE_FIELD && fieldOutdoors(sc.sunRoomId))) firelight = 0;
-    if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette && !shafts && !clouds) return;
+    /* Sun glare: outdoors by day (the world map and the outdoor fields). */
+    int glare = sc.place == PC_SCENE_WORLDMAP || (sc.place == PC_SCENE_FIELD && fieldOutdoors(sc.sunRoomId)) ? sceneSunGlare() : 0;
+    if (!lighting && !glow && !shadows && !fog && !grade && !particles && !vignette && !shafts && !clouds && !glare) return;
     if (!sc.viewArmed || sc.screenZ <= 0) {
         sc.lightStatus = "the game gave no view for this scene";
         return;
@@ -577,11 +736,11 @@ static void params(SceneParams* p) {
     float gain = sc.haveLightGain ? sc.lightGain : 1.0f;
     l->on = 1;
     l->all = sc.haveLightGain || sc.lightDebug;
-    l->top = lightTop[lighting] * gain;
-    l->shade = sc.shadePart ? lightShade[lighting] * gain : 0;
-    l->bounce = sc.bouncePart ? lightBounce[lighting] * gain : 0;
+    l->top = lightTop[lighting] * gain * sc.lightingTimes;
+    l->shade = sc.shadePart ? lightShade[lighting] * gain * sc.lightingTimes : 0;
+    l->bounce = sc.bouncePart ? lightBounce[lighting] * gain * sc.lightingTimes : 0;
     l->figureLight = lighting && sc.characterPart && l->top > 0;
-    l->glow = glowGain[glow] * gain;
+    l->glow = glowGain[glow] * gain * sc.glowTimes;
     l->shadow = shadowDark[shadows] * gain;
     l->fogMost = fogMost[fog] * gain;
     l->fogDensity = fogDensity[fog];
@@ -592,8 +751,9 @@ static void params(SceneParams* p) {
     if (sc.place == PC_SCENE_BATTLE || sc.place == PC_SCENE_BATTLING) l->fogCap = 1.0f;
     if (sc.place == PC_SCENE_WORLDMAP) l->fogDensity *= 0.5f;
     l->grade = gradeAmount[grade] * gain;
+    l->gradeArea = sc.gradeAreaPart ? gradeAmount[grade] * gain : 0;
     l->vignette = vignetteAmount[vignette];
-    l->shafts = shaftAmount[shafts];
+    l->shafts = shaftAmount[shafts] * sc.shaftsTimes;
     l->shaftTime = (float)(hwVSyncCount() % 216000u) / 60.0f; /* seconds, over an hour that repeats */
     if (firelight) {
         l->flicker = flickerDepth[firelight];
@@ -636,6 +796,23 @@ static void params(SceneParams* p) {
             l->figure[k][i] = (sc.matrix[i][0] * r[0] + sc.matrix[i][1] * r[1] + sc.matrix[i][2] * r[2]) / 4096.0f + sc.trans[i];
     }
     l->figures = sc.sceneFigureCount;
+    l->glare = glareAmount[glare];
+    l->dustSize = DUST_SIZE;
+    l->dustCover = DUST_COVER;
+    /* Footstep dust: the live puffs, in this frame's view, at the level of Particles. */
+    l->dustCount = 0;
+    int dustLevel = sceneFootstepDust() ? particles : 0;
+    for (int i = 0; dustLevel && i < SCENE_DUST; i++) {
+        uint32_t age = hwVSyncCount() - dust.puff[i].born;
+        if (dust.puff[i].strength <= 0 || age >= DUST_LIFE) continue;
+        const float* r = dust.puff[i].room;
+        float* q = l->dust[l->dustCount++];
+        for (int c = 0; c < 3; c++)
+            q[c] = (sc.matrix[c][0] * r[0] + sc.matrix[c][1] * r[1] + sc.matrix[c][2] * r[2]) / 4096.0f + sc.trans[c];
+        q[3] = (float)age / (float)DUST_LIFE;
+        q[4] = dust.puff[i].strength * dustAmount[dustLevel];
+        q[5] = dust.puff[i].seed;
+    }
     if (particles) {
         /* The box they wrap in: from the focus when the room starts, then
          * kept, so a moving camera does not stretch it. */
@@ -744,6 +921,7 @@ void pcSceneView(const short rotation[3][3], const int translation[3], int scree
         }
         sc.trans[i] = (float)translation[i];
     }
+    sc.viewScale = length / 4096.0f;
     sc.screenZ = (float)screenZ;
     sc.centerX = (float)centerX;
     sc.centerY = (float)centerY;
@@ -765,6 +943,7 @@ void pcSceneDepth(const void* mainOt, int mainCount, const void* groundOt, int g
     sc.placeGiven = PC_SCENE_FIELD;
     sc.speakerZ = sc.speakerGiven; /* for this scene only too */
     sc.speakerGiven = 0;
+    if (sceneFootstepDust() && sceneParticles()) dustStep();
     /* The view is for this scene only: a scene registered without one is not lit. */
     sc.viewArmed = sc.viewGiven;
     sc.viewGiven = 0;
@@ -877,6 +1056,16 @@ static void finish(int reached) {
                    sc.scenes, p.light.top, p.light.shade, p.light.bounce, p.light.glow, p.light.fogMost, p.light.grade,
                    p.light.up[0], p.light.up[1], p.light.up[2], p.light.screenZ, p.light.figures);
         if (p.light.shafts > 0) gpuLog("scene: %u light shafts %.2f time %.2f", sc.scenes, p.light.shafts, p.light.shaftTime);
+        if (sceneFootstepDust() && sceneParticles())
+            gpuLog("scene: %u footstep dust %d puffs, %d feet, fastest %.4f, first %.0f %.0f %.0f, scale %.2f", sc.scenes,
+                   p.light.dustCount, dust.count, dust.fastest, dust.count ? dust.foot[0][0] : 0.0, dust.count ? dust.foot[0][1] : 0.0,
+                   dust.count ? dust.foot[0][2] : 0.0, sc.viewScale);
+        if (sceneFootstepDust() && p.light.dustCount > 0) {
+            const float* q = p.light.dust[0];
+            gpuLog("scene: %u puff 0 view %.0f %.0f %.0f age %.2f strength %.2f screen %.1f %.1f (centre %.0f %.0f, screenZ %.0f)",
+                   sc.scenes, q[0], q[1], q[2], q[3], q[4], q[2] > 0 ? q[0] * sc.screenZ / q[2] + sc.centerX : -1.0,
+                   q[2] > 0 ? q[1] * sc.screenZ / q[2] + sc.centerY : -1.0, sc.centerX, sc.centerY, sc.screenZ);
+        }
         if (p.light.clouds > 0)
             gpuLog("scene: %u cloud shadows %.2f size %.0f drift %.3f %.3f", sc.scenes, p.light.clouds, p.light.cloudSize,
                    p.light.cloudDrift[0], p.light.cloudDrift[1]);

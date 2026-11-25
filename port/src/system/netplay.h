@@ -7,15 +7,19 @@
  * lockstep queue are netplay_core.h.
  */
 
+#include "card/party.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 /* main(): "--netplay ..." taken off the arguments (1), none (0), or a usage
  * error (-1). Then netplayConnect, before hwInit: the handshake and the
- * session's start options; 0 when there is no session. */
+ * session's start options; 0 when there is no session. `disc`: the image
+ * the game will open (party vs party reads its character-code table: the
+ * names' check). */
 int netplayArgs(int* argc, char*** argv);
-int netplayConnect(void);
+int netplayConnect(const char* disc);
 int netplayActive(void);
 /* 1 (and a note) in a session: `what` would change this side's game alone
  * (options.c starts, gauntlet.c, arena.c, the cards). */
@@ -44,6 +48,9 @@ typedef struct {
     int table, config; /* ... this one (host); join: the formation chosen, if pick */
     int pick;          /* join: a formation chosen (for a host that lets player 2 choose) */
     int party[3];      /* host: the party (character ids, 255 none) */
+    int partyVsParty;  /* host: party vs party (each player's party from their own save) */
+    int hasParty;      /* this side's party record below (party vs party; the joiner's for such a host) */
+    XgPartyRecord record; /* ... (checked) */
 } NetplayStart;
 enum { NETPLAY_IDLE, NETPLAY_STARTING, NETPLAY_HOSTING, NETPLAY_JOINING, NETPLAY_CONNECTED, NETPLAY_OVER };
 
@@ -58,6 +65,10 @@ const char* netplaySessionDetail(void);
 int netplaySessionDelay(void);
 int netplaySessionPaused(void); /* the other player paused */
 int netplaySessionLost(void);   /* the connection is lost: the session waits for it (up to a minute) */
+/* Host, party vs party: a player's party was refused (1, with the reason,
+ * card/party.h XG_PARTY_*, and the member's character id or 255), the
+ * session waiting on for another; 0 none. */
+int netplaySessionRefusedParty(int* reason, int* member);
 void netplaySessionStop(void);
 /* The running game's story progress (field variable 0), for the host's Gears;
  * its party (a versus battle's: Fei and Citan when none). */

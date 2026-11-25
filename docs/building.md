@@ -104,6 +104,41 @@ the Windows installer and ZIP, the Linux tarball and the Ubuntu amd64
 `.deb` once their payload audits pass. The tarball and Windows packages
 include both engines. The `.deb` includes Original.
 
+## Updates
+
+Release packages can check for a new release. The first start asks whether
+to check; F1 > System > Updates changes the answer, and `update_check=off`
+in `settings.ini` turns the check off. A check runs at most once a day and
+fetches two small files from the GitHub releases: the update list and its
+signature. The request carries nothing about you or your copy, and a list
+whose signature does not verify is ignored. On Linux the check uses the
+system's libcurl (`libcurl.so.4`); without it there is no check.
+
+When a new release is out, F1 > System > Updates offers it. The Windows
+installer and ZIP copies, the Linux tarball and the Android app install it
+themselves (Install and restart). The `.deb`, Arch and Gentoo packages only
+say that it is out; update them with the package manager. Save state slots
+from a release that checks for updates load in the other such releases, older
+and newer; a slot marked "This version only" loads only in the release that
+made it.
+
+### APT repository
+
+The releases are also an APT repository for the `.deb`, so `apt upgrade`
+keeps the port up to date:
+
+```bash
+sudo install -d /etc/apt/keyrings
+sudo curl -fsSLo /etc/apt/keyrings/xenogears-pc-archive-keyring.asc \
+    https://github.com/EtherAura/xenogears-pc/releases/latest/download/xenogears-pc-archive-keyring.asc
+echo 'deb [signed-by=/etc/apt/keyrings/xenogears-pc-archive-keyring.asc] https://github.com/EtherAura/xenogears-pc/releases/latest/download/ ./' \
+    | sudo tee /etc/apt/sources.list.d/xenogears-pc.list
+sudo apt update && sudo apt install xenogears-pc
+```
+
+`gpg --show-keys /etc/apt/keyrings/xenogears-pc-archive-keyring.asc` shows
+the key; its fingerprint is `98D8 FE73 4486 2E22 A6CC 4BD1 F8DB C452 62B8 B7A6`.
+
 ## Building without a disc
 
 A release's Linux and Windows executables can be rebuilt on a machine that

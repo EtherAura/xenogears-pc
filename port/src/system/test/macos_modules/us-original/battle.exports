@@ -204,6 +204,7 @@ pcVersusChoosing
 pcVersusLastResult
 pcVersusMirrorSlot
 pcVersusMirrorSprites
+pcVersusPartyFiles
 pcVersusRandom
 performAttackSub2
 playBattleSoundFileAndWait

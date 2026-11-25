@@ -179,7 +179,7 @@ void createFxModelShatter(sCustomPolySubBuffer* model, u8* prims, MATRIX* m, s32
     size = getCustomPolySubBufferSize(model);
     sub = model;
     if (prims == NULL) {
-        buf = allocateHeap(size * 2, 0);
+        buf = allocateHeap(PC_HEAP_OF(PC_PRIMS, size * 2), 0);
         copyCustomPolySubBuffer(sub, buf, 0, 1);
         memcpy(buf + size, buf, size);
     } else {

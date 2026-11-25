@@ -139,7 +139,7 @@ int pcArenaAbort(void) {
 static s32 versus;  /* PC_VERSUS_IDLE, LEAVING or IN */
 static s32 versusTable;
 static s32 versusConfig;
-static s32 versusMirror; /* a mirror match (port/src/game/battle/mirror.c) */
+static s32 versusMirror; /* a mirror match or party vs party (VERSUS_KIND_*: port/src/game/battle/mirror.c), 0 not */
 static GameState versusState;
 #if !VERSION_JP
 static s32 versusOnGear[3];
@@ -161,7 +161,11 @@ int pcVersusConfig(void) {
 }
 
 int pcVersusMirror(void) {
-    return versus == PC_VERSUS_IN && versusMirror;
+    return versus == PC_VERSUS_IN && versusMirror != 0;
+}
+
+int pcVersusPartyMatch(void) {
+    return versus == PC_VERSUS_IN && versusMirror == VERSUS_KIND_PARTY;
 }
 
 /* The field takes the request: it starts the battle now. */

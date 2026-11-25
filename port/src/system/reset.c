@@ -21,6 +21,7 @@
 void portClearModuleBss(const char* name);
 void portStartPrepare(void); /* options.c: a start the extras asked for (its disc) */
 void pcArenaSoftReset(void) __attribute__((weak)); /* arena.c: a Battle arena match starts again (its disc) */
+void transitionSpeedReset(void) __attribute__((weak)); /* fieldspeed.c: Speedup transitions' marks */
 
 void portSoftReset(void) {
     regionalMovieEnd();
@@ -30,5 +31,8 @@ void portSoftReset(void) {
     portStartPrepare();
     if (pcArenaSoftReset != NULL) {
         pcArenaSoftReset();
+    }
+    if (transitionSpeedReset != NULL) {
+        transitionSpeedReset(); /* a reset inside a marked transition never reaches the game's end of it */
     }
 }

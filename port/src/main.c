@@ -178,6 +178,9 @@ int xenogearsMain(int argc, char** argv) {
 #else
 int main(int argc, char** argv) {
 #endif
+#ifdef _WIN32
+    win32AttachConsole(); /* a GUI program: the log to a terminal it was started from */
+#endif
 #if defined(XG_PIE) && defined(__linux__) && !defined(__ANDROID__)
     fixedAddresses(argv);
 #endif
@@ -229,7 +232,7 @@ int main(int argc, char** argv) {
     const char* savedDisc = settingsGet("disc");
     setup |= argc == 1 && (savedDisc == NULL || savedDisc[0] == 0) && cdSetupInteractive();
     const char* disc = argc > 1 ? argv[1] : defaultDisc();
-    if (netplay && !netplayConnect()) { /* the handshake; the session's options before hwInit reads them */
+    if (netplay && !netplayConnect(disc)) { /* the handshake; the session's options before hwInit reads them */
         return 1;
     }
 

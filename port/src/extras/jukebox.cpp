@@ -89,6 +89,7 @@ extern "C" {
 #include "disc.h"
 #include "files.h"
 #include "jukebox.h"
+#include "audiotap.h"
 #include "system/settings.h"
 #include "tables.h"
 #include "writers.h"
@@ -707,12 +708,8 @@ SDL_AudioStream* stream() {
     if (!S->streamTried) {
         S->streamTried = true;
         SDL_AudioSpec spec = {SDL_AUDIO_S16, 2, XG_JB_RATE};
-        if (SDL_WasInit(SDL_INIT_AUDIO) || SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-            S->stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
-        }
-        if (S->stream != nullptr) {
-            SDL_ResumeAudioStreamDevice(S->stream);
-        } else {
+        S->stream = xgTapOpen(&spec); // the device's, or a recording's (audiotap.h)
+        if (S->stream == nullptr) {
             fprintf(stderr, "extras: jukebox: no audio device: %s\n", SDL_GetError());
         }
     }
@@ -1806,7 +1803,7 @@ void releaseResources() {
         S->job.manifestPath.clear();
     }
     if (S->stream != nullptr) {
-        SDL_DestroyAudioStream(S->stream);
+        xgTapClose(S->stream);
     }
     xgJbDestroy(S->player);
     xgJbDestroy(S->meter);

@@ -1040,14 +1040,70 @@ static u16 readKeyboard(void) {
  * stick's up/down into zoom: up closer, down out. L2 still reaches the game (L2 + R2
  * together boards the Gear, as before). */
 static struct { float turn, tilt, zoom; int recenter; } camIn;
-/* A right stick (x right, y down, -1..1) past its dead zone, added to the camera's input. */
+/* The camera's settings (xenogears-pc #5; pad.h), each read again when a setting changes:
+ *   camera_invert_x=0, camera_invert_y=0  1: the right stick (a gamepad's, the touch pad's) and
+ *       first-person mouse look turn (x) or tilt (y) the other way. The J/L and I/K keys keep
+ *       their directions and L2's zoom keeps its.
+ *   camera_turn_speed=100, camera_tilt_speed=100  percent of the turn and tilt speeds (25..300),
+ *       for the stick, the keys and first-person mouse look.
+ *   camera_stick_deadzone=20  percent of a gamepad's right stick that does nothing (0..60; the
+ *       touch pad's stick keeps its own 12).
+ * XG_CAMERA_SCRIPT's input takes none of them, so a recorded camera plays as recorded. */
+static struct { int valid; unsigned revision; int invertX, invertY, turn, tilt, deadzone; } camSet;
+static int clampPercent(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+static void loadCameraSettings(void) {
+    if (camSet.valid && camSet.revision == settingsRevision()) return;
+    camSet.invertX = settingsBool("camera_invert_x", 0);
+    camSet.invertY = settingsBool("camera_invert_y", 0);
+    camSet.turn = clampPercent(settingsInt("camera_turn_speed", 100), 25, 300);
+    camSet.tilt = clampPercent(settingsInt("camera_tilt_speed", 100), 25, 300);
+    camSet.deadzone = clampPercent(settingsInt("camera_stick_deadzone", 20), 0, 60);
+    camSet.revision = settingsRevision();
+    camSet.valid = 1;
+}
+/* For this run and the file's next write: the menu saves (a slider once let go). */
+static void setCameraSetting(const char* key, int value, const char* about) {
+    settingsDescribe(key, about);
+    settingsSetInt(key, value);
+}
+int padCameraInvertX(void) { loadCameraSettings(); return camSet.invertX; }
+int padCameraInvertY(void) { loadCameraSettings(); return camSet.invertY; }
+int padCameraTurnSpeed(void) { loadCameraSettings(); return camSet.turn; }
+int padCameraTiltSpeed(void) { loadCameraSettings(); return camSet.tilt; }
+int padCameraDeadzone(void) { loadCameraSettings(); return camSet.deadzone; }
+void padSetCameraInvertX(int on) {
+    setCameraSetting("camera_invert_x", on != 0, "camera_invert_x: 1: the right stick and first-person mouse look turn the camera the other way");
+}
+void padSetCameraInvertY(int on) {
+    setCameraSetting("camera_invert_y", on != 0, "camera_invert_y: 1: the right stick and first-person mouse look tilt the camera the other way");
+}
+void padSetCameraTurnSpeed(int percent) {
+    setCameraSetting("camera_turn_speed", clampPercent(percent, 25, 300), "camera_turn_speed: the camera's turning speed in percent (25..300, default 100)");
+}
+void padSetCameraTiltSpeed(int percent) {
+    setCameraSetting("camera_tilt_speed", clampPercent(percent, 25, 300), "camera_tilt_speed: the camera's tilting speed in percent (25..300, default 100)");
+}
+void padSetCameraDeadzone(int percent) {
+    setCameraSetting("camera_stick_deadzone", clampPercent(percent, 0, 60), "camera_stick_deadzone: the right stick's dead zone for the camera in percent (0..60, default 20)");
+}
+void padCameraMouse(float* dx, float* dy) {
+    loadCameraSettings();
+    *dx *= (camSet.invertX ? -1 : 1) * camSet.turn / 100.0f;
+    *dy *= (camSet.invertY ? -1 : 1) * camSet.tilt / 100.0f;
+}
+/* A right stick (x right, y down, -1..1) past its dead zone, added to the camera's input;
+ * camera_invert_x and camera_invert_y flip its turn and tilt (not L2's zoom). */
 static void cameraStick(float x, float y, float dead, int zoomHeld, float* turn, float* tilt, float* zoom) {
-    if (x > dead || x < -dead) *turn += (x - (x > 0 ? dead : -dead)) / (1 - dead);
+    if (x > dead || x < -dead) {
+        float v = (x - (x > 0 ? dead : -dead)) / (1 - dead);
+        *turn += camSet.invertX ? -v : v;
+    }
     if (y > dead || y < -dead) {
         float v = (y - (y > 0 ? dead : -dead)) / (1 - dead);
-        if (zoomHeld) *zoom += v; else *tilt -= v;
+        if (zoomHeld) *zoom += v; else *tilt -= camSet.invertY ? -v : v;
     }
 }
+static float clampUnit(float v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 static int keyBound(SDL_Scancode key) {
     loadBindings();
     for (int i = 0; i < PAD_BUTTONS; i++)
@@ -1098,13 +1154,15 @@ static const struct CameraLine* cameraScriptAt(int64_t vsync) {
 }
 static void sampleCamera(int live, u16 held) {
     float turn = 0, tilt = 0, zoom = 0; int rc = 0;
+    float scriptTurn = 0, scriptTilt = 0, scriptZoom = 0;
     loadCameraScript();
+    loadCameraSettings();
     if (cameraScriptCount > 0) {
         const struct CameraLine* c = cameraScriptAt((int64_t)hwVSyncCount());
         if (c != NULL) {
-            turn += c->turn;
-            tilt += c->tilt;
-            zoom += c->zoom;
+            scriptTurn = c->turn;
+            scriptTilt = c->tilt;
+            scriptZoom = c->zoom;
             rc |= c->recenter && c->vsync == (int64_t)hwVSyncCount();
         }
     }
@@ -1125,7 +1183,7 @@ static void sampleCamera(int live, u16 held) {
         if (gamepads[0] != NULL) {
             float x = SDL_GetGamepadAxis(gamepads[0], SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f;
             float y = SDL_GetGamepadAxis(gamepads[0], SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f;
-            cameraStick(x, y, 0.2f, zoomHeld, &turn, &tilt, &zoom);
+            cameraStick(x, y, camSet.deadzone / 100.0f, zoomHeld, &turn, &tilt, &zoom);
             rc |= SDL_GetGamepadButton(gamepads[0], SDL_GAMEPAD_BUTTON_RIGHT_STICK);
         }
         float tx, ty;
@@ -1135,9 +1193,10 @@ static void sampleCamera(int live, u16 held) {
             rc |= back;
         }
     }
-    camIn.turn = turn < -1 ? -1 : turn > 1 ? 1 : turn;
-    camIn.tilt = tilt < -1 ? -1 : tilt > 1 ? 1 : tilt;
-    camIn.zoom = zoom < -1 ? -1 : zoom > 1 ? 1 : zoom;
+    /* the player's input at the chosen speeds, the script's as it was recorded */
+    camIn.turn = clampUnit(turn) * (camSet.turn / 100.0f) + clampUnit(scriptTurn);
+    camIn.tilt = clampUnit(tilt) * (camSet.tilt / 100.0f) + clampUnit(scriptTilt);
+    camIn.zoom = clampUnit(zoom + scriptZoom);
 #if XG_ENGINE_ENHANCED
     static int chordHeld;
     int chord = (held & (BTN_L2 | BTN_L3)) == (BTN_L2 | BTN_L3);
