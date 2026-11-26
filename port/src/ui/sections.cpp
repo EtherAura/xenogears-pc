@@ -856,250 +856,6 @@ void displaySection() {
         overrideNote("upscale_color");
     }
 
-    // The first piece of the HD-2D-style look (port/src/gpu/scene.c): the
-    // Enhanced engine's fields only.
-    // The reasons the scene effects give when they show nothing (port/src/gpu/scene.c),
-    // named here for the catalogs (tools/l10n.py reads the UI's sources); hint() shows
-    // them through tr().
-    static const char* const sceneReasons[] = {
-        N_("no focus point in this view"), N_("a movie-backed scene"), N_("no frame"), N_("no display copy yet"),
-        N_("not available on this device, or without memory for it"),
-        N_("the game gave no view for this scene"), N_("being prepared (shaders compiling)")};
-    (void)sceneReasons;
-    if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
-        // "Subtle", not "Light": the catalogs have no contexts and "Light" is the model viewer's lamp.
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneDof();
-        int chosen = listChoice("##depth_of_field", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetDof(chosen);
-        hint("In fields, battles and on the world map, scenery and characters behind and in front of the party "
-             "soften. Dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by "
-             "default.");
-        if (sceneDofStatus() != nullptr) hint("Not shown now: %s.", tr(sceneDofStatus()));
-        overrideNote("depth_of_field");
-    }
-    if (row("Focus range", "depth_of_field_focus", opt::ENHANCED)) {
-        static const char* const ranges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
-        ImGui::BeginDisabled(sceneDof() == 0);
-        int range = sceneDofFocus();
-        int chosen = listChoice("##depth_of_field_focus", ranges, IM_COUNTOF(ranges), range);
-        ImGui::EndDisabled();
-        if (chosen != range) sceneSetDofFocus(chosen);
-        hint("How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far "
-             "behind or close to the camera.");
-        overrideNote("depth_of_field_focus");
-    }
-    // Dialogue focus (xg-rgcf.5.18): part of the depth of field.
-    if (row("Dialogue focus", "depth_of_field_dialogue", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneDof() == 0);
-        bool on = sceneDofDialogue() != 0;
-        if (offOnList("##depth_of_field_dialogue", &on)) sceneSetDofDialogue(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("In fields, while someone speaks the focus moves to them and the room around them softens a little "
-             "more, easing in and back out over half a second. On by default, with Depth of field.");
-        overrideNote("depth_of_field_dialogue");
-    }
-    // The tilt-shift (xg-rgcf.5.14): made with the depth of field, the larger blur of the two.
-    if (row("Tilt-shift", "tilt_shift", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneTiltShift();
-        int chosen = listChoice("##tilt_shift", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetTiltShift(chosen);
-        hint("In fields and on the world map, the picture blurs toward its edges, faintly at first and most at the "
-             "edge, the miniature look. With Depth of field on too, the stronger blur of the two shows. Dialogue, "
-             "portraits and the HUD stay sharp. Off by default.");
-        overrideNote("tilt_shift");
-    }
-    // Scene lighting (docs/PORT_HD2D.md section 15): Lighting is the top
-    // light, the shade and the bounce light together; Glow is the glow.
-    if (row("Lighting", "lighting", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneLighting();
-        int chosen = listChoice("##lighting", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetLighting(chosen);
-        hint("In fields, battles and on the world map, the scenery gets light from above, shade in corners and under "
-             "overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not "
-             "touched, and the PS1 picture itself is not changed. Off by default.");
-        if ((sceneLighting() || sceneGlow()) && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("lighting");
-    }
-    // Flickering firelight (xg-rgcf.5.20): part of Lighting and Glow.
-    if (row("Firelight flicker", "lighting_firelight", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneLighting() == 0 && sceneGlow() == 0);
-        bool on = sceneFirelight() != 0;
-        if (offOnList("##lighting_firelight", &on)) sceneSetFirelight(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is "
-             "around them and their glow rise and fall, each fire in its own rhythm, and they keep their painted "
-             "brightness under the lighting's shade. Windows, the sky and white or blue lights stay steady. On by "
-             "default, with Lighting or Glow.");
-        overrideNote("lighting_firelight");
-    }
-    // The characters in the light (xg-rgcf.5.19): part of Lighting.
-    if (row("Light on characters", "lighting_characters", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneLighting() == 0);
-        bool on = sceneLightCharacters() != 0;
-        if (offOnList("##lighting_characters", &on)) sceneSetLightCharacters(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("The characters take the lighting too: brighter on the side toward the sun with a thin warm edge there, "
-             "darker on the far side, shade at their feet in corners, and a glow from what is near white. On by "
-             "default, with Lighting.");
-        overrideNote("lighting_characters");
-    }
-    if (row("Glow", "glow", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneGlow();
-        int chosen = listChoice("##glow", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetGlow(chosen);
-        hint("In fields, battles and on the world map, bright areas such as lamps, fires and windows glow softly. Off by "
-             "default.");
-        overrideNote("glow");
-    }
-    // Shadows (docs/PORT_HD2D.md section 20): a sun set per room.
-    if (row("Shadows", "shadows", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneShadows();
-        int chosen = listChoice("##shadows", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetShadows(chosen);
-        hint("In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, "
-             "and the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by "
-             "default.");
-        if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("shadows");
-    }
-    // Fog and the colour grade (docs/PORT_HD2D.md section 27), made with the lighting.
-    if (row("Fog", "fog", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneFog();
-        int chosen = listChoice("##fog", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetFog(chosen);
-        hint("In fields, battles and on the world map, a haze that thickens past the characters, in the colour of the "
-             "farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by "
-             "default.");
-        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("fog");
-    }
-    if (row("Colour grade", "color_grade", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneGrade();
-        int chosen = listChoice("##color_grade", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetGrade(chosen);
-        hint("In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch "
-             "more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default.");
-        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("color_grade");
-    }
-    // The colour grade adapting to the area (xg-rgcf.5.22): part of Colour grade.
-    if (row("Adapt to the area", "color_grade_area", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneGrade() == 0);
-        bool on = sceneGradeArea() != 0;
-        if (offOnList("##color_grade_area", &on)) sceneSetGradeArea(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("The colour grade also leans gently into each place's own colour: a sandy place a little warmer, a green "
-             "one a little greener, a dark one a little bluer in its shadows. Dialogue, portraits and the HUD are not "
-             "touched. On by default, with Colour grade.");
-        overrideNote("color_grade_area");
-    }
-    // Ambient particles (docs/PORT_HD2D.md section 33), drawn after the depth of field.
-    if (row("Particles", "particles", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneParticles();
-        int chosen = listChoice("##particles", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetParticles(chosen);
-        hint("In fields, battles and on the world map, fine dust drifting where the place is lit, and warm embers where "
-             "it is dark. Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("particles");
-    }
-    if (row("Particle size", "particle_size", opt::ENHANCED)) {
-        static const char* const sizes[] = {N_("Small"), N_("Medium"), N_("Large")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED || sceneParticles() == 0);
-        int size = sceneParticleSize();
-        int chosen = listChoice("##particle_size", sizes, IM_COUNTOF(sizes), size);
-        ImGui::EndDisabled();
-        if (chosen != size) sceneSetParticleSize(chosen);
-        hint("How big the particles are. Small by default.");
-        overrideNote("particle_size");
-    }
-    // Footstep dust (xg-rgcf.5.23): part of Particles.
-    if (row("Footstep dust", "particles_footsteps", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneParticles() == 0);
-        bool on = sceneFootstepDust() != 0;
-        if (offOnList("##particles_footsteps", &on)) sceneSetFootstepDust(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("Characters kick up a little dust where they walk on sand, dirt or a dusty floor, more when they run, a "
-             "step paler than the ground, lingering a moment. On by default, with Particles.");
-        overrideNote("particles_footsteps");
-    }
-    // The vignette (xg-rgcf.5.13), on the shown colour with the colour grade.
-    if (row("Vignette", "vignette", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneVignette();
-        int chosen = listChoice("##vignette", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetVignette(chosen);
-        hint("In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the "
-             "middle. Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("vignette");
-    }
-    // Light shafts (xg-rgcf.5.16), on the shown colour after the colour grade.
-    if (row("Light shafts", "light_shafts", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneLightShafts();
-        int chosen = listChoice("##light_shafts", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetLightShafts(chosen);
-        hint("In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft "
-             "sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("light_shafts");
-    }
-    // Sun glare (xg-rgcf.5.24).
-    if (row("Sun glare", "sun_glare", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneSunGlare();
-        int chosen = listChoice("##sun_glare", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetSunGlare(chosen);
-        hint("On the world map and in fields outdoors by day, a soft warm glow spills in from the sun's side of the "
-             "picture, with a few faint lens rings across it, where sky or far scenery shows that way. Dialogue, "
-             "portraits and the HUD are not touched. Off by default.");
-        overrideNote("sun_glare");
-    }
-    // Cloud shadows (xg-rgcf.5.17), with the cast shadows in the composite.
-    if (row("Cloud shadows", "cloud_shadows", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneCloudShadows();
-        int chosen = listChoice("##cloud_shadows", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetCloudShadows(chosen);
-        hint("On the world map and in fields outdoors, the soft shadows of clouds drift slowly over the ground. "
-             "Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("cloud_shadows");
-    }
-
     if (row("Filter", "present_filter")) {
         static const char* const filters[] = {"Nearest", "Linear", "Sharp", "Bicubic", "xBR (edges)"};
         static const char* const filterHints[] = {
@@ -1330,6 +1086,247 @@ void displaySection() {
     }
 
     shaderPresetRows(); // shaders.cpp: Shader, Movie shader and their parameters
+
+    opt::endPage();
+}
+
+// ---- Effects (HD-2D scene lighting, depth of field and atmosphere: gpu/scene.c) --------
+
+void effectsSection() {
+    opt::beginPage("effects", EFFECTS);
+
+    // The reasons the scene effects give when they show nothing (port/src/gpu/scene.c),
+    // named here for the catalogs (tools/l10n.py reads the UI's sources); hint() shows
+    // them through tr().
+    static const char* const sceneReasons[] = {
+        N_("no focus point in this view"), N_("a movie-backed scene"), N_("no frame"), N_("no display copy yet"),
+        N_("not available on this device, or without memory for it"),
+        N_("the game gave no view for this scene"), N_("being prepared (shaders compiling)")};
+    (void)sceneReasons;
+
+    opt::group(N_("Depth of field"));
+    if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
+        // "Subtle", not "Light": the catalogs have no contexts and "Light" is the model viewer's lamp.
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneDof();
+        int chosen = listChoice("##depth_of_field", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetDof(chosen);
+        hint("In fields, battles and on the world map, scenery and characters behind and in front of the party "
+             "soften. Dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by "
+             "default.");
+        if (sceneDofStatus() != nullptr) hint("Not shown now: %s.", tr(sceneDofStatus()));
+        overrideNote("depth_of_field");
+    }
+    if (row("Focus range", "depth_of_field_focus", opt::ENHANCED)) {
+        static const char* const ranges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
+        ImGui::BeginDisabled(sceneDof() == 0);
+        int range = sceneDofFocus();
+        int chosen = listChoice("##depth_of_field_focus", ranges, IM_COUNTOF(ranges), range);
+        ImGui::EndDisabled();
+        if (chosen != range) sceneSetDofFocus(chosen);
+        hint("How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far "
+             "behind or close to the camera.");
+        overrideNote("depth_of_field_focus");
+    }
+    if (row("Dialogue focus", "depth_of_field_dialogue", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneDof() == 0);
+        bool on = sceneDofDialogue() != 0;
+        if (offOnList("##depth_of_field_dialogue", &on)) sceneSetDofDialogue(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("In fields, while someone speaks the focus moves to them and the room around them softens a little "
+             "more, easing in and back out over half a second. On by default, with Depth of field.");
+        overrideNote("depth_of_field_dialogue");
+    }
+    if (row("Tilt-shift", "tilt_shift", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneTiltShift();
+        int chosen = listChoice("##tilt_shift", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetTiltShift(chosen);
+        hint("In fields and on the world map, the picture blurs toward its edges, faintly at first and most at the "
+             "edge, the miniature look. With Depth of field on too, the stronger blur of the two shows. Dialogue, "
+             "portraits and the HUD stay sharp. Off by default.");
+        overrideNote("tilt_shift");
+    }
+
+    opt::group(N_("Lighting and shadows"));
+    if (row("Lighting", "lighting", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneLighting();
+        int chosen = listChoice("##lighting", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetLighting(chosen);
+        hint("In fields, battles and on the world map, the scenery gets light from above, shade in corners and under "
+             "overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not "
+             "touched, and the PS1 picture itself is not changed. Off by default.");
+        if ((sceneLighting() || sceneGlow()) && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        overrideNote("lighting");
+    }
+    if (row("Firelight flicker", "lighting_firelight", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneLighting() == 0 && sceneGlow() == 0);
+        bool on = sceneFirelight() != 0;
+        if (offOnList("##lighting_firelight", &on)) sceneSetFirelight(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is "
+             "around them and their glow rise and fall, each fire in its own rhythm, and they keep their painted "
+             "brightness under the lighting's shade. Windows, the sky and white or blue lights stay steady. On by "
+             "default, with Lighting or Glow.");
+        overrideNote("lighting_firelight");
+    }
+    if (row("Light on characters", "lighting_characters", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneLighting() == 0);
+        bool on = sceneLightCharacters() != 0;
+        if (offOnList("##lighting_characters", &on)) sceneSetLightCharacters(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("The characters take the lighting too: brighter on the side toward the sun with a thin warm edge there, "
+             "darker on the far side, shade at their feet in corners, and a glow from what is near white. On by "
+             "default, with Lighting.");
+        overrideNote("lighting_characters");
+    }
+    if (row("Glow", "glow", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneGlow();
+        int chosen = listChoice("##glow", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetGlow(chosen);
+        hint("In fields, battles and on the world map, bright areas such as lamps, fires and windows glow softly. Off by "
+             "default.");
+        overrideNote("glow");
+    }
+    if (row("Shadows", "shadows", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneShadows();
+        int chosen = listChoice("##shadows", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetShadows(chosen);
+        hint("In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, "
+             "and the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by "
+             "default.");
+        if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        overrideNote("shadows");
+    }
+    if (row("Cloud shadows", "cloud_shadows", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneCloudShadows();
+        int chosen = listChoice("##cloud_shadows", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetCloudShadows(chosen);
+        hint("On the world map and in fields outdoors, the soft shadows of clouds drift slowly over the ground. "
+             "Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("cloud_shadows");
+    }
+    if (row("Light shafts", "light_shafts", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneLightShafts();
+        int chosen = listChoice("##light_shafts", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetLightShafts(chosen);
+        hint("In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft "
+             "sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("light_shafts");
+    }
+    if (row("Sun glare", "sun_glare", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneSunGlare();
+        int chosen = listChoice("##sun_glare", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetSunGlare(chosen);
+        hint("On the world map and in fields outdoors by day, a soft warm glow spills in from the sun's side of the "
+             "picture, with a few faint lens rings across it, where sky or far scenery shows that way. Dialogue, "
+             "portraits and the HUD are not touched. Off by default.");
+        overrideNote("sun_glare");
+    }
+
+    opt::group(N_("Atmosphere and colour"));
+    if (row("Fog", "fog", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneFog();
+        int chosen = listChoice("##fog", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetFog(chosen);
+        hint("In fields, battles and on the world map, a haze that thickens past the characters, in the colour of the "
+             "farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by "
+             "default.");
+        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        overrideNote("fog");
+    }
+    if (row("Colour grade", "color_grade", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneGrade();
+        int chosen = listChoice("##color_grade", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetGrade(chosen);
+        hint("In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch "
+             "more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default.");
+        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && sceneLightingStatus() != nullptr)
+            hint("Not shown now: %s.", tr(sceneLightingStatus()));
+        overrideNote("color_grade");
+    }
+    if (row("Adapt to the area", "color_grade_area", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneGrade() == 0);
+        bool on = sceneGradeArea() != 0;
+        if (offOnList("##color_grade_area", &on)) sceneSetGradeArea(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("The colour grade also leans gently into each place's own colour: a sandy place a little warmer, a green "
+             "one a little greener, a dark one a little bluer in its shadows. Dialogue, portraits and the HUD are not "
+             "touched. On by default, with Colour grade.");
+        overrideNote("color_grade_area");
+    }
+    if (row("Vignette", "vignette", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneVignette();
+        int chosen = listChoice("##vignette", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetVignette(chosen);
+        hint("In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the "
+             "middle. Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("vignette");
+    }
+    if (row("Particles", "particles", opt::ENHANCED)) {
+        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+        int level = sceneParticles();
+        int chosen = listChoice("##particles", levels, IM_COUNTOF(levels), level);
+        ImGui::EndDisabled();
+        if (chosen != level) sceneSetParticles(chosen);
+        hint("In fields, battles and on the world map, fine dust drifting where the place is lit, and warm embers where "
+             "it is dark. Dialogue, portraits and the HUD are not touched. Off by default.");
+        overrideNote("particles");
+    }
+    if (row("Particle size", "particle_size", opt::ENHANCED)) {
+        static const char* const sizes[] = {N_("Small"), N_("Medium"), N_("Large")};
+        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED || sceneParticles() == 0);
+        int size = sceneParticleSize();
+        int chosen = listChoice("##particle_size", sizes, IM_COUNTOF(sizes), size);
+        ImGui::EndDisabled();
+        if (chosen != size) sceneSetParticleSize(chosen);
+        hint("How big the particles are. Small by default.");
+        overrideNote("particle_size");
+    }
+    if (row("Footstep dust", "particles_footsteps", opt::ENHANCED)) {
+        ImGui::BeginDisabled(sceneParticles() == 0);
+        bool on = sceneFootstepDust() != 0;
+        if (offOnList("##particles_footsteps", &on)) sceneSetFootstepDust(on ? 1 : 0);
+        ImGui::EndDisabled();
+        hint("Characters kick up a little dust where they walk on sand, dirt or a dusty floor, more when they run, a "
+             "step paler than the ground, lingering a moment. On by default, with Particles.");
+        overrideNote("particles_footsteps");
+    }
 
     opt::endPage();
 }
@@ -1760,49 +1757,6 @@ void audioSection() {
         japaneseDiscsNote(movies, japanese1, japanese2);
         overrideNote("japanese_cutscene_audio");
     }
-    bool captionText = regionalCaptionsAvailable() != 0;
-    if (row("Subtitles", "cutscene_subtitles")) {
-        bool packText = gameTextPackHasMovies() != 0;
-        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation", "Text pack"};
-        int captions = regionalSubtitlesEnabled();
-        if (!captionText) subtitleTracks[1] = "Text pack";
-        int shown = !captionText && captions == REGIONAL_PACK_SUBTITLES ? 1 : captions;
-        ImGui::BeginDisabled(!captionText && !packText && !captions);
-        int count = captionText ? (packText ? 4 : 3) : (packText ? 2 : 1);
-        int picked = choice("subtitles", subtitleTracks, count, shown);
-        ImGui::EndDisabled();
-        if (picked != shown) regionalSetSubtitles(!captionText && picked == 1 ? REGIONAL_PACK_SUBTITLES : picked);
-        if (packText) hint("Text pack uses the movie captions supplied by the active dialogue pack.");
-        else if (captionText) hint("Independent of audio language. Uses the in-game dialogue font.");
-        else hint("Choose a text pack with movie captions to subtitle cutscenes in this build.");
-        overrideNote("cutscene_subtitles");
-    }
-    if (captionText && row("Sound captions", "cutscene_sound_captions")) {
-        const char* levels[] = {"Off", "Voices", "All sounds"};
-        int level = regionalSoundCaptions();
-        int levelChoice = choice("soundcaptions", levels, 3, level);
-        if (levelChoice != level) regionalSetSoundCaptions(levelChoice);
-        hint("With subtitles on, also captions sounds, for players who can't hear them: Voices such as [screams], or "
-             "all sounds such as [explosion] too.");
-        overrideNote("cutscene_sound_captions");
-    }
-    if (captionText && row("Song lyrics", "cutscene_lyrics")) {
-        const char* offOn[] = {"Off", "On"};
-        int lyrics = regionalLyrics();
-        int lyricsChoice = choice("lyrics", offOn, 2, lyrics);
-        if (lyricsChoice != lyrics) regionalSetLyrics(lyricsChoice);
-        hint("With subtitles on, shows the words of the songs in the movies.");
-        overrideNote("cutscene_lyrics");
-    }
-    if (captionText && row("Invented language", "cutscene_invented_language")) {
-        const char* spellings[] = {"Script spelling", "As spoken"};
-        int spoken = regionalInventedSpoken();
-        int spokenChoice = choice("invented", spellings, 2, spoken);
-        if (spokenChoice != spoken) regionalSetInventedSpoken(spokenChoice);
-        hint("Lines in the game's invented language: as the English script spells them, or as the Japanese voice "
-             "says them (Japanese translation track).");
-        overrideNote("cutscene_invented_language");
-    }
     for (int disc = 1; disc <= 2; ++disc) {
         if (!row(disc == 1 ? "Japanese Disc 1" : "Japanese Disc 2", disc == 1 ? "japanese_disc1" : "japanese_disc2")) {
             continue;
@@ -2018,19 +1972,26 @@ bool touchRowsWanted() {
 }
 
 // Controls > Touch pad (system/touch.h): when it shows, its controls, how
-// strong and how large. The pad shows over the menu while it shows over the
-// game (menu.cpp frame()); while one of these rows is being changed (and a
-// moment after) it is drawn even when it does not (off, or hidden by a
-// controller), so a size or an opacity is chosen by eye.
+// strong and how large. Placed at the bottom of Controls (collapsed while Off);
+// Layout and Look are disabled while Off, and the preview over the menu draws
+// only while Touch pad is enabled and one of those rows is actively being changed.
+bool touchKeptOpen;
+
 void touchRows() {
     static int previewUntil;
     bool preview = false;
-    opt::group(N_("Touch pad"));
+    bool off = touchMode() == 0;
+    if (!off) touchKeptOpen = true;
+    opt::group(N_("Touch pad"), !touchKeptOpen && off ? opt::COLLAPSED : 0);
     if (row("Touch pad", "touch_pad")) {
         static const char* const modes[] = {N_("Off"), N_("On"), N_("Automatic")};
         int m = touchMode();
         int chosen = choice("touch_pad", modes, 3, m);
-        if (chosen != m) touchSetMode(chosen);
+        if (chosen != m) {
+            touchSetMode(chosen);
+            touchKeptOpen = true;
+            off = chosen == 0;
+        }
         hint("Automatic: shown from your first touch until you use a controller or a keyboard. The menu button "
              "opens this menu, the four squares the hotkeys' row (save and load states, the disc, the picture). "
              "Back opens and leaves the menu.");
@@ -2038,27 +1999,36 @@ void touchRows() {
     if (row("Layout", "touch_pad_layout")) {
         static const char* const layouts[] = {N_("Buttons"), N_("Buttons and sticks")};
         int l = touchLayout();
+        ImGui::BeginDisabled(off);
         ImGui::BeginGroup();
         int chosen = choice("touch_pad_layout", layouts, 2, l);
         ImGui::EndGroup();
-        preview |= ImGui::IsItemHovered() || ImGui::IsItemActive();
-        if (chosen != l) {
+        ImGui::EndDisabled();
+        if (!off && chosen != l) {
             touchSetLayout(chosen);
             preview = true;
         }
         hint("Buttons and sticks adds a left stick, which moves as the D-pad does. In the Enhanced engine, with "
-             "the free camera or the first-person look turned on (Camera and vibration, below), a right stick "
+             "the free camera or the first-person look turned on (Camera), a right stick "
              "turns and tilts the camera and, with L2 held, zooms it; the button over the stick returns to the "
              "game's view, and the eye enters and leaves the first-person view.");
     }
     if (row("Look", "touch_pad_opacity touch_pad_size")) {
         int opacity = touchOpacityPercent(), size = touchSizePercent();
+        ImGui::BeginDisabled(off);
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##touch_opacity", &opacity, 10, 100, tr("Opacity: %d%%"))) touchSetOpacityPercent(opacity);
-        preview |= ImGui::IsItemHovered() || ImGui::IsItemActive() || ImGui::IsItemFocused();
+        if (ImGui::SliderInt("##touch_opacity", &opacity, 10, 100, tr("Opacity: %d%%"))) {
+            touchSetOpacityPercent(opacity);
+            preview = !off;
+        }
+        preview |= !off && ImGui::IsItemActive();
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##touch_size", &size, 60, 140, tr("Size: %d%%"))) touchSetSizePercent(size);
-        preview |= ImGui::IsItemHovered() || ImGui::IsItemActive() || ImGui::IsItemFocused();
+        if (ImGui::SliderInt("##touch_size", &size, 60, 140, tr("Size: %d%%"))) {
+            touchSetSizePercent(size);
+            preview = !off;
+        }
+        preview |= !off && ImGui::IsItemActive();
+        ImGui::EndDisabled();
         const ImVec2 screen = ImGui::GetIO().DisplaySize;
         int fitted = touchFittedSizePercent(screen.x, screen.y);
         if (fitted < touchSizePercent()) {
@@ -2068,8 +2038,12 @@ void touchRows() {
     }
     if (opt::indexing()) return;
     int frame = ImGui::GetFrameCount();
-    if (preview) previewUntil = frame + 75; // and a little over a second after
-    if (frame < previewUntil && !touchShown()) { // shown, menu.cpp frame() draws it
+    if (off) {
+        previewUntil = 0;
+    } else if (preview) {
+        previewUntil = frame + 75; // and a little over a second after
+    }
+    if (!off && frame < previewUntil && !touchShown()) { // shown, menu.cpp frame() draws it
         const ImVec2 screen = ImGui::GetIO().DisplaySize;
         touchpadDraw(ImGui::GetForegroundDrawList(), screen.x, screen.y);
     }
@@ -2077,7 +2051,6 @@ void touchRows() {
 
 void controlsSection() {
     opt::beginPage("controls", CONTROLS, true); // one column: the tables want the width
-    if (touchRowsWanted()) touchRows();
     opt::group(N_("Buttons"));
     if (row("Button convention", "jp_controls_us us_controls_jp")) {
         bool jp = padRegionalControls(0), us = padRegionalControls(1);
@@ -2193,69 +2166,7 @@ void controlsSection() {
         ImGui::EndDisabled();
     }
 
-    opt::group(N_("Camera and vibration"));
-    if (row("Free camera", "free_camera", opt::ENHANCED)) {
-        bool on = pcFreeCameraEnabled() != 0;
-        if (checkbox("Free camera in fields", &on)) pcFreeCameraSet(on);
-        hint("%s", tr("Enhanced engine. Turn and tilt the camera around the party with the right stick; hold L2 and move "
-                      "the stick up or down to zoom (keyboard: J/L turn, I/K tilt, U/O zoom). R3 or Home returns to the "
-                      "game's view. Scenes and rooms with a fixed camera keep the game's."));
-        if (touchRowsWanted()) hint("By touch: the touch pad's Buttons and sticks layout (Touch pad, above); its right stick is the camera's.");
-        overrideNote("free_camera");
-    }
-
-    if (row("First-person look", "first_person_look", opt::ENHANCED)) {
-        bool on = pcFirstPersonEnabled() != 0;
-        if (checkbox("Allow first-person look in fields and on the world map", &on)) pcFirstPersonSet(on);
-        hint("%s", tr("Press V or hold L2 and click L3 to enter or leave. Look with the right stick, I/J/K/L, or a right mouse drag."));
-        if (touchRowsWanted()) hint("By touch: the eye beside the touch pad's right stick (the Buttons and sticks layout).");
-        overrideNote("first_person_look");
-    }
-
-    if (row("First-person navigation", "first_person_navigation", opt::ENHANCED)) {
-        bool on = pcFirstPersonNavigation() != 0;
-        if (checkbox("Move in first-person view", &on)) pcFirstPersonNavigationSet(on);
-        hint("%s", tr("With first-person look enabled, move relative to the view. When navigation is off, moving leaves first-person view."));
-        overrideNote("first_person_navigation");
-    }
-
-    if (row("Camera stick", "camera_invert_x camera_invert_y camera_turn_speed camera_tilt_speed camera_stick_deadzone",
-            opt::ENHANCED)) {
-        bool invertX = padCameraInvertX() != 0, invertY = padCameraInvertY() != 0;
-        if (checkbox("Invert horizontal", &invertX)) {
-            padSetCameraInvertX(invertX);
-            settingsSave();
-        }
-        if (checkbox("Invert vertical", &invertY)) {
-            padSetCameraInvertY(invertY);
-            settingsSave();
-        }
-        hint("%s", tr("Invert the right stick's turning (horizontal) or tilting (vertical) for the free camera, the world "
-                      "map's camera and first-person look; a right mouse drag in first-person look follows. The keys "
-                      "and L2's zoom keep their directions."));
-        overrideNote("camera_invert_x");
-        overrideNote("camera_invert_y");
-        markBlock();
-        int turn = padCameraTurnSpeed(), tilt = padCameraTiltSpeed(), dead = padCameraDeadzone();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##camera_turn_speed", &turn, 25, 300, tr("Horizontal speed: %d%%"))) padSetCameraTurnSpeed(turn);
-        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##camera_tilt_speed", &tilt, 25, 300, tr("Vertical speed: %d%%"))) padSetCameraTiltSpeed(tilt);
-        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
-        hint("The camera's sensitivity: how fast the right stick, the camera keys and first-person mouse look turn it "
-             "(horizontal) and tilt it (vertical). Zoom keeps its speed. Default: 100%%.");
-        overrideNote("camera_turn_speed");
-        overrideNote("camera_tilt_speed");
-        markBlock();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##camera_stick_deadzone", &dead, 0, 60, tr("Right stick dead zone: %d%%"))) padSetCameraDeadzone(dead);
-        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
-        hint("How far the right stick must move before the camera does (the left stick's dead zone, under Stick and "
-             "mouse, is the D-pad's). Default: 20%%.");
-        overrideNote("camera_stick_deadzone");
-    }
-
+    opt::group(N_("Vibration"));
     if (row("Vibration", "vibration vibration_strength")) {
         static const char* const modes[] = {"Off", "The game's", "Enhanced"};
         static const char* const about[] = {
@@ -2302,16 +2213,107 @@ void controlsSection() {
         overrideNote("vibration_strength");
     }
 
-    opt::group(N_("Hotkeys"), opt::COLLAPSED);
-    if (row("Hotkeys")) {
-        const char* choose = skin::native() ? skin::actionGlyph(padConfirmButton()) : padActionLabel(padConfirmButton());
-        const char* back = skin::native() ? skin::actionGlyph(padCancelButton()) : padActionLabel(padCancelButton());
-        const char* start = skin::native() ? skin::actionGlyph("start") : padActionLabel("start");
-        char chooseKeys[96], backKeys[96];
-        snprintf(chooseKeys, sizeof(chooseKeys), "%s%sEnter", choose != NULL ? choose : "", choose != NULL ? "/" : "");
-        snprintf(backKeys, sizeof(backKeys), "%s%sEsc%s%s", back != NULL ? back : "", back != NULL ? "/" : "",
-                 start != NULL ? "/" : "", start != NULL ? start : "");
-        const char* const hotkeys[][2] = {
+    if (touchRowsWanted()) touchRows();
+    opt::endPage();
+    if (!opt::indexing()) capturePopup();
+}
+
+// ---- Camera -----------------------------------------------------------------------------------
+
+void cameraSection() {
+    opt::beginPage("camera", CAMERA);
+    opt::group(N_("View"));
+    if (row("Free camera", "free_camera", opt::ENHANCED)) {
+        bool on = pcFreeCameraEnabled() != 0;
+        if (checkbox("Free camera in fields", &on)) pcFreeCameraSet(on);
+        hint("%s", tr("Enhanced engine. Turn and tilt the camera around the party with the right stick; hold L2 and move "
+                      "the stick up or down to zoom (keyboard: J/L turn, I/K tilt, U/O zoom). R3 or Home returns to the "
+                      "game's view. Scenes and rooms with a fixed camera keep the game's."));
+        if (touchRowsWanted()) hint("By touch: the touch pad's Buttons and sticks layout (Controls > Touch pad); its right stick is the camera's.");
+        overrideNote("free_camera");
+    }
+
+    if (row("First-person look", "first_person_look", opt::ENHANCED)) {
+        bool on = pcFirstPersonEnabled() != 0;
+        if (checkbox("Allow first-person look in fields and on the world map", &on)) pcFirstPersonSet(on);
+        hint("%s", tr("Press V or hold L2 and click L3 to enter or leave. Look with the right stick, I/J/K/L, or a right mouse drag."));
+        if (touchRowsWanted()) hint("By touch: the eye beside the touch pad's right stick (the Buttons and sticks layout).");
+        overrideNote("first_person_look");
+    }
+
+    if (row("First-person navigation", "first_person_navigation", opt::ENHANCED)) {
+        bool on = pcFirstPersonNavigation() != 0;
+        if (checkbox("Move in first-person view", &on)) pcFirstPersonNavigationSet(on);
+        hint("%s", tr("With first-person look enabled, move relative to the view. When navigation is off, moving leaves first-person view."));
+        overrideNote("first_person_navigation");
+    }
+
+    opt::group(N_("Camera stick"));
+    if (row("Camera stick", "camera_invert_x camera_invert_y camera_turn_speed camera_tilt_speed camera_stick_deadzone",
+            opt::ENHANCED)) {
+        bool invertX = padCameraInvertX() != 0, invertY = padCameraInvertY() != 0;
+        if (checkbox("Invert horizontal", &invertX)) {
+            padSetCameraInvertX(invertX);
+            settingsSave();
+        }
+        if (checkbox("Invert vertical", &invertY)) {
+            padSetCameraInvertY(invertY);
+            settingsSave();
+        }
+        hint("%s", tr("Invert the right stick's turning (horizontal) or tilting (vertical) for the free camera, the world "
+                      "map's camera and first-person look; a right mouse drag in first-person look follows. The keys "
+                      "and L2's zoom keep their directions."));
+        overrideNote("camera_invert_x");
+        overrideNote("camera_invert_y");
+        markBlock();
+        int turn = padCameraTurnSpeed(), tilt = padCameraTiltSpeed(), dead = padCameraDeadzone();
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##camera_turn_speed", &turn, 25, 300, tr("Horizontal speed: %d%%"))) padSetCameraTurnSpeed(turn);
+        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##camera_tilt_speed", &tilt, 25, 300, tr("Vertical speed: %d%%"))) padSetCameraTiltSpeed(tilt);
+        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
+        hint("The camera's sensitivity: how fast the right stick, the camera keys and first-person mouse look turn it "
+             "(horizontal) and tilt it (vertical). Zoom keeps its speed. Default: 100%%.");
+        overrideNote("camera_turn_speed");
+        overrideNote("camera_tilt_speed");
+        markBlock();
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::SliderInt("##camera_stick_deadzone", &dead, 0, 60, tr("Right stick dead zone: %d%%"))) padSetCameraDeadzone(dead);
+        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
+        hint("How far the right stick must move before the camera does (the left stick's dead zone, under Controls, "
+             "is the D-pad's). Default: 20%%.");
+        overrideNote("camera_stick_deadzone");
+    }
+    opt::endPage();
+}
+
+// ---- Hotkeys ----------------------------------------------------------------------------------
+
+void hotkeysSection() {
+    opt::beginPage("hotkeys", HOTKEYS, true);
+    const char* choose = skin::native() ? skin::actionGlyph(padConfirmButton()) : padActionLabel(padConfirmButton());
+    const char* back = skin::native() ? skin::actionGlyph(padCancelButton()) : padActionLabel(padCancelButton());
+    const char* start = skin::native() ? skin::actionGlyph("start") : padActionLabel("start");
+    char chooseKeys[96], backKeys[96];
+    snprintf(chooseKeys, sizeof(chooseKeys), "%s%sEnter", choose != NULL ? choose : "", choose != NULL ? "/" : "");
+    snprintf(backKeys, sizeof(backKeys), "%s%sEsc%s%s", back != NULL ? back : "", back != NULL ? "/" : "",
+             start != NULL ? "/" : "", start != NULL ? start : "");
+    auto drawHotkeyTable = [](const char* id, const char* const rows[][2], int count) {
+        if (ImGui::BeginTable(id, 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+            for (int i = 0; i < count; i++) {
+                ImGui::TableNextRow(0, ROW * scale());
+                ImGui::TableSetColumnIndex(0);
+                wrappedText("%s", tr(rows[i][0])); // (wrapped: a narrow pane cuts nothing)
+                ImGui::TableSetColumnIndex(1);
+                wrappedText("%s", tr(rows[i][1]));
+            }
+            ImGui::EndTable();
+        }
+    };
+    opt::group(N_("This menu"));
+    if (row("Menu controls")) {
+        const char* const menuKeys[][2] = {
             {"F1", N_("this menu (the game pauses)")},
             {N_("Guide / both stick clicks"), N_("this menu")},
             {backKeys, N_("back; from the list, leave this menu")},
@@ -2320,6 +2322,13 @@ void controlsSection() {
             {"L1/R1", N_("the previous and next section")},
             {N_("Square / Delete"), N_("reset the setting the cursor is on (gold: changed)")},
             {"Ctrl+F", N_("search the settings")},
+        };
+        drawHotkeyTable("menu_hotkeys", menuKeys, IM_COUNTOF(menuKeys));
+        hint("The keys and buttons that navigate this menu.");
+    }
+    opt::group(N_("In the game"));
+    if (row("Shortcuts")) {
+        const char* const gameKeys[][2] = {
             {"F2", N_("swap discs (when the game asks for one)")},
             {"F3", N_("aspect: 4:3 TV, 4:3 fill, 1:1, 16:9, 16:10, 21:9, 32:9")},
             {"F4", N_("scale: fit, integer, stretch")},
@@ -2333,22 +2342,12 @@ void controlsSection() {
             {"Start+Select+L1+R1", N_("the game's own soft reset")},
             {"Tab, Select+R2", N_("in a battle: battle speed 1x, 2x, 4x (Gameplay > Battle speed on)")},
             {"Tab, Select+R2", N_("on the field and the world map: field speed 1x, 2x, 4x (Gameplay > Field speed on)")},
-            {"H, Select+Square", N_("the dialogue backlog: the text shown so far (Gameplay > Dialogue backlog on)")},
+            {"H, Select+Square", N_("the dialogue backlog: the text shown so far (Language & text > Dialogue backlog on)")},
         };
-        if (ImGui::BeginTable("hotkeys", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-            for (const auto& h : hotkeys) {
-                ImGui::TableNextRow(0, ROW * scale());
-                ImGui::TableSetColumnIndex(0);
-                wrappedText("%s", tr(h[0])); // (wrapped: a narrow pane cuts nothing)
-                ImGui::TableSetColumnIndex(1);
-                wrappedText("%s", tr(h[1]));
-            }
-            ImGui::EndTable();
-        }
-        hint("The keys and buttons of this menu and the hotkeys that work while the game runs.");
+        drawHotkeyTable("game_hotkeys", gameKeys, IM_COUNTOF(gameKeys));
+        hint("Hotkeys and button chords that work while the game runs.");
     }
     opt::endPage();
-    if (!opt::indexing()) capturePopup();
 }
 
 // ---- Saves: memory cards (the save states: states.cpp) ------------------------------------
@@ -2633,13 +2632,18 @@ void cardsSection() {
     }
 }
 
-void savesSection() {
-    opt::beginPage("saves", SAVES);
+void cardsPageSection() {
+    opt::beginPage("cards", CARDS);
     cardsSection();
-    statesSection(); // states.cpp: the Save states group and its Advanced group
 #ifdef __ANDROID__
     androidBackupRows();
 #endif
+    opt::endPage();
+}
+
+void statesPageSection() {
+    opt::beginPage("states", STATES);
+    statesSection(); // states.cpp: the Save states group and its Advanced group
     opt::endPage();
 }
 
@@ -2709,17 +2713,6 @@ void gameplaySection() {
              "room change). The menu itself, the field and every other screen keep their speed; music keeps its "
              "tempo. Off: the original transitions.");
         overrideNote("speedup_transitions");
-    }
-    if (row("Dialogue backlog", "dialogue_backlog")) {
-        bool backlog = backlogChosen() != 0;
-        if (offOnList("##dialogue_backlog", &backlog)) backlogSetChosen(backlog);
-        hint("Keeps the text the game shows (the field's and the world map's windows, a battle's story lines and a "
-             "movie's captions), so a line passed too soon can be read again: H, or Select + Square together on a "
-             "gamepad, opens it over the paused game, in the game's own window and letters. Up and Down scroll, L1 "
-             "and R1 a page; the cancel button, H or Select + Square closes it. While it is on, Select on the field, "
-             "the world map and in battles does its own job as you let it go, and nothing when pressed with Square "
-             "or a shoulder button. Off: nothing is kept.");
-        overrideNote("dialogue_backlog");
     }
     if (row("PS1 frame rate", "ps1_frame_rate")) {
         bool ps1Rate = ps1timeFrameRateOn() != 0;
@@ -2804,39 +2797,13 @@ void gameplaySection() {
         char rateStatus[384]; presentationRateDescribe(rateStatus, sizeof(rateStatus)); hint("%s", rateStatus);
         overrideNote("interpolation_hz");
     }
+    opt::endPage();
+}
 
-    opt::group(N_("Text"));
-    if (row("Text speed", "text_speed")) {
-        static const char* const speedNames[] = {"Original", "2x", "3x", "4x", "8x", "Instant"};
-        static const int speeds[] = {1, 2, 3, 4, 8, 0};
-        int textSpeed = pcGameplayTextSpeed();
-        int speedChoice = -1;
-        for (int i = 0; i < 6; i++) if (textSpeed == speeds[i]) speedChoice = i;
-        int speedSelected = listChoice("##text_speed", speedNames, 6, speedChoice);
-        if (speedSelected != speedChoice && speedSelected >= 0) pcGameplaySetTextSpeed(speeds[speedSelected]);
-        hint("How fast dialogue appears. Pauses stay. Timed and slow text, such as lines that close by themselves "
-             "or are cut off, keeps its original pace.");
-        overrideNote("text_speed");
-    }
-    if (row("Hold to show text", "text_hold_fast")) {
-        bool holdText = pcGameplayTextHold() != 0;
-        if (offOnList("##text_hold_fast", &holdText)) pcGameplaySetTextHold(holdText);
-        hint("Holding the confirm button shows the rest of a page at once. Pages still wait for a fresh press.");
-        overrideNote("text_hold_fast");
-    }
-    if (row("Auto-advance text", "text_auto_advance")) {
-        static const char* const autoNames[] = {"Off", "1 s", "2 s", "3 s", "5 s", "8 s"};
-        static const int autoSeconds[] = {0, 1, 2, 3, 5, 8};
-        int autoNow = pcGameplayTextAutoAdvance();
-        int autoChoice = -1;
-        for (int i = 0; i < 6; i++) if (autoNow == autoSeconds[i]) autoChoice = i;
-        int autoSelected = listChoice("##text_auto_advance", autoNames, 6, autoChoice);
-        if (autoSelected != autoChoice && autoSelected >= 0) pcGameplaySetTextAutoAdvance(autoSeconds[autoSelected]);
-        hint("A finished page continues by itself after this long, in fields and battle. Choices always wait "
-             "for you.");
-        overrideNote("text_auto_advance");
-    }
+// ---- Battles ------------------------------------------------------------------------------------
 
+void battlesSection() {
+    opt::beginPage("battles", BATTLES);
     opt::group(N_("Battles"));
     if (row("Difficulty", "difficulty")) {
         static const char* const modes[] = {"Normal", "Hard"};
@@ -2958,6 +2925,110 @@ void gameplaySection() {
 
     opt::group(""); // the Gauntlet has its own heading
     if (opt::plain()) gauntletSection(); // gauntlet.cpp
+    opt::endPage();
+}
+
+// ---- Language and text --------------------------------------------------------------------------
+
+void languageRow();
+
+void subtitleRows() {
+    bool captionText = regionalCaptionsAvailable() != 0;
+    if (row("Subtitles", "cutscene_subtitles")) {
+        bool packText = gameTextPackHasMovies() != 0;
+        const char* subtitleTracks[] = {"Off", "US dialogue", "Japanese translation", "Text pack"};
+        int captions = regionalSubtitlesEnabled();
+        if (!captionText) subtitleTracks[1] = "Text pack";
+        int shown = !captionText && captions == REGIONAL_PACK_SUBTITLES ? 1 : captions;
+        ImGui::BeginDisabled(!captionText && !packText && !captions);
+        int count = captionText ? (packText ? 4 : 3) : (packText ? 2 : 1);
+        int picked = choice("subtitles", subtitleTracks, count, shown);
+        ImGui::EndDisabled();
+        if (picked != shown) regionalSetSubtitles(!captionText && picked == 1 ? REGIONAL_PACK_SUBTITLES : picked);
+        if (packText) hint("Text pack uses the movie captions supplied by the active dialogue pack.");
+        else if (captionText) hint("Independent of audio language. Uses the in-game dialogue font.");
+        else hint("Choose a text pack with movie captions to subtitle cutscenes in this build.");
+        overrideNote("cutscene_subtitles");
+    }
+    if (captionText && row("Sound captions", "cutscene_sound_captions")) {
+        const char* levels[] = {"Off", "Voices", "All sounds"};
+        int level = regionalSoundCaptions();
+        int levelChoice = choice("soundcaptions", levels, 3, level);
+        if (levelChoice != level) regionalSetSoundCaptions(levelChoice);
+        hint("With subtitles on, also captions sounds, for players who can't hear them: Voices such as [screams], or "
+             "all sounds such as [explosion] too.");
+        overrideNote("cutscene_sound_captions");
+    }
+    if (captionText && row("Song lyrics", "cutscene_lyrics")) {
+        const char* offOn[] = {"Off", "On"};
+        int lyrics = regionalLyrics();
+        int lyricsChoice = choice("lyrics", offOn, 2, lyrics);
+        if (lyricsChoice != lyrics) regionalSetLyrics(lyricsChoice);
+        hint("With subtitles on, shows the words of the songs in the movies.");
+        overrideNote("cutscene_lyrics");
+    }
+    if (captionText && row("Invented language", "cutscene_invented_language")) {
+        const char* spellings[] = {"Script spelling", "As spoken"};
+        int spoken = regionalInventedSpoken();
+        int spokenChoice = choice("invented", spellings, 2, spoken);
+        if (spokenChoice != spoken) regionalSetInventedSpoken(spokenChoice);
+        hint("Lines in the game's invented language: as the English script spells them, or as the Japanese voice "
+             "says them (Japanese translation track).");
+        overrideNote("cutscene_invented_language");
+    }
+}
+
+void languageSection() {
+    opt::beginPage("language", LANGUAGE);
+    opt::group(N_("Language"));
+    languageRow();
+    gameTextRows(); // gametext.cpp: Game language, plus collapsed Individual text settings & Translation sources
+
+    opt::group(N_("Text"));
+    if (row("Text speed", "text_speed")) {
+        static const char* const speedNames[] = {"Original", "2x", "3x", "4x", "8x", "Instant"};
+        static const int speeds[] = {1, 2, 3, 4, 8, 0};
+        int textSpeed = pcGameplayTextSpeed();
+        int speedChoice = -1;
+        for (int i = 0; i < 6; i++) if (textSpeed == speeds[i]) speedChoice = i;
+        int speedSelected = listChoice("##text_speed", speedNames, 6, speedChoice);
+        if (speedSelected != speedChoice && speedSelected >= 0) pcGameplaySetTextSpeed(speeds[speedSelected]);
+        hint("How fast dialogue appears. Pauses stay. Timed and slow text, such as lines that close by themselves "
+             "or are cut off, keeps its original pace.");
+        overrideNote("text_speed");
+    }
+    if (row("Hold to show text", "text_hold_fast")) {
+        bool holdText = pcGameplayTextHold() != 0;
+        if (offOnList("##text_hold_fast", &holdText)) pcGameplaySetTextHold(holdText);
+        hint("Holding the confirm button shows the rest of a page at once. Pages still wait for a fresh press.");
+        overrideNote("text_hold_fast");
+    }
+    if (row("Auto-advance text", "text_auto_advance")) {
+        static const char* const autoNames[] = {"Off", "1 s", "2 s", "3 s", "5 s", "8 s"};
+        static const int autoSeconds[] = {0, 1, 2, 3, 5, 8};
+        int autoNow = pcGameplayTextAutoAdvance();
+        int autoChoice = -1;
+        for (int i = 0; i < 6; i++) if (autoNow == autoSeconds[i]) autoChoice = i;
+        int autoSelected = listChoice("##text_auto_advance", autoNames, 6, autoChoice);
+        if (autoSelected != autoChoice && autoSelected >= 0) pcGameplaySetTextAutoAdvance(autoSeconds[autoSelected]);
+        hint("A finished page continues by itself after this long, in fields and battle. Choices always wait "
+             "for you.");
+        overrideNote("text_auto_advance");
+    }
+    if (row("Dialogue backlog", "dialogue_backlog")) {
+        bool backlog = backlogChosen() != 0;
+        if (offOnList("##dialogue_backlog", &backlog)) backlogSetChosen(backlog);
+        hint("Keeps the text the game shows (the field's and the world map's windows, a battle's story lines and a "
+             "movie's captions), so a line passed too soon can be read again: H, or Select + Square together on a "
+             "gamepad, opens it over the paused game, in the game's own window and letters. Up and Down scroll, L1 "
+             "and R1 a page; the cancel button, H or Select + Square closes it. While it is on, Select on the field, "
+             "the world map and in battles does its own job as you let it go, and nothing when pressed with Square "
+             "or a shoulder button. Off: nothing is kept.");
+        overrideNote("dialogue_backlog");
+    }
+
+    opt::group(N_("Subtitles"));
+    subtitleRows();
     opt::endPage();
 }
 
@@ -3236,14 +3307,24 @@ void menuLookRows() {
         hint(v ? "This menu's windows darker than the game's grey." : "This menu's windows in the game's own half-clear grey.");
         overrideNote("menu_dark");
     }
+
+    if (row("Auto-scroll descriptions", "menu_desc_autoscroll")) {
+        static const char* const offOnScroll[] = {"Off", "On"};
+        int autoScroll = skin::descAutoScroll() ? 1 : 0;
+        int v = choice("menudescscroll", offOnScroll, 2, autoScroll);
+        if (v != autoScroll) {
+            skin::setDescAutoScroll(v != 0);
+        }
+        hint("Long descriptions in the message box below scroll gently on their own after a brief pause. The right "
+             "stick and mouse wheel scroll them at any time.");
+        overrideNote("menu_desc_autoscroll");
+    }
 }
 
 void aboutRows(); // System's About group (below)
 
 void systemSection() {
     opt::beginPage("system", SYSTEM);
-    opt::group(N_("Language and text"));
-    gameTextRows();
 
     // ---- one choice for many settings
     opt::group(N_("Presets"));
@@ -3367,7 +3448,6 @@ void systemSection() {
 #endif
 
     opt::group(N_("This menu"));
-    languageRow();
     menuLookRows();
 
     opt::group(N_("Advanced"), opt::COLLAPSED);
@@ -3552,6 +3632,7 @@ void sectionsOpened() {
     opt::opened();
     readWindowSize();
     cap.active = false;
+    touchKeptOpen = false;
     backupSlot = -1;
     cardMsg.text[0] = biosMsg.text[0] = discMsg.text[0] = aspectMsg.text[0] = '\0';
 }
@@ -3789,20 +3870,38 @@ void drawPage(int section) {
     case DISPLAY:
         displaySection();
         break;
+    case EFFECTS:
+        effectsSection();
+        break;
     case AUDIO:
         audioSection();
         break;
     case CONTROLS:
         controlsSection();
         break;
+    case CAMERA:
+        cameraSection();
+        break;
+    case HOTKEYS:
+        hotkeysSection();
+        break;
     case GAMEPLAY:
         gameplaySection();
+        break;
+    case BATTLES:
+        battlesSection();
+        break;
+    case LANGUAGE:
+        languageSection();
         break;
     case PACKS:
         packsSection();
         break;
-    case SAVES:
-        savesSection(); // the memory cards, then states.cpp's save states
+    case CARDS:
+        cardsPageSection();
+        break;
+    case STATES:
+        statesPageSection();
         break;
     case SYSTEM:
         systemSection(); // with About in its last group

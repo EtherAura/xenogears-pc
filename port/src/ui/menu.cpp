@@ -46,12 +46,15 @@ void extrasJukeboxEnd(void) __attribute__((weak));
 
 namespace menu {
 
-const char* const sectionNames[SECTION_COUNT] = {N_("Display"), N_("Audio"),  N_("Controls"),
-                                                 N_("Gameplay"), N_("Packs"),  N_("Saves"),
-                                                 N_("System"),   N_("Extras"), N_("Search")};
-// The section list's names: it is narrow, as the game's main menu.
-const char* const listNames[SECTION_COUNT] = {N_("Display"), N_("Audio"),  N_("Controls"), N_("Gameplay"), N_("Packs"),
-                                              N_("Saves"),   N_("System"), N_("Extras"),   N_("Search")};
+const char* const sectionNames[SECTION_COUNT] = {
+    N_("Display"),       N_("Effects"),      N_("Audio"),   N_("Controls"), N_("Camera"),
+    N_("Hotkeys"),       N_("Gameplay"),     N_("Battles"), N_("Language & text"), N_("Packs"),
+    N_("Memory cards"),  N_("Save states"),  N_("System"),  N_("Extras"),   N_("Search")};
+// The section list's names on the commands' arc.
+const char* const listNames[SECTION_COUNT] = {
+    N_("Display"),       N_("Effects"),      N_("Audio"),   N_("Controls"), N_("Camera"),
+    N_("Hotkeys"),       N_("Gameplay"),     N_("Battles"), N_("Language"), N_("Packs"),
+    N_("Memory cards"),  N_("Save states"),  N_("System"),  N_("Extras"),   N_("Search")};
 
 namespace {
 
@@ -109,7 +112,14 @@ struct State {
     ImGuiID listWindow; // the window holding the section list (its cursor is the red arrow)
     ImGuiID lastNav;    // the item the cursor was on last frame (a move sounds)
     int arrowEntry;     // the list entry the red arrow is on (-1: none)
+    int arcTop;         // the first entry shown on the commands' arc when the window holds fewer than all
+    bool arcBarShown;   // the arc's scroll bar: hidden when the menu opens, shown once the list has scrolled
     int shownSection;   // the section the pane showed last frame
+    float descScroll;    // the description message box's vertical scroll
+    float descMaxScroll; // ... and its ceiling last frame (> 0 when lines overflow)
+    int descAutoWait;    // > 0: frames waiting at the top before auto-scroll; < 0: waiting at the bottom
+    bool descManual;     // right stick or mouse scrolled this option's description
+    bool currentBlockTall; // the cursor's block in the pane is taller than the pane (an open licence)
     unsigned long openedAt; // st.frames when the menu last opened
     ImGuiID lastContentNav;  // the pane's cursor item last frame (scrollToBlock)
     ImGuiID leftFrom;        // Left was pressed on this item: no move means back to the list
@@ -340,16 +350,20 @@ void runStep(Step& s) {
         e.text.text = s.arg;
         SDL_PushEvent(&e);
     } else if (strcmp(s.cmd, "section") == 0) {
-        // A section by (the start of) its English name; the merged ones' old
-        // names too: cards, states (Saves), about (System).
+        // A section by (the start of) its English name; earlier names too:
+        // saves, cards (Memory cards), states (Save states), text (Language), about (System).
         for (int i = 0; i < SECTION_COUNT; i++) {
             if (SDL_strncasecmp(s.arg, sectionNames[i], strlen(s.arg)) == 0 ||
-                (i == SAVES && (SDL_strcasecmp(s.arg, "cards") == 0 || SDL_strcasecmp(s.arg, "states") == 0 ||
-                                SDL_strcasecmp(s.arg, "memory cards") == 0 || SDL_strcasecmp(s.arg, "save states") == 0)) ||
+                SDL_strncasecmp(s.arg, listNames[i], strlen(s.arg)) == 0 ||
+                (i == CARDS && (SDL_strcasecmp(s.arg, "cards") == 0 || SDL_strcasecmp(s.arg, "saves") == 0 ||
+                                SDL_strcasecmp(s.arg, "memory cards") == 0)) ||
+                (i == STATES && (SDL_strcasecmp(s.arg, "states") == 0 || SDL_strcasecmp(s.arg, "save states") == 0)) ||
+                (i == LANGUAGE && SDL_strcasecmp(s.arg, "text") == 0) ||
                 (i == SYSTEM && SDL_strcasecmp(s.arg, "about") == 0)) {
                 st.section = i;
                 st.enterContent = true; /* opened, the cursor on its first control */
                 st.opened = true;
+                break;
             }
         }
     } else if (strcmp(s.cmd, "shot") == 0) {
@@ -755,6 +769,7 @@ void scrollToBlock(ImGuiWindow* w, float endY) {
     }
     bool last = y1 == endY - origin;
     float view = w->Size.y - w->WindowPadding.y * 2;
+    st.currentBlockTall = y1 - y0 > view;
     float scroll = w->Scroll.y, want = scroll;
     if (y1 - y0 <= view) {
         if (y0 < scroll) {
@@ -780,24 +795,33 @@ void scrollToBlock(ImGuiWindow* w, float endY) {
 // The game's seven commands lie on one circle (cursorPosXTable and
 // cursorPosYTable, menu overlay 0x801E9A00 and 0x801E9A2C: 0x17,0x61 ...
 // 0x49,0xC9), centre (-54.6, 198.1), radius 127.5, one every 8.96 degrees.
-// The settings menu has ten (nine sections and Back). Ten on the game's
-// circle were cramped (7.15 degrees apart, the top ones 9 pixels: xg-htn.35.92.2),
-// so they lie on that circle enlarged (user): the same sweep, from
-// the game's first command's angle to its seventh's, scaled about the point
-// where the first ball touches the screen's left edge (x 7) and the last ends
-// on the menu picture's last line (y 205). Compact: 1.65 times both ways, which
-// gives ten entries the game's own spacing (13 pixels at the top to 21 at the
-// bottom). On the game's screen the names must stay left of the game's sheet
-// (x 0x7A), so there only the height is 1.65 times and the arc keeps the
-// game's width (x 7 to 73).
-ImVec2 commandPoint(int i, bool game) {
+// Here that exact circular sweep (first command's angle to seventh's, kx == ky
+// so the circle keeps its true curvature) is scaled to the column's height,
+// holding as many entries at once as keep at least 14 game pixels between
+// neighbours (all of them in a full compact panel; a sliding window along the
+// same curve with the game's scroll bar when the screen is lower, as in game
+// size).
+ImVec2 arcPoint(int slot, int slots, float colH, bool scrolled) {
     const float cx = -54.6f, cy = 198.1f, r = 127.5f;
     const float a0 = atan2f(97 - cy, 23 - cx), a1 = atan2f(201 - cy, 73 - cx);
-    const float kx = game ? 1.0f : 1.65f, ky = 1.65f;
-    float a = a0 + (a1 - a0) * (float)i / (float)SECTION_COUNT;
-    float x = 7 + kx * r * (cosf(a) - cosf(a0));
-    float y = 205 - ky * r * (sinf(a1) - sinf(a));
+    const float spanY = r * (sinf(a1) - sinf(a0));
+    const float avail = fmaxf(spanY, colH - 16.0f); // a ball spans y - 5 .. y + 11 (16 game pixels)
+    const float k = avail / spanY;
+    const float x0 = scrolled ? 20.0f : 7.0f; // room on the left for the 8-wide scroll bar and 12-wide arrow
+    float t = slots > 1 ? (float)slot / (float)(slots - 1) : 0.0f;
+    float a = a0 + (a1 - a0) * t;
+    float x = x0 + k * r * (cosf(a) - cosf(a0));
+    float y = 5.0f + k * r * (sinf(a) - sinf(a0));
     return ImVec2(roundf(x), roundf(y));
+}
+
+int arcVisibleSlots(int total, float colH) {
+    for (int vis = total; vis > 7; vis--) {
+        float y0 = arcPoint(0, vis, colH, false).y;
+        float y1 = arcPoint(1, vis, colH, false).y;
+        if (y1 - y0 >= 14.0f) return vis;
+    }
+    return std::min(total, 7);
 }
 // From a command's point (the menu file's sprite table, placed at 0xA0,0x96
 // as setupMainMenuWithConfig does): its ball (sprites 0x109 + k, red 0x116 + k)
@@ -839,13 +863,16 @@ struct Layout {
     bool game;      // menu_text=game: on the game's screen, at the game's places
     float u;        // window pixels per game pixel
     ImVec2 origin;  // game mode: the game menu picture's (0, 0); compact: the commands' frame
+    float colH = 216.0f; // the commands' column height, in game pixels
+    int visibleCommands = SECTION_COUNT + 1;
     ImRect sheet, help, foot;
     ImVec2 at(float x, float y) const { return ImVec2(origin.x + x * u, origin.y + y * u); }
     ImRect box(const Box& b) const { return ImRect(at(b.x, b.y), at(b.x + b.w, b.y + b.h)); }
     bool setup;     // the setup screen's commands (kSetupCommands)
-    ImVec2 command(int i) const {
-        ImVec2 p = setup ? kSetupCommands[i] : commandPoint(i, game);
-        return at(p.x, p.y);
+    ImVec2 command(int slot) const {
+        if (setup) return at(kSetupCommands[slot].x, kSetupCommands[slot].y);
+        ImVec2 p = arcPoint(slot, visibleCommands, colH, visibleCommands < SECTION_COUNT + 1);
+        return ImVec2(origin.x + p.x * u, origin.y + (game ? 4.0f + p.y : p.y) * u);
     }
     ImVec2 centre() const { return game ? at(160, 112) : ImVec2(); } // the menu's projection centre
 };
@@ -885,6 +912,8 @@ Layout layout(bool opened) {
         // what the window holds): the game's screen kept inside it.
         L.origin.y = std::max(0.0f, std::min(L.origin.y, floorf(io.DisplaySize.y - 216 * u)));
         L.origin.x = std::max(0.0f, L.origin.x);
+        L.colH = 208.0f; // 4 game pixels inside the 216-line picture top and bottom
+        L.visibleCommands = L.setup ? SETUP_SECTIONS + 2 : arcVisibleSlots(SECTION_COUNT + 1, L.colH);
         L.sheet = L.box(opened ? kItemBox : kSheet);
         L.help = L.box(kMessageBox);
         return L;
@@ -904,8 +933,14 @@ Layout layout(bool opened) {
     L.sheet = ImRect(at(left, edge), at(pw - edge, ph - edge - footH - gap - helpH - gap));
     L.help = ImRect(at(left, ph - edge - footH - gap - helpH), at(pw - edge, ph - edge - footH - gap));
     L.foot = ImRect(at(edge, ph - edge - footH), at(pw - edge, ph - edge));
-    // The commands' circle with its last ball's bottom (216) on the column's.
-    L.origin = ImVec2(o.x + edge * u, o.y + (ph - edge - footH - gap - 216) * u);
+    if (L.setup) {
+        L.origin = ImVec2(o.x + edge * u, o.y + (ph - edge - footH - gap - 216) * u);
+        L.visibleCommands = SETUP_SECTIONS + 2;
+    } else {
+        L.colH = (float)std::max(120, ph - 2 * edge - footH - gap);
+        L.origin = ImVec2(o.x + edge * u, o.y + edge * u);
+        L.visibleCommands = arcVisibleSlots(SECTION_COUNT + 1, L.colH);
+    }
     return L;
 }
 
@@ -1276,21 +1311,70 @@ void drawFrame() {
     // it (opening, L1/R1) can move right into the section's child. Dimmed
     // while the cursor is in the section, as the game's main menu is while a
     // sub-menu is up; the red arrow on the entry the cursor is on, over it.
+    const int vis = st.setup ? entries : L.visibleCommands;
+    if (!st.opened && !st.setup) {
+        int maxTop = std::max(0, entries - vis);
+        st.arcTop = std::clamp(st.arcTop, 0, maxTop);
+        if (maxTop > 0 && !popupOpen() && !capturing()) {
+            if (io.MouseWheel != 0.0f) {
+                st.arcTop = std::clamp(st.arcTop - (int)lroundf(io.MouseWheel), 0, maxTop);
+            }
+            static int arcStickWait;
+            float rstick = ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
+                           ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue;
+            if (fabsf(rstick) > 0.35f) {
+                if (arcStickWait <= 0) {
+                    st.arcTop = std::clamp(st.arcTop + (rstick > 0 ? 1 : -1), 0, maxTop);
+                    arcStickWait = 6;
+                } else {
+                    --arcStickWait;
+                }
+            } else {
+                arcStickWait = 0;
+            }
+        }
+        int keep = commandFocus >= 0 ? commandFocus : -1;
+        if (keep >= 0) {
+            if (keep < st.arcTop) st.arcTop = keep;
+            if (keep >= st.arcTop + vis) st.arcTop = keep - vis + 1;
+        }
+        // No scroll bar when the menu opens (user); it appears once the list has scrolled.
+        st.arcBarShown = st.arcBarShown || st.arcTop > 0;
+        if (maxTop > 0 && st.arcBarShown) {
+            float topY = L.origin.y + (L.game ? 4.0f * u : 0.0f);
+            float trackH = L.colH * u, inner = trackH - 16 * u;
+            float shown = (float)vis / (float)entries;
+            float thumbH = floorf(fmaxf(8 * u, inner * shown) / u) * u;
+            float thumbY = floorf((inner - thumbH) * ((float)st.arcTop / (float)maxTop) / u) * u;
+            dl->PushClipRectFullScreen();
+            skin::scrollBar(dl, ImVec2(L.origin.x, topY), trackH, thumbY, thumbH);
+            dl->PopClipRect();
+            ImGui::SetCursorScreenPos(ImVec2(L.origin.x, topY));
+            ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+            ImGui::InvisibleButton("##arc_scroll", ImVec2(8 * u, trackH));
+            ImGui::PopItemFlag();
+            if (ImGui::IsItemActive()) {
+                float at = (io.MousePos.y - topY - 8 * u - thumbH / 2) / fmaxf(1.0f, inner - thumbH);
+                st.arcTop = std::clamp((int)lroundf(at * maxTop), 0, maxTop);
+            }
+        }
+    }
     int arrowWas = st.arrowEntry;
     st.arrowEntry = -1;
-    for (int i = 0; i < entries && !st.opened; i++) {
+    for (int slot = 0; slot < vis && !st.opened; slot++) {
+        int i = st.setup ? slot : st.arcTop + slot;
         bool focused;
         const char* name = tr(i >= sections ? (st.setup ? (i == sections ? "Start" : "Quit") : "Back")
                                             : st.setup ? kSetupNames[i] : listNames[i]);
         if (i >= sections) {
-            if (listEntry(i, name, false, L.command(i), st.inContent, &focused)) {
+            if (listEntry(i, name, false, L.command(slot), st.inContent, &focused)) {
                 if (!st.setup || i > sections) {
                     st.closing = true; // Back; Quit
                 } else if (setupStart()) {
                     st.closing = true; // Start, with valid images
                 }
             }
-        } else if (listEntry(i, name, st.section == i, L.command(i), st.inContent, &focused)) {
+        } else if (listEntry(i, name, st.section == i, L.command(slot), st.inContent, &focused)) {
             st.section = i;
             st.enterContent = true;
             st.opened = true;
@@ -1317,18 +1401,23 @@ void drawFrame() {
     }
     // The arrow where the cursor was when this frame began (a move shows
     // next frame, as the game's: updateCursorPolysLocation after the input).
-    if (arrowWas >= 0 && !st.opened) {
-        skin::sprite(dl, skin::SPRITE_ARROW, L.command(arrowWas));
+    int arrowSlot = st.setup ? arrowWas : arrowWas - st.arcTop;
+    if (arrowWas >= 0 && arrowSlot >= 0 && arrowSlot < vis && !st.opened) {
+        skin::sprite(dl, skin::SPRITE_ARROW, L.command(arrowSlot));
     }
     st.focusSections = false;
     // The commands alone until one is chosen: no pane, nothing in it (the
     // game's main menu shows its commands and status; a chosen command's
     // menu then takes the screen). Esc, B or the legend's back come back.
     ImGuiWindow* content = nullptr;
+    float rightStick = ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
+                       ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue;
     if (!st.opened) {
         st.inContent = false;
         st.contentId = 0;
         st.shownSection = -1;
+        st.descMaxScroll = 0.0f;
+        st.currentBlockTall = false;
         helpText = tr("Choose a section to open it.");
     } else {
 
@@ -1359,14 +1448,13 @@ void drawFrame() {
     skin::focusWindow(); // the JP game's cursor band (none in the US game)
     if (st.shownSection != st.section) {
         helpIndex = 0;
+        st.currentBlockTall = false;
         ImGui::SetScrollY(0.0f); // each section from its top (one child shows them all)
         st.shownSection = st.section;
     }
-    // The right stick scrolls the section (text the cursor cannot reach: the licences).
-    float stick = ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
-                  ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue;
-    if (fabsf(stick) > 0.2f) {
-        ImGui::SetScrollY(ImGui::GetScrollY() + stick * 6.0f * u);
+    // When the description fits (or a long licence block is open), the right stick scrolls the pane.
+    if ((st.descMaxScroll <= 0.0f || st.currentBlockTall) && fabsf(rightStick) > 0.2f) {
+        ImGui::SetScrollY(ImGui::GetScrollY() + rightStick * 6.0f * u);
     }
     if (st.jumpFocus) {
         // The cursor where the row asks (options.h: a search result's control,
@@ -1471,21 +1559,80 @@ void drawFrame() {
     }
 
     // The description in the message box: its lines where the game's are
-    // (10 in, 10 down, 16 apart); more than fits scrolls (the help popup has it all).
+    // (12 in so the 8-wide scroll bar fits cleanly on the left, 10 down, 16 apart);
+    // longer descriptions show the game's scroll bar, scroll with the right stick
+    // or mouse wheel, and optionally scroll gently on their own (the help popup has it all).
     bool helpClicked = false;
     if (st.opened) {
-    ImGui::SetCursorScreenPos(ImVec2(help.Min.x + kMessageText * u, help.Min.y + kMessageText * u));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::BeginChild("description", ImVec2(help.GetWidth() - 2 * kMessageText * u,
-                                            floorf((help.GetHeight() / u - kMessageText - 6) / 16 + 0.01f) * 16 * u),
-                      ImGuiChildFlags_None, ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar);
-    ImGui::PopStyleVar();
-    static std::string previousHelp;
-    if (previousHelp != helpText) ImGui::SetScrollY(0.0f);
-    previousHelp = helpText;
-    textLines(helpText.empty() ? tr("Choose an option for its description.") : helpText.c_str());
-    helpClicked = ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-    ImGui::EndChild();
+        static std::string previousHelp;
+        if (previousHelp != helpText) {
+            previousHelp = helpText;
+            st.descScroll = 0.0f;
+            st.descAutoWait = 90;
+            st.descManual = false;
+        }
+        const float descLeft = 12 * u, descRight = kMessageText * u;
+        const float lines = floorf((help.GetHeight() / u - kMessageText - 3) / 16 + 0.01f);
+        const float viewH = fmaxf(13.0f, lines * 16.0f - 3.0f) * u;
+        ImGui::SetCursorScreenPos(ImVec2(help.Min.x + descLeft, help.Min.y + kMessageText * u));
+        ImGui::SetNextWindowScroll(ImVec2(0.0f, st.descScroll));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::BeginChild("description", ImVec2(help.GetWidth() - descLeft - descRight, viewH),
+                          ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleVar();
+        textLines(helpText.empty() ? tr("Choose an option for its description.") : helpText.c_str());
+        ImGuiWindow* dw = ImGui::GetCurrentWindow();
+        float contentH = dw->DC.CursorPos.y - dw->DC.CursorStartPos.y - ImGui::GetStyle().ItemSpacing.y;
+        float maxScroll = fmaxf(0.0f, contentH - viewH);
+        bool hovered = ImGui::IsWindowHovered();
+        helpClicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        ImGui::EndChild();
+        if (maxScroll > 0.0f) {
+            if (hovered && io.MouseWheel != 0.0f && !popupOpen()) {
+                st.descScroll -= io.MouseWheel * 16.0f * u;
+                st.descManual = true;
+            } else if (!st.currentBlockTall && fabsf(rightStick) > 0.2f && !popupOpen()) {
+                st.descScroll += rightStick * 4.0f * u;
+                st.descManual = true;
+            } else if (!st.descManual && skin::descAutoScroll() && !popupOpen()) {
+                if (st.descAutoWait > 0) {
+                    --st.descAutoWait;
+                } else if (st.descScroll < maxScroll) {
+                    st.descScroll = fminf(maxScroll, st.descScroll + 0.35f * u);
+                    if (st.descScroll >= maxScroll) st.descAutoWait = -120;
+                } else if (++st.descAutoWait >= 0) {
+                    st.descScroll = 0.0f;
+                    st.descAutoWait = 90;
+                }
+            }
+            st.descScroll = std::clamp(st.descScroll, 0.0f, maxScroll);
+            float trackH = help.GetHeight(), inner = trackH - 16 * u;
+            float shown = viewH / (viewH + maxScroll);
+            float thumbH = floorf(fmaxf(6 * u, inner * shown) / u) * u;
+            float thumbY = floorf((inner - thumbH) * (st.descScroll / maxScroll) / u) * u;
+            dl->PushClipRectFullScreen();
+            skin::scrollBar(dl, help.Min, trackH, thumbY, thumbH);
+            if (st.descScroll < maxScroll - 0.5f * u) {
+                float ax = help.Max.x - 8 * u, ay = help.Max.y - 6 * u;
+                ImU32 col = (st.frames / 24) % 2 ? IM_COL32(235, 235, 245, 230) : IM_COL32(165, 165, 185, 170);
+                dl->AddTriangleFilled(ImVec2(ax, ay), ImVec2(ax + 5 * u, ay), ImVec2(ax + 2.5f * u, ay + 3.5f * u), col);
+            }
+            dl->PopClipRect();
+            ImGui::SetCursorScreenPos(help.Min);
+            ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+            ImGui::InvisibleButton("##desc_scroll", ImVec2(8 * u, trackH));
+            ImGui::PopItemFlag();
+            if (ImGui::IsItemActive()) {
+                float at = (io.MousePos.y - help.Min.y - 8 * u - thumbH / 2) / fmaxf(1.0f, inner - thumbH);
+                st.descScroll = std::clamp(at * maxScroll, 0.0f, maxScroll);
+                st.descManual = true;
+                helpClicked = false;
+            }
+        } else {
+            st.descScroll = 0.0f;
+        }
+        st.descMaxScroll = maxScroll;
     } // st.opened: the description
     if (!capturing() && !io.WantTextInput && !popupOpen() && (helpClicked || st.helpWanted ||
         ImGui::IsKeyPressed(ImGuiKey_H, false) || (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))) {
@@ -1835,6 +1982,8 @@ void run() {
     st.section = st.setup ? st.setupSection : 0;
     st.shownSection = -1;
     st.arrowEntry = -1;
+    st.arcTop = 0; // the cursor starts on the first section
+    st.arcBarShown = false;
     st.leftFrom = 0;
     st.focusSections = true;
     st.enterContent = false;

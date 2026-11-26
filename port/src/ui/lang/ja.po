@@ -2335,8 +2335,8 @@ msgid "on the field and the world map: field speed 1x, 2x, 4x (Gameplay > Field 
 msgstr "フィールドとワールドマップ: フィールド速度を 1 倍、2 倍、4 倍に切り替え(ゲームプレイ > フィールド速度がオンのとき)"
 
 #: port/src/ui/sections.cpp
-msgid "the dialogue backlog: the text shown so far (Gameplay > Dialogue backlog on)"
-msgstr "会話ログ: これまでに出た文章(ゲームプレイ > 会話ログがオンのとき)"
+msgid "the dialogue backlog: the text shown so far (Language & text > Dialogue backlog on)"
+msgstr "会話ログ: これまでに出た文章(言語とテキスト > 会話ログがオンのとき)"
 
 #: port/src/ui/sections.cpp
 msgid "The game is using this card; try again in a moment."
@@ -7774,8 +7774,8 @@ msgid "Right stick dead zone: %d%%"
 msgstr "右スティックの遊び: %d%%"
 
 #: port/src/ui/sections.cpp
-msgid "How far the right stick must move before the camera does (the left stick's dead zone, under Stick and mouse, is the D-pad's). Default: 20%%."
-msgstr "カメラが動き出すまでに右スティックを倒す必要がある量です(「スティックとマウス」にある左スティックの遊びは方向キー用です)。標準: 20%%。"
+msgid "How far the right stick must move before the camera does (the left stick's dead zone, under Controls, is the D-pad's). Default: 20%%."
+msgstr "カメラが動き出すまでに右スティックを倒す必要がある量です(「操作」にある左スティックの遊びは方向キー用です)。標準: 20%%。"
 
 #: port/src/ui/options.cpp
 msgid "Camera horizontal speed"
@@ -7993,8 +7993,8 @@ msgid "Layout"
 msgstr "配置"
 
 #: port/src/ui/sections.cpp
-msgid "Buttons and sticks adds a left stick, which moves as the D-pad does. In the Enhanced engine, with the free camera or the first-person look turned on (Camera and vibration, below), a right stick turns and tilts the camera and, with L2 held, zooms it; the button over the stick returns to the game's view, and the eye enters and leaves the first-person view."
-msgstr "「ボタンとスティック」では、方向キーと同じように動く左スティックが加わります。強化エンジンで自由カメラかファーストパーソン視点をオンにしているとき(下の「カメラと振動」)は、右スティックでカメラを回したり上下に向けたりし、L2 を押しながらでズームします。スティックの上のボタンでゲームの視点にもどり、目のボタンでファーストパーソン視点に出入りします。"
+msgid "Buttons and sticks adds a left stick, which moves as the D-pad does. In the Enhanced engine, with the free camera or the first-person look turned on (Camera), a right stick turns and tilts the camera and, with L2 held, zooms it; the button over the stick returns to the game's view, and the eye enters and leaves the first-person view."
+msgstr "「ボタンとスティック」では、方向キーと同じように動く左スティックが加わります。強化エンジンで自由カメラかファーストパーソン視点をオンにしているとき(「カメラ」)は、右スティックでカメラを回したり上下に向けたりし、L2 を押しながらでズームします。スティックの上のボタンでゲームの視点にもどり、目のボタンでファーストパーソン視点に出入りします。"
 
 #: port/src/ui/sections.cpp
 #, c-format
@@ -8032,8 +8032,44 @@ msgid "Enhanced engine. Turn and tilt the camera around the party with the right
 msgstr "強化エンジン。右スティックでパーティーの周りのカメラを回したり上下に向けたりし、L2 を押しながらスティックを上下に動かすとズームします(キーボード: J/L で回転、I/K で上下、U/O でズーム)。R3 か Home でゲームの視点にもどります。カメラが固定されたシーンや部屋では、ゲームのカメラのままです。"
 
 #: port/src/ui/sections.cpp
-msgid "By touch: the touch pad's Buttons and sticks layout (Touch pad, above); its right stick is the camera's."
-msgstr "タッチでは: タッチパッドの「ボタンとスティック」の配置(上の「タッチパッド」)で、右スティックがカメラ用です。"
+msgid "By touch: the touch pad's Buttons and sticks layout (Controls > Touch pad); its right stick is the camera's."
+msgstr "タッチでは: タッチパッドの「ボタンとスティック」の配置(「操作 > タッチパッド」)で、右スティックがカメラ用です。"
+
+msgid "Effects"
+msgstr "エフェクト"
+
+msgid "Camera"
+msgstr "カメラ"
+
+msgid "Language & text"
+msgstr "言語とテキスト"
+
+msgid "Auto-scroll descriptions"
+msgstr "説明の自動スクロール"
+
+msgid "Lighting and shadows"
+msgstr "ライティングと影"
+
+msgid "Atmosphere and colour"
+msgstr "空気感と色合い"
+
+msgid "Long descriptions in the message box below scroll gently on their own after a brief pause. The right stick and mouse wheel scroll them at any time."
+msgstr "下の説明ウインドウに入りきらない長い説明が、少し待ってからゆっくり自動でスクロールします。右スティックやマウスホイールではいつでも動かせます。"
+
+msgid "Menu controls"
+msgstr "メニューの操作"
+
+msgid "The keys and buttons that navigate this menu."
+msgstr "このメニューを動かすキーとボタンです。"
+
+msgid "In the game"
+msgstr "ゲーム中"
+
+msgid "Shortcuts"
+msgstr "ショートカット"
+
+msgid "Hotkeys and button chords that work while the game runs."
+msgstr "ゲーム中に使えるホットキーとボタンの同時押しです。"
 
 #: port/src/ui/sections.cpp
 msgid "By touch: the eye beside the touch pad's right stick (the Buttons and sticks layout)."

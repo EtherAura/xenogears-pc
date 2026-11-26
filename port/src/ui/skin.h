@@ -78,6 +78,12 @@ float menuUnitFor(int w, int h);
 bool darkWindows();
 void setDarkWindows(bool on); // also written to settings.ini
 
+// Long option descriptions in the message box (settings.ini menu_desc_autoscroll,
+// on by default): scroll gently on their own after a pause until the right
+// stick or mouse scrolls them by hand.
+bool descAutoScroll();
+void setDescAutoScroll(bool on);
+
 // Each frame, right after ImGui::NewFrame.
 void beginFrame();
 

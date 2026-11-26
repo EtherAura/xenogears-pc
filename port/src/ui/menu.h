@@ -12,10 +12,25 @@
 
 namespace menu {
 
-// The sections on the commands' arc (user: consolidated; Memory
-// cards and Save states are Saves, About is in System, the packs' rows from
-// Display are Packs; Search finds a row in any of them).
-enum Section { DISPLAY, AUDIO, CONTROLS, GAMEPLAY, PACKS, SAVES, SYSTEM, EXTRAS, SEARCH, SECTION_COUNT };
+// The sections on the commands' arc (Search finds a row in any of them).
+enum Section {
+    DISPLAY,
+    EFFECTS,
+    AUDIO,
+    CONTROLS,
+    CAMERA,
+    HOTKEYS,
+    GAMEPLAY,
+    BATTLES,
+    LANGUAGE,
+    PACKS,
+    CARDS,
+    STATES,
+    SYSTEM,
+    EXTRAS,
+    SEARCH,
+    SECTION_COUNT
+};
 extern const char* const sectionNames[SECTION_COUNT];
 
 // sections.cpp

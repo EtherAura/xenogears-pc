@@ -414,6 +414,21 @@ void setDarkWindows(bool on) {
     settingsSave();
 }
 
+bool descAutoScroll() {
+    static bool described;
+    if (!described) {
+        described = true;
+        settingsDescribe("menu_desc_autoscroll", "menu_desc_autoscroll: 1 (default) gently scrolls option descriptions "
+                                                 "that exceed the message box; 0 scrolls only with the right stick or mouse");
+    }
+    return settingsBool("menu_desc_autoscroll", 1) != 0;
+}
+
+void setDescAutoScroll(bool on) {
+    settingsSetInt("menu_desc_autoscroll", on ? 1 : 0);
+    settingsSave();
+}
+
 int unitFor(int w, int h) {
     // Game: the game's 320 x 216 picture as large as the window holds it in
     // whole pixels (4 at 1868 x 965, 10 at 3840 x 2160). Compact: room for

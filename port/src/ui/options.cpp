@@ -320,6 +320,8 @@ std::vector<Spec>& table() {
         .unit = "%";
     add("menu_dark", N_("Dark mode"), [](int) { return skin::darkWindows() ? 1 : 0; },
         [](int, int v) { skin::setDarkWindows(v != 0); }, 0);
+    add("menu_desc_autoscroll", N_("Auto-scroll descriptions"), [](int) { return skin::descAutoScroll() ? 1 : 0; },
+        [](int, int v) { skin::setDescAutoScroll(v != 0); }, 1);
     // Packs
     add("movie_replacements", N_("Pack movies"), [](int) { return moviePackEnabled(); },
         [](int, int v) { moviePackSetEnabled(v); }, 1);
