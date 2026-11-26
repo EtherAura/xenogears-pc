@@ -113,7 +113,6 @@ struct State {
     ImGuiID lastNav;    // the item the cursor was on last frame (a move sounds)
     int arrowEntry;     // the list entry the red arrow is on (-1: none)
     int arcTop;         // the first entry shown on the commands' arc when the window holds fewer than all
-    bool arcBarShown;   // the arc's scroll bar: hidden when the menu opens, shown once the list has scrolled
     int shownSection;   // the section the pane showed last frame
     float descScroll;    // the description message box's vertical scroll
     float descMaxScroll; // ... and its ceiling last frame (> 0 when lines overflow)
@@ -1338,26 +1337,8 @@ void drawFrame() {
             if (keep < st.arcTop) st.arcTop = keep;
             if (keep >= st.arcTop + vis) st.arcTop = keep - vis + 1;
         }
-        // No scroll bar when the menu opens (user); it appears once the list has scrolled.
-        st.arcBarShown = st.arcBarShown || st.arcTop > 0;
-        if (maxTop > 0 && st.arcBarShown) {
-            float topY = L.origin.y + (L.game ? 4.0f * u : 0.0f);
-            float trackH = L.colH * u, inner = trackH - 16 * u;
-            float shown = (float)vis / (float)entries;
-            float thumbH = floorf(fmaxf(8 * u, inner * shown) / u) * u;
-            float thumbY = floorf((inner - thumbH) * ((float)st.arcTop / (float)maxTop) / u) * u;
-            dl->PushClipRectFullScreen();
-            skin::scrollBar(dl, ImVec2(L.origin.x, topY), trackH, thumbY, thumbH);
-            dl->PopClipRect();
-            ImGui::SetCursorScreenPos(ImVec2(L.origin.x, topY));
-            ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
-            ImGui::InvisibleButton("##arc_scroll", ImVec2(8 * u, trackH));
-            ImGui::PopItemFlag();
-            if (ImGui::IsItemActive()) {
-                float at = (io.MousePos.y - topY - 8 * u - thumbH / 2) / fmaxf(1.0f, inner - thumbH);
-                st.arcTop = std::clamp((int)lroundf(at * maxTop), 0, maxTop);
-            }
-        }
+        // No scroll bar on the section list (user): it scrolls with the cursor
+        // (and wraps from the top to Back), or with the mouse wheel.
     }
     int arrowWas = st.arrowEntry;
     st.arrowEntry = -1;
@@ -1983,7 +1964,6 @@ void run() {
     st.shownSection = -1;
     st.arrowEntry = -1;
     st.arcTop = 0; // the cursor starts on the first section
-    st.arcBarShown = false;
     st.leftFrom = 0;
     st.focusSections = true;
     st.enterContent = false;

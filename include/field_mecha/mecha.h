@@ -608,7 +608,7 @@ sMechaDataTable2* pcConvertMechaData2(void* data);
 void pcFreeMechaData2(sMechaDataTable2* table);
 /* The PS1 stack words under the field's wall-slide edge buffer (the field's
  * src/field/f_8008083C.c); renderMechas leaves some of its own there. */
-extern u32 pcSlideEdgeStack[4];
+extern u32 pcSlideEdgeStack[4] PORT_ALIAS;
 #endif
 
 #endif /* FIELD_MECHA_MECHA_H */

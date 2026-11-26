@@ -22,6 +22,15 @@ be the release the build was made for.
 No root access is needed. `tools/setup.sh` puts the PS1 toolchain in
 `tools/toolchain` and the Python packages in `.venv`.
 
+### FreeBSD amd64
+
+FreeBSD 15.1 builds use Clang and the `binutils`, `cmake-core`, `ninja`,
+`sdl3`, `shaderc`, `vulkan-headers`, and `vulkan-loader` packages. Follow the
+matching build's FreeBSD setup for the pinned PS1 compiler and Python tools.
+Give CMake a fresh build directory so it finds GNU `ld.bfd` and `objcopy`
+for the relocatable game modules. The regular build targets below work
+with the same checked retail inputs.
+
 ## Steps
 
 ```bash
@@ -86,6 +95,16 @@ a pinned Debian build environment with its MinGW-w64 (below), not with the
 host's.
 
 ## Desktop release packages
+
+Download the amd64 `.deb` from the [releases page](https://github.com/EtherAura/xenogears-pc/releases/latest)
+and run `sudo apt install ./FILE.deb`, substituting the downloaded filename.
+Ubuntu 26.04 LTS is the minimum supported Ubuntu release. The same package
+installed and reached the disc setup screen on Debian Forky (testing).
+
+On Windows x64, run the `setup.exe` download to install both engines. For a
+portable copy, extract the `.zip` and launch `xenogears.exe` or
+`xenogears-enhanced.exe` from the extracted folder. Both downloads include
+the SDL runtime and require a Vulkan 1.3 driver.
 
 On a Linux x86-64 host, the release command needs bubblewrap, Python 3 and
 Docker. Docker prepares two cached build environments once: Ubuntu's for the

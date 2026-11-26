@@ -1353,7 +1353,11 @@ int vramBookkeepingHeld(void) __attribute__((weak)); /* port/src/gpu/vram.c */
 
 static int parkAllowed(void);
 
+void safeAuditVBlank(void);       /* safeaudit.c: XG_SAFE_AUDIT */
+void safeAuditSafePoint(void);
+
 void stateVBlankPoint(void) {
+    safeAuditVBlank();
     finishJob(0);
     harnessCheck(hwVSyncCount());
     if (req.kind == REQ_SAVE && req.safe) {
@@ -1406,6 +1410,7 @@ static int parkAllowed(void) {
 }
 
 void stateSafePark(void) {
+    safeAuditSafePoint();
     if (req.kind == REQ_SAVE && req.safe && parkAllowed()) {
         gameStackPark();
     }

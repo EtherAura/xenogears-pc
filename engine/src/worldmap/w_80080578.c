@@ -43,7 +43,7 @@ extern s32 worldmapFile5;
 extern sWorldmapSeqHeader* fieldSeq;
 extern u16 musicStatusFlag;
 extern u8 battleMusic[];
-extern sWorldmapRenderingStruct worldmapRenderingStructs[2];
+extern sWorldmapRenderingStruct worldmapRenderingStructs[2] PORT_ALIAS;
 extern sWorldmapFile1Header* worldmapFile1Buffer;
 extern s32 worldmapExitToFieldVar0;
 extern u16 worldmapMode16DirectorStates[];

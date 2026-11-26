@@ -150,7 +150,7 @@ typedef struct {
 extern sFieldRenderContext* pCurrentFieldRenderingContext;
 /* Noah: g_frameOddOrEven */
 extern s32 g_frameOddOrEven;
-extern Unk800B1E18 D_800B1E18[2];
+extern Unk800B1E18 D_800B1E18[2] PORT_ALIAS;
 /* main: cosine lookup (4096 = 360 degrees) */
 s32 getAngleSin(s32 angle);
 

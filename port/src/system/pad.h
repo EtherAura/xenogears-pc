@@ -46,6 +46,8 @@ int padGamepadInput(int button);           /* PAD_INPUT_* or an SDL_GamepadButto
 void padSetGamepadInput(int button, int input); /* taken from any other button */
 int padStickDpad(void);                    /* the left stick drives the D-pad too */
 void padSetStickDpad(int on);
+int padBackgroundInput(void);               /* the controller plays while the window is not focused */
+void padSetBackgroundInput(int on);
 int padStickDeadzone(void);                /* percentage, 0..95; default 50 */
 void padSetStickDeadzone(int percent);
 /* -1 edits the default mapping; 0/1 edits that connected controller's

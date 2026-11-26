@@ -1,6 +1,7 @@
 
 #include "common.h"
 s32 pcFieldNativeFrameGoesOn(void); /* f_80072140.c, xg-hbc.19.3 */
+void pcFieldNativeEndScope(void);   /* f_80072140.c: no frame between until the next field frame */
 #include "pc_retail_heap.h"
 #include "psyq.h"
 #include "pc_gameplay.h"
@@ -77,7 +78,7 @@ typedef struct {
 extern s32 g_frameOddOrEven;
 extern sFieldRenderContext* pCurrentFieldRenderingContext;
 extern FieldBss_800AF880 fieldSceneState;    /* camera block (eye, at, cameraTan) */
-extern DR_MODE gDialogDrModes[2][16];
+extern DR_MODE gDialogDrModes[2][16] PORT_ALIAS;
 extern s32 fieldTransitionMode;
 extern s32 fieldTransitionFadeInLength;
 extern s32 fieldTransitionInProgress;
@@ -123,7 +124,7 @@ extern u32* color15BitDest;
 extern s32 debugCameraDigitsAllocated;
 extern s32 debugCameraDigitsFrameCounter;
 extern s32 debugCameraDigitsCursorFrame;
-extern POLY_FT4* debugCameraDigitPolys[2];
+extern POLY_FT4* debugCameraDigitPolys[2] PORT_ALIAS;
 extern UVRect debugCameraDigitImages[117]; /* to debugCameraDigits */
 extern DebugDigitSetup debugCameraDigits[0x6D]; /* the overlay's 109 prims (to debugCameraDigitsAllocated) */
 /* particles */
@@ -1617,6 +1618,12 @@ void startFieldTransition(void) {
     initFieldMoviePlayer();
     startFieldMoviePlayback();
     fieldMovieStarted = 1;
+    /* Enhanced: the movie's loop reads the pad itself, between field frames. Started on a
+     * frame between (pcFieldOffTick), updateFieldInputs would only peek at the pad's buffer
+     * and put it back, the whole movie long: the buffer fills, no press reaches the loop and
+     * the opening could not be skipped, depending on the frame it began on. A native scope
+     * until the next field frame (pcFieldSubAdvance ends it) makes each read a taking one. */
+    pcFieldNativeEndScope();
     do {
         VSync(0);
         updateFieldMoviePlayer(3);

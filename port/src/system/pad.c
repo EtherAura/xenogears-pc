@@ -411,6 +411,18 @@ void padSetStickDpad(int on) {
     saveProfile(profile);
 }
 
+/* The controller while the window is not focused (main.c sets the hint at start;
+ * SDL takes a change at once). */
+int padBackgroundInput(void) {
+    return settingsBool("pad_background", 0);
+}
+
+void padSetBackgroundInput(int on) {
+    settingsSetInt("pad_background", on != 0);
+    settingsSave();
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, on ? "1" : "0");
+}
+
 int padStickDeadzone(void) {
     return selectedBindings()->deadzone;
 }

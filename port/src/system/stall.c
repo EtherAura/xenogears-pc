@@ -218,6 +218,12 @@ static void printBacktrace(void) {
     }
 }
 
+/* An address's "name+0xoff" for others (safeaudit.c): the same symbols. */
+void stallNameOf(void* p, char* out, size_t size) {
+    loadSymbols();
+    nameOf(p, out, size);
+}
+
 #endif /* STALL_BACKTRACE */
 
 /* ---- the app in the background ----

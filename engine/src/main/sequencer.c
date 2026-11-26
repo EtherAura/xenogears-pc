@@ -89,11 +89,11 @@ extern u16 spuIrqEnableRequest;
 extern u32 audioTickTotalTime;
 extern s32 audioTickCount;
 u32 GetRCnt(u32 spec);
-extern SeqOpcode seqOpcodes[0x80];  /* opcode handlers 0x80-0xFF */
-extern u8 opcodeSizes[0x80];         /* opcode operand sizes */
+extern SeqOpcode seqOpcodes[0x80] PORT_ALIAS;  /* opcode handlers 0x80-0xFF */
+extern u8 opcodeSizes[0x80] PORT_ALIAS;         /* opcode operand sizes */
 extern u8 noteDeltaTimeTable[];             /* note length per data byte */
 extern u8 noteKeyTable[];
-extern s32 (*lfoWaveformFuncs[16])(SoundLfo*);
+extern s32 (*lfoWaveformFuncs[16])(SoundLfo*) PORT_ALIAS;
 extern u8 pitchToOctaveSemitone[];
 extern s16 pitchTable2[];
 s32 SpuGetVoiceEnvelopeAttr(s32, s32*, s16*);

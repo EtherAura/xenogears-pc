@@ -32,11 +32,74 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install what the checks use
+      - name: Prepare the APT archive cache
+        id: apt-cache
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            python3-yaml python3-numpy python3-pil gcc libc6-dev clang gcc-mingw-w64-x86-64
+          # Use a path that the unprivileged APT download user can traverse.
+          mkdir -m 0755 /tmp/xgpc-apt-archives
+          echo "week=$(date -u +%G-W%V)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/xgpc-apt-archives/*.deb
+          key: xgpc-apt-noble-${{ runner.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}-${{ steps.apt-cache.outputs.week }}
+          restore-keys: xgpc-apt-noble-${{ runner.arch }}-${{ hashFiles('.github/workflows/ci.yml') }}-
+
+      - name: Install what the checks use
+        shell: bash
+        run: |
+          apt_fetch() {
+            local limit=$1 attempt
+            shift
+            for attempt in 1 2; do
+              if sudo timeout --kill-after=5s "$limit" apt-get \
+                -o Acquire::Retries=1 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 "$@"; then
+                return 0
+              fi
+              if [[ $attempt == 1 ]]; then
+                echo "::warning::APT network step failed, retrying once"
+                sleep 5
+              fi
+            done
+            return 1
+          }
+
+          apt_fetch 60s -o APT::Update::Error-Mode=any update
+
+          archive_dir=/tmp/xgpc-apt-archives
+          packages=(python3-yaml python3-numpy python3-pil gcc libc6-dev clang gcc-mingw-w64-x86-64)
+          install_args=(-y --no-install-recommends)
+          archive_args=(-o "Dir::Cache::Archives=$archive_dir/")
+
+          # APT checks already cached archives by size. Check restored files
+          # against SHA-256 from the fresh package indexes before reusing them.
+          plan_dir=$(mktemp -d "$RUNNER_TEMP/xgpc-apt-plan.XXXXXXXX")
+          LC_ALL=C apt-get "${install_args[@]}" --print-uris -o Acquire::ForceHash=sha256 \
+            -o "Dir::Cache::Archives=$plan_dir/" install "${packages[@]}" > "$plan_dir/plan"
+          python3 - "$archive_dir" "$plan_dir/plan" <<'PY'
+          import hashlib
+          import re
+          import sys
+          from pathlib import Path
+
+          archive_dir, plan = map(Path, sys.argv[1:])
+          checksums = dict(re.findall(
+              r"^'[^']+' (\S+\.deb) \d+ SHA256:([a-f0-9]{64})$",
+              plan.read_text(), re.MULTILINE,
+          ))
+          for archive in archive_dir.glob("*.deb"):
+              expected = checksums.get(archive.name)
+              if expected and not archive.is_symlink() and archive.is_file():
+                  with archive.open("rb") as source:
+                      if hashlib.file_digest(source, "sha256").hexdigest() == expected:
+                          continue
+              archive.unlink()
+          PY
+
+          apt_fetch 180s "${install_args[@]}" "${archive_args[@]}" --download-only install "${packages[@]}"
+          # The network deadlines above only apply before dpkg starts.
+          sudo apt-get "${install_args[@]}" "${archive_args[@]}" --no-download install "${packages[@]}"
 
       # Our own tools and tests; the libraries under port/third_party keep their upstream form.
       - name: Every Python tool compiles

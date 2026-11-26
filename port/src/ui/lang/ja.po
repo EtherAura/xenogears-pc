@@ -8020,6 +8020,18 @@ msgid "Stick and mouse"
 msgstr "スティックとマウス"
 
 #: port/src/ui/sections.cpp
+msgid "Background input"
+msgstr "バックグラウンド入力"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Controller works when the window is not focused"
+msgstr "ウィンドウが非アクティブでもコントローラーを使う"
+
+#: port/src/ui/sections.cpp
+msgid "Off: the controller is ignored while another window has the focus. On: it plays either way."
+msgstr "オフ：他のウィンドウがアクティブな間はコントローラーを無視します。オン：常に操作できます。"
+
+#: port/src/ui/sections.cpp
 msgid "Left stick"
 msgstr "左スティック"
 

@@ -386,6 +386,8 @@ std::vector<Spec>& table() {
         [](int, int v) { padSetRegionalControls(0, v); }, 0);
     add("us_controls_jp", N_("US controls in the Japanese version"), [](int) { return padRegionalControls(1); },
         [](int, int v) { padSetRegionalControls(1, v); }, 0);
+    add("pad_background", N_("Controller works when the window is not focused"),
+        [](int) { return padBackgroundInput(); }, [](int, int v) { padSetBackgroundInput(v); }, 0);
     add("pad_stick_dpad", N_("Left stick drives the D-pad"), [](int) { return padStickDpad(); },
         [](int, int v) { padSetStickDpad(v); }, 1);
     add("pad_stick_deadzone", N_("Stick dead zone"), [](int) { return padStickDeadzone(); },

@@ -243,12 +243,10 @@ int main(int argc, char** argv) {
     /* Android's Back comes as a key (SDL_SCANCODE_AC_BACK: the menu, pad.c)
      * instead of leaving the app. */
     SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
-    /* The controller plays whether or not the window has the keyboard focus.
-     * SDL drops gamepad presses while no window of ours has it (the hint's
-     * default), so a window that opened without the focus (a compositor's
-     * focus-stealing prevention, a launch from another app) ignored the pad
-     * until it was clicked: the opening movie would not skip, intermittently. */
-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    /* The controller in the background (Controls > Background input, pad.c
+     * padSetBackgroundInput): off, SDL's default, it drops gamepad presses while
+     * no window of ours has the keyboard focus; on, the pad plays either way. */
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, settingsBool("pad_background", 0) ? "1" : "0");
     /* Headless runs (tests, sweeps) take no gamepads: they would read the
      * controller of whoever is playing on the same machine (scripted input
      * comes from XG_PAD_SCRIPT and the UI/extras scripts instead). */

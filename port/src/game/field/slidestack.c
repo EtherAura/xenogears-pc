@@ -20,7 +20,7 @@
 #include "pc_slide.h"
 #include "pc_retail_heap.h"
 
-extern u32 pcSlideEdgeStack[4];
+extern u32 pcSlideEdgeStack[4] PORT_ALIAS;
 extern sptr cdromFnd;
 static s32 pcSlideEdgeLoaderContext;
 static s32 pcSlideEdgeAnimationContext;

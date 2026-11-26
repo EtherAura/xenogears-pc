@@ -304,7 +304,7 @@ extern BattlingKernelState battlingProgress;
 extern void* battlingMainTaskTable[];
 void recordBattlingGpuTime(void); /* port/src/game/battling/thread.c */
 extern s32 battlingDebugEnabled;
-extern LoadingBatchCommand battlingStartupLoads[6];
+extern LoadingBatchCommand battlingStartupLoads[6] PORT_ALIAS;
 extern s32 battlingPlaysOwnMusic;
 extern u16 battlingHudSpriteClut[];
 extern u8 battlingArenaRowStarts[];

@@ -2123,6 +2123,15 @@ void controlsSection() {
         hint("Default keys and Default gamepad (or Reset controller profile) put every binding back.");
     }
 
+    if (row("Background input", "pad_background")) {
+        bool background = padBackgroundInput() != 0;
+        if (checkbox("Controller works when the window is not focused", &background)) {
+            padSetBackgroundInput(background);
+        }
+        hint("Off: the controller is ignored while another window has the focus. On: it plays either way.");
+        overrideNote("pad_background");
+    }
+
     opt::group(N_("Stick and mouse"));
     if (row("Left stick", "pad_stick_dpad pad_stick_deadzone")) {
         bool stick = padStickDpad();

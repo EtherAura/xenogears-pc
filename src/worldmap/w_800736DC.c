@@ -113,7 +113,7 @@ extern void* mechaFinalizeVar0;
 extern MATRIX worldmapColorMatrix;
 extern MATRIX worldmapLightMatrix;
 void adjustWorldModelLocation(VECTOR* pos);
-extern sWorldmapRenderingStruct worldmapRenderingStructs[2];
+extern sWorldmapRenderingStruct worldmapRenderingStructs[2] PORT_ALIAS;
 extern u16 worldmapInput1_0;
 extern u16 worldmapInput1_1;
 extern u16 worldmapInput2_0;

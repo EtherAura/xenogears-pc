@@ -694,11 +694,13 @@ def nm(objs: list[str]) -> tuple[set[str], dict[str, list[str]], set[str], dict[
     where it is: (object, nm type, value), names at one place being aliases of one object; and
     every name any of the objects references, those the others define included)."""
     defined, undefined, common, data = set(), {}, set(), {}
+    # FreeBSD nm prefers the addressless bitcode symbols in fat LTO objects.
+    nm_command = ["/usr/bin/nm", "--no-llvm-bc"] if sys.platform.startswith("freebsd") else ["nm"]
     for o in objs:
         with open(o, "rb") as obj:
             macho = obj.read(8) == bytes.fromhex("cffaedfe0c000001")
-        nm_tool = "llvm-nm" if macho and sys.platform != "darwin" else "nm"
-        out = subprocess.run([nm_tool, o], capture_output=True, text=True, check=True).stdout
+        nm_tool = ["llvm-nm"] if macho and sys.platform != "darwin" else nm_command
+        out = subprocess.run([*nm_tool, o], capture_output=True, text=True, check=True).stdout
         for line in out.splitlines():
             parts = line.split()
             if macho:
