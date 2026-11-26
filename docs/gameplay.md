@@ -44,6 +44,38 @@ and Gears you had. F1 > Gameplay > Retry lost battles.
 Random encounters: Off, Reduced, Normal, Increased, or 0% to 400%. Story
 battles still happen. F1 > Gameplay > Random encounters.
 
+## Memory cards
+
+The port uses raw 128 KB PlayStation memory card images (`.mcd`, `.mcr`, `.mc`,
+`.srm`): the same format as DuckStation, Mednafen/Beetle PSX, PCSX-Redux and
+original hardware dumps. Saves are compatible both ways — a card or save made in
+the port loads back in an emulator or on a PlayStation (rename `.mcd` to `.mcr`
+if another tool expects it). US builds use US saves (`BASLUS-00664...`) and
+Japanese builds use Japanese saves (`BISLPS-01160...`).
+
+Default cards are `card1.mcd` and `card2.mcd` in `~/.local/share/xenogears/`
+(Windows: `%APPDATA%\xenogears\`). F1 > Saves > Memory cards swaps the image in
+either slot while the game is paused, lists saves on the card, imports and
+exports single saves (`.mcs`, plus import of 54-byte header saves such as
+Xploder/Action Replay), and restores from the last ten automatic backups kept
+beside each image (`<image>.backups/`). Container formats with extra headers
+(`.gme`, `.vmp`, `.psv`) need to be converted to a raw 128 KB image or `.mcs`
+first.
+
+The command line manages cards without starting the game:
+
+```sh
+xenogears --card list   1
+xenogears --card export 1 BASLUS-006640 save.mcs
+xenogears --card import 1 save.mcs [--replace]
+xenogears --card delete 1 BASLUS-006640
+xenogears --card format 1
+```
+
+Pass `1`, `2`, or a path to a 128 KB card image. `card1` and `card2` in
+`settings.ini`, and the `XG_CARD1`, `XG_CARD2` and `XG_CARD_DIR` environment
+variables, set the card paths.
+
 ## Save states and rewind
 
 ![F1 > Saves > Save states](img/gameplay-states.png)

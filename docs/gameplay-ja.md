@@ -36,6 +36,25 @@ F1 > ゲームプレイ > Battles。Advanced には、敵の能力値ごとの�
 
 エンカウント（Random encounters）：オフ、少なめ、ノーマル、多め、または 0% から 400%。ストーリー上のバトルはこれまでどおり起こります。F1 > ゲームプレイ > エンカウント。
 
+<a id="memory-cards"></a>
+## メモリーカード
+
+この移植版は、生の 128 KB PlayStation メモリーカードイメージ（`.mcd`、`.mcr`、`.mc`、`.srm`）を使います。DuckStation、Mednafen/Beetle PSX、PCSX-Redux、実機からのダンプと同じ形式です。セーブデータには双方向の互換性があり、この移植版で作ったカードやセーブをエミュレーターや PlayStation 実機で読み込めます（別のツールが `.mcr` を求める場合は拡張子を変更してください）。北米版ビルドは北米版セーブ（`BASLUS-00664...`）、日本版ビルドは日本版セーブ（`BISLPS-01160...`）を使います。
+
+標準のカードは `~/.local/share/xenogears/`（Windows では `%APPDATA%\xenogears\`）の `card1.mcd` と `card2.mcd` です。F1 > セーブ（Saves） > メモリーカード（Memory cards）では、ゲームを一時停止したまま両スロットのイメージを差し替えたり、カード内のセーブを一覧表示したり、単体のセーブ（`.mcs`、および Xploder や Action Replay などの 54 バイトヘッダー形式の取り込み）を取り込み・書き出ししたりできます。各イメージの横には直前 10 回分の自動バックアップ（`<image>.backups/`）が残っており、そこから復元することもできます。追加ヘッダーを持つコンテナ形式（`.gme`、`.vmp`、`.psv`）は、あらかじめ生の 128 KB イメージまたは `.mcs` に変換してください。
+
+ゲームを起動せずにコマンドラインからカードを操作することもできます。
+
+```sh
+xenogears --card list   1
+xenogears --card export 1 BASLUS-006640 save.mcs
+xenogears --card import 1 save.mcs [--replace]
+xenogears --card delete 1 BASLUS-006640
+xenogears --card format 1
+```
+
+カードの指定には `1`、`2`、または 128 KB カードイメージのパスを渡します。カードのパスは `settings.ini` の `card1` と `card2`、および環境変数 `XG_CARD1`、`XG_CARD2`、`XG_CARD_DIR` でも設定できます。
+
 ## ステートセーブと巻きもどし
 
 ![F1 > セーブ > ステートセーブ](img/gameplay-states.png)
