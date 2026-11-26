@@ -621,7 +621,7 @@ void updateScale() {
     SDL_GetWindowSize(presentWindow(), &lw, &lh);
     st.pixelsPerUnit = lw > 0 ? (float)pw / (float)lw : 1.0f;
     float s = skin::menuUnitFor(pw, ph);
-    if (s == st.unit) {
+    if (s == st.unit && skin::unit() == s) {
         return;
     }
     st.unit = s;

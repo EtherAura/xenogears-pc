@@ -470,7 +470,7 @@ float menuUnitFor(int w, int h) {
 void setUnit(float unit) {
     st.unit = unit;
     ImGuiStyle& s = ImGui::GetStyle();
-    ImGui::StyleColorsDark(&s);
+    s = ImGuiStyle();
     s.WindowRounding = s.ChildRounding = s.FrameRounding = s.PopupRounding = s.GrabRounding = s.TabRounding = 0;
     s.ScrollbarRounding = 0;
     s.WindowBorderSize = s.ChildBorderSize = s.PopupBorderSize = s.FrameBorderSize = 0;

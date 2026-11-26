@@ -656,6 +656,13 @@ add_executable(ui_motiontest EXCLUDE_FROM_ALL src/ui/test/motiontest.cpp src/ui/
     "${XG_IMGUI_DIR}/imgui_tables.cpp" "${XG_IMGUI_DIR}/imgui_widgets.cpp")
 target_compile_features(ui_motiontest PRIVATE cxx_std_17)
 target_include_directories(ui_motiontest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_IMGUI_DIR}")
+add_executable(ui_skintest EXCLUDE_FROM_ALL src/ui/test/skintest.cpp src/ui/skin.cpp src/system/settings.c
+    "${XG_IMGUI_DIR}/imgui.cpp" "${XG_IMGUI_DIR}/imgui_draw.cpp"
+    "${XG_IMGUI_DIR}/imgui_tables.cpp" "${XG_IMGUI_DIR}/imgui_widgets.cpp")
+target_compile_features(ui_skintest PRIVATE cxx_std_17)
+target_include_directories(ui_skintest PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${XG_IMGUI_DIR}")
+target_compile_definitions(ui_skintest PRIVATE PLATFORM_PC)
+target_link_libraries(ui_skintest PRIVATE SDL3::SDL3)
 # Japanese line breaking in the menus' text (xg-em4y): no ImGui, no SDL.
 add_executable(ui_textwraptest EXCLUDE_FROM_ALL src/ui/test/textwraptest.cpp src/ui/textwrap.cpp)
 target_compile_features(ui_textwraptest PRIVATE cxx_std_17)
