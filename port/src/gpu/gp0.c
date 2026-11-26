@@ -838,7 +838,29 @@ static int readsThisFrame(uint32_t tex, uint32_t uvMin, uint32_t uvMax) {
     int tx = (int)(tex & 15) * 64, ty = (int)((tex >> 4) & 1) * 256;
     int x0 = tx + (int)(uvMin & 0xFFFFu), y0 = ty + (int)(uvMin >> 16);
     int x1 = tx + (int)(uvMax & 0xFFFFu), y1 = ty + (int)(uvMax >> 16);
-    return inThisFrame(x0, y0, x1, y1);
+    if (inThisFrame(x0, y0, x1, y1)) return 1;
+    /* A screen wave's strip reads its own rows shifted (the opening
+     * flashback's fire, vram.c's distortion mesh): at the drawing area's
+     * edges the shift reaches a few texels past it, and the strip, wholly
+     * this frame's picture but for those texels, would be kept sharp over
+     * the blurred scene as a band. Within the margin of the area and mostly
+     * inside it, it is this frame's picture. XG_DOF_OWN_MARGIN=<texels>
+     * (default 8; 0: the exact test only, for comparing). */
+    static int margin = -1;
+    if (margin < 0) {
+        const char* e = getenv("XG_DOF_OWN_MARGIN");
+        margin = e != NULL && *e != '\0' ? atoi(e) : 8;
+        if (margin < 0) margin = 0;
+    }
+    if (margin == 0 || x0 < gp.clipX0 - margin || x1 > gp.clipX1 + margin || y0 < gp.clipY0 - margin ||
+        y1 > gp.clipY1 + margin) {
+        return 0;
+    }
+    int ix0 = x0 > gp.clipX0 ? x0 : gp.clipX0, iy0 = y0 > gp.clipY0 ? y0 : gp.clipY0;
+    int ix1 = x1 < gp.clipX1 ? x1 : gp.clipX1, iy1 = y1 < gp.clipY1 ? y1 : gp.clipY1;
+    if (ix1 < ix0 || iy1 < iy0) return 0;
+    long inside = (long)(ix1 - ix0 + 1) * (iy1 - iy0 + 1), all = (long)(x1 - x0 + 1) * (y1 - y0 + 1);
+    return inside * 2 >= all;
 }
 
 static void hiVertex(HiVertex* o, float x, float y, float u, float v, float r, float g, float b, uint32_t mode,
