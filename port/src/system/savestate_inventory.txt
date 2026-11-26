@@ -392,6 +392,9 @@ system/fieldspeed.c transitionIdle state the main menu's loop waits for the play
 system/fieldspeed.c transitionMenu state the main menu's way in or out is marked (pcTransitionMenu; fieldSpeedStateIo)
 system/fieldspeed.c transitionRoom state the field's room change is marked (pcTransitionRoom; fieldSpeedStateIo)
 system/bios.c * host host files for the extras' sandbox
+system/cores.c fastMask host the game thread's fast cores (fast_cores), set once at the start
+system/cores.c pinnedToFast host the game thread's fast cores (fast_cores), set once at the start
+system/cores.c startMask host the game thread's fast cores (fast_cores), set once at the start
 system/cputime.c * host XG_CPU_TIMING
 system/displaylock.c * host the display lock
 system/gameplay.c dialogStepSkip derived set and cleared within one field frame (xg-hbc.11)
@@ -488,6 +491,7 @@ system/libetc.c betweenChecked host XG_VSYNC_BETWEEN, read once
 system/libetc.c betweenOff host XG_VSYNC_BETWEEN, read once
 system/libetc.c callbacks state
 system/libetc.c countBase state
+system/libetc.c flipMark host the vblank a 60 Hz frame between reached, for the main flip's catch-up (checked against lastVSync on use)
 system/libetc.c idleChecked host the vsync_idle setting, read once
 system/libetc.c idleOn host the vsync_idle setting, read once
 system/libetc.c lastVSync state

@@ -37,6 +37,7 @@
 #include "pngfast.h"
 #include "system/settings.h"
 #include "../system/savestate.h"
+#include "../system/cores.h"
 
 #define CACHE 16      /* pictures held */
 #define AHEAD 8       /* frames read ahead of the last completed one */
@@ -338,7 +339,7 @@ static void start(void) {
     if (mp.thread[0] == NULL) {
         mp.quit = 0;
         for (int i = 0; i < THREADS; i++) {
-            mp.thread[i] = SDL_CreateThread(worker, "moviepack", NULL);
+            mp.thread[i] = hostThreadCreate(worker, "moviepack", NULL);
         }
     }
 }

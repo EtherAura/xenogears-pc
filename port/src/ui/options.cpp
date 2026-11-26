@@ -503,7 +503,7 @@ std::vector<Spec>& table() {
     add("field60slow", N_("20 and 15 fps rooms"),
         [](int) { return pcGameplayField60SlowSetting(); },
         [](int, int v) { keySet("field60slow", v); }, 1);
-    add("interpolation", N_("Motion smoothing"), [](int) { return interpolationEnabled(); },
+    add("interpolation", N_("Motion smoothing"), [](int) { return interpolationSetting(); },
         [](int, int v) { interpolationSetEnabled(v); }, 1);
     add("interpolation_hz", N_("Motion display rate"), [](int) { return presentationRate(); },
         [](int, int v) { presentationSetRate(v); }, 60, rateNames, 5, rateValues);

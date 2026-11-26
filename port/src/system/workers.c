@@ -6,6 +6,7 @@
  * only: nothing here is state the game sees.
  */
 #include "workers.h"
+#include "cores.h"
 
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -54,7 +55,7 @@ static void poolStart(void) {
     for (int i = 1; i <= helpers; i++) {
         pool.go[i] = SDL_CreateSemaphore(0);
         pool.done[i] = SDL_CreateSemaphore(0);
-        pool.thread[i] = pool.go[i] && pool.done[i] ? SDL_CreateThread(worker, "worker", (void*)(intptr_t)i) : NULL;
+        pool.thread[i] = pool.go[i] && pool.done[i] ? hostThreadCreateFast(worker, "worker", (void*)(intptr_t)i) : NULL;
         if (pool.thread[i] == NULL) {
             if (pool.go[i]) SDL_DestroySemaphore(pool.go[i]);
             if (pool.done[i]) SDL_DestroySemaphore(pool.done[i]);

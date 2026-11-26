@@ -44,6 +44,7 @@
 #include "ui/ui.h"
 #include "system/cputime.h"
 #include "system/settings.h"
+#include "system/cores.h"
 #include "system/speedup.h"
 
 #define OSD_WORDS 2048 /* the note, or the performance overlay's panel (present.c) */
@@ -2303,7 +2304,7 @@ static int presentEnqueue(uint64_t timing,PresentCopy* copy) {
     if(!asyncPresent.thread) {
         asyncPresent.lock=SDL_CreateMutex();asyncPresent.changed=SDL_CreateCondition();
         if(asyncPresent.lock && asyncPresent.changed)
-            asyncPresent.thread=SDL_CreateThread(presentWorker,"Vulkan present",NULL);
+            asyncPresent.thread=hostThreadCreate(presentWorker,"Vulkan present",NULL);
         if(!asyncPresent.thread) {
             SDL_DestroyCondition(asyncPresent.changed);SDL_DestroyMutex(asyncPresent.lock);
             asyncPresent.lock=NULL;asyncPresent.changed=NULL;asyncPresent.disabled=1;
@@ -5472,7 +5473,7 @@ static int SDLCALL spareAheadRun(void* arg) {
 static void hiSpareAhead(int w, int h) {
     if (spareAhead.thread || vk.hiWideSpare != VK_NULL_HANDLE || vk.hiWideCold != VK_NULL_HANDLE || w <= 0 || h <= 0) return;
     spareAhead.w = w; spareAhead.h = h; spareAhead.made = 0;
-    spareAhead.thread = SDL_CreateThread(spareAheadRun, "hires spare", NULL);
+    spareAhead.thread = hostThreadCreate(spareAheadRun, "hires spare", NULL);
 }
 /* Its result as the spare (a spare already there wins: nothing is using
  * the one made ahead, which is freed). */
@@ -6040,7 +6041,7 @@ static int sceneMakeNow(int now) {
     if (!now) {
         memset(&sceneBuild.made, 0, sizeof(sceneBuild.made));
         SDL_SetAtomicInt(&sceneBuild.done, 0);
-        sceneBuild.thread = SDL_CreateThread(sceneBuildRun, "scene pipelines", NULL);
+        sceneBuild.thread = hostThreadCreate(sceneBuildRun, "scene pipelines", NULL);
         if (sceneBuild.thread) {
             gpuLog("scene: compiling the depth of field's and the lighting's pipelines on a thread of their own");
             return 0;
@@ -8760,7 +8761,8 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
     int starved = hostPresent.quietFrames >= 2;
     int active = ready && !starved && hostPresent.cost <= UINT64_C(12000000);
     hostPresent.status = active ? "Host scheduling" : !presentationRate() ? "Native rate" :
-        !hostPresent.realtime ? "Native rate during deterministic playback" : !interpolationEnabled() ?
+        !hostPresent.realtime ? "Native rate during deterministic playback" : interpolationStandsAside() ?
+        "Native rate: the 60 Hz modes draw every vblank" : !interpolationEnabled() ?
         "Native rate: Smooth motion is off" : starved ? "Native rate: no idle display time" : ready ? "Native rate: display work is over budget" : !eligible ? "Native rate: shader preset or capture active" :
         "Native rate: waiting for supported field frames";
     if (hidden) {

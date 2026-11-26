@@ -43,6 +43,7 @@
 #include "stateportable.h"
 #include "system.h"
 #include "world.h"
+#include "cores.h"
 
 #ifdef VERSION_JP
 #define REGION "JP"
@@ -759,7 +760,7 @@ static void writeState(const char* path, const char* what, uint8_t* body, size_t
         finishJob(1);
         return;
     }
-    worker = SDL_CreateThread(workerMain, "state write", j);
+    worker = hostThreadCreate(workerMain, "state write", j);
     if (worker == NULL) {
         workerMain(j);
         finishJob(1);

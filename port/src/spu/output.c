@@ -64,6 +64,7 @@
 
 #include "output.h"
 #include "spu.h"
+#include "system/cores.h"
 #include "system/settings.h"
 #include "../system/savestate.h"
 #ifdef _WIN32
@@ -174,11 +175,14 @@ static void openOutput(void) {
             fprintf(stderr, "spu: cannot write XG_AUDIO_DUMP %s\n", path);
         }
     }
+    hostLibraryThreadsAnywhere(1); /* SDL's sound threads on every core (system/cores.h) */
     if (!SDL_WasInit(SDL_INIT_AUDIO) && !SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        hostLibraryThreadsAnywhere(0);
         fprintf(stderr, "spu: no audio: %s\n", SDL_GetError());
         return;
     }
     stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, NULL, NULL);
+    hostLibraryThreadsAnywhere(0);
     if (stream == NULL) {
         fprintf(stderr, "spu: no audio device: %s\n", SDL_GetError());
         return;

@@ -19,6 +19,7 @@
 #include "texture.h"
 #include "system/settings.h"
 #include "system/cputime.h"
+#include "system/cores.h"
 
 #define PACK_SLOTS TEXTURE_PACK_SLOTS /* images and known misses (a field meets thousands of keys) */
 #define PACK_HASH 16384
@@ -431,7 +432,7 @@ static int posesStart(void) {
     int running=0, want=SDL_GetNumLogicalCPUCores()/4;
     want=want<1?1:want>POSE_THREADS?POSE_THREADS:want;
     for (int i=0;i<want;++i) {
-        if (!poseThreads[i]) poseThreads[i]=SDL_CreateThread(poseLoaderMain,"sprite-pose-loader",NULL);
+        if (!poseThreads[i]) poseThreads[i]=hostThreadCreate(poseLoaderMain,"sprite-pose-loader",NULL);
         running+=poseThreads[i]!=NULL;
     }
     return running;
@@ -538,7 +539,7 @@ static void warmPacks(const char* const* dirs, int count) {
         if (dirs[i] && dirs[i][0]) snprintf(list->paths[list->count++],sizeof(list->paths[0]),"%s",dirs[i]);
     if (!memcmp(last,list->paths,sizeof(last))) { free(list); return; }   /* already warmed */
     memcpy(last,list->paths,sizeof(last));
-    SDL_Thread* t=SDL_CreateThread(warmMain,"pack-warmup",list);
+    SDL_Thread* t=hostThreadCreate(warmMain,"pack-warmup",list);
     if (t) SDL_DetachThread(t); else free(list);
 #else
     (void)dirs; (void)count;
@@ -906,7 +907,7 @@ static int enqueue(Entry* e, const char* path, size_t estimate, int page) {
     if (!jobLock || !jobWake || !jobFinished) return 0;
     int running=0;
     for (int i=0;i<LOADER_THREADS;++i) {
-        if (!loaders[i]) loaders[i]=SDL_CreateThread(loaderMain,"texture-pack-loader",NULL);
+        if (!loaders[i]) loaders[i]=hostThreadCreate(loaderMain,"texture-pack-loader",NULL);
         running+=loaders[i]!=NULL;
     }
     if (!running) return 0;

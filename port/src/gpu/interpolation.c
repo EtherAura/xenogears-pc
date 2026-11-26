@@ -169,7 +169,30 @@ static void load(void) {
 /* Called per packet and per presented frame: speedup.c caches the setting
  * (refreshed on every settings change, so the menu's toggle and
  * speedupSetEnabled's gpuHostReset see the new value). */
-int interpolationEnabled(void) { load(); return ip.enabled && speedupEnabled(); }
+int interpolationSetting(void) { load(); return ip.enabled && speedupEnabled(); }
+
+/* The Enhanced engine's 60 Hz field (its 20 and 15 fps rooms included) and
+ * world map complete a picture every vblank, and smoothing covers only those
+ * two: at a display rate of 60 Hz or the native rate it would replay each one
+ * a second time (the scene's draws and effects: the GPU's work about 1.4
+ * times) a frame late, and add nothing. It stands aside there: the game's
+ * own pictures, no delay; at 120/144/240 Hz it still adds pictures between
+ * (xg-c4y7: carl's settings in Lahan, late vblanks 6 -> 0 of 341, GPU
+ * median 13.6 -> 9.5 ms). The setting itself stays as chosen. Weak: the
+ * programs that link this file without the gameplay switches never stand
+ * aside. */
+extern int pcGameplayField60(void) __attribute__((weak));
+extern int pcGameplayField60Slow(void) __attribute__((weak));
+extern int pcGameplayWorldmap60(void) __attribute__((weak));
+int interpolationStandsAside(void) {
+#if XG_ENGINE_ENHANCED
+    return presentationRate() <= 60 && pcGameplayField60 != NULL && pcGameplayField60Slow != NULL &&
+           pcGameplayWorldmap60 != NULL && pcGameplayField60() && pcGameplayField60Slow() && pcGameplayWorldmap60();
+#else
+    return 0;
+#endif
+}
+int interpolationEnabled(void) { return interpolationSetting() && !interpolationStandsAside(); }
 int interpolationCapturing(void) { return ip.loaded && ip.building >= 0 && ip.captureReady && ip.frames[ip.building].valid; }
 int pcInterpolationBuilding(void) { return interpolationCapturing(); }
 const char* interpolationStatus(void) { load(); return ip.status; }

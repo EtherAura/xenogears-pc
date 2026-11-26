@@ -8116,6 +8116,10 @@ msgid "Adds one game frame of display delay (usually 33 ms; up to 67 ms in slowe
 msgstr "表示がゲームの 1 フレーム分遅れます(ふつうは 33 ミリ秒、遅い場面では最大 67 ミリ秒)。アニメーションの絵、文字、ライティングは元のタイミングのままです。"
 
 #: port/src/ui/sections.cpp
+msgid "Standing aside: the 60 Hz fields and world map already draw every vblank, so at 60 Hz or the native rate the game's own pictures are shown, with no added delay. Higher motion display rates still add pictures between."
+msgstr "いまは働いていません: 60 Hz のフィールドとワールドマップは毎 vblank 描画するので、60 Hz かネイティブのレートではゲーム自身の絵をそのまま表示し、表示の遅れも加わりません。それより高い表示レートでは、引き続きあいだの絵を加えます。"
+
+#: port/src/ui/sections.cpp
 msgid "Advanced"
 msgstr "詳細設定"
 

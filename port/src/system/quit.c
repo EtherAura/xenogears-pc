@@ -33,6 +33,7 @@
 #include <unistd.h>
 #endif
 
+#include "cores.h"
 #include "rumble.h"
 #include "system.h"
 #ifdef __ANDROID__
@@ -147,7 +148,7 @@ void quitInit(void) {
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGHUP, &sa, NULL);
 #endif
-    SDL_Thread* t = SDL_CreateThread(watchdog, "quit watchdog", NULL);
+    SDL_Thread* t = hostThreadCreate(watchdog, "quit watchdog", NULL);
     if (t != NULL) {
         SDL_DetachThread(t);
     }

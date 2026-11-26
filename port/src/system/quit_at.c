@@ -24,6 +24,7 @@
 
 #include "savestate.h"
 #include "system.h"
+#include "cores.h"
 
 #define FALLBACK_POLL_MS 50
 #define FALLBACK_GRACE_POLLS 20 /* a second past the end before the fallback steps in */
@@ -84,7 +85,7 @@ __attribute__((constructor)) static void quitAtInit(void) {
      * way. */
     queuedAt = hwVSyncPeriod();
     hwScheduleAt(queuedAt, endEvent, NULL);
-    SDL_Thread* t = SDL_CreateThread(fallback, "quit at", NULL);
+    SDL_Thread* t = hostThreadCreate(fallback, "quit at", NULL);
     if (t != NULL) {
         SDL_DetachThread(t);
     }

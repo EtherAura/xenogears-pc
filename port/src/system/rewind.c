@@ -58,6 +58,7 @@
 #include "savestate.h"
 #include "stateimage.h"
 #include "system.h"
+#include "cores.h"
 
 int cdBootDiscNumber(void);                      /* cd/cd.h */
 uint64_t spuOutputDumpFrames(void);              /* spu/output.c */
@@ -589,7 +590,7 @@ static void lanesInit(void) {
     for (int l = 1; l < lanes.count; l++) {
         lanes.go[l] = SDL_CreateSemaphore(0);
         lanes.done[l] = SDL_CreateSemaphore(0);
-        lanes.thread[l] = lanes.go[l] && lanes.done[l] ? SDL_CreateThread(laneWorker, "rewind lane", (void*)(intptr_t)l) : NULL;
+        lanes.thread[l] = lanes.go[l] && lanes.done[l] ? hostThreadCreateFast(laneWorker, "rewind lane", (void*)(intptr_t)l) : NULL;
         if (lanes.thread[l] == NULL) {
             if (lanes.go[l]) SDL_DestroySemaphore(lanes.go[l]);
             if (lanes.done[l]) SDL_DestroySemaphore(lanes.done[l]);
@@ -764,7 +765,7 @@ static void packInit(void) {
         packing.ready = SDL_CreateSemaphore(0);
         packing.done = SDL_CreateSemaphore(0);
         if (packing.ready && packing.done)
-            packing.thread = SDL_CreateThread(packWorker, "rewind pack", NULL);
+            packing.thread = hostThreadCreate(packWorker, "rewind pack", NULL);
     }
 }
 

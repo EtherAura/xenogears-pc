@@ -31,6 +31,9 @@ static s32 videoMode;
  * a busy wait for the vblank). The host's presentation only, never a state. */
 static int pollRun;
 static uint32_t pollCount;
+/* The vblank a picture between reached (pcVSyncFlipMark): the main flip's
+ * catch-up counts from it when it is later than lastVSync. Host only. */
+static uint32_t flipMark;
 
 void etcVBlank(void) {
     if (!started) {
@@ -114,6 +117,26 @@ void pcFieldVSync(void) {
     mainFlipVSync(__builtin_return_address(0));
 }
 
+/* The Enhanced engine's 60 Hz field (xg-xqha): its frame between waits for
+ * its vblank by polling VSync(-1), which moves no lastVSync, so the tick's
+ * main flip after it took that vblank for one passed during rendering and
+ * returned at once: the tick was drawn in the frame between's vblank, one
+ * picture never shown and the next vblank showing the same again. The frame
+ * between marks the vblank it reached; the catch-up counts from the later of
+ * the two (a mark after a state load that lies outside lastVSync..now is
+ * ignored). The stepped clock never catches up (hwWaitVSyncSince). */
+void pcVSyncFlipMark(void) {
+    flipMark = hwVSyncCount();
+}
+
+static uint32_t flipSince(void) {
+    uint32_t now = hwVSyncCount();
+    if ((int32_t)(flipMark - lastVSync) > 0 && (int32_t)(now - flipMark) >= 0) {
+        return flipMark;
+    }
+    return lastVSync;
+}
+
 /* The Enhanced engine's pictures between two vblanks (xg-hbc.19.4): a loop
  * that waits two vblanks a frame (VSync(2): the battle's shatter, the field's
  * transition strips) registers a function that draws the picture between its
@@ -193,7 +216,7 @@ static s32 vsyncWork(s32 mode, int catchUp) {
             }
         }
     }
-    if (catchUp) hwWaitVSyncSince(lastVSync);
+    if (catchUp) hwWaitVSyncSince(flipSince());
     else hwWaitVSync();
     lastVSync = hwVSyncCount();
     lastVSyncTime = hwNow();

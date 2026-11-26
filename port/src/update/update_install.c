@@ -31,6 +31,7 @@
 #ifdef __ANDROID__
 #include "system/android.h"
 #endif
+#include "system/cores.h"
 
 /* system/quit.c, gpu/present.c (weak: the tests have no game to quit, no picture). */
 void quitNow(void) __attribute__((weak));
@@ -455,7 +456,7 @@ int updateInstallStart(const UpdateInstallPlace* place) {
     SDL_SetAtomicInt(&I.done, 0);
     SDL_SetAtomicInt(&I.total, 0);
     SDL_SetAtomicInt(&I.stage, INSTALL_CHECKING);
-    I.thread = SDL_CreateThread(installThread, "xg-update-install", NULL);
+    I.thread = hostThreadCreate(installThread, "xg-update-install", NULL);
     if (I.thread == NULL) {
         snprintf(I.st.why, sizeof I.st.why, "no thread for the install: %s", SDL_GetError());
         SDL_SetAtomicInt(&I.stage, INSTALL_FAILED);
@@ -708,7 +709,7 @@ void updateInstallVBlank(void) {
         if (I.place.kind == RELEASE_SETUP) { /* Windows asks for admin on the asker's thread */
             I.askWhy[0] = '\0';
             SDL_SetAtomicInt(&I.asking, 1);
-            I.asker = SDL_CreateThread(askThread, "xg-update-setup", NULL);
+            I.asker = hostThreadCreate(askThread, "xg-update-setup", NULL);
             if (I.asker != NULL) return;
             SDL_SetAtomicInt(&I.asking, 0); /* no thread: asked here, as before */
         }

@@ -3,7 +3,9 @@
 #include "interpolation_core.h"
 #include "texture.h"
 
-int interpolationEnabled(void);
+int interpolationEnabled(void);   /* smoothing in effect now (the setting, unless it stands aside) */
+int interpolationSetting(void);   /* the player's setting (with Speedup), for the menus */
+int interpolationStandsAside(void); /* the Enhanced engine's 60 Hz modes already draw every vblank */
 int interpolationCapturing(void);
 void interpolationSetEnabled(int enabled);
 void interpolationReset(void);

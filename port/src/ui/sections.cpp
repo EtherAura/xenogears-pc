@@ -2778,7 +2778,7 @@ void gameplaySection() {
                "follows it, while the battle itself (turns, damage, random rolls) runs exactly as on the PlayStation. "
                "Takes effect at once."),
             N_("The Original engine runs battles as the PlayStation did."));
-    bool smoothing = interpolationEnabled();
+    bool smoothing = interpolationSetting();
     if (row("Motion smoothing", "interpolation")) {
         ImGui::BeginDisabled(!speedupEnabled());
         if (checkbox("Smooth motion", &smoothing)) interpolationSetEnabled(smoothing);
@@ -2786,6 +2786,8 @@ void gameplaySection() {
         hint("Smooths fields and the world map: models, Gears, terrain, character placement, camera motion, particles, clouds and screen effects. Gameplay, animation events and audio keep their original timing.");
         hint("Adds one game frame of display delay (usually 33 ms; up to 67 ms in slower scenes). Animation pictures, text and lighting retain their original timing.");
         hint("Available with Speedup. Supports wide/expanded framing, texture filters, packs and enhanced text. Scene cuts and unsafe state changes use the original picture.");
+        if (smoothing && interpolationStandsAside())
+            hint("Standing aside: the 60 Hz fields and world map already draw every vblank, so at 60 Hz or the native rate the game's own pictures are shown, with no added delay. Higher motion display rates still add pictures between.");
         overrideNote("interpolation");
     }
     if (row("Motion display rate", "interpolation_hz")) {

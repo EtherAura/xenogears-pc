@@ -30,6 +30,7 @@
 #include "cd/cd.h"
 #include "cd/regional.h"
 #include "system/gamedata.h"
+#include "system/cores.h"
 #include "system/gamestack.h"
 #include "system/savestate.h"
 #include "system/rewind.h"
@@ -373,6 +374,7 @@ int main(int argc, char** argv) {
     }
     uiPrepare(); /* the touch pad's first picture's set-up now, not in that vblank */
     fprintf(stderr, "xenogears: entering kernelMain\n");
+    coresPinGameThread(); /* on a hybrid CPU, the game thread on the fast cores (system/cores.h) */
     hwGameStart(); /* the boot is out of the clock: no vblank backlog at the start */
     gameStackRun(kernelMain); /* on a stack of its own (system/gamestack.h: save states) */
     fprintf(stderr, "xenogears: kernelMain returned\n");

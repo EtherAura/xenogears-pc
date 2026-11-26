@@ -14,6 +14,7 @@
 #include "update_manifest.h"
 #include "system/release.h"
 #include "system/settings.h"
+#include "system/cores.h"
 
 /* system/netplay.c, gpu/present.c (weak: the tests have neither). */
 int netplayActive(void) __attribute__((weak));
@@ -352,7 +353,7 @@ int updateStart(int force) {
     copy(U.skip, sizeof U.skip, settingsGet("update_skip"));
     fprintf(stderr, "update: checking %s%s (%s)\n", U.base, UPDATE_MANIFEST_NAME, name);
     SDL_SetAtomicInt(&U.done, 0);
-    U.thread = SDL_CreateThread(checkThread, "xg-update", NULL);
+    U.thread = hostThreadCreate(checkThread, "xg-update", NULL);
     if (U.thread == NULL) {
         U.pending.outcome = UPDATE_FAILED;
         snprintf(U.pending.why, sizeof U.pending.why, "no thread for the check: %s", SDL_GetError());

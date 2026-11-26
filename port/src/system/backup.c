@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "backup.h"
+#include "cores.h"
 
 #define MAX_ENTRY (1024u * 1024u * 1024u) /* 1 GB: far above any save file */
 #define MAX_FILES 4096
@@ -348,7 +349,7 @@ static void SDLCALL chosen(void* user, const char* const* list, int filter) {
         setStatus(list == NULL, text);
         return;
     }
-    SDL_Thread* t = SDL_CreateThread(work, "backup", SDL_strdup(list[0]));
+    SDL_Thread* t = hostThreadCreate(work, "backup", SDL_strdup(list[0]));
     if (t == NULL) {
         snprintf(text, sizeof text, "No backup thread: %s", SDL_GetError());
         setStatus(1, text);

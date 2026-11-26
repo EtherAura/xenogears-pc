@@ -1816,6 +1816,7 @@ void pcFieldPreviewDrop(void); /* f_8008083C.c */
  * frames between are work the PS1 does not do: they take no stepped-clock
  * time (hwClockHold, held from here to the frame's wait, updateAndRenderField). */
 void hwClockHold(int on); /* port/src/system/hw.c */
+void pcVSyncFlipMark(void); /* port/src/system/libetc.c */
 static s32 pcFieldHeld;
 void pcFieldClockRelease(void) {
     if (pcFieldHeld) {
@@ -2332,6 +2333,7 @@ void updateAndRenderField(void) {
         hwClockHold(0);
         while (VSync(-1) < target) {
         }
+        pcVSyncFlipMark(); /* the next tick's flip waits for its own vblank (xg-xqha) */
         hwClockHold(1);
     } else {
         pcFieldVSync();

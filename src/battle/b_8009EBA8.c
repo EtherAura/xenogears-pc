@@ -2642,6 +2642,66 @@ void finalizeMechaForEvent(s32 mechaIdx) {
     }
 }
 
+#ifdef PLATFORM_PC
+/*
+ * The sky's bands with expanded vertical framing (xg-2fmy). The display copy
+ * has scene rows above the PS1's top row (include/pc_wide.h), but the bands
+ * are laid against that row: the flat sky starts at y 0 (createBattleHorizon),
+ * and a band whose edge is above the row is left out. So the rows above showed
+ * the clouds over black, darkened by the additive gradient's tail, and once
+ * the horizon rose into them the flat ground (from edge to edge, so stretched
+ * up by the GPU) covered the sky there. With extra rows, the display copy draws
+ * each band from a copy laid against its own top row (-pcVerticalCull) and
+ * across its margins; VRAM, the 4:3 picture, still gets the PS1's bands.
+ * The copies keep the band's slot in the ordering table; a band the PS1 linked
+ * this frame is then left out of the display copy (PC_WIDE_NATIVE_ONLY).
+ * Pieces: the left margin, the 4:3 picture and the right margin, each inside
+ * the GPU's 1024-pixel polygon limit; no stretching, which would carry the
+ * ground's flat band up to the top again.
+ */
+static void pcSkyFlat(POLY_F4* native, OTag* ot, s32 top, s32 bottom, s32 linked) {
+    s16 x[4] = {-pcWideView, 0, 0x140, 0x140 + pcWideView};
+    POLY_F4* p = pcWideAlloc(3 * sizeof(POLY_F4));
+    s32 i;
+
+    if (p == NULL) {
+        return;
+    }
+    for (i = 0; i < 3; i++, p++) {
+        if (x[i] < x[i + 1]) {
+            *p = *native;
+            setXY4(p, x[i], top, x[i + 1], top, x[i], bottom, x[i + 1], bottom);
+            addPrim(ot, p);
+            pcWidePrim(p, 0, PC_WIDE_ONLY | PC_WIDE_NOEXTEND);
+        }
+    }
+    if (linked) {
+        pcWidePrim(native, 0, PC_WIDE_NATIVE_ONLY);
+    }
+}
+
+static void pcSkyGradient(POLY_G4* native, OTag* ot, s32 top, s32 bottom, s32 linked) {
+    s16 x[4] = {-pcWideView, 0, 0x140, 0x140 + pcWideView};
+    POLY_G4* p = pcWideAlloc(3 * sizeof(POLY_G4));
+    s32 i;
+
+    if (p == NULL) {
+        return;
+    }
+    for (i = 0; i < 3; i++, p++) {
+        if (x[i] < x[i + 1]) {
+            *p = *native;
+            setXY4(p, x[i], top, x[i + 1], top, x[i], bottom, x[i + 1], bottom);
+            addPrim(ot, p);
+            pcWidePrim(p, 0, PC_WIDE_ONLY | PC_WIDE_NOEXTEND);
+        }
+    }
+    if (linked) {
+        pcWidePrim(native, 0, PC_WIDE_NATIVE_ONLY);
+    }
+}
+#endif
+
 void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MATRIX* m, OTag* ot, s32 oddOrEven) {
     SVECTOR unused;
     MATRIX mat;
@@ -2668,6 +2728,10 @@ void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MAT
     u8 tu;
     s32 mv;
     SVECTOR* vtx;
+#ifdef PLATFORM_PC
+    s32 pcTop = -pcVerticalCull; /* the display copy's top row: below 0, it has extra rows */
+    s32 pcGround;
+#endif
 
     if (h != NULL) {
         addPrim(ot, &h->m3C_drawModes[oddOrEven]);
@@ -2693,6 +2757,9 @@ void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MAT
         gte_ldv0(&pos);
         gte_rtps();
         gte_stsxy(&sxy1);
+#ifdef PLATFORM_PC
+        pcGround = sxy1.vy;
+#endif
         if (sxy1.vy >= 0 && sxy0.vy < 240) {
             h->m173C_gradient[oddOrEven + 2].y0 = sxy0.vy;
             h->m173C_gradient[oddOrEven + 2].y1 = sxy0.vy;
@@ -2700,6 +2767,11 @@ void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MAT
             h->m173C_gradient[oddOrEven + 2].y3 = sxy1.vy;
             addPrim(ot, &h->m173C_gradient[oddOrEven + 2]);
         }
+#ifdef PLATFORM_PC
+        if (pcTop < 0 && pcGround >= pcTop && sxy0.vy < 240) {
+            pcSkyGradient(&h->m173C_gradient[oddOrEven + 2], ot, sxy0.vy, pcGround, pcGround >= 0);
+        }
+#endif
         if (sxy1.vy < 0) {
             sxy1.vy = 0;
         }
@@ -2707,6 +2779,11 @@ void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MAT
             h->m16DC_flat[oddOrEven + 2].y0 = sxy1.vy;
             h->m16DC_flat[oddOrEven + 2].y1 = sxy1.vy;
             addPrim(ot, &h->m16DC_flat[oddOrEven + 2]);
+#ifdef PLATFORM_PC
+            if (pcTop < 0) {
+                pcSkyFlat(&h->m16DC_flat[oddOrEven + 2], ot, pcGround > pcTop ? pcGround : pcTop, 0xF0, 1);
+            }
+#endif
         }
         pos.vx = n.vx * h->m18_horizonDistance / 4096 * h->mC_skyBandScale / 256 + at->vx;
         pos.vy = h->m16_horizonY * h->mC_skyBandScale / 256;
@@ -2722,6 +2799,11 @@ void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MAT
             h->m173C_gradient[oddOrEven].y3 = sxy1.vy;
             addPrim(ot, &h->m173C_gradient[oddOrEven]);
         }
+#ifdef PLATFORM_PC
+        if (pcTop < 0 && sxy0.vx >= pcTop && sxy0.vx < 480 && sxy1.vy < 240) {
+            pcSkyGradient(&h->m173C_gradient[oddOrEven], ot, sxy0.vx, sxy1.vy, sxy0.vx >= 0);
+        }
+#endif
         d.vx = at->vx - eye->vx;
         d.vy = 0;
         d.vz = at->vz - eye->vz;
@@ -2808,6 +2890,11 @@ void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MAT
             h->m16DC_flat[oddOrEven].y3 = sxy0.vy;
             addPrim(ot, &h->m16DC_flat[oddOrEven]);
         }
+#ifdef PLATFORM_PC
+        if (pcTop < 0 && sxy0.vy > pcTop) {
+            pcSkyFlat(&h->m16DC_flat[oddOrEven], ot, pcTop, sxy0.vy, sxy0.vy >= 0);
+        }
+#endif
         addPrim(ot, &h->m24_drawModes[oddOrEven]);
     }
 }

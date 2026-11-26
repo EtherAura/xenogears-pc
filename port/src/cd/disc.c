@@ -12,6 +12,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "cd_internal.h"
+#include "../system/cores.h"
 
 #include <SDL3/SDL.h>
 #include <ctype.h>
@@ -439,7 +440,7 @@ void discWarm(const CdDisc* disc) {
             continue;
         }
         char* copy = strdup(path);
-        SDL_Thread* t = copy != NULL ? SDL_CreateThread(warmRun, "disc cache", copy) : NULL;
+        SDL_Thread* t = copy != NULL ? hostThreadCreate(warmRun, "disc cache", copy) : NULL;
         if (t == NULL) {
             free(copy);
             continue;

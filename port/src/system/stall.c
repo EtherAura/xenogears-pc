@@ -33,6 +33,7 @@
 #include <string.h>
 
 #include "system.h"
+#include "cores.h"
 
 #if defined(__linux__) && defined(__GLIBC__)
 #define STALL_BACKTRACE 1
@@ -380,7 +381,7 @@ void stallInit(void) {
     if (stallSetup(getenv("XG_STALL_MS")) == 0) {
         return;
     }
-    SDL_Thread* t = SDL_CreateThread(watch, "stall watch", NULL);
+    SDL_Thread* t = hostThreadCreate(watch, "stall watch", NULL);
     if (t != NULL) {
         SDL_DetachThread(t);
     }
