@@ -71,6 +71,14 @@ int scalePercent();
 void setScalePercent(int percent); // also written to settings.ini
 float menuUnitFor(int w, int h);
 
+// The menu's font size (settings.ini menu_font_scale, percent, default 100):
+// scales the text independent of the panel's layout unit. Read each frame.
+enum { FONT_SCALE_MIN = 75, FONT_SCALE_MAX = 150, FONT_SCALE_DEFAULT = 100 };
+int fontScalePercent();
+void setFontScalePercent(int percent); // also written to settings.ini
+float fontScale();
+float rowHeight(); // one option line height in ImGui units (at least 16 * unit)
+
 // Dark windows (settings.ini menu_dark, off by default): box() fills the
 // game window's inside with a darker grey; frames, letters, cursors and the
 // picture behind stay as they are. Read at each box(), so a change applies
@@ -133,6 +141,10 @@ void scrollBar(ImDrawList* dl, ImVec2 top, float height, float thumbTop, float t
 
 // The list pointer (animated) with its top left at `at`.
 void pointer(ImDrawList* dl, ImVec2 at);
+
+// The animated Xenogears dialog/list arrow rotated to point up or down,
+// centred at `center` (for off-screen list and description indicators).
+void scrollArrow(ImDrawList* dl, ImVec2 center, bool up);
 
 // End of a frame: the pointer beside the item the keyboard or gamepad
 // cursor is on (not over the section list: menu.cpp draws its arrow), and

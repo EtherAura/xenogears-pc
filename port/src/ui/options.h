@@ -60,6 +60,20 @@ void endPage();
 void group(const char* heading, int flags = 0);
 // A setting's row: false when it is not shown (skip its controls).
 bool row(const char* label, const char* keys = nullptr, int flags = 0);
+// Width to leave on the right of a single-line control for the inline Reset button
+// when the current row differs from its default (0 when unchanged or stacked).
+float resetReserve();
+// Nested submenu inside a section: at the section's root, renders a single clickable
+// row (returning false); once entered (or during search/indexing), returns true so
+// its rows are drawn. Close with endSubmenu() only when beginSubmenu() returned true.
+bool beginSubmenu(const char* id, const char* label, const char* summary = nullptr, const char* about = nullptr);
+void endSubmenu();
+bool atRoot();                   // true when no submenu is active (or during search/indexing)
+bool inSubmenu(int section);     // true when section currently has a submenu open
+const char* submenuTitle(int section); // translated title of active submenu, or nullptr
+bool popSubmenu(int section);    // leave active submenu back to section root; true if one was open
+void clearSubmenu(int section);  // reset section back to root (e.g. on section switch)
+bool takeSubmenuEnter();         // true once after entering a submenu (menu.cpp scrolls & focuses)
 // Content of a page that is not a setting's row: its table closed; true when
 // it is to be drawn (never in the Search page's results, nor while indexing,
 // nor in a collapsed group).
@@ -94,8 +108,10 @@ void opened();
 bool changed(const char* key);
 void reset(const char* key);
 
-// System > Presets: its rows.
+// Presets section (and pre-game Presets page): its rows.
 void presetRows();
+// Reset all known changed settings back to their defaults (with confirmation).
+void resetAllRow();
 
 } // namespace opt
 } // namespace menu

@@ -29,6 +29,7 @@ enum Section {
     SYSTEM,
     EXTRAS,
     SEARCH,
+    PRESETS,
     SECTION_COUNT
 };
 extern const char* const sectionNames[SECTION_COUNT];
@@ -36,13 +37,14 @@ extern const char* const sectionNames[SECTION_COUNT];
 // sections.cpp
 void sectionsOpened();           // the menu opened: read what may have changed since
 void drawSection(int section);   // inside the content pane
-// The setup screen (ui.h uiDiscSetup): two pages on the commands' arc, and
-// Start and Quit.
-enum SetupSection { SETUP_DISCS, SETUP_BIOS, SETUP_SECTIONS };
+// The pre-game / setup screen (ui.h uiDiscSetup): pages on the commands' arc,
+// plus Settings (opens the full menu before launch), Start and Quit.
+enum SetupSection { SETUP_DISCS, SETUP_BIOS, SETUP_PRESETS, SETUP_SECTIONS };
 extern const char* const setupSectionNames[SETUP_SECTIONS];
-void discSetupOpened(const char* region, bool noDisc);
+void discSetupOpened(const char* region, bool noDisc, bool startupMenu);
 void drawSetupSection(int section); // inside the content pane
 bool setupStart();               // Start: true when the images are valid and saved (and the BIOS settled)
+bool discSetupNoDisc();          // true while no disc image is open yet
 bool discSetupCommand(const char* command, const char* argument);
 bool discSetupAccepted();
 const char* discSetupChosen();   // without a disc open: the starting image chosen

@@ -122,17 +122,20 @@ extern "C" {
 
 union SDL_Event;
 
-/* Before kernelMain: the setup screen (sections.cpp): the disc images (a
- * folder searched, or the images themselves) and the BIOS image (a folder
- * searched, a file, or none). Returns 1 when the player started with valid
- * images (saved to settings.ini, and the BIOS applied), 0 when they quit
- * (saved selections unchanged). region NULL allows either region (extras).
+/* Before kernelMain: the pre-game / setup screen (sections.cpp): presets,
+ * full settings access, disc images (a folder searched, or the images
+ * themselves) and the BIOS image (a folder searched, a file, or none).
+ * Returns 1 when the player started with valid images (saved to settings.ini,
+ * and the BIOS applied), 0 when they quit (saved selections unchanged).
+ * region NULL allows either region (extras).
  *   UI_SETUP_NO_DISC   no image is open yet (main.c opens the chosen one:
  *                      `chosen`); the game's look is read from an image, so
  *                      without one the screen has a plain look
  *   UI_SETUP_BIOS      it is shown because no BIOS image was found: it
- *                      opens at the BIOS page */
-enum { UI_SETUP_NO_DISC = 1, UI_SETUP_BIOS = 2 };
+ *                      opens at the BIOS page
+ *   UI_SETUP_STARTUP   opened as the pre-game menu (menu_on_startup=1 or
+ *                      --menu): opens with Presets shown and cursor on Start */
+enum { UI_SETUP_NO_DISC = 1, UI_SETUP_BIOS = 2, UI_SETUP_STARTUP = 4 };
 int uiDiscSetup(const char* region, int flags, char* chosen, unsigned long size);
 
 /* Only in a build with the updater (XG_UPDATER; port/src/update/update_check.h): before

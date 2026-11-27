@@ -123,6 +123,21 @@ int main() {
     EXPECTF(std::fabs(afterCycledAt4 - firstAt4) < 0.01f, "got %.2f vs %.2f", afterCycledAt4, firstAt4);
     EXPECTF(afterCycledAt4 <= 44.0f * 4.0f, "span %.2f exceeded compact group height", afterCycledAt4);
 
+    // Menu font size scales FontSizeBase independently and clamps to [75, 150].
+    skin::setFontScalePercent(125);
+    EXPECT(skin::fontScalePercent() == 125);
+    skin::setUnit(4.0f);
+    EXPECTF(std::fabs(ImGui::GetStyle().FontSizeBase - 13.0f * 4.0f * 1.25f) < 0.01f,
+            "got %.2f", ImGui::GetStyle().FontSizeBase);
+    skin::setFontScalePercent(50);
+    EXPECT(skin::fontScalePercent() == skin::FONT_SCALE_MIN);
+    skin::setFontScalePercent(250);
+    EXPECT(skin::fontScalePercent() == skin::FONT_SCALE_MAX);
+    skin::setFontScalePercent(skin::FONT_SCALE_DEFAULT);
+    skin::setUnit(4.0f);
+    EXPECTF(std::fabs(ImGui::GetStyle().FontSizeBase - 13.0f * 4.0f) < 0.01f,
+            "got %.2f", ImGui::GetStyle().FontSizeBase);
+
     ImGui::DestroyContext(ctx);
     std::printf("skintest: %d checks, %d failed\n", checks, failures);
     return failures != 0;

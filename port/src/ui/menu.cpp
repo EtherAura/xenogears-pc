@@ -49,12 +49,14 @@ namespace menu {
 const char* const sectionNames[SECTION_COUNT] = {
     N_("Display"),       N_("Effects"),      N_("Audio"),   N_("Controls"), N_("Camera"),
     N_("Hotkeys"),       N_("Gameplay"),     N_("Battles"), N_("Language & text"), N_("Packs"),
-    N_("Memory cards"),  N_("Save states"),  N_("System"),  N_("Extras"),   N_("Search")};
+    N_("Memory cards"),  N_("Save states"),  N_("System"),  N_("Extras"),   N_("Search"),
+    N_("Presets")};
 // The section list's names on the commands' arc.
 const char* const listNames[SECTION_COUNT] = {
     N_("Display"),       N_("Effects"),      N_("Audio"),   N_("Controls"), N_("Camera"),
     N_("Hotkeys"),       N_("Gameplay"),     N_("Battles"), N_("Language"), N_("Packs"),
-    N_("Memory cards"),  N_("Save states"),  N_("System"),  N_("Extras"),   N_("Search")};
+    N_("Memory cards"),  N_("Save states"),  N_("System"),  N_("Extras"),   N_("Search"),
+    N_("Presets")};
 
 namespace {
 
@@ -90,8 +92,13 @@ struct State {
     UiVulkan dev;
     VkFormat pipelineFormat;
     float unit;          // window pixels per game pixel (ImGui works in window pixels; skin.h menuUnitFor)
+    int fontScale;       // menu_font_scale applied in updateScale
     int setupSection;    // the setup screen's page to open at
+    int initialEntry = -1; // initial arc entry to focus (-1: st.section)
+    bool preGameSettings; // true while browsing full Settings from the pre-game / setup screen
+    bool startupMenu;    // opened via UI_SETUP_STARTUP (menu_on_startup / --menu)
     bool helpWanted, backWanted; // the legend's help and back, clicked
+    bool resetScroll;    // reset content pane scroll on submenu transition
     bool restoreContent;         // a click on nothing took the cursor out of the section: back to it
     bool suspendWanted;  // the system put the program in the background (or minimised it: pause_minimized)
     const char* suspendWhy;
@@ -349,6 +356,17 @@ void runStep(Step& s) {
         e.text.text = s.arg;
         SDL_PushEvent(&e);
     } else if (strcmp(s.cmd, "section") == 0) {
+        if (st.setup && !st.preGameSettings) {
+            for (int i = 0; i < SETUP_SECTIONS; i++) {
+                if (SDL_strncasecmp(s.arg, setupSectionNames[i], strlen(s.arg)) == 0) {
+                    st.section = i;
+                    st.enterContent = true;
+                    st.opened = true;
+                    break;
+                }
+            }
+            return;
+        }
         // A section by (the start of) its English name; earlier names too:
         // saves, cards (Memory cards), states (Save states), text (Language), about (System).
         for (int i = 0; i < SECTION_COUNT; i++) {
@@ -359,6 +377,7 @@ void runStep(Step& s) {
                 (i == STATES && (SDL_strcasecmp(s.arg, "states") == 0 || SDL_strcasecmp(s.arg, "save states") == 0)) ||
                 (i == LANGUAGE && SDL_strcasecmp(s.arg, "text") == 0) ||
                 (i == SYSTEM && SDL_strcasecmp(s.arg, "about") == 0)) {
+                opt::clearSubmenu(st.section);
                 st.section = i;
                 st.enterContent = true; /* opened, the cursor on its first control */
                 st.opened = true;
@@ -621,10 +640,12 @@ void updateScale() {
     SDL_GetWindowSize(presentWindow(), &lw, &lh);
     st.pixelsPerUnit = lw > 0 ? (float)pw / (float)lw : 1.0f;
     float s = skin::menuUnitFor(pw, ph);
-    if (s == st.unit && skin::unit() == s) {
+    int fs = skin::fontScalePercent();
+    if (s == st.unit && skin::unit() == s && fs == st.fontScale) {
         return;
     }
     st.unit = s;
+    st.fontScale = fs;
     skin::setUnit(s);
 }
 
@@ -800,24 +821,25 @@ void scrollToBlock(ImGuiWindow* w, float endY) {
 // neighbours (all of them in a full compact panel; a sliding window along the
 // same curve with the game's scroll bar when the screen is lower, as in game
 // size).
-ImVec2 arcPoint(int slot, int slots, float colH, bool scrolled) {
+ImVec2 arcPoint(int slot, int slots, float colH) {
     const float cx = -54.6f, cy = 198.1f, r = 127.5f;
     const float a0 = atan2f(97 - cy, 23 - cx), a1 = atan2f(201 - cy, 73 - cx);
     const float spanY = r * (sinf(a1) - sinf(a0));
     const float avail = fmaxf(spanY, colH - 16.0f); // a ball spans y - 5 .. y + 11 (16 game pixels)
-    const float k = avail / spanY;
-    const float x0 = scrolled ? 20.0f : 7.0f; // room on the left for the 8-wide scroll bar and 12-wide arrow
+    const float ky = avail / spanY;
+    const float kx = ky; // true circular curvature (only the tree is visible at root)
+    const float x0 = 9.0f; // room on the left for the ball and red arrow
     float t = slots > 1 ? (float)slot / (float)(slots - 1) : 0.0f;
     float a = a0 + (a1 - a0) * t;
-    float x = x0 + k * r * (cosf(a) - cosf(a0));
-    float y = 5.0f + k * r * (sinf(a) - sinf(a0));
+    float x = x0 + kx * r * (cosf(a) - cosf(a0));
+    float y = 5.0f + ky * r * (sinf(a) - sinf(a0));
     return ImVec2(roundf(x), roundf(y));
 }
 
 int arcVisibleSlots(int total, float colH) {
     for (int vis = total; vis > 7; vis--) {
-        float y0 = arcPoint(0, vis, colH, false).y;
-        float y1 = arcPoint(1, vis, colH, false).y;
+        float y0 = arcPoint(0, vis, colH).y;
+        float y1 = arcPoint(1, vis, colH).y;
         if (y1 - y0 >= 14.0f) return vis;
     }
     return std::min(total, 7);
@@ -829,11 +851,7 @@ int arcVisibleSlots(int total, float colH) {
 // 2 to 10 of its 13, so its line starts at -4; the red arrow (0x108) has its
 // tip on the point.
 const ImVec2 kBall(-7, -5), kLabel(2, -4);
-// The setup screen's four commands: the game's own title menu's places
-// (loadSaveGameMenuExecute: cursorPosXTable/cursorPosYTable entries 7 to 10,
-// 0x18,0x90 0x1F,0xA2 0x24,0xB5 0x25,0xC9), top to bottom.
-const ImVec2 kSetupCommands[SETUP_SECTIONS + 2] = {{0x18, 0x90}, {0x1F, 0xA2}, {0x24, 0xB5}, {0x25, 0xC9}};
-const char* const kSetupNames[SETUP_SECTIONS] = {N_("Discs"), "BIOS"};
+const char* const kSetupNames[SETUP_SECTIONS] = {N_("Discs"), "BIOS", N_("Presets")};
 
 // The game's boxes (iniMenuContext364And380: x, y, width, height of the
 // inside), game pixels.
@@ -867,11 +885,9 @@ struct Layout {
     ImRect sheet, help, foot;
     ImVec2 at(float x, float y) const { return ImVec2(origin.x + x * u, origin.y + y * u); }
     ImRect box(const Box& b) const { return ImRect(at(b.x, b.y), at(b.x + b.w, b.y + b.h)); }
-    bool setup;     // the setup screen's commands (kSetupCommands)
     ImVec2 command(int slot) const {
-        if (setup) return at(kSetupCommands[slot].x, kSetupCommands[slot].y);
-        ImVec2 p = arcPoint(slot, visibleCommands, colH, visibleCommands < SECTION_COUNT + 1);
-        return ImVec2(origin.x + p.x * u, origin.y + (game ? 4.0f + p.y : p.y) * u);
+        ImVec2 p = arcPoint(slot, visibleCommands, colH);
+        return ImVec2(origin.x + p.x * u, origin.y + (game ? 10.0f + p.y : p.y) * u);
     }
     ImVec2 centre() const { return game ? at(160, 112) : ImVec2(); } // the menu's projection centre
 };
@@ -891,55 +907,38 @@ float touchPadFloor() {
     return std::max(bottom, 0.0f);
 }
 
-// opened: a section is open (its pane across the panel; else beside the commands).
-Layout layout(bool opened) {
+// opened: when false, only the commands' arc is shown; when true, the arc is
+// hidden and the active section or submenu opens as a full-width screen.
+Layout layout(bool opened, int totalEntries = SECTION_COUNT + 1) {
     ImGuiIO& io = ImGui::GetIO();
     Layout L;
     L.u = skin::unit();
     float u = L.u;
     L.game = skin::textSize() == skin::TEXT_GAME;
-    L.setup = st.setup;
     if (L.game) {
-        // The game's menu picture (320 x 216: its display is 216 lines) as
-        // the window shows the game's own menu at the 4:3 TV framing: across
-        // the middle, its line 0 110 game lines above the window's middle
-        // (measured: XG_DUMP_PRESENT of the game's menu in a 320 x 240 window
-        // has it from line 10, as Beetle's TV picture). No legend: the game
-        // has none (the help window and its popup say the keys).
         L.origin = ImVec2(floorf(io.DisplaySize.x * 0.5f - 160 * u), floorf(io.DisplaySize.y * 0.5f - 110 * u));
-        // A window too low for the TV's framing (the menu's percentage up to
-        // what the window holds): the game's screen kept inside it.
         L.origin.y = std::max(0.0f, std::min(L.origin.y, floorf(io.DisplaySize.y - 216 * u)));
         L.origin.x = std::max(0.0f, L.origin.x);
-        L.colH = 208.0f; // 4 game pixels inside the 216-line picture top and bottom
-        L.visibleCommands = L.setup ? SETUP_SECTIONS + 2 : arcVisibleSlots(SECTION_COUNT + 1, L.colH);
+        L.colH = 192.0f; // leave 10+ game pixels top/bottom for the Xenogears scroll arrows
+        L.visibleCommands = arcVisibleSlots(totalEntries, L.colH);
         L.sheet = L.box(opened ? kItemBox : kSheet);
         L.help = L.box(kMessageBox);
         return L;
     }
-    // Compact: the port's own panel, up to 560 x 336 game pixels: the
-    // commands' column, the sheet beside it, the message box under the sheet
-    // and the legend at the bottom, above a touch pad's Select and Start.
-    const int footH = 17, edge = 8, gap = 8, listW = 148; // the enlarged arc's longest names end at 136
+    // Compact: up to 580 x 340 game pixels. Root shows only the commands' arc;
+    // entering any section or submenu switches to a full-width screen.
+    const int footH = 17, edge = 8, gap = 8;
     int cw = (int)(io.DisplaySize.x / u), ch = (int)(touchPadFloor() / u);
-    int pw = cw - 2 * edge < 560 ? cw - 2 * edge : 560, ph = ch - 2 * edge < 336 ? ch - 2 * edge : 336;
-    // The message box's three lines, or two where the panel is low (a large
-    // menu size in a small window), so the sheet keeps room for its rows.
+    int pw = cw - 2 * edge < 580 ? cw - 2 * edge : 580, ph = ch - 2 * edge < 340 ? ch - 2 * edge : 340;
     const int helpH = ph < 280 ? kMessageBox.h - 16 : kMessageBox.h;
     ImVec2 o(floorf((cw - pw) / 2.0f) * u, floorf((ch - ph) / 2.0f) * u);
     auto at = [&](int x, int y) { return ImVec2(o.x + x * u, o.y + y * u); };
-    const int left = opened ? edge : edge + listW + gap; // open: the whole panel's width
-    L.sheet = ImRect(at(left, edge), at(pw - edge, ph - edge - footH - gap - helpH - gap));
-    L.help = ImRect(at(left, ph - edge - footH - gap - helpH), at(pw - edge, ph - edge - footH - gap));
+    L.sheet = ImRect(at(edge, edge), at(pw - edge, ph - edge - footH - gap - helpH - gap));
+    L.help = ImRect(at(edge, ph - edge - footH - gap - helpH), at(pw - edge, ph - edge - footH - gap));
     L.foot = ImRect(at(edge, ph - edge - footH), at(pw - edge, ph - edge));
-    if (L.setup) {
-        L.origin = ImVec2(o.x + edge * u, o.y + (ph - edge - footH - gap - 216) * u);
-        L.visibleCommands = SETUP_SECTIONS + 2;
-    } else {
-        L.colH = (float)std::max(120, ph - 2 * edge - footH - gap);
-        L.origin = ImVec2(o.x + edge * u, o.y + edge * u);
-        L.visibleCommands = arcVisibleSlots(SECTION_COUNT + 1, L.colH);
-    }
+    L.colH = (float)std::max(120, ph - 2 * edge - footH - gap - 24);
+    L.origin = ImVec2(o.x + edge * u, o.y + (edge + 12) * u);
+    L.visibleCommands = arcVisibleSlots(totalEntries, L.colH);
     return L;
 }
 
@@ -1169,23 +1168,46 @@ void drawFrame() {
     const ImGuiStyle& style = ImGui::GetStyle();
     float u = skin::unit();
 
-    // The setup screen (ui.h uiDiscSetup) is the same screen: its two pages
-    // and Start and Quit on the commands' arc.
-    const int sections = st.setup ? (int)SETUP_SECTIONS : (int)SECTION_COUNT;
-    const int entries = st.setup ? (int)SETUP_SECTIONS + 2 : (int)SECTION_COUNT + 1;
+    // The pre-game / setup screen (ui.h uiDiscSetup): its pages (Presets, Discs, BIOS),
+    // plus Settings (opens all F1 sections before boot), Start and Quit on the commands' arc.
+    const bool inSetup = st.setup && !st.preGameSettings;
+    const int sections = inSetup ? (int)SETUP_SECTIONS : (int)SECTION_COUNT;
+    const int entries = inSetup ? (int)SETUP_SECTIONS + 3 : (int)SECTION_COUNT + 1;
+    st.section = std::clamp(st.section, 0, sections - 1);
+    auto leaveOrReturn = [&]() {
+        if (st.preGameSettings) {
+            st.preGameSettings = false;
+            st.section = st.setupSection;
+            st.opened = false;
+            st.focusSections = true;
+            st.initialEntry = SETUP_SECTIONS; // focus back on Settings
+            sfx::play(sfx::BACK);
+        } else {
+            st.closing = true;
+        }
+    };
+    auto stepBack = [&]() {
+        if (!inSetup && opt::popSubmenu(st.section)) {
+            st.resetScroll = true;
+            st.jumpFocus = true; // focus returns to the submenu row
+            sfx::play(sfx::BACK);
+            return;
+        }
+        st.focusSections = true;
+        st.opened = false;
+        sfx::play(sfx::BACK);
+    };
 
     // F1 uses field-choice text for enabled values. Keep this local to
     // Settings; extras viewers can still use their own list selections.
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
 
     // The section pane is a nav scope of its own: Right (or Enter, A) on the
-    // list goes into it, Esc or B comes back out (ImGui puts the cursor on the
-    // pane itself then, from either side: which way it went decides).
+    // list goes into it, Esc or B comes back out (popping any active submenu
+    // first, then returning to the commands arc).
     if (st.contentId != 0 && ImGui::GetFocusID() == st.contentId) {
         if (st.inContent) {
-            st.focusSections = true;
-            st.opened = false;
-            sfx::play(sfx::BACK);
+            stepBack();
         } else {
             st.enterContent = true;
             st.opened = true;
@@ -1193,13 +1215,12 @@ void drawFrame() {
     }
 
     // Left on an option with nothing to its left (ImGui found nowhere to
-    // move) goes back to the section list, as Right on the list comes in.
+    // move) pops a nested submenu or goes back to the section list.
     ImGuiContext& g = *ImGui::GetCurrentContext();
     bool padNav = (io.BackendFlags & ImGuiBackendFlags_HasGamepad) && (io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad);
     if (st.leftFrom != 0) {
         if (g.NavId == st.leftFrom && st.inContent && !popupOpen() && !ImGui::IsAnyItemActive()) {
-            st.focusSections = true; // (its sound came with the press: sounds())
-            st.opened = false;
+            stepBack();
         }
         st.leftFrom = 0;
     }
@@ -1215,48 +1236,59 @@ void drawFrame() {
     bool pad = (io.BackendFlags & ImGuiBackendFlags_HasGamepad) && (io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad);
     bool free = st.escapeFree && !st.inContent && !capturing();
     if (st.backWanted) {
-        // The legend's back, clicked: as Esc (from the section to the
-        // commands, from the commands out).
+        // The legend's or header's back, clicked: pop submenu, else return to
+        // the commands arc, else leave the menu.
         st.backWanted = false;
-        st.restoreContent = false; // (the click that asked for it: not to be undone)
-        if (st.inContent) {
+        st.restoreContent = false;
+        if (!inSetup && opt::inSubmenu(st.section)) {
+            opt::popSubmenu(st.section);
+            st.resetScroll = true;
+            st.jumpFocus = true;
+            sfx::play(sfx::BACK);
+        } else if (st.inContent || st.opened) {
             st.focusSections = true;
             st.opened = false;
             sfx::play(sfx::BACK);
         } else if (!popupOpen()) {
-            st.closing = true;
+            leaveOrReturn();
         }
     }
     if (free && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
                  (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))) {
-        st.closing = true;
+        if (st.opened || (!inSetup && opt::inSubmenu(st.section))) stepBack();
+        else leaveOrReturn();
     }
     if (pad && !capturing() && !popupOpen() && ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false)) {
-        st.closing = true;
+        leaveOrReturn();
     }
-    // L1/R1: the previous and next section.
-    if (pad && !capturing() && !popupOpen() && !ImGui::IsAnyItemActive()) {
+    // L1/R1: the previous and next section (at root, not inside a submenu screen).
+    auto changeSection = [&](int step) {
+        if (!inSetup) opt::clearSubmenu(st.section);
+        st.section = (st.section + step + sections) % sections;
+        if (st.opened || st.inContent) {
+            st.enterContent = true;
+        } else {
+            st.focusSections = true;
+        }
+    };
+    if ((inSetup || !opt::inSubmenu(st.section)) && pad && !capturing() && !popupOpen() && !ImGui::IsAnyItemActive()) {
         int step = ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? -1 : ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) ? 1 : 0;
         if (step != 0) {
-            st.section = (st.section + step + sections) % sections;
-            if (st.opened) {
-                st.enterContent = true; // the next section, open, from its first control
-            } else {
-                st.focusSections = true;
-            }
+            changeSection(step);
         }
     }
 
-    // A search result chosen (options.h): its section opens at its row.
+    // A search result chosen (options.h): its section (and submenu) opens at its row.
     int jumpTo = 0;
-    if (!st.setup && opt::takeJump(&jumpTo)) {
+    if (!inSetup && opt::takeJump(&jumpTo)) {
         st.section = jumpTo;
         st.opened = true;
         st.jumpFocus = true;
     }
     // Ctrl+F: the Search page, its box taking the keys.
-    if (!st.setup && !capturing() && !popupOpen() && !io.WantTextInput &&
+    if (!inSetup && !capturing() && !popupOpen() && !io.WantTextInput &&
         ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_F)) {
+        opt::clearSubmenu(st.section);
         st.section = SEARCH;
         st.opened = true;
         st.jumpFocus = true;
@@ -1267,7 +1299,11 @@ void drawFrame() {
     // Commands follow the game's arc, but Up/Down still follow their
     // order (with the game's held-direction repeat: stepped()). Spatial
     // scoring can otherwise jump into the sheet beside them.
-    int commandFocus = st.focusSections ? st.section : -1;
+    int commandFocus = -1;
+    if (st.focusSections) {
+        commandFocus = st.initialEntry >= 0 ? st.initialEntry : st.section;
+        st.initialEntry = -1;
+    }
     if (g.NavWindow && g.NavWindow->ID == st.listWindow && st.arrowEntry >= 0 &&
         !popupOpen() && !capturing()) {
         int step = (stepped(ImGuiKey_DownArrow) || (pad && stepped(ImGuiKey_GamepadDpadDown))) ? 1 :
@@ -1275,16 +1311,20 @@ void drawFrame() {
         if (step) {
             ImGui::NavMoveRequestCancel();
             commandFocus = (st.arrowEntry + step + entries) % entries;
-            if (commandFocus < sections) st.section = commandFocus;
+            if (commandFocus < sections && commandFocus != st.section) {
+                if (!inSetup) opt::clearSubmenu(st.section);
+                st.section = commandFocus;
+            }
             st.focusSections = true;
         }
     }
 
-    // The game's main menu: the commands on its arc, the chosen section's
-    // sheet in a box beside them, its description in the message box under
-    // it (game mode: at the game's places on the game's screen; compact: in
-    // the port's panel, with the keys' legend under it).
-    Layout L = layout(st.opened);
+    // Only the root commands' arc is visible when first opened; entering any
+    // section or nested submenu hides the root tree and opens a full-width screen.
+    const bool inSubmenu = !inSetup && opt::inSubmenu(st.section);
+    const bool showPane = st.opened || inSubmenu;
+    const bool showArc = !showPane;
+    Layout L = layout(showPane, entries);
     ImRect pane = L.sheet, help = L.help, foot = L.foot;
     st.pane = pane;
     st.centre = L.centre();
@@ -1300,19 +1340,17 @@ void drawFrame() {
     ImGui::PopStyleVar();
     st.listWindow = ImGui::GetCurrentWindow()->ID;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (st.opened) {
+    if (showPane) {
         dl->PushClipRectFullScreen();
         skin::box(dl, help.Min, help.Max);
         dl->PopClipRect();
     }
 
-    // The list. It sits in the window itself (not a child): a focus put on
-    // it (opening, L1/R1) can move right into the section's child. Dimmed
-    // while the cursor is in the section, as the game's main menu is while a
-    // sub-menu is up; the red arrow on the entry the cursor is on, over it.
-    const int vis = st.setup ? entries : L.visibleCommands;
-    if (!st.opened && !st.setup) {
-        int maxTop = std::max(0, entries - vis);
+    // The section list on the commands' arc: no scroll bar; uses the animated
+    // Xenogears dialog arrow above/below whenever entries are off-screen.
+    const int vis = std::min(entries, L.visibleCommands);
+    const int maxTop = std::max(0, entries - vis);
+    if (showArc) {
         st.arcTop = std::clamp(st.arcTop, 0, maxTop);
         if (maxTop > 0 && !popupOpen() && !capturing()) {
             if (io.MouseWheel != 0.0f) {
@@ -1321,7 +1359,7 @@ void drawFrame() {
             static int arcStickWait;
             float rstick = ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
                            ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue;
-            if (fabsf(rstick) > 0.35f) {
+            if (!st.inContent && fabsf(rstick) > 0.35f) {
                 if (arcStickWait <= 0) {
                     st.arcTop = std::clamp(st.arcTop + (rstick > 0 ? 1 : -1), 0, maxTop);
                     arcStickWait = 6;
@@ -1337,25 +1375,73 @@ void drawFrame() {
             if (keep < st.arcTop) st.arcTop = keep;
             if (keep >= st.arcTop + vis) st.arcTop = keep - vis + 1;
         }
-        // No scroll bar on the section list (user): it scrolls with the cursor
-        // (and wraps from the top to Back), or with the mouse wheel.
+        // Xenogears dialog box arrow indicators (also clickable for mouse users).
+        if (maxTop > 0) {
+            if (st.arcTop > 0) {
+                ImVec2 topPt = L.command(0);
+                float cx = topPt.x + 18 * u, cy = topPt.y - 10 * u;
+                dl->PushClipRectFullScreen();
+                skin::scrollArrow(dl, ImVec2(cx, cy), true);
+                dl->PopClipRect();
+                ImGui::SetCursorScreenPos(ImVec2(cx - 10 * u, cy - 6 * u));
+                ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+                if (ImGui::InvisibleButton("##arc_up", ImVec2(20 * u, 12 * u))) {
+                    st.arcTop = std::max(0, st.arcTop - 1);
+                    sfx::play(sfx::MOVE);
+                }
+                ImGui::PopItemFlag();
+            }
+            if (st.arcTop + vis < entries) {
+                ImVec2 botPt = L.command(vis - 1);
+                float cx = botPt.x + 18 * u, cy = botPt.y + 15 * u;
+                dl->PushClipRectFullScreen();
+                skin::scrollArrow(dl, ImVec2(cx, cy), false);
+                dl->PopClipRect();
+                ImGui::SetCursorScreenPos(ImVec2(cx - 10 * u, cy - 6 * u));
+                ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+                if (ImGui::InvisibleButton("##arc_down", ImVec2(20 * u, 12 * u))) {
+                    st.arcTop = std::min(maxTop, st.arcTop + 1);
+                    sfx::play(sfx::MOVE);
+                }
+                ImGui::PopItemFlag();
+            }
+        }
     }
     int arrowWas = st.arrowEntry;
     st.arrowEntry = -1;
-    for (int slot = 0; slot < vis && !st.opened; slot++) {
-        int i = st.setup ? slot : st.arcTop + slot;
+    for (int slot = 0; slot < vis && showArc; slot++) {
+        int i = st.arcTop + slot;
         bool focused;
-        const char* name = tr(i >= sections ? (st.setup ? (i == sections ? "Start" : "Quit") : "Back")
-                                            : st.setup ? kSetupNames[i] : listNames[i]);
+        const char* name = nullptr;
+        if (inSetup) {
+            if (i < sections) name = tr(kSetupNames[i]);
+            else if (i == sections) name = tr("Settings");
+            else if (i == sections + 1) name = tr("Start");
+            else name = tr("Quit");
+        } else {
+            name = tr(i >= sections ? (st.preGameSettings ? "Back to start" : "Back") : listNames[i]);
+        }
         if (i >= sections) {
             if (listEntry(i, name, false, L.command(slot), st.inContent, &focused)) {
-                if (!st.setup || i > sections) {
-                    st.closing = true; // Back; Quit
-                } else if (setupStart()) {
-                    st.closing = true; // Start, with valid images
+                if (inSetup) {
+                    if (i == sections) {
+                        st.preGameSettings = true;
+                        st.section = 0;
+                        st.opened = false;
+                        st.focusSections = true;
+                        st.arcTop = 0;
+                        sfx::play(sfx::CHOOSE);
+                    } else if (i == sections + 1) {
+                        if (setupStart()) st.closing = true;
+                    } else {
+                        st.closing = true; // Quit
+                    }
+                } else {
+                    leaveOrReturn();
                 }
             }
         } else if (listEntry(i, name, st.section == i, L.command(slot), st.inContent, &focused)) {
+            if (st.section != i && !inSetup) opt::clearSubmenu(st.section);
             st.section = i;
             st.enterContent = true;
             st.opened = true;
@@ -1370,7 +1456,8 @@ void drawFrame() {
         if (i >= sections) {
             continue;
         }
-        if (focused && !st.focusSections) {
+        if (focused && !st.focusSections && !st.enterContent && !st.jumpFocus) {
+            if (st.section != i && !inSetup) opt::clearSubmenu(st.section);
             st.section = i; // the section follows the cursor
             // Right goes into it (ImGui's own move scores the tall pane as below).
             if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight))) {
@@ -1382,18 +1469,16 @@ void drawFrame() {
     }
     // The arrow where the cursor was when this frame began (a move shows
     // next frame, as the game's: updateCursorPolysLocation after the input).
-    int arrowSlot = st.setup ? arrowWas : arrowWas - st.arcTop;
-    if (arrowWas >= 0 && arrowSlot >= 0 && arrowSlot < vis && !st.opened) {
+    int arrowSlot = arrowWas - st.arcTop;
+    if (arrowWas >= 0 && arrowSlot >= 0 && arrowSlot < vis && showArc && !st.inContent) {
         skin::sprite(dl, skin::SPRITE_ARROW, L.command(arrowSlot));
     }
     st.focusSections = false;
-    // The commands alone until one is chosen: no pane, nothing in it (the
-    // game's main menu shows its commands and status; a chosen command's
-    // menu then takes the screen). Esc, B or the legend's back come back.
     ImGuiWindow* content = nullptr;
     float rightStick = ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
                        ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue;
-    if (!st.opened) {
+    int headerStep = 0;
+    if (!showPane) {
         st.inContent = false;
         st.contentId = 0;
         st.shownSection = -1;
@@ -1402,14 +1487,10 @@ void drawFrame() {
         helpText = tr("Choose a section to open it.");
     } else {
 
-    // The section in a child that scrolls inside the box, with the game's
-    // list scroll bar at the box's inner left edge (its own, not ImGui's):
-    // its rows where the game's item list has its rows (kListText, kListTop);
-    // in compact, its name above them.
-    // The child from 2 inside the box's top and bottom (where its frame's
-    // light line is: what scrolls is cut there), as wide as the box and 12
-    // more, so its right margin is 8, not 20.
-    float headH = L.game ? 0.0f : 16 * u;
+    // Header bar at the top of the pane: clickable < Back (when in a submenu
+    // or full-width Game mode), breadcrumb title, and clickable < / > section
+    // steppers on the right.
+    float headH = std::max(16.0f * u, skin::rowHeight());
     ImGui::SetCursorScreenPos(ImVec2(pane.Min.x + 8 * u, pane.Min.y + headH + 2 * u));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2((kListText - 8) * u, (kListTop - 2) * u));
     ImGui::BeginChild("content", ImVec2(pane.GetWidth() + 4 * u, pane.GetHeight() - headH - 4 * u),
@@ -1417,29 +1498,79 @@ void drawFrame() {
     ImGui::PopStyleVar();
     content = ImGui::GetCurrentWindow();
     settingsClickRestore(content);
-    // The box, its heading and the scrolled contents in this draw list.
+    // The box, its header bar and the scrolled contents in this draw list.
     st.paneDrawList = content->DrawList;
     st.paneDrawList->PushClipRectFullScreen();
     skin::box(st.paneDrawList, pane.Min, pane.Max);
-    if (!L.game) {
-        st.paneDrawList->AddText(ImVec2(pane.Min.x + kListText * u, pane.Min.y + kListTop * u), IM_COL32_WHITE,
-                                 tr(st.setup ? setupSectionNames[st.section] : sectionNames[st.section]));
+    {
+        const char* secTitle = tr(inSetup ? setupSectionNames[st.section] : sectionNames[st.section]);
+        const char* subTitle = !inSetup ? opt::submenuTitle(st.section) : nullptr;
+        bool showBackBtn = true;
+        float hy = pane.Min.y + kListTop * u;
+        float hx = pane.Min.x + kListText * u;
+        if (showBackBtn) {
+            const char* backTxt = tr("< Back");
+            ImVec2 bsz = ImGui::CalcTextSize(backTxt);
+            ImRect br(ImVec2(hx - 2 * u, hy - u), ImVec2(hx + bsz.x + 4 * u, hy + bsz.y + u));
+            bool bHov = !popupOpen() && ImGui::IsMousePosValid() && br.Contains(io.MousePos);
+            st.paneDrawList->AddText(ImVec2(hx, hy),
+                                     ImGui::GetColorU32(bHov ? skin::textWarning : skin::textHint), backTxt);
+            if (bHov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) st.backWanted = true;
+            hx += bsz.x + 10 * u;
+        }
+        // Clickable < and > prev/next section controls on root section screens
+        // (hidden on dedicated submenu screens where < Back returns to the section).
+        float titleMaxX = pane.Max.x - 10 * u;
+        if (subTitle == nullptr) {
+            const char* prevTxt = "<";
+            const char* nextTxt = ">";
+            ImVec2 psz = ImGui::CalcTextSize(prevTxt), nsz = ImGui::CalcTextSize(nextTxt);
+            float rx = pane.Max.x - 10 * u;
+            ImRect nr(ImVec2(rx - nsz.x - 4 * u, hy - u), ImVec2(rx + 2 * u, hy + nsz.y + u));
+            bool nHov = !popupOpen() && ImGui::IsMousePosValid() && nr.Contains(io.MousePos);
+            st.paneDrawList->AddText(ImVec2(rx - nsz.x, hy),
+                                     ImGui::GetColorU32(nHov ? skin::textWarning : skin::textHint), nextTxt);
+            if (nHov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) headerStep = 1;
+            rx -= nsz.x + 12 * u;
+            ImRect pr(ImVec2(rx - psz.x - 4 * u, hy - u), ImVec2(rx + 2 * u, hy + psz.y + u));
+            bool pHov = !popupOpen() && ImGui::IsMousePosValid() && pr.Contains(io.MousePos);
+            st.paneDrawList->AddText(ImVec2(rx - psz.x, hy),
+                                     ImGui::GetColorU32(pHov ? skin::textWarning : skin::textHint), prevTxt);
+            if (pHov && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) headerStep = -1;
+            titleMaxX = rx - psz.x - 8 * u;
+        }
+
+        char headerText[256];
+        if (subTitle != nullptr) {
+            snprintf(headerText, sizeof headerText, "%s > %s", secTitle, subTitle);
+            if (hx + ImGui::CalcTextSize(headerText).x > titleMaxX) {
+                snprintf(headerText, sizeof headerText, "%s", subTitle);
+            }
+        } else {
+            snprintf(headerText, sizeof headerText, "%s", secTitle);
+        }
+        if (titleMaxX > hx) {
+            st.paneDrawList->PushClipRect(ImVec2(hx, hy - 2 * u), ImVec2(titleMaxX, hy + headH), false);
+            st.paneDrawList->AddText(ImVec2(hx, hy), IM_COL32_WHITE, headerText);
+            st.paneDrawList->PopClipRect();
+        }
     }
     st.paneDrawList->PopClipRect();
     skin::focusWindow(); // the JP game's cursor band (none in the US game)
-    if (st.shownSection != st.section) {
+    if (st.shownSection != st.section || st.resetScroll) {
         helpIndex = 0;
         st.currentBlockTall = false;
-        ImGui::SetScrollY(0.0f); // each section from its top (one child shows them all)
+        ImGui::SetScrollY(0.0f); // each section/submenu from its top (one child shows them all)
         st.shownSection = st.section;
+        st.resetScroll = false;
     }
     // When the description fits (or a long licence block is open), the right stick scrolls the pane.
-    if ((st.descMaxScroll <= 0.0f || st.currentBlockTall) && fabsf(rightStick) > 0.2f) {
+    if (st.inContent && (st.descMaxScroll <= 0.0f || st.currentBlockTall) && fabsf(rightStick) > 0.2f) {
         ImGui::SetScrollY(ImGui::GetScrollY() + rightStick * 6.0f * u);
     }
     if (st.jumpFocus) {
         // The cursor where the row asks (options.h: a search result's control,
-        // the search box), not on the first control.
+        // the search box, or the submenu row on back), not on the first control.
         ImGui::FocusWindow(ImGui::GetCurrentWindow());
         ImGui::SetNavCursorVisible(true);
         st.jumpFocus = false;
@@ -1454,13 +1585,18 @@ void drawFrame() {
     }
     blocks.resize(0);
     helpBlocks.clear();
-    helpWindow = st.setup || st.section != EXTRAS ? content : nullptr;
-    if (st.setup) {
+    helpWindow = inSetup || st.section != EXTRAS ? content : nullptr;
+    if (inSetup) {
         drawSetupSection(st.section);
     } else {
         drawSection(st.section);
     }
     helpWindow = nullptr;
+    if (!inSetup && opt::takeSubmenuEnter()) {
+        st.resetScroll = true;
+        st.enterContent = true;
+        st.opened = true;
+    }
     {
         // Square (or Delete) on a changed row: back to its defaults (options.h).
         float y = -FLT_MAX;
@@ -1469,7 +1605,7 @@ void drawFrame() {
         } else if (ImGui::IsWindowHovered() && ImGui::IsMousePosValid()) {
             y = io.MousePos.y;
         }
-        bool reset = !st.setup && !capturing() && !io.WantTextInput && !popupOpen() && !ImGui::IsAnyItemActive() &&
+        bool reset = !inSetup && !capturing() && !io.WantTextInput && !popupOpen() && !ImGui::IsAnyItemActive() &&
                      (st.squarePressed || ImGui::IsKeyPressed(ImGuiKey_Delete, false));
         opt::finishPage(y, reset);
     }
@@ -1496,9 +1632,9 @@ void drawFrame() {
     } else {
         Legend keys = legend();
         char text[256];
-        if (st.setup) {
-            snprintf(text, sizeof(text), "%s", tr("Choose your disc images and BIOS, then Start. Quit leaves without "
-                                                  "changing anything."));
+        if (inSetup) {
+            snprintf(text, sizeof(text), "%s", tr("Choose Presets, Settings, Discs or BIOS, then Start. Quit leaves "
+                                                  "without starting the game."));
         } else if (st.section == EXTRAS) {
             snprintf(text, sizeof(text), "%s", tr("Choose an extra to open it. The game stays paused. Back returns to Settings."));
         } else {
@@ -1512,11 +1648,15 @@ void drawFrame() {
     st.inContent = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
     ImGui::EndChild();
     st.contentId = ImGui::GetItemID();
-    } // st.opened: the pane
+    if (headerStep != 0) {
+        changeSection(headerStep);
+        sfx::play(sfx::MOVE);
+    }
+    } // showPane: the pane
 
     // The scroll bar: the thumb as long as the part shown, where it is; the
     // mouse may drag it or click the track.
-    if (st.opened) {
+    if (showPane) {
         float trackH = pane.GetHeight(), inner = trackH - 16 * u;
         float total = content->ContentSize.y + content->WindowPadding.y * 2, view = content->Size.y;
         float shown = total > view ? view / total : 1.0f;
@@ -1544,7 +1684,7 @@ void drawFrame() {
     // longer descriptions show the game's scroll bar, scroll with the right stick
     // or mouse wheel, and optionally scroll gently on their own (the help popup has it all).
     bool helpClicked = false;
-    if (st.opened) {
+    if (showPane) {
         static std::string previousHelp;
         if (previousHelp != helpText) {
             previousHelp = helpText;
@@ -1595,9 +1735,7 @@ void drawFrame() {
             dl->PushClipRectFullScreen();
             skin::scrollBar(dl, help.Min, trackH, thumbY, thumbH);
             if (st.descScroll < maxScroll - 0.5f * u) {
-                float ax = help.Max.x - 8 * u, ay = help.Max.y - 6 * u;
-                ImU32 col = (st.frames / 24) % 2 ? IM_COL32(235, 235, 245, 230) : IM_COL32(165, 165, 185, 170);
-                dl->AddTriangleFilled(ImVec2(ax, ay), ImVec2(ax + 5 * u, ay), ImVec2(ax + 2.5f * u, ay + 3.5f * u), col);
+                skin::scrollArrow(dl, ImVec2(help.Max.x - 10 * u, help.Max.y - 7 * u), false);
             }
             dl->PopClipRect();
             ImGui::SetCursorScreenPos(help.Min);
@@ -1960,6 +2098,8 @@ void run() {
     st.open = true;
     st.closing = false;
     st.leaving = false;
+    st.preGameSettings = false;
+    st.resetScroll = false;
     st.section = st.setup ? st.setupSection : 0;
     st.shownSection = -1;
     st.arrowEntry = -1;
@@ -2151,7 +2291,9 @@ bool padHeld(const char* button) {
 }
 
 void showSetupSection(int section) {
+    st.preGameSettings = false;
     st.section = section;
+    st.opened = true;
     st.enterContent = true;
 }
 
@@ -2274,7 +2416,15 @@ extern "C" int uiEvent(const SDL_Event* e) {
     case SDL_EVENT_KEY_UP:
         if (e->key.scancode == SDL_SCANCODE_F1) {
             if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) {
-                st.closing = true;
+                if (st.preGameSettings) {
+                    st.preGameSettings = false;
+                    st.section = st.setupSection;
+                    st.opened = false;
+                    st.focusSections = true;
+                    st.initialEntry = SETUP_SECTIONS;
+                } else {
+                    st.closing = true;
+                }
             }
             return 1;
         }
@@ -2385,11 +2535,17 @@ extern "C" int uiVBlank(void) {
 extern "C" int uiDiscSetup(const char* region, int flags, char* chosen, unsigned long size) {
     if (!begin()) return 0;
     if (!st.scriptLoaded) { st.scriptLoaded = true; loadScript(); }
-    discSetupOpened(region, (flags & UI_SETUP_NO_DISC) != 0);
+    bool startup = (flags & UI_SETUP_STARTUP) != 0;
+    discSetupOpened(region, (flags & UI_SETUP_NO_DISC) != 0, startup);
     st.setup = true;
-    st.setupSection = (flags & UI_SETUP_BIOS) ? SETUP_BIOS : SETUP_DISCS;
+    st.startupMenu = startup;
+    st.setupSection = (flags & UI_SETUP_BIOS) ? SETUP_BIOS : startup ? SETUP_PRESETS : SETUP_DISCS;
+    st.initialEntry = startup ? (int)SETUP_SECTIONS + 1 : -1; // startup: cursor ready on Start
     run();
     st.setup = false;
+    st.startupMenu = false;
+    st.preGameSettings = false;
+    st.initialEntry = -1;
     st.want = false;
     if (discSetupAccepted() && chosen != nullptr && size > 0) {
         snprintf(chosen, size, "%s", discSetupChosen());

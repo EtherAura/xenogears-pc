@@ -98,17 +98,42 @@ bool checkbox(const char* label, bool* value) {
 // reset, search); flags: opt::RESTART, opt::ENHANCED.
 using opt::row;
 
+// Compact width for a drop-down combo: wide enough for its longest choice plus
+// padding and the arrow button, without stretching across the whole pane.
+float comboWidth(const char* const* names, int count, const char* preview = nullptr) {
+    float maxText = preview != nullptr ? ImGui::CalcTextSize(preview).x : 0.0f;
+    for (int i = 0; i < count; i++) {
+        float w = ImGui::CalcTextSize(tr(names[i])).x;
+        if (w > maxText) maxText = w;
+    }
+    float want = maxText + 32.0f * scale();
+    float minW = 72.0f * scale();
+    if (want < minW) want = minW;
+    float avail = ImGui::GetContentRegionAvail().x - opt::resetReserve();
+    if (avail > 0.0f && want > avail) want = avail;
+    return want;
+}
+
+float sliderWidth(float extraRight = 0.0f) {
+    float avail = ImGui::GetContentRegionAvail().x - opt::resetReserve() - extraRight;
+    float cap = 170.0f * scale();
+    if (avail <= 0.0f) return cap;
+    return std::min(avail, cap);
+}
+
 // The choices on one line, as the game's menus show them: the chosen one
 // magenta, the other available choices white, and the pointer on the cursor.
 int listChoice(const char* id, const char* const* names, int count, int value);
 int choice(const char* id, const char* const* names, int count, int value) {
-    float width = (count - 1) * 14 * scale();
+    float gap = 8.0f * scale();
+    float width = (count - 1) * gap;
     for (int i = 0; i < count; i++) width += ImGui::CalcTextSize(tr(names[i])).x;
-    if (width > ImGui::GetContentRegionAvail().x) return listChoice(id, names, count, value);
+    float avail = ImGui::GetContentRegionAvail().x - opt::resetReserve();
+    if (width > avail) return listChoice(id, names, count, value);
     ImGui::PushID(id);
     for (int i = 0; i < count; i++) {
         if (i > 0) {
-            ImGui::SameLine(0, 14 * scale());
+            ImGui::SameLine(0, gap);
         }
         ImGui::AlignTextToFramePadding();
         if (skin::selectable(tr(names[i]), value == i, 0, ImGui::CalcTextSize(tr(names[i])))) {
@@ -119,13 +144,20 @@ int choice(const char* id, const char* const* names, int count, int value) {
     return value;
 }
 
-// More choices than a line holds: the chosen one shown, the others in a
-// drop-down list (as Aspect's).
+// More choices than a line holds: the chosen one shown in a compact drop-down
+// sized to its choices, not stretched across the pane.
 int listChoice(const char* id, const char* const* names, int count, int value) {
     int chosen = value;
-    ImGui::SetNextItemWidth(-1);
+    const char* preview = value >= 0 && value < count ? tr(names[value]) : tr("Custom");
+    char hiddenId[128];
+    const char* comboId = id;
+    if (id != nullptr && id[0] != '#') {
+        snprintf(hiddenId, sizeof hiddenId, "##%s", id);
+        comboId = hiddenId;
+    }
+    ImGui::SetNextItemWidth(comboWidth(names, count, preview));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-    bool open = ImGui::BeginCombo(id, value >= 0 && value < count ? tr(names[value]) : tr("Custom"));
+    bool open = ImGui::BeginCombo(comboId, preview);
     ImGui::PopStyleVar();
     if (open) {
         skin::frameWindow();
@@ -625,15 +657,27 @@ void readWindowSize() {
     }
 }
 
-// Off and On in a drop-down list (the menu's style for a setting with a few
-// named states); true when chosen otherwise.
+// Off and On: inline choices when they fit, compact drop-down otherwise; true when changed.
 bool offOnList(const char* id, bool* value, const char* off = N_("Off"), const char* on = N_("On")) {
     const char* names[] = {off, on};
-    int v = listChoice(id, names, 2, *value ? 1 : 0);
+    int v = choice(id, names, 2, *value ? 1 : 0);
     if (v == (*value ? 1 : 0) || v < 0) return false;
     *value = v == 1;
     return true;
 }
+
+// ---- Presets ----------------------------------------------------------------------------
+
+void presetsSection() {
+    opt::beginPage("presets", PRESETS);
+    opt::group(N_("Presets"));
+    opt::presetRows();
+    opt::group(N_("Reset"));
+    opt::resetAllRow();
+    opt::endPage();
+}
+
+bool customWindowOpen;
 
 void displaySection() {
     opt::beginPage("display", DISPLAY);
@@ -650,9 +694,13 @@ void displaySection() {
     if (row("Aspect", "aspect")) {
         char customName[48];
         snprintf(customName, sizeof(customName), current == ASPECT_COUNT ? tr("Custom %s") : tr("Custom w:h"), now);
-        ImGui::SetNextItemWidth(-1);
+        const char* preview = current < ASPECT_COUNT ? tr(aspects[current].name) : customName;
+        const char* aspectNames[ASPECT_COUNT + 1];
+        for (int i = 0; i < ASPECT_COUNT; i++) aspectNames[i] = aspects[i].name;
+        aspectNames[ASPECT_COUNT] = customName;
+        ImGui::SetNextItemWidth(comboWidth(aspectNames, ASPECT_COUNT + 1, preview));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-        bool listOpen = ImGui::BeginCombo("##aspect", current < ASPECT_COUNT ? tr(aspects[current].name) : customName);
+        bool listOpen = ImGui::BeginCombo("##aspect", preview);
         ImGui::PopStyleVar();
         if (listOpen) {
             skin::frameWindow();
@@ -676,36 +724,36 @@ void displaySection() {
         } else {
             hint("Widescreen at %s: more of the scene at the sides. Movies stay 4:3.", now);
         }
-        if (customOpen || current == ASPECT_COUNT) {
-            if (current == ASPECT_COUNT && !customOpen) {
-                sscanf(now, "%d:%d", &customW, &customH);
-                customOpen = true;
-            }
-            ImGui::SetNextItemWidth(68.0f * scale());
-            ImGui::InputInt("##cw", &customW, 1, 4);
-            ImGui::SameLine();
-            ImGui::TextUnformatted(":");
-            ImGui::SameLine();
-            ImGui::SetNextItemWidth(68.0f * scale());
-            ImGui::InputInt("##ch", &customH, 1, 4);
-            customW = customW < 1 ? 1 : customW > 100 ? 100 : customW;
-            customH = customH < 1 ? 1 : customH > 100 ? 100 : customH;
-            sameLineFor("Use");
-            if (ImGui::Button(tr("Use##aspect"))) {
-                char text[32];
-                snprintf(text, sizeof(text), "%d:%d", customW, customH);
-                if (presentSetAspectText(text)) {
-                    aspectMsg.text[0] = '\0';
-                } else {
-                    aspectMsg.set(true, "%s is narrower than 4:3: wide shapes only (or 1:1)", text);
-                }
-            }
-            aspectMsg.draw();
-        }
         if (presentAspect(NULL, NULL) == PRESENT_ASPECT_WIDE) {
             hint("The paused picture stays as it was drawn; the game draws the wide picture when it goes on.");
         }
         overrideNote("aspect");
+    }
+    if ((customOpen || current == ASPECT_COUNT) && row("Custom aspect")) {
+        if (current == ASPECT_COUNT && !customOpen) {
+            sscanf(now, "%d:%d", &customW, &customH);
+            customOpen = true;
+        }
+        ImGui::SetNextItemWidth(58.0f * scale());
+        ImGui::InputInt("##cw", &customW, 1, 4);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(":");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(58.0f * scale());
+        ImGui::InputInt("##ch", &customH, 1, 4);
+        customW = customW < 1 ? 1 : customW > 100 ? 100 : customW;
+        customH = customH < 1 ? 1 : customH > 100 ? 100 : customH;
+        ImGui::SameLine();
+        if (ImGui::Button(tr("Use##aspect"))) {
+            char text[32];
+            snprintf(text, sizeof(text), "%d:%d", customW, customH);
+            if (presentSetAspectText(text)) {
+                aspectMsg.text[0] = '\0';
+            } else {
+                aspectMsg.set(true, "%s is narrower than 4:3: wide shapes only (or 1:1)", text);
+            }
+        }
+        if (aspectMsg.text[0] != '\0') hint("%s", aspectMsg.text);
     }
 
     if (row("Vertical framing", "expanded_vertical")) {
@@ -750,39 +798,40 @@ void displaySection() {
             full = !full;
             presentSetFullscreen(full);
         }
-        ImGui::SameLine(0, 14 * scale());
         hint("F11 or Alt+Enter too.");
         overrideNote("fullscreen");
     }
 
 #ifndef __ANDROID__ // the window fills the screen there, with or without the system bars
     if (row("Window size", "window_width window_height")) {
-        ImGui::BeginDisabled(full);
-        ImGui::SetNextItemWidth(84.0f * scale());
-        ImGui::InputInt("##ww", &windowW, 16, 160);
-        ImGui::SameLine();
-        ImGui::TextUnformatted(tr("x"));
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(84.0f * scale());
-        ImGui::InputInt("##wh", &windowH, 16, 160);
-        windowW = windowW < 320 ? 320 : windowW > 16384 ? 16384 : windowW;
-        windowH = windowH < 240 ? 240 : windowH > 16384 ? 16384 : windowH;
-        sameLineFor("Set");
-        if (ImGui::Button(tr("Set##size"))) {
-            presentSetWindowSize(windowW, windowH);
+        static const int winPresets[][2] = {{960, 720}, {1280, 960}, {1440, 1080}, {1280, 720}, {1920, 1080}};
+        static const char* const winNames[] = {"960x720", "1280x960", "1440x1080", "1280x720", "1920x1080", N_("Custom...")};
+        int cur = -1;
+        for (int i = 0; i < (int)IM_COUNTOF(winPresets); i++) {
+            if (windowW == winPresets[i][0] && windowH == winPresets[i][1]) cur = i;
         }
-        static const int presets[][2] = {{960, 720}, {1280, 960}, {1440, 1080}, {1280, 720}, {1920, 1080}};
-        for (int i = 0; i < (int)IM_COUNTOF(presets); i++) {
-            char label[24];
-            snprintf(label, sizeof(label), "%dx%d", presets[i][0], presets[i][1]);
-            if (i > 0) {
-                sameLineFor(label);
+        char curText[32];
+        snprintf(curText, sizeof curText, "%dx%d", windowW, windowH);
+        ImGui::BeginDisabled(full);
+        ImGui::SetNextItemWidth(comboWidth(winNames, (int)IM_COUNTOF(winNames), curText));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
+        bool open = ImGui::BeginCombo("##winsize", curText);
+        ImGui::PopStyleVar();
+        if (open) {
+            skin::frameWindow();
+            for (int i = 0; i < (int)IM_COUNTOF(winPresets); i++) {
+                if (ImGui::Selectable(winNames[i], cur == i)) {
+                    windowW = winPresets[i][0];
+                    windowH = winPresets[i][1];
+                    presentSetWindowSize(windowW, windowH);
+                    customWindowOpen = false;
+                }
+                if (cur == i) ImGui::SetItemDefaultFocus();
             }
-            if (ImGui::Button(label)) {
-                windowW = presets[i][0];
-                windowH = presets[i][1];
-                presentSetWindowSize(windowW, windowH);
+            if (ImGui::Selectable(tr("Custom..."), customWindowOpen)) {
+                customWindowOpen = true;
             }
+            ImGui::EndCombo();
         }
         ImGui::EndDisabled();
         int pw = 0, ph = 0, lw = 0, lh = 0;
@@ -798,6 +847,24 @@ void displaySection() {
         overrideNote("window_width");
         overrideNote("window_height");
     }
+    if (customWindowOpen && row("Custom size")) {
+        ImGui::BeginDisabled(full);
+        ImGui::SetNextItemWidth(68.0f * scale());
+        ImGui::InputInt("##ww", &windowW, 16, 160);
+        ImGui::SameLine();
+        ImGui::TextUnformatted(tr("x"));
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(68.0f * scale());
+        ImGui::InputInt("##wh", &windowH, 16, 160);
+        windowW = windowW < 320 ? 320 : windowW > 16384 ? 16384 : windowW;
+        windowH = windowH < 240 ? 240 : windowH > 16384 ? 16384 : windowH;
+        ImGui::SameLine();
+        if (ImGui::Button(tr("Set##size"))) {
+            presentSetWindowSize(windowW, windowH);
+        }
+        ImGui::EndDisabled();
+        hint("Enter width and height in window coordinates, then choose Set.");
+    }
 #endif
 
     // ---- how sharp: the resolution, colour and the filters
@@ -808,7 +875,7 @@ void displaySection() {
                                             "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"};
         int up = hiresUpscale();
         int index = up == 1 ? 0 : up == 0 ? 1 : up;
-        ImGui::SetNextItemWidth(-1);
+        ImGui::SetNextItemWidth(comboWidth(names, (int)IM_COUNTOF(names), tr(names[index])));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
         bool open = ImGui::BeginCombo("##upscale", tr(names[index]));
         ImGui::PopStyleVar();
@@ -848,7 +915,7 @@ void displaySection() {
             "No dither, all colours in 8 bits: dim glow layers add up, making dark areas brighter than the PS1.",
         };
         int c = hiresColor();
-        int nc = listChoice("##upcolor", colours, IM_COUNTOF(colours), c);
+        int nc = choice("##upcolor", colours, IM_COUNTOF(colours), c);
         if (nc != c) {
             hiresSetColor(nc);
         }
@@ -866,7 +933,7 @@ void displaySection() {
             "The pixel art's edges smoothed (xBR): diagonals and curves without steps.",
         };
         int filter = presentFilter();
-        int v = listChoice("##filter", filters, PRESENT_FILTER_COUNT, filter);
+        int v = choice("##filter", filters, PRESENT_FILTER_COUNT, filter);
         if (v != filter) {
             presentSetFilter(v);
         }
@@ -889,203 +956,233 @@ void displaySection() {
         overrideNote("present_movie_filter");
     }
 
-    // ---- each kind of picture's look: native, filtered, upscaled, or a pack's art
-    opt::group(N_("Textures and art"));
-    /* One appearance control per category: native, filter, upscale or art. */
-    auto appearanceRow = [&](const char* label, const char* keys, int kind, int portrait, bool last) {
-        if (!row(label, keys)) return;
-        ImGui::PushID(kind);
-        auto selectedSet=[&]() {return portrait==1?portraitBattlePackSelected():portrait==2?portraitMenuPackSelected():portraitPackSelected();};
-        auto selectSet=[&](const char* id) {if(portrait==1)portraitBattlePackSelect(id);else if(portrait==2)portraitMenuPackSelect(id);else portraitPackSelect(id);};
-        static const char* names[]={"Original","Linear","Edge","Upscaled 2x","Upscaled 4x","Texture pack","Enhanced text","Cel 2x","Cel 4x","Cel 8x"};
-        int mode=portrait<0?textureAppearance(kind):textureFilter(kind);
-        const char* currentName=mode>=0 && mode<10?tr(names[mode]):tr("Original");
-        bool artwork=portrait>=0 && strcmp(selectedSet(),"original");
-        if(artwork) {
-            currentName=selectedSet();
-            for(int i=1;i<portraitPackCount();i++)if(!strcmp(portraitPackSet(i)->id,selectedSet()))currentName=portraitPackSet(i)->name;
-            if(!strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK))currentName=tr("Texture pack");
-        }
-        ImGui::SetNextItemWidth(-1);
-        if(ImGui::BeginCombo("##appearance",currentName)) {
-            skin::frameWindow();
-            auto option=[&](int value) {
-                bool selected=!artwork && mode==value;
-                if(ImGui::Selectable(tr(names[value]),selected)) {
-                    if(portrait>=0) {selectSet("original");textureSetFilter(kind,value);}
-                    else textureSetAppearance(kind,value);
-                }
-                if(selected)ImGui::SetItemDefaultFocus();
-            };
-            for(int i=0;i<3;i++)option(i);
-            if(portrait<0) {
-                if(kind==PC_TEX_HUD || kind==PC_TEX_BATTLE_HUD || kind==PC_TEX_TEXT || kind==PC_TEX_ICON) {option(3);option(4);}
-                option(5);if(kind==PC_TEX_TEXT)option(6);
-                if(kind==PC_TEX_HUD || kind==PC_TEX_BATTLE_HUD || kind==PC_TEX_ICON){option(7);option(8);option(9);}
-                if(kind==PC_TEX_SPRITE || kind==PC_TEX_3D)option(9);
-            } else {
-                for(int i=1;i<portraitPackCount();i++) {
-                    const PortraitSet* set=portraitPackSet(i);
-                    bool selected=artwork && !strcmp(set->id,selectedSet());
-                    if(ImGui::Selectable(set->name,selected)) {selectSet(set->id);textureSetFilter(kind,0);}
-                    if(selected)ImGui::SetItemDefaultFocus();
-                }
-                /* the texture pack's pictures of the faces (a Beetle PSX HW pack's, or the user's pack) */
-                bool packSelected=artwork && !strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK);
-                if(ImGui::Selectable(tr("Texture pack"),packSelected)) {selectSet(PORTRAIT_TEXTURE_PACK);textureSetFilter(kind,0);}
-                if(packSelected)ImGui::SetItemDefaultFocus();
+    // ---- nested submenus for art, shaders, performance and advanced display options
+    opt::group(N_("More display"));
+    if (opt::beginSubmenu("textures", N_("Textures and art"), nullptr,
+                          N_("Per-category texture filters, cel redraws, enhanced text and portrait packs."))) {
+        opt::group(N_("Textures and art"));
+        /* One appearance control per category: native, filter, upscale or art. */
+        auto appearanceRow = [&](const char* label, const char* keys, int kind, int portrait, bool last) {
+            if (!row(label, keys)) return;
+            ImGui::PushID(kind);
+            auto selectedSet=[&]() {return portrait==1?portraitBattlePackSelected():portrait==2?portraitMenuPackSelected():portraitPackSelected();};
+            auto selectSet=[&](const char* id) {if(portrait==1)portraitBattlePackSelect(id);else if(portrait==2)portraitMenuPackSelect(id);else portraitPackSelect(id);};
+            static const char* names[]={"Original","Linear","Edge","Upscaled 2x","Upscaled 4x","Texture pack","Enhanced text","Cel 2x","Cel 4x","Cel 8x"};
+            int mode=portrait<0?textureAppearance(kind):textureFilter(kind);
+            const char* currentName=mode>=0 && mode<10?tr(names[mode]):tr("Original");
+            bool artwork=portrait>=0 && strcmp(selectedSet(),"original");
+            if(artwork) {
+                currentName=selectedSet();
+                for(int i=1;i<portraitPackCount();i++)if(!strcmp(portraitPackSet(i)->id,selectedSet()))currentName=portraitPackSet(i)->name;
+                if(!strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK))currentName=tr("Texture pack");
             }
-            ImGui::EndCombo();
-        }
-        ImGui::PopID();
-        overrideNote(textureFilterKey(kind));
-        if (last) {
-            hint("Each category uses its selected filter, faithful native upscale or artwork pack. Text controls labels and numbers. Battle portraits also cover results; menu portraits reuse the dialogue artwork.");
-            hint("Applies with upscaling or subpixel geometry. Missing pack images use the originals.");
-            hint("Cel 2x/4x/8x uses faithful cel redraws of the original HUD and icons. Upscaled 2x/4x retains the original pixel artwork. Sprites -> Cel 8x uses the field sprite cel library (Packs > Sprite packs): redrawn sprites through the game\'s own palettes. 3D textures -> Cel 8x uses the field texture library (Packs > Texture pack): repainted scenery at 8x.");
-            overrideNote("portrait_set");overrideNote("menu_portrait_set");overrideNote("battle_portrait_set");
-            overrideNote("text_glyphs");
-        }
-    };
-    appearanceRow("3D textures","texture_style_3d",PC_TEX_3D,-1,false);
-    appearanceRow("Sprites","texture_style_sprite",PC_TEX_SPRITE,-1,false);
-    appearanceRow("HUD","texture_style_hud",PC_TEX_HUD,-1,false);
-    appearanceRow("Battle HUD","texture_style_battle_hud",PC_TEX_BATTLE_HUD,-1,false);
-    appearanceRow("Text","texture_style_text",PC_TEX_TEXT,-1,false);
-    appearanceRow("Battle icons","texture_style_icon",PC_TEX_ICON,-1,false);
-    appearanceRow("Dialogue portraits","texture_filter_portrait portrait_set",PC_TEX_PORTRAIT,0,false);
-    appearanceRow("Menu portraits","texture_filter_menu_portrait menu_portrait_set",PC_TEX_MENU_PORTRAIT,2,false);
-    appearanceRow("Battle portraits","texture_filter_battle_portrait battle_portrait_set",PC_TEX_BATTLE_PORTRAIT,1,true);
+            ImGui::SetNextItemWidth(comboWidth(names, 10, currentName));
+            if(ImGui::BeginCombo("##appearance",currentName)) {
+                skin::frameWindow();
+                auto option=[&](int value) {
+                    bool selected=!artwork && mode==value;
+                    if(ImGui::Selectable(tr(names[value]),selected)) {
+                        if(portrait>=0) {selectSet("original");textureSetFilter(kind,value);}
+                        else textureSetAppearance(kind,value);
+                    }
+                    if(selected)ImGui::SetItemDefaultFocus();
+                };
+                for(int i=0;i<3;i++)option(i);
+                if(portrait<0) {
+                    if(kind==PC_TEX_HUD || kind==PC_TEX_BATTLE_HUD || kind==PC_TEX_TEXT || kind==PC_TEX_ICON) {option(3);option(4);}
+                    option(5);if(kind==PC_TEX_TEXT)option(6);
+                    if(kind==PC_TEX_HUD || kind==PC_TEX_BATTLE_HUD || kind==PC_TEX_ICON){option(7);option(8);option(9);}
+                    if(kind==PC_TEX_SPRITE || kind==PC_TEX_3D)option(9);
+                } else {
+                    for(int i=1;i<portraitPackCount();i++) {
+                        const PortraitSet* set=portraitPackSet(i);
+                        bool selected=artwork && !strcmp(set->id,selectedSet());
+                        if(ImGui::Selectable(set->name,selected)) {selectSet(set->id);textureSetFilter(kind,0);}
+                        if(selected)ImGui::SetItemDefaultFocus();
+                    }
+                    /* the texture pack's pictures of the faces (a Beetle PSX HW pack's, or the user's pack) */
+                    bool packSelected=artwork && !strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK);
+                    if(ImGui::Selectable(tr("Texture pack"),packSelected)) {selectSet(PORTRAIT_TEXTURE_PACK);textureSetFilter(kind,0);}
+                    if(packSelected)ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PopID();
+            overrideNote(textureFilterKey(kind));
+            if (last) {
+                hint("Each category uses its selected filter, faithful native upscale or artwork pack. Text controls labels and numbers. Battle portraits also cover results; menu portraits reuse the dialogue artwork.");
+                hint("Applies with upscaling or subpixel geometry. Missing pack images use the originals.");
+                hint("Cel 2x/4x/8x uses faithful cel redraws of the original HUD and icons. Upscaled 2x/4x retains the original pixel artwork. Sprites -> Cel 8x uses the field sprite cel library (Packs > Sprite packs): redrawn sprites through the game\'s own palettes. 3D textures -> Cel 8x uses the field texture library (Packs > Texture pack): repainted scenery at 8x.");
+                overrideNote("portrait_set");overrideNote("menu_portrait_set");overrideNote("battle_portrait_set");
+                overrideNote("text_glyphs");
+            }
+        };
+        appearanceRow("3D textures","texture_style_3d",PC_TEX_3D,-1,false);
+        appearanceRow("Sprites","texture_style_sprite",PC_TEX_SPRITE,-1,false);
+        appearanceRow("HUD","texture_style_hud",PC_TEX_HUD,-1,false);
+        appearanceRow("Battle HUD","texture_style_battle_hud",PC_TEX_BATTLE_HUD,-1,false);
+        appearanceRow("Text","texture_style_text",PC_TEX_TEXT,-1,false);
+        appearanceRow("Battle icons","texture_style_icon",PC_TEX_ICON,-1,false);
+        appearanceRow("Dialogue portraits","texture_filter_portrait portrait_set",PC_TEX_PORTRAIT,0,false);
+        appearanceRow("Menu portraits","texture_filter_menu_portrait menu_portrait_set",PC_TEX_MENU_PORTRAIT,2,false);
+        appearanceRow("Battle portraits","texture_filter_battle_portrait battle_portrait_set",PC_TEX_BATTLE_PORTRAIT,1,true);
 
-    if (row("Text edges", "text_smooth")) {
-        bool smoothText = textureGlyphSmooth() != 0;
-        ImGui::BeginDisabled(textureAppearance(PC_TEX_TEXT) != 6);
-        if (checkbox("Smooth Enhanced text", &smoothText)) textureSetGlyphSmooth(smoothText);
-        ImGui::EndDisabled();
-        hint("With Text -> Enhanced text: the letters' edges blend into the picture and their outline meets the face softly. Off keeps the hard edges of the 8x glyphs.");
-        overrideNote("text_smooth");
+        if (row("Text edges", "text_smooth")) {
+            bool smoothText = textureGlyphSmooth() != 0;
+            ImGui::BeginDisabled(textureAppearance(PC_TEX_TEXT) != 6);
+            if (offOnList("##text_smooth", &smoothText, N_("Hard"), N_("Smooth"))) textureSetGlyphSmooth(smoothText);
+            ImGui::EndDisabled();
+            hint("With Text -> Enhanced text: the letters' edges blend into the picture and their outline meets the face softly. Hard keeps the crisp edges of the 8x glyphs.");
+            overrideNote("text_smooth");
+        }
+        opt::endSubmenu();
     }
 
-    // ---- what it costs: the GPU's limits (and the diagnostics' rows)
-    opt::group(N_("Performance"));
-    if (row("Auto GPU limit", "upscale_gpu_ms")) {
-        ImGui::BeginDisabled(hiresUpscale() != 0);
-        int gpuBudget = hiresGpuBudget();
-        bool limitGpu = gpuBudget > 0;
-        if (checkbox("Limit GPU time", &limitGpu)) {
-            gpuBudget = limitGpu ? 12 : 0;
-            hiresSetGpuBudget(gpuBudget);
+    if (opt::beginSubmenu("shaders", N_("Shaders"), nullptr,
+                          N_("RetroArch .slangp / .slang post-processing shaders for the game and movies."))) {
+        opt::group(N_("Shaders"));
+        shaderPresetRows(); // shaders.cpp: Shader, Movie shader and their parameters
+        opt::endSubmenu();
+    }
+
+    if (opt::beginSubmenu("performance", N_("Performance"), nullptr,
+                          N_("GPU frame-time budget, half-resolution large surfaces and performance overlays."))) {
+        opt::group(N_("Performance"));
+        if (row("Auto GPU limit", "upscale_gpu_ms")) {
+            ImGui::BeginDisabled(hiresUpscale() != 0);
+            int gpuBudget = hiresGpuBudget();
+            bool limitGpu = gpuBudget > 0;
+            if (offOnList("##gpu_limit_on", &limitGpu)) {
+                gpuBudget = limitGpu ? 12 : 0;
+                hiresSetGpuBudget(gpuBudget);
+            }
+            ImGui::EndDisabled();
+            hint("Auto lowers resolution after sustained GPU load and restores it when there is headroom. Off by default on a "
+                 "discrete GPU; 8 ms on an integrated one (handhelds, laptops), where 12x battles cannot hold the frame rate.");
+            overrideNote("upscale_gpu_ms");
         }
-        if (limitGpu) {
-            ImGui::SetNextItemWidth(-1);
+        if (hiresGpuBudget() > 0 && row("GPU frame budget", "upscale_gpu_ms")) {
+            ImGui::BeginDisabled(hiresUpscale() != 0);
+            int gpuBudget = hiresGpuBudget();
+            ImGui::SetNextItemWidth(sliderWidth());
             if (ImGui::SliderInt("##gpu_budget", &gpuBudget, 1, 50, "%d ms", ImGuiSliderFlags_AlwaysClamp))
                 hiresSetGpuBudget(gpuBudget);
+            ImGui::EndDisabled();
+            hint("The budget covers GPU work per video frame. CPU or display waits can still limit speed.");
         }
-        ImGui::EndDisabled();
-        hint("Auto lowers resolution after sustained GPU load and restores it when there is headroom. Off by default on a "
-             "discrete GPU; 8 ms on an integrated one (handhelds, laptops), where 12x battles cannot hold the frame rate.");
-        hint("The budget covers GPU work per video frame. CPU or display waits can still limit speed.");
-        overrideNote("upscale_gpu_ms");
-    }
-    if (row("Large surfaces", "upscale_large", opt::ENHANCED)) {
-        bool coarseLarge = hiresCoarseLarge();
-        if (checkbox("Half-resolution large surfaces (Enhanced)", &coarseLarge)) hiresSetCoarseLarge(coarseLarge);
-        hint("Arenas, Gears and screen-covering layers drawn at half the upscale; text, the HUD and small things stay at full. Cheaper on handheld GPUs; 2x2 blocks on their edges. Off by default.");
-        overrideNote("upscale_large");
-    }
-    // ===== INTEGRATION POINT: port/src/ui/diagnostics.cpp (diagnostics.h) =====
-    // The diagnostics' performance rows, in this group, outside its table; a
-    // weak symbol, so the menu links without diagnostics.cpp.
-    if (diagnosticsPerfRows && opt::plain()) {
-        diagnosticsPerfRows();
-    }
-    // ===== end of the integration point =====
-
-    // ---- rarely changed
-    opt::group(N_("Advanced"), opt::COLLAPSED);
-    if (row("GPU ordering", "gpu_ordered_batches")) {
-        bool ordered = gpuOrderedFallback();
-        if (checkbox("Exact ordered fallback", &ordered)) gpuSetOrderedFallback(ordered);
-        hint("May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. "
-             "Enabled by default on the Android PowerVR DXT-48-1536.");
-        hint("%s", gpuOrderedStatus());
-        overrideNote("gpu_ordered_batches");
-    }
-
-    if (row("VSync wait", "vsync_wait")) {
-        static const char* const vsyncWaits[] = {"Sleep between frames", "Spin (steady clock)"};
-        int spin = hwSpinWait() ? 1 : 0;
-        int spinChoice = listChoice("##vsync_wait", vsyncWaits, 2, spin);
-        if (spinChoice != spin && spinChoice >= 0) hwSetSpinWait(spinChoice);
-        hint("Sleep rests the game thread until its next event, so the CPU may clock down between frames. Spin keeps it busy-waiting: a steady CPU clock and vblanks delivered on time, with one core always busy and more power used.");
-        overrideNote("vsync_wait");
-    }
-
-    bool lockOn = settingsInt("display_lock", 0) != 0;
-    if (row("Display lock", "display_lock")) {
-        if (offOnList("##display_lock", &lockOn, N_("Off"), N_("On: one vblank per refresh"))) {
-            settingsDescribe("display_lock", "display_lock: 1 ties the game's vblank to the display's refresh when they "
-                                             "are within display_lock_tolerance Hz (FIFO; the game that much faster or "
-                                             "slower), 0 off (default)");
-            settingsSetInt("display_lock", lockOn ? 1 : 0);
-            settingsSave();
+        if (row("Large surfaces", "upscale_large", opt::ENHANCED)) {
+            bool coarseLarge = hiresCoarseLarge();
+            if (offOnList("##upscale_large", &coarseLarge, N_("Full resolution"), N_("Half resolution")))
+                hiresSetCoarseLarge(coarseLarge);
+            hint("Arenas, Gears and screen-covering layers drawn at half the upscale; text, the HUD and small things stay at full. Cheaper on handheld GPUs; 2x2 blocks on their edges. Off by default.");
+            overrideNote("upscale_large");
         }
-        hint("On: when the display refreshes within the tolerance below of the game's 59.83 Hz, the game runs at the "
-             "display's rate instead (at most 0.4%% faster or slower, its sound too) and each picture is shown exactly "
-             "once, with no repeated or dropped frame. Adds the FIFO queue's latency. Off by default. Applies within "
-             "a second.");
-        overrideNote("display_lock");
-    }
-    if (row("Lock tolerance", "display_lock_tolerance")) {
-        static const char* const names[] = {"0.01 Hz", "0.02 Hz", "0.05 Hz", "0.10 Hz", "0.15 Hz", "0.20 Hz", "0.24 Hz"};
-        static const int hundredths[] = {1, 2, 5, 10, 15, 20, 24};
-        const char* t = settingsGet("display_lock_tolerance");
-        int nowH = t != NULL && t[0] != '\0' ? (int)lround(atof(t) * 100) : 5, at = -1;
-        for (int i = 0; i < 7; i++) if (hundredths[i] == nowH) at = i;
-        ImGui::BeginDisabled(!lockOn);
-        int v = listChoice("##display_lock_tolerance", names, 7, at);
-        ImGui::EndDisabled();
-        if (v != at && v >= 0) {
-            char text[16];
-            snprintf(text, sizeof text, "%d.%02d", hundredths[v] / 100, hundredths[v] % 100);
-            settingsSet("display_lock_tolerance", text);
-            settingsSave();
+        // ===== INTEGRATION POINT: port/src/ui/diagnostics.cpp (diagnostics.h) =====
+        if (diagnosticsPerfRows && opt::plain()) {
+            diagnosticsPerfRows();
         }
-        hint("The largest difference between the display's refresh and the game's vblank rate that Display lock "
-             "locks. 0.05 Hz by default; a display at exactly 60.00 Hz is 0.17 Hz from the game's rate, so it needs 0.20 "
-             "or more.");
-        overrideNote("display_lock_tolerance");
+        // ===== end of the integration point =====
+        opt::endSubmenu();
     }
 
-    if (row("Screen effects", "upscale_cpu_effects")) {
-        bool cpuEffects = hiresCpuEffects();
-        if (checkbox("High-resolution pause blur", &cpuEffects)) hiresSetCpuEffects(cpuEffects);
-        hint("Keeps rendered detail through the Gear arena pause blur above 1x. Uses the original blur radius and colour steps. Off by default.");
-        overrideNote("upscale_cpu_effects");
-    }
+    if (opt::beginSubmenu("advanced", N_("Advanced"), nullptr,
+                          N_("GPU batch ordering, VSync wait, display lock, pause blur and geometry precision."))) {
+        opt::group(N_("Advanced"));
+        if (row("GPU ordering", "gpu_ordered_batches")) {
+            bool ordered = gpuOrderedFallback();
+            if (offOnList("##gpu_ordered_batches", &ordered, N_("Hardware"), N_("Ordered fallback")))
+                gpuSetOrderedFallback(ordered);
+            hint("May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. "
+                 "Enabled by default on the Android PowerVR DXT-48-1536.");
+            hint("%s", gpuOrderedStatus());
+            overrideNote("gpu_ordered_batches");
+        }
 
-    if (row("Geometry", "geometry_precision perspective_textures geometry_slivers geometry_seam_guard")) {
+        if (row("VSync wait", "vsync_wait")) {
+            static const char* const vsyncWaits[] = {"Sleep", "Spin"};
+            int spin = hwSpinWait() ? 1 : 0;
+            int spinChoice = choice("##vsync_wait", vsyncWaits, 2, spin);
+            if (spinChoice != spin && spinChoice >= 0) hwSetSpinWait(spinChoice);
+            hint("Sleep rests the game thread until its next event, so the CPU may clock down between frames. Spin keeps it busy-waiting: a steady CPU clock and vblanks delivered on time, with one core always busy and more power used.");
+            overrideNote("vsync_wait");
+        }
+
+        bool lockOn = settingsInt("display_lock", 0) != 0;
+        if (row("Display lock", "display_lock")) {
+            if (offOnList("##display_lock", &lockOn)) {
+                settingsDescribe("display_lock", "display_lock: 1 ties the game's vblank to the display's refresh when they "
+                                                 "are within display_lock_tolerance Hz (FIFO; the game that much faster or "
+                                                 "slower), 0 off (default)");
+                settingsSetInt("display_lock", lockOn ? 1 : 0);
+                settingsSave();
+            }
+            hint("On: when the display refreshes within the tolerance below of the game's 59.83 Hz, the game runs at the "
+                 "display's rate instead (at most 0.4%% faster or slower, its sound too) and each picture is shown exactly "
+                 "once, with no repeated or dropped frame. Adds the FIFO queue's latency. Off by default. Applies within "
+                 "a second.");
+            overrideNote("display_lock");
+        }
+        if (row("Lock tolerance", "display_lock_tolerance")) {
+            static const char* const names[] = {"0.01 Hz", "0.02 Hz", "0.05 Hz", "0.10 Hz", "0.15 Hz", "0.20 Hz", "0.24 Hz"};
+            static const int hundredths[] = {1, 2, 5, 10, 15, 20, 24};
+            const char* t = settingsGet("display_lock_tolerance");
+            int nowH = t != NULL && t[0] != '\0' ? (int)lround(atof(t) * 100) : 5, at = -1;
+            for (int i = 0; i < 7; i++) if (hundredths[i] == nowH) at = i;
+            ImGui::BeginDisabled(!lockOn);
+            int v = listChoice("##display_lock_tolerance", names, 7, at);
+            ImGui::EndDisabled();
+            if (v != at && v >= 0) {
+                char text[16];
+                snprintf(text, sizeof text, "%d.%02d", hundredths[v] / 100, hundredths[v] % 100);
+                settingsSet("display_lock_tolerance", text);
+                settingsSave();
+            }
+            hint("The largest difference between the display's refresh and the game's vblank rate that Display lock "
+                 "locks. 0.05 Hz by default; a display at exactly 60.00 Hz is 0.17 Hz from the game's rate, so it needs 0.20 "
+                 "or more.");
+            overrideNote("display_lock_tolerance");
+        }
+
+        if (row("Pause blur", "upscale_cpu_effects")) {
+            bool cpuEffects = hiresCpuEffects();
+            if (offOnList("##upscale_cpu_effects", &cpuEffects, N_("Original"), N_("High-res")))
+                hiresSetCpuEffects(cpuEffects);
+            hint("Keeps rendered detail through the Gear arena pause blur above 1x. Uses the original blur radius and colour steps. Off by default.");
+            overrideNote("upscale_cpu_effects");
+        }
+
         bool precise = hiresPrecision();
-        if (checkbox("Subpixel geometry", &precise)) hiresSetPrecision(precise);
-        hint("Smooths projected vertices as the camera moves. Enabled by default with upscaling.");
-        ImGui::BeginDisabled(!precise);
-        bool perspective = hiresPerspective();
-        if (checkbox("Perspective textures", &perspective)) hiresSetPerspective(perspective);
-        hint("Corrects texture swim on 3D surfaces. Screen-space sprites and menus keep their original mapping.");
-        bool slivers = hiresSlivers();
-        if (checkbox("Restore thin surfaces", &slivers)) hiresSetSlivers(slivers);
-        hint("Keeps thin terrain, shadows and custom surfaces visible when PS1 pixel rounding would remove them. Off by default.");
-        bool seamGuard = hiresSeamGuard();
-        if (checkbox("Close surface gaps", &seamGuard)) hiresSetSeamGuard(seamGuard);
-        ImGui::EndDisabled();
-        hint("Slightly overlaps opaque edges that met through PS1 pixel rounding.");
-        overrideNote("geometry_precision");
-        overrideNote("perspective_textures");
-        overrideNote("geometry_seam_guard");
-        overrideNote("geometry_slivers");
+        if (row("Subpixel geometry", "geometry_precision")) {
+            if (offOnList("##geometry_precision", &precise)) hiresSetPrecision(precise);
+            hint("Smooths projected vertices as the camera moves. Enabled by default with upscaling.");
+            overrideNote("geometry_precision");
+        }
+        if (row("Perspective textures", "perspective_textures")) {
+            ImGui::BeginDisabled(!precise);
+            bool perspective = hiresPerspective();
+            if (offOnList("##perspective_textures", &perspective)) hiresSetPerspective(perspective);
+            ImGui::EndDisabled();
+            hint("Corrects texture swim on 3D surfaces. Screen-space sprites and menus keep their original mapping.");
+            overrideNote("perspective_textures");
+        }
+        if (row("Restore thin surfaces", "geometry_slivers")) {
+            ImGui::BeginDisabled(!precise);
+            bool slivers = hiresSlivers();
+            if (offOnList("##geometry_slivers", &slivers)) hiresSetSlivers(slivers);
+            ImGui::EndDisabled();
+            hint("Keeps thin terrain, shadows and custom surfaces visible when PS1 pixel rounding would remove them. Off by default.");
+            overrideNote("geometry_slivers");
+        }
+        if (row("Close surface gaps", "geometry_seam_guard")) {
+            ImGui::BeginDisabled(!precise);
+            bool seamGuard = hiresSeamGuard();
+            if (offOnList("##geometry_seam_guard", &seamGuard)) hiresSetSeamGuard(seamGuard);
+            ImGui::EndDisabled();
+            hint("Slightly overlaps opaque edges that met through PS1 pixel rounding.");
+            overrideNote("geometry_seam_guard");
+        }
+        opt::endSubmenu();
     }
-
-    shaderPresetRows(); // shaders.cpp: Shader, Movie shader and their parameters
 
     opt::endPage();
 }
@@ -1103,229 +1200,281 @@ void effectsSection() {
         N_("not available on this device, or without memory for it"),
         N_("the game gave no view for this scene"), N_("being prepared (shaders compiling)")};
     (void)sceneReasons;
+    static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
 
-    opt::group(N_("Depth of field"));
-    if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
-        // "Subtle", not "Light": the catalogs have no contexts and "Light" is the model viewer's lamp.
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
+    // Quick preset row at the top of Effects so players can switch the whole HD-2D stack in one click.
+    opt::group(N_("HD-2D preset"));
+    if (row("All effects", nullptr, opt::ENHANCED)) {
+        int core[] = {sceneDof(), sceneLighting(), sceneGlow(), sceneShadows(), sceneCloudShadows(),
+                      sceneLightShafts(), sceneSunGlare(), sceneFog(), sceneGrade(), sceneParticles()};
+        int matched = core[0];
+        for (int v : core) {
+            if (v != matched) { matched = -1; break; }
+        }
+        if (matched == 0 && (sceneTiltShift() != 0 || sceneVignette() != 0)) matched = -1;
         ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneDof();
-        int chosen = listChoice("##depth_of_field", levels, IM_COUNTOF(levels), level);
+        int chosen = choice("##all_effects", levels, IM_COUNTOF(levels), matched);
         ImGui::EndDisabled();
-        if (chosen != level) sceneSetDof(chosen);
-        hint("In fields, battles and on the world map, scenery and characters behind and in front of the party "
-             "soften. Dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by "
-             "default.");
-        if (sceneDofStatus() != nullptr) hint("Not shown now: %s.", tr(sceneDofStatus()));
-        overrideNote("depth_of_field");
-    }
-    if (row("Focus range", "depth_of_field_focus", opt::ENHANCED)) {
-        static const char* const ranges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
-        ImGui::BeginDisabled(sceneDof() == 0);
-        int range = sceneDofFocus();
-        int chosen = listChoice("##depth_of_field_focus", ranges, IM_COUNTOF(ranges), range);
-        ImGui::EndDisabled();
-        if (chosen != range) sceneSetDofFocus(chosen);
-        hint("How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far "
-             "behind or close to the camera.");
-        overrideNote("depth_of_field_focus");
-    }
-    if (row("Dialogue focus", "depth_of_field_dialogue", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneDof() == 0);
-        bool on = sceneDofDialogue() != 0;
-        if (offOnList("##depth_of_field_dialogue", &on)) sceneSetDofDialogue(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("In fields, while someone speaks the focus moves to them and the room around them softens a little "
-             "more, easing in and back out over half a second. On by default, with Depth of field.");
-        overrideNote("depth_of_field_dialogue");
-    }
-    if (row("Tilt-shift", "tilt_shift", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneTiltShift();
-        int chosen = listChoice("##tilt_shift", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetTiltShift(chosen);
-        hint("In fields and on the world map, the picture blurs toward its edges, faintly at first and most at the "
-             "edge, the miniature look. With Depth of field on too, the stronger blur of the two shows. Dialogue, "
-             "portraits and the HUD stay sharp. Off by default.");
-        overrideNote("tilt_shift");
+        if (chosen >= 0 && chosen != matched) {
+            sceneSetDof(chosen);
+            if (chosen == 0) sceneSetTiltShift(0);
+            sceneSetLighting(chosen);
+            sceneSetGlow(chosen);
+            sceneSetShadows(chosen);
+            sceneSetCloudShadows(chosen);
+            sceneSetLightShafts(chosen);
+            sceneSetSunGlare(chosen);
+            sceneSetFog(chosen);
+            sceneSetGrade(chosen);
+            sceneSetVignette(chosen == 0 ? 0 : chosen == 3 ? 2 : 1);
+            sceneSetParticles(chosen);
+            settingsSave();
+        }
+        hint("Sets every HD-2D effect together (depth of field, lighting, glow, shadows, shafts, sun glare, fog, "
+             "colour grade, vignette and particles). Open a category below to tune individual effects.");
     }
 
-    opt::group(N_("Lighting and shadows"));
-    if (row("Lighting", "lighting", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneLighting();
-        int chosen = listChoice("##lighting", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetLighting(chosen);
-        hint("In fields, battles and on the world map, the scenery gets light from above, shade in corners and under "
-             "overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not "
-             "touched, and the PS1 picture itself is not changed. Off by default.");
-        if ((sceneLighting() || sceneGlow()) && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("lighting");
+    opt::group(N_("Categories"));
+    char dofSummary[48], lightSummary[48], atmoSummary[48];
+    {
+        int n = (sceneDof() != 0) + (sceneTiltShift() != 0);
+        if (n == 0) snprintf(dofSummary, sizeof dofSummary, "%s", tr("Off"));
+        else if (sceneDof() != 0 && sceneTiltShift() == 0) snprintf(dofSummary, sizeof dofSummary, "%s", tr(levels[sceneDof()]));
+        else snprintf(dofSummary, sizeof dofSummary, tr("%d on"), n);
     }
-    if (row("Firelight flicker", "lighting_firelight", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneLighting() == 0 && sceneGlow() == 0);
-        bool on = sceneFirelight() != 0;
-        if (offOnList("##lighting_firelight", &on)) sceneSetFirelight(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is "
-             "around them and their glow rise and fall, each fire in its own rhythm, and they keep their painted "
-             "brightness under the lighting's shade. Windows, the sky and white or blue lights stay steady. On by "
-             "default, with Lighting or Glow.");
-        overrideNote("lighting_firelight");
+    {
+        int n = (sceneLighting() != 0) + (sceneGlow() != 0) + (sceneShadows() != 0) +
+                (sceneCloudShadows() != 0) + (sceneLightShafts() != 0) + (sceneSunGlare() != 0);
+        if (n == 0) snprintf(lightSummary, sizeof lightSummary, "%s", tr("Off"));
+        else snprintf(lightSummary, sizeof lightSummary, tr("%d on"), n);
     }
-    if (row("Light on characters", "lighting_characters", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneLighting() == 0);
-        bool on = sceneLightCharacters() != 0;
-        if (offOnList("##lighting_characters", &on)) sceneSetLightCharacters(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("The characters take the lighting too: brighter on the side toward the sun with a thin warm edge there, "
-             "darker on the far side, shade at their feet in corners, and a glow from what is near white. On by "
-             "default, with Lighting.");
-        overrideNote("lighting_characters");
-    }
-    if (row("Glow", "glow", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneGlow();
-        int chosen = listChoice("##glow", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetGlow(chosen);
-        hint("In fields, battles and on the world map, bright areas such as lamps, fires and windows glow softly. Off by "
-             "default.");
-        overrideNote("glow");
-    }
-    if (row("Shadows", "shadows", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneShadows();
-        int chosen = listChoice("##shadows", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetShadows(chosen);
-        hint("In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, "
-             "and the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by "
-             "default.");
-        if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("shadows");
-    }
-    if (row("Cloud shadows", "cloud_shadows", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneCloudShadows();
-        int chosen = listChoice("##cloud_shadows", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetCloudShadows(chosen);
-        hint("On the world map and in fields outdoors, the soft shadows of clouds drift slowly over the ground. "
-             "Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("cloud_shadows");
-    }
-    if (row("Light shafts", "light_shafts", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneLightShafts();
-        int chosen = listChoice("##light_shafts", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetLightShafts(chosen);
-        hint("In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft "
-             "sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("light_shafts");
-    }
-    if (row("Sun glare", "sun_glare", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneSunGlare();
-        int chosen = listChoice("##sun_glare", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetSunGlare(chosen);
-        hint("On the world map and in fields outdoors by day, a soft warm glow spills in from the sun's side of the "
-             "picture, with a few faint lens rings across it, where sky or far scenery shows that way. Dialogue, "
-             "portraits and the HUD are not touched. Off by default.");
-        overrideNote("sun_glare");
+    {
+        int n = (sceneFog() != 0) + (sceneGrade() != 0) + (sceneVignette() != 0) + (sceneParticles() != 0);
+        if (n == 0) snprintf(atmoSummary, sizeof atmoSummary, "%s", tr("Off"));
+        else snprintf(atmoSummary, sizeof atmoSummary, tr("%d on"), n);
     }
 
-    opt::group(N_("Atmosphere and colour"));
-    if (row("Fog", "fog", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneFog();
-        int chosen = listChoice("##fog", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetFog(chosen);
-        hint("In fields, battles and on the world map, a haze that thickens past the characters, in the colour of the "
-             "farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by "
-             "default.");
-        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("fog");
+    if (opt::beginSubmenu("dof", N_("Depth of field"), dofSummary,
+                          N_("Focus blur, focus range, dialogue focus and miniature tilt-shift."))) {
+        opt::group(N_("Depth of field"));
+        if (row("Depth of field", "depth_of_field", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneDof();
+            int chosen = choice("##depth_of_field", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetDof(chosen);
+            hint("In fields, battles and on the world map, scenery and characters behind and in front of the party "
+                 "soften. Dialogue, portraits and the HUD stay sharp, and the PS1 picture itself is not changed. Off by "
+                 "default.");
+            if (sceneDofStatus() != nullptr) hint("Not shown now: %s.", tr(sceneDofStatus()));
+            overrideNote("depth_of_field");
+        }
+        if (row("Focus range", "depth_of_field_focus", opt::ENHANCED)) {
+            static const char* const ranges[] = {N_("Narrow"), N_("Normal"), N_("Wide")};
+            ImGui::BeginDisabled(sceneDof() == 0);
+            int range = sceneDofFocus();
+            int chosen = choice("##depth_of_field_focus", ranges, IM_COUNTOF(ranges), range);
+            ImGui::EndDisabled();
+            if (chosen != range) sceneSetDofFocus(chosen);
+            hint("How deep the sharp range around the party is. Narrow softens more of the scene; Wide only what is far "
+                 "behind or close to the camera.");
+            overrideNote("depth_of_field_focus");
+        }
+        if (row("Dialogue focus", "depth_of_field_dialogue", opt::ENHANCED)) {
+            ImGui::BeginDisabled(sceneDof() == 0);
+            bool on = sceneDofDialogue() != 0;
+            if (offOnList("##depth_of_field_dialogue", &on)) sceneSetDofDialogue(on ? 1 : 0);
+            ImGui::EndDisabled();
+            hint("In fields, while someone speaks the focus moves to them and the room around them softens a little "
+                 "more, easing in and back out over half a second. On by default, with Depth of field.");
+            overrideNote("depth_of_field_dialogue");
+        }
+        if (row("Tilt-shift", "tilt_shift", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneTiltShift();
+            int chosen = choice("##tilt_shift", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetTiltShift(chosen);
+            hint("In fields and on the world map, the picture blurs toward its edges, faintly at first and most at the "
+                 "edge, the miniature look. With Depth of field on too, the stronger blur of the two shows. Dialogue, "
+                 "portraits and the HUD stay sharp. Off by default.");
+            overrideNote("tilt_shift");
+        }
+        opt::endSubmenu();
     }
-    if (row("Colour grade", "color_grade", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneGrade();
-        int chosen = listChoice("##color_grade", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetGrade(chosen);
-        hint("In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch "
-             "more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default.");
-        if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && sceneLightingStatus() != nullptr)
-            hint("Not shown now: %s.", tr(sceneLightingStatus()));
-        overrideNote("color_grade");
+
+    if (opt::beginSubmenu("lighting", N_("Lighting"), lightSummary,
+                          N_("Scene lighting, firelight flicker, character lighting, glow, shadows, clouds, shafts and sun glare."))) {
+        opt::group(N_("Lighting and shadows"));
+        if (row("Lighting", "lighting", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneLighting();
+            int chosen = choice("##lighting", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetLighting(chosen);
+            hint("In fields, battles and on the world map, the scenery gets light from above, shade in corners and under "
+                 "overhangs, and light from bright spots such as lamps and fires. Dialogue, portraits and the HUD are not "
+                 "touched, and the PS1 picture itself is not changed. Off by default.");
+            if ((sceneLighting() || sceneGlow()) && sceneLightingStatus() != nullptr)
+                hint("Not shown now: %s.", tr(sceneLightingStatus()));
+            overrideNote("lighting");
+        }
+        if (row("Firelight", "lighting_firelight", opt::ENHANCED)) {
+            ImGui::BeginDisabled(sceneLighting() == 0 && sceneGlow() == 0);
+            bool on = sceneFirelight() != 0;
+            if (offOnList("##lighting_firelight", &on)) sceneSetFirelight(on ? 1 : 0);
+            ImGui::EndDisabled();
+            hint("Indoors, at night and in battles, fires, torches and lamps flicker: the light they throw on what is "
+                 "around them and their glow rise and fall, each fire in its own rhythm, and they keep their painted "
+                 "brightness under the lighting's shade. Windows, the sky and white or blue lights stay steady. On by "
+                 "default, with Lighting or Glow.");
+            overrideNote("lighting_firelight");
+        }
+        if (row("Character light", "lighting_characters", opt::ENHANCED)) {
+            ImGui::BeginDisabled(sceneLighting() == 0);
+            bool on = sceneLightCharacters() != 0;
+            if (offOnList("##lighting_characters", &on)) sceneSetLightCharacters(on ? 1 : 0);
+            ImGui::EndDisabled();
+            hint("The characters take the lighting too: brighter on the side toward the sun with a thin warm edge there, "
+                 "darker on the far side, shade at their feet in corners, and a glow from what is near white. On by "
+                 "default, with Lighting.");
+            overrideNote("lighting_characters");
+        }
+        if (row("Glow", "glow", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneGlow();
+            int chosen = choice("##glow", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetGlow(chosen);
+            hint("In fields, battles and on the world map, bright areas such as lamps, fires and windows glow softly. Off by "
+                 "default.");
+            overrideNote("glow");
+        }
+        if (row("Shadows", "shadows", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneShadows();
+            int chosen = choice("##shadows", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetShadows(chosen);
+            hint("In fields, battles and on the world map, the scenery casts shadows from a sun set when each place starts, "
+                 "and the characters cast theirs too. Dialogue, portraits and the HUD are not touched. Off by "
+                 "default.");
+            if (!sceneLighting() && !sceneGlow() && sceneLightingStatus() != nullptr)
+                hint("Not shown now: %s.", tr(sceneLightingStatus()));
+            overrideNote("shadows");
+        }
+        if (row("Cloud shadows", "cloud_shadows", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneCloudShadows();
+            int chosen = choice("##cloud_shadows", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetCloudShadows(chosen);
+            hint("On the world map and in fields outdoors, the soft shadows of clouds drift slowly over the ground. "
+                 "Dialogue, portraits and the HUD are not touched. Off by default.");
+            overrideNote("cloud_shadows");
+        }
+        if (row("Light shafts", "light_shafts", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneLightShafts();
+            int chosen = choice("##light_shafts", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetLightShafts(chosen);
+            hint("In fields and on the world map, light spills in shafts from windows, openings and the sky, and soft "
+                 "sunbeams slant down from above. Dialogue, portraits and the HUD are not touched. Off by default.");
+            overrideNote("light_shafts");
+        }
+        if (row("Sun glare", "sun_glare", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneSunGlare();
+            int chosen = choice("##sun_glare", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetSunGlare(chosen);
+            hint("On the world map and in fields outdoors by day, a soft warm glow spills in from the sun's side of the "
+                 "picture, with a few faint lens rings across it, where sky or far scenery shows that way. Dialogue, "
+                 "portraits and the HUD are not touched. Off by default.");
+            overrideNote("sun_glare");
+        }
+        opt::endSubmenu();
     }
-    if (row("Adapt to the area", "color_grade_area", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneGrade() == 0);
-        bool on = sceneGradeArea() != 0;
-        if (offOnList("##color_grade_area", &on)) sceneSetGradeArea(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("The colour grade also leans gently into each place's own colour: a sandy place a little warmer, a green "
-             "one a little greener, a dark one a little bluer in its shadows. Dialogue, portraits and the HUD are not "
-             "touched. On by default, with Colour grade.");
-        overrideNote("color_grade_area");
-    }
-    if (row("Vignette", "vignette", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneVignette();
-        int chosen = listChoice("##vignette", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetVignette(chosen);
-        hint("In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the "
-             "middle. Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("vignette");
-    }
-    if (row("Particles", "particles", opt::ENHANCED)) {
-        static const char* const levels[] = {N_("Off"), N_("Subtle"), N_("Medium"), N_("Strong")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
-        int level = sceneParticles();
-        int chosen = listChoice("##particles", levels, IM_COUNTOF(levels), level);
-        ImGui::EndDisabled();
-        if (chosen != level) sceneSetParticles(chosen);
-        hint("In fields, battles and on the world map, fine dust drifting where the place is lit, and warm embers where "
-             "it is dark. Dialogue, portraits and the HUD are not touched. Off by default.");
-        overrideNote("particles");
-    }
-    if (row("Particle size", "particle_size", opt::ENHANCED)) {
-        static const char* const sizes[] = {N_("Small"), N_("Medium"), N_("Large")};
-        ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED || sceneParticles() == 0);
-        int size = sceneParticleSize();
-        int chosen = listChoice("##particle_size", sizes, IM_COUNTOF(sizes), size);
-        ImGui::EndDisabled();
-        if (chosen != size) sceneSetParticleSize(chosen);
-        hint("How big the particles are. Small by default.");
-        overrideNote("particle_size");
-    }
-    if (row("Footstep dust", "particles_footsteps", opt::ENHANCED)) {
-        ImGui::BeginDisabled(sceneParticles() == 0);
-        bool on = sceneFootstepDust() != 0;
-        if (offOnList("##particles_footsteps", &on)) sceneSetFootstepDust(on ? 1 : 0);
-        ImGui::EndDisabled();
-        hint("Characters kick up a little dust where they walk on sand, dirt or a dusty floor, more when they run, a "
-             "step paler than the ground, lingering a moment. On by default, with Particles.");
-        overrideNote("particles_footsteps");
+
+    if (opt::beginSubmenu("atmosphere", N_("Atmosphere"), atmoSummary,
+                          N_("Distance fog, colour grade, vignette, ambient particles and footstep dust."))) {
+        opt::group(N_("Atmosphere and colour"));
+        if (row("Fog", "fog", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneFog();
+            int chosen = choice("##fog", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetFog(chosen);
+            hint("In fields, battles and on the world map, a haze that thickens past the characters, in the colour of the "
+                 "farthest scenery. Small rooms barely change. Dialogue, portraits and the HUD are not touched. Off by "
+                 "default.");
+            if (!sceneLighting() && !sceneGlow() && !sceneShadows() && sceneLightingStatus() != nullptr)
+                hint("Not shown now: %s.", tr(sceneLightingStatus()));
+            overrideNote("fog");
+        }
+        if (row("Colour grade", "color_grade", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneGrade();
+            int chosen = choice("##color_grade", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetGrade(chosen);
+            hint("In fields, battles and on the world map, shadows a little cool and highlights a little warm, with a touch "
+                 "more colour and contrast. Dialogue, portraits and the HUD are not touched. Off by default.");
+            if (!sceneLighting() && !sceneGlow() && !sceneShadows() && !sceneFog() && sceneLightingStatus() != nullptr)
+                hint("Not shown now: %s.", tr(sceneLightingStatus()));
+            overrideNote("color_grade");
+        }
+        if (row("Adapt to the area", "color_grade_area", opt::ENHANCED)) {
+            ImGui::BeginDisabled(sceneGrade() == 0);
+            bool on = sceneGradeArea() != 0;
+            if (offOnList("##color_grade_area", &on)) sceneSetGradeArea(on ? 1 : 0);
+            ImGui::EndDisabled();
+            hint("The colour grade also leans gently into each place's own colour: a sandy place a little warmer, a green "
+                 "one a little greener, a dark one a little bluer in its shadows. Dialogue, portraits and the HUD are not "
+                 "touched. On by default, with Colour grade.");
+            overrideNote("color_grade_area");
+        }
+        if (row("Vignette", "vignette", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneVignette();
+            int chosen = choice("##vignette", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetVignette(chosen);
+            hint("In fields, battles and on the world map, the picture's edges a little darker, drawing the eye to the "
+                 "middle. Dialogue, portraits and the HUD are not touched. Off by default.");
+            overrideNote("vignette");
+        }
+        if (row("Particles", "particles", opt::ENHANCED)) {
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED);
+            int level = sceneParticles();
+            int chosen = choice("##particles", levels, IM_COUNTOF(levels), level);
+            ImGui::EndDisabled();
+            if (chosen != level) sceneSetParticles(chosen);
+            hint("In fields, battles and on the world map, fine dust drifting where the place is lit, and warm embers where "
+                 "it is dark. Dialogue, portraits and the HUD are not touched. Off by default.");
+            overrideNote("particles");
+        }
+        if (row("Particle size", "particle_size", opt::ENHANCED)) {
+            static const char* const sizes[] = {N_("Small"), N_("Medium"), N_("Large")};
+            ImGui::BeginDisabled(engineThis() != ENGINE_ENHANCED || sceneParticles() == 0);
+            int size = sceneParticleSize();
+            int chosen = choice("##particle_size", sizes, IM_COUNTOF(sizes), size);
+            ImGui::EndDisabled();
+            if (chosen != size) sceneSetParticleSize(chosen);
+            hint("How big the particles are. Small by default.");
+            overrideNote("particle_size");
+        }
+        if (row("Footstep dust", "particles_footsteps", opt::ENHANCED)) {
+            ImGui::BeginDisabled(sceneParticles() == 0);
+            bool on = sceneFootstepDust() != 0;
+            if (offOnList("##particles_footsteps", &on)) sceneSetFootstepDust(on ? 1 : 0);
+            ImGui::EndDisabled();
+            hint("Characters kick up a little dust where they walk on sand, dirt or a dusty floor, more when they run, a "
+                 "step paler than the ground, lingering a moment. On by default, with Particles.");
+            overrideNote("particles_footsteps");
+        }
+        opt::endSubmenu();
     }
 
     opt::endPage();
@@ -1548,9 +1697,8 @@ void packsSection() {
         ImGui::SameLine();
         if (ImGui::Button(tr("Disable##beetle"))) { texturePackBeetleSetRoot(""); beetlePath[0]=0; }
         static const char* const orders[]={"Our texture pack first","Beetle pack first"};
-        ImGui::SetNextItemWidth(-1);
         int first=texturePackBeetleFirst();
-        int v=listChoice("##beetle_order",orders,2,first);
+        int v=choice("##beetle_order",orders,2,first);
         if (v!=first) texturePackBeetleSetFirst(v);
         BeetlePackStats beetle;
         texturePackBeetleStats(&beetle);
@@ -1673,7 +1821,7 @@ const SDL_DialogFileFilter japaneseFilters[] = {{"Japanese Xenogears discs", "cu
 // A slider of milliseconds kept in settings.ini (the output reads it at once).
 void audioSlider(const char* id, const char* key, int def, int lo, int hi) {
     int ms = settingsInt(key, def);
-    ImGui::SetNextItemWidth(-1);
+    ImGui::SetNextItemWidth(sliderWidth());
     if (ImGui::SliderInt(id, &ms, lo, hi, "%d ms")) {
         settingsSetInt(key, ms);
         spuOutputApplySettings();
@@ -1708,7 +1856,7 @@ void audioSection() {
     opt::group(N_("Sound"));
     if (row("Volume", "volume")) {
         int volume = settingsInt("volume", 100);
-        ImGui::SetNextItemWidth(-1);
+        ImGui::SetNextItemWidth(sliderWidth());
         if (ImGui::SliderInt("##volume", &volume, 0, 100, "%d%%")) {
             settingsSetInt("volume", volume);
             spuOutputApplySettings();
@@ -1721,9 +1869,9 @@ void audioSection() {
         overrideNote("volume");
     }
 
-    if (row("Binaural (headphones)", "binaural_headphones")) {
+    if (row("Binaural audio", "binaural_headphones")) {
         bool on = spuHeadphonesEnabled() != 0;
-        if (checkbox("Binaural (headphones)", &on)) spuHeadphonesSet(on);
+        if (offOnList("##binaural_headphones", &on)) spuHeadphonesSet(on);
         hint("%s", tr("Hear instruments and sound effects across a front soundstage on stereo headphones. Movie audio keeps its original mix."));
         overrideNote("binaural_headphones");
     }
@@ -1735,58 +1883,71 @@ void audioSection() {
         overrideNote("audio_latency");
     }
 
-    opt::group(N_("Japanese audio"));
+    opt::group(N_("More audio"));
     bool battle = settingsBool("japanese_battle_voices", 0);
     bool movies = regionalMovieEnabled();
     bool japanese1 = regionalSourceFound(1) != 0, japanese2 = regionalSourceFound(2) != 0;
     bool japanese = japanese1 || japanese2;
-    if (row("Battle voices", "japanese_battle_voices", opt::RESTART)) {
-        ImGui::BeginDisabled(!japanese && !battle); // on already: it can still be turned off
-        if (checkbox("Japanese battle voices", &battle)) regionalSetBattle(battle);
-        ImGui::EndDisabled();
-        hint("Uses your Japanese discs. Restart the game after changing this option.");
-        japaneseDiscsNote(battle, japanese1, japanese2);
-        if (battle != (regionalBattleEnabled() != 0)) warning("Saved for the next launch.");
-        overrideNote("japanese_battle_voices");
-    }
-    if (row("Cutscene audio", "japanese_cutscene_audio")) {
-        ImGui::BeginDisabled(!japanese && !movies);
-        if (checkbox("Japanese cutscene audio", &movies)) regionalSetMovie(movies);
-        ImGui::EndDisabled();
-        hint("Applies to the next cutscene. Keeps this version's video and text.");
-        japaneseDiscsNote(movies, japanese1, japanese2);
-        overrideNote("japanese_cutscene_audio");
-    }
-    for (int disc = 1; disc <= 2; ++disc) {
-        if (!row(disc == 1 ? "Japanese Disc 1" : "Japanese Disc 2", disc == 1 ? "japanese_disc1" : "japanese_disc2")) {
-            continue;
+    const char* jpSummary = (battle && movies) ? tr("Voices & cutscenes")
+                          : battle             ? tr("Battle voices")
+                          : movies             ? tr("Cutscenes")
+                                               : tr("Off");
+    if (opt::beginSubmenu("japanese", N_("Japanese audio"), jpSummary,
+                          N_("Use Japanese battle voices and cutscene audio from your own Japanese discs."))) {
+        opt::group(N_("Japanese audio"));
+        if (row("Battle voices", "japanese_battle_voices", opt::RESTART)) {
+            ImGui::BeginDisabled(!japanese && !battle); // on already: it can still be turned off
+            if (offOnList("##japanese_battle_voices", &battle)) regionalSetBattle(battle);
+            ImGui::EndDisabled();
+            hint("Uses your Japanese discs. Restart the game after changing this option.");
+            japaneseDiscsNote(battle, japanese1, japanese2);
+            if (battle != (regionalBattleEnabled() != 0)) warning("Saved for the next launch.");
+            overrideNote("japanese_battle_voices");
         }
-        ImGui::PushID(disc);
-        if (pathField("japanese-image", japanesePaths[disc-1], sizeof japanesePaths[0], 60+disc,
-                      false, japaneseFilters, 2, "Use")) {
-            char why[1200];
-            bool ok = regionalSetSource(disc, japanesePaths[disc-1], why, sizeof why);
-            regionalMsg.set(!ok, "%s", why);
+        if (row("Cutscene audio", "japanese_cutscene_audio")) {
+            ImGui::BeginDisabled(!japanese && !movies);
+            if (offOnList("##japanese_cutscene_audio", &movies)) regionalSetMovie(movies);
+            ImGui::EndDisabled();
+            hint("Applies to the next cutscene. Keeps this version's video and text.");
+            japaneseDiscsNote(movies, japanese1, japanese2);
+            overrideNote("japanese_cutscene_audio");
         }
-        if (battle || movies) hint("%s", regionalSourceStatus(disc));
-        hint("Your Japanese disc's image, for its battle voices and cutscene audio.");
-        if (disc == 2) regionalMsg.draw();
-        ImGui::PopID();
+        for (int disc = 1; disc <= 2; ++disc) {
+            if (!row(disc == 1 ? "Japanese Disc 1" : "Japanese Disc 2", disc == 1 ? "japanese_disc1" : "japanese_disc2")) {
+                continue;
+            }
+            ImGui::PushID(disc);
+            if (pathField("japanese-image", japanesePaths[disc-1], sizeof japanesePaths[0], 60+disc,
+                          false, japaneseFilters, 2, "Use")) {
+                char why[1200];
+                bool ok = regionalSetSource(disc, japanesePaths[disc-1], why, sizeof why);
+                regionalMsg.set(!ok, "%s", why);
+            }
+            if (battle || movies) hint("%s", regionalSourceStatus(disc));
+            hint("Your Japanese disc's image, for its battle voices and cutscene audio.");
+            if (disc == 2) regionalMsg.draw();
+            ImGui::PopID();
+        }
+        opt::endSubmenu();
     }
 
-    opt::group(N_("Advanced"), opt::COLLAPSED);
-    if (row("Latency ceiling", "audio_latency_max")) {
-        audioSlider("##latency_max", "audio_latency_max", 150, 40, 500);
-        hint("How far the queue may grow by itself after the sound ran dry (an underrun): it grows a little each "
-             "time, up to this, then shrinks back to Latency. 150 ms by default; higher for a busy machine or "
-             "streaming software.");
-        overrideNote("audio_latency_max");
-    }
-    if (row("Output")) {
-        const char* driver = SDL_GetCurrentAudioDriver();
-        ImGui::AlignTextToFramePadding();
-        wrappedText(tr("SDL audio driver: %s"), driver != NULL ? driver : tr("none"));
-        hint("The system's sound driver the game plays through (SDL_AUDIO_DRIVER chooses another).");
+    if (opt::beginSubmenu("advanced", N_("Advanced"), nullptr,
+                          N_("Audio latency ceiling and active SDL audio driver."))) {
+        opt::group(N_("Advanced"));
+        if (row("Latency ceiling", "audio_latency_max")) {
+            audioSlider("##latency_max", "audio_latency_max", 150, 40, 500);
+            hint("How far the queue may grow by itself after the sound ran dry (an underrun): it grows a little each "
+                 "time, up to this, then shrinks back to Latency. 150 ms by default; higher for a busy machine or "
+                 "streaming software.");
+            overrideNote("audio_latency_max");
+        }
+        if (row("Output")) {
+            const char* driver = SDL_GetCurrentAudioDriver();
+            ImGui::AlignTextToFramePadding();
+            wrappedText(tr("SDL audio driver: %s"), driver != NULL ? driver : tr("none"));
+            hint("The system's sound driver the game plays through (SDL_AUDIO_DRIVER chooses another).");
+        }
+        opt::endSubmenu();
     }
     opt::endPage();
 }
@@ -1982,7 +2143,7 @@ void touchRows() {
     bool preview = false;
     bool off = touchMode() == 0;
     if (!off) touchKeptOpen = true;
-    opt::group(N_("Touch pad"), !touchKeptOpen && off ? opt::COLLAPSED : 0);
+    opt::group(N_("Touch pad"));
     if (row("Touch pad", "touch_pad")) {
         static const char* const modes[] = {N_("Off"), N_("On"), N_("Automatic")};
         int m = touchMode();
@@ -2013,17 +2174,23 @@ void touchRows() {
              "turns and tilts the camera and, with L2 held, zooms it; the button over the stick returns to the "
              "game's view, and the eye enters and leaves the first-person view.");
     }
-    if (row("Look", "touch_pad_opacity touch_pad_size")) {
-        int opacity = touchOpacityPercent(), size = touchSizePercent();
+    if (row("Touch opacity", "touch_pad_opacity")) {
+        int opacity = touchOpacityPercent();
         ImGui::BeginDisabled(off);
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##touch_opacity", &opacity, 10, 100, tr("Opacity: %d%%"))) {
+        ImGui::SetNextItemWidth(sliderWidth());
+        if (ImGui::SliderInt("##touch_opacity", &opacity, 10, 100, "%d%%")) {
             touchSetOpacityPercent(opacity);
             preview = !off;
         }
         preview |= !off && ImGui::IsItemActive();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##touch_size", &size, 60, 140, tr("Size: %d%%"))) {
+        ImGui::EndDisabled();
+        hint("The pad shows over the menu while you change it.");
+    }
+    if (row("Touch size", "touch_pad_size")) {
+        int size = touchSizePercent();
+        ImGui::BeginDisabled(off);
+        ImGui::SetNextItemWidth(sliderWidth());
+        if (ImGui::SliderInt("##touch_size", &size, 60, 140, "%d%%")) {
             touchSetSizePercent(size);
             preview = !off;
         }
@@ -2050,24 +2217,25 @@ void touchRows() {
 }
 
 void controlsSection() {
-    opt::beginPage("controls", CONTROLS, true); // one column: the tables want the width
-    opt::group(N_("Buttons"));
-    if (row("Button convention", "jp_controls_us us_controls_jp")) {
-        bool jp = padRegionalControls(0), us = padRegionalControls(1);
-        if (checkbox("Japanese controls in the US version", &jp)) padSetRegionalControls(0, jp);
+    opt::beginPage("controls", CONTROLS);
+    opt::group(N_("Controller"));
+    if (row("JP controls (US)", "jp_controls_us")) {
+        bool jp = padRegionalControls(0);
+        if (offOnList("##jp_controls_us", &jp)) padSetRegionalControls(0, jp);
         hint("Circle confirms, Cross cancels; Triangle and Square follow the Japanese convention too.");
         overrideNote("jp_controls_us");
-        if (checkbox("US controls in the Japanese version", &us)) padSetRegionalControls(1, us);
+    }
+    if (row("US controls (JP)", "us_controls_jp")) {
+        bool us = padRegionalControls(1);
+        if (offOnList("##us_controls_jp", &us)) padSetRegionalControls(1, us);
         hint("Cross confirms, Circle cancels. Your keyboard and controller bindings stay independent.");
         overrideNote("us_controls_jp");
-        ImGui::Text(tr("%s Choose   %s Back"),skin::actionGlyph(padConfirmButton()),skin::actionGlyph(padCancelButton()));
-        hint("Button symbols follow your control convention and the controller you use, including remaps and reconnects.");
     }
-
     if (row("Controller profile")) {
         int profile = padProfilePort();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::BeginCombo("##profile", profile < 0 ? tr(padProfileName(profile)) : padProfileName(profile))) {
+        const char* preview = profile < 0 ? tr(padProfileName(profile)) : padProfileName(profile);
+        ImGui::SetNextItemWidth(comboWidth(nullptr, 0, preview));
+        if (ImGui::BeginCombo("##profile", preview)) {
             if (ImGui::Selectable(tr("Default mapping"), profile < 0)) {
                 padSelectProfile(-1);
             }
@@ -2098,85 +2266,38 @@ void controlsSection() {
         SDL_free(ids);
     }
 
-    if (row("Bindings")) {
-        ImGui::TextUnformatted(tr("Keyboard"));
-        hint("Choose a key to change it, then press the new one. A key drives one button: binding it elsewhere moves it.");
-        if (ImGui::GetContentRegionAvail().x >= 340.0f * scale()) {
-            bindingTable("keys", true, true);
-        } else {
-            // A narrow pane (a small window, the game's text size): the keys,
-            // then the gamepad, each table with room for its names.
-            bindingTable("keys", true, false);
-            ImGui::Spacing();
-            ImGui::TextUnformatted(tr("Gamepad"));
-            bindingTable("pad", false, true);
-        }
-        markBlock(); // the defaults go with these
-        if (ImGui::Button(tr("Default keys"))) {
-            padResetKeys();
-        }
-        const char* resetPad = padProfilePort() < 0 ? tr("Default gamepad") : tr("Reset controller profile");
-        sameLineFor(resetPad);
-        if (ImGui::Button(resetPad)) {
-            padResetGamepad();
-        }
-        hint("Default keys and Default gamepad (or Reset controller profile) put every binding back.");
-    }
-
     if (row("Background input", "pad_background")) {
         bool background = padBackgroundInput() != 0;
-        if (checkbox("Controller works when the window is not focused", &background)) {
+        if (offOnList("##pad_background", &background)) {
             padSetBackgroundInput(background);
         }
         hint("Off: the controller is ignored while another window has the focus. On: it plays either way.");
         overrideNote("pad_background");
     }
 
-    opt::group(N_("Stick and mouse"));
-    if (row("Left stick", "pad_stick_dpad pad_stick_deadzone")) {
-        bool stick = padStickDpad();
-        if (checkbox("Left stick drives the D-pad", &stick)) {
+    bool stick = padStickDpad();
+    if (row("Left stick as D-pad", "pad_stick_dpad")) {
+        if (offOnList("##pad_stick_dpad", &stick)) {
             padSetStickDpad(stick);
         }
+        hint("Left stick drives the D-pad directions.");
+        overrideNote("pad_stick_dpad");
+    }
+    if (row("Stick dead zone", "pad_stick_deadzone")) {
         int deadzone = padStickDeadzone();
         ImGui::BeginDisabled(!stick);
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##deadzone", &deadzone, 0, 95, tr("Stick dead zone: %d%%"))) {
+        ImGui::SetNextItemWidth(sliderWidth());
+        if (ImGui::SliderInt("##deadzone", &deadzone, 0, 95, "%d%%")) {
             padSetStickDeadzone(deadzone);
         }
         ImGui::EndDisabled();
         hint("The stick must move past this threshold to press a direction. Default: 50%%.");
-    }
-
-    if (row("Mouse", "mouse_game mouse_point mouse_target mouse_camera")) {
-        auto mouseOption = [](const char* key, const char* label, bool value, const char* about) {
-            if (strcmp(key, "mouse_game") != 0) {
-                markBlock(); // each its own help
-            }
-            if (checkbox(label, &value)) {
-                settingsSetInt(key, value ? 1 : 0);
-                settingsSave();
-            }
-            hint("%s", tr(about));
-            overrideNote(key);
-        };
-        bool mouse = mouseGameEnabled() != 0;
-        mouseOption("mouse_game", "Mouse in the game", mouse,
-                    "Left click confirms, right click cancels, the wheel moves the cursor, the side buttons are L1 and R1.");
-        ImGui::BeginDisabled(!mouse);
-        mouseOption("mouse_point", "Click menu entries", mousePointEnabled() != 0,
-                    "A click on a main menu command or an item moves the game's cursor there and chooses it (an item: "
-                    "click it again to use it).");
-        mouseOption("mouse_target", "Click battle targets", mouseTargetEnabled() != 0,
-                    "While the game asks for a target, a click on one chooses it. In an attack it aims; a click on "
-                    "the aimed target is the confirm button.");
-        mouseOption("mouse_camera", "Drag to turn the camera", mouseCameraEnabled() != 0,
-                    "Drag sideways with the right button in fields and on the world map, as L1 and R1 turn it.");
-        ImGui::EndDisabled();
+        overrideNote("pad_stick_deadzone");
     }
 
     opt::group(N_("Vibration"));
-    if (row("Vibration", "vibration vibration_strength")) {
+    int rumbleNow = rumbleMode();
+    if (row("Vibration", "vibration")) {
         static const char* const modes[] = {"Off", "The game's", "Enhanced"};
         static const char* const about[] = {
             "No controller vibration.",
@@ -2184,22 +2305,24 @@ void controlsSection() {
             "Vibration option on.",
             "The game's own, and the port's: hits taken and dealt, knock-outs, gear impacts, deathblows, and the "
             "camera shakes of battles and fields."};
-        int mode = rumbleMode();
-        int chosen = choice("vibration", modes, 3, mode);
-        if (chosen != mode) {
+        int chosen = choice("vibration", modes, 3, rumbleNow);
+        if (chosen != rumbleNow) {
             rumbleSetMode(chosen);
             settingsSave();
+            rumbleNow = chosen;
         }
-        hint("%s", tr(about[chosen]));
+        hint("%s", tr(about[rumbleNow]));
         overrideNote("vibration");
-        markBlock();
+    }
+    if (row("Vibration strength", "vibration_strength")) {
         SDL_Gamepad* pad = SDL_GetGamepadFromID(padProfileDevice(0));
         bool motors = rumblePadHasMotors(pad) != 0;
         int strength = rumbleStrength();
-        ImGui::BeginDisabled(chosen == RUMBLE_OFF);
-        float test = ImGui::CalcTextSize(tr("Test")).x + ImGui::GetStyle().FramePadding.x * 2;
-        ImGui::SetNextItemWidth(-(test + ImGui::GetStyle().ItemSpacing.x));
-        if (ImGui::SliderInt("##vibration_strength", &strength, 0, 100, tr("Strength: %d%%"))) {
+        ImGui::BeginDisabled(rumbleNow == RUMBLE_OFF);
+        float testW = ImGui::CalcTextSize(tr("Test")).x + ImGui::GetStyle().FramePadding.x * 2 +
+                      ImGui::GetStyle().ItemSpacing.x;
+        ImGui::SetNextItemWidth(sliderWidth(testW));
+        if (ImGui::SliderInt("##vibration_strength", &strength, 0, 100, "%d%%")) {
             rumbleSetStrength(strength);
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
@@ -2222,7 +2345,95 @@ void controlsSection() {
         overrideNote("vibration_strength");
     }
 
-    if (touchRowsWanted()) touchRows();
+    opt::group(N_("More controls"));
+    if (opt::beginSubmenu("bindings", N_("Button bindings"), nullptr,
+                          N_("Rebind keyboard keys and gamepad buttons, or restore default mappings."))) {
+        opt::group(N_("Button bindings"), opt::STACKED);
+        if (opt::plain()) {
+            ImGui::Text(tr("%s Choose   %s Back"), skin::actionGlyph(padConfirmButton()), skin::actionGlyph(padCancelButton()));
+            if (ImGui::GetContentRegionAvail().x >= 340.0f * scale()) {
+                bindingTable("keys", true, true);
+            } else {
+                ImGui::TextUnformatted(tr("Keyboard"));
+                bindingTable("keys", true, false);
+                ImGui::Spacing();
+                ImGui::TextUnformatted(tr("Gamepad"));
+                bindingTable("pad", false, true);
+            }
+            markBlock();
+            if (ImGui::Button(tr("Default keys"))) {
+                padResetKeys();
+            }
+            const char* resetPad = padProfilePort() < 0 ? tr("Default gamepad") : tr("Reset controller profile");
+            sameLineFor(resetPad);
+            if (ImGui::Button(resetPad)) {
+                padResetGamepad();
+            }
+            hint("Choose a key or button to rebind it. Default keys and Default gamepad restore all bindings.");
+        }
+        opt::endSubmenu();
+    }
+
+    const char* mouseSummary = mouseGameEnabled() ? tr("On") : tr("Off");
+    if (opt::beginSubmenu("mouse", N_("Mouse controls"), mouseSummary,
+                          N_("Use the mouse for menus, battle targets and camera rotation."))) {
+        opt::group(N_("Mouse"));
+        bool mouse = mouseGameEnabled() != 0;
+        if (row("Mouse in the game", "mouse_game")) {
+            if (offOnList("##mouse_game", &mouse)) {
+                settingsSetInt("mouse_game", mouse ? 1 : 0);
+                settingsSave();
+            }
+            hint("Left click confirms, right click cancels, the wheel moves the cursor, the side buttons are L1 and R1.");
+            overrideNote("mouse_game");
+        }
+        if (row("Click menu entries", "mouse_point")) {
+            bool v = mousePointEnabled() != 0;
+            ImGui::BeginDisabled(!mouse);
+            if (offOnList("##mouse_point", &v)) {
+                settingsSetInt("mouse_point", v ? 1 : 0);
+                settingsSave();
+            }
+            ImGui::EndDisabled();
+            hint("A click on a main menu command or an item moves the game's cursor there and chooses it (an item: "
+                 "click it again to use it).");
+            overrideNote("mouse_point");
+        }
+        if (row("Click battle targets", "mouse_target")) {
+            bool v = mouseTargetEnabled() != 0;
+            ImGui::BeginDisabled(!mouse);
+            if (offOnList("##mouse_target", &v)) {
+                settingsSetInt("mouse_target", v ? 1 : 0);
+                settingsSave();
+            }
+            ImGui::EndDisabled();
+            hint("While the game asks for a target, a click on one chooses it. In an attack it aims; a click on "
+                 "the aimed target is the confirm button.");
+            overrideNote("mouse_target");
+        }
+        if (row("Drag to turn camera", "mouse_camera")) {
+            bool v = mouseCameraEnabled() != 0;
+            ImGui::BeginDisabled(!mouse);
+            if (offOnList("##mouse_camera", &v)) {
+                settingsSetInt("mouse_camera", v ? 1 : 0);
+                settingsSave();
+            }
+            ImGui::EndDisabled();
+            hint("Drag sideways with the right button in fields and on the world map, as L1 and R1 turn it.");
+            overrideNote("mouse_camera");
+        }
+        opt::endSubmenu();
+    }
+
+    if (touchRowsWanted()) {
+        static const char* const touchModeNames[] = {N_("Off"), N_("On"), N_("Automatic")};
+        int tm = touchMode();
+        if (opt::beginSubmenu("touch", N_("Touch pad"), tr(touchModeNames[tm >= 0 && tm < 3 ? tm : 0]),
+                              N_("On-screen touch pad visibility, layout, opacity and size."))) {
+            touchRows();
+            opt::endSubmenu();
+        }
+    }
     opt::endPage();
     if (!opt::indexing()) capturePopup();
 }
@@ -2234,7 +2445,7 @@ void cameraSection() {
     opt::group(N_("View"));
     if (row("Free camera", "free_camera", opt::ENHANCED)) {
         bool on = pcFreeCameraEnabled() != 0;
-        if (checkbox("Free camera in fields", &on)) pcFreeCameraSet(on);
+        if (offOnList("##free_camera", &on)) pcFreeCameraSet(on);
         hint("%s", tr("Enhanced engine. Turn and tilt the camera around the party with the right stick; hold L2 and move "
                       "the stick up or down to zoom (keyboard: J/L turn, I/K tilt, U/O zoom). R3 or Home returns to the "
                       "game's view. Scenes and rooms with a fixed camera keep the game's."));
@@ -2244,51 +2455,58 @@ void cameraSection() {
 
     if (row("First-person look", "first_person_look", opt::ENHANCED)) {
         bool on = pcFirstPersonEnabled() != 0;
-        if (checkbox("Allow first-person look in fields and on the world map", &on)) pcFirstPersonSet(on);
+        if (offOnList("##first_person_look", &on)) pcFirstPersonSet(on);
         hint("%s", tr("Press V or hold L2 and click L3 to enter or leave. Look with the right stick, I/J/K/L, or a right mouse drag."));
         if (touchRowsWanted()) hint("By touch: the eye beside the touch pad's right stick (the Buttons and sticks layout).");
         overrideNote("first_person_look");
     }
 
-    if (row("First-person navigation", "first_person_navigation", opt::ENHANCED)) {
+    if (row("First-person move", "first_person_navigation", opt::ENHANCED)) {
         bool on = pcFirstPersonNavigation() != 0;
-        if (checkbox("Move in first-person view", &on)) pcFirstPersonNavigationSet(on);
+        if (offOnList("##first_person_navigation", &on)) pcFirstPersonNavigationSet(on);
         hint("%s", tr("With first-person look enabled, move relative to the view. When navigation is off, moving leaves first-person view."));
         overrideNote("first_person_navigation");
     }
 
     opt::group(N_("Camera stick"));
-    if (row("Camera stick", "camera_invert_x camera_invert_y camera_turn_speed camera_tilt_speed camera_stick_deadzone",
-            opt::ENHANCED)) {
-        bool invertX = padCameraInvertX() != 0, invertY = padCameraInvertY() != 0;
-        if (checkbox("Invert horizontal", &invertX)) {
+    if (row("Invert horizontal", "camera_invert_x", opt::ENHANCED)) {
+        bool invertX = padCameraInvertX() != 0;
+        if (offOnList("##camera_invert_x", &invertX)) {
             padSetCameraInvertX(invertX);
             settingsSave();
         }
-        if (checkbox("Invert vertical", &invertY)) {
+        hint("Invert the right stick's horizontal turning for free camera, world map and first-person look.");
+        overrideNote("camera_invert_x");
+    }
+    if (row("Invert vertical", "camera_invert_y", opt::ENHANCED)) {
+        bool invertY = padCameraInvertY() != 0;
+        if (offOnList("##camera_invert_y", &invertY)) {
             padSetCameraInvertY(invertY);
             settingsSave();
         }
-        hint("%s", tr("Invert the right stick's turning (horizontal) or tilting (vertical) for the free camera, the world "
-                      "map's camera and first-person look; a right mouse drag in first-person look follows. The keys "
-                      "and L2's zoom keep their directions."));
-        overrideNote("camera_invert_x");
+        hint("Invert the right stick's vertical tilting for free camera, world map and first-person look.");
         overrideNote("camera_invert_y");
-        markBlock();
-        int turn = padCameraTurnSpeed(), tilt = padCameraTiltSpeed(), dead = padCameraDeadzone();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##camera_turn_speed", &turn, 25, 300, tr("Horizontal speed: %d%%"))) padSetCameraTurnSpeed(turn);
+    }
+    if (row("Horizontal speed", "camera_turn_speed", opt::ENHANCED)) {
+        int turn = padCameraTurnSpeed();
+        ImGui::SetNextItemWidth(sliderWidth());
+        if (ImGui::SliderInt("##camera_turn_speed", &turn, 25, 300, "%d%%")) padSetCameraTurnSpeed(turn);
         if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##camera_tilt_speed", &tilt, 25, 300, tr("Vertical speed: %d%%"))) padSetCameraTiltSpeed(tilt);
-        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
-        hint("The camera's sensitivity: how fast the right stick, the camera keys and first-person mouse look turn it "
-             "(horizontal) and tilt it (vertical). Zoom keeps its speed. Default: 100%%.");
+        hint("Camera horizontal sensitivity for the right stick, camera keys and first-person mouse look. Default: 100%%.");
         overrideNote("camera_turn_speed");
+    }
+    if (row("Vertical speed", "camera_tilt_speed", opt::ENHANCED)) {
+        int tilt = padCameraTiltSpeed();
+        ImGui::SetNextItemWidth(sliderWidth());
+        if (ImGui::SliderInt("##camera_tilt_speed", &tilt, 25, 300, "%d%%")) padSetCameraTiltSpeed(tilt);
+        if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
+        hint("Camera vertical sensitivity for the right stick, camera keys and first-person mouse look. Default: 100%%.");
         overrideNote("camera_tilt_speed");
-        markBlock();
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##camera_stick_deadzone", &dead, 0, 60, tr("Right stick dead zone: %d%%"))) padSetCameraDeadzone(dead);
+    }
+    if (row("Right stick dead zone", "camera_stick_deadzone", opt::ENHANCED)) {
+        int dead = padCameraDeadzone();
+        ImGui::SetNextItemWidth(sliderWidth());
+        if (ImGui::SliderInt("##camera_stick_deadzone", &dead, 0, 60, "%d%%")) padSetCameraDeadzone(dead);
         if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
         hint("How far the right stick must move before the camera does (the left stick's dead zone, under Controls, "
              "is the D-pad's). Default: 20%%.");
@@ -2689,7 +2907,7 @@ void gameplaySection() {
         static const int battleSpeeds[] = {0, 1, 2, 4};
         int chosen = battleSpeedChosen(), index = 0;
         for (int i = 1; i < 4; i++) if (chosen == battleSpeeds[i]) index = i;
-        int picked = listChoice("##battle_speed", battleSpeedNames, 4, index);
+        int picked = choice("##battle_speed", battleSpeedNames, 4, index);
         if (picked != index && picked >= 0) battleSpeedSetChosen(battleSpeeds[picked]);
         hint("Character and Gear battles at 2x or 4x: the game runs that many of its own frames per picture, so "
              "turns, damage and every random roll come as at 1x, only sooner. Music keeps its tempo; sound effects "
@@ -2703,7 +2921,7 @@ void gameplaySection() {
         static const int fieldSpeeds[] = {0, 1, 2, 4};
         int chosen = fieldSpeedChosen(), index = 0;
         for (int i = 1; i < 4; i++) if (chosen == fieldSpeeds[i]) index = i;
-        int picked = listChoice("##field_speed", fieldSpeedNames, 4, index);
+        int picked = choice("##field_speed", fieldSpeedNames, 4, index);
         if (picked != index && picked >= 0) fieldSpeedSetChosen(fieldSpeeds[picked]);
         hint("The field and the world map at 2x or 4x, their scenes and dialogue included: the game runs that many "
              "of its own frames per picture. Menus, movies and battles keep their own speed (Battle speed above "
@@ -2748,63 +2966,76 @@ void gameplaySection() {
         overrideNote("deus_camera_fix");
     }
 
-    // ---- every 60 Hz mode together: the Enhanced engine's per-mode switches,
-    // and the Original engine's motion smoothing
-    opt::group(N_("60 Hz"));
-    hz60Row("60 Hz fields", "field60", pcGameplayField60, pcGameplaySetField60,
-            N_("Fields run their logic every vblank: input every vblank, the player, sprites and camera moving every "
-               "frame at their authored speed, scripts, dialogue, random encounters and effects at their authored "
-               "cadence. Fields authored at 20 or 15 frames per second keep that. Takes effect at once."),
-            N_("The Original engine runs fields as the PlayStation did, at 30 frames per second."));
-    if (row("20 and 15 fps rooms", "field60slow", opt::ENHANCED | opt::RESTART)) {
-        bool slow = settingsBool("field60slow", 1) != 0;
-        ImGui::BeginDisabled(engineThis() == ENGINE_ENHANCED && !pcGameplayField60());
-        if (offOnList("##field60slow", &slow, N_("At their authored rate"), N_("At 60 Hz with the field"))) {
-            settingsDescribe("field60slow", "field60slow: 1 (default) runs the fields authored at 20 or 15 frames per "
-                                            "second at 60 Hz with 60 Hz fields, 0 keeps their own cadence");
-            settingsSetInt("field60slow", slow ? 1 : 0);
-            settingsSave();
+    // ---- every 60 Hz mode together in a nested submenu
+    opt::group(N_("Frame rate & motion"));
+    char hzSummary[48];
+    if (engineThis() == ENGINE_ENHANCED) {
+        int n = (pcGameplayField60() != 0) + (pcGameplayWorldmap60() != 0) + (pcGameplayBattle60() != 0);
+        if (n == 3) snprintf(hzSummary, sizeof hzSummary, "%s", tr("All 60 Hz"));
+        else if (n > 0) snprintf(hzSummary, sizeof hzSummary, tr("%d of 3 on"), n);
+        else snprintf(hzSummary, sizeof hzSummary, "%s", tr("30 Hz"));
+    } else {
+        snprintf(hzSummary, sizeof hzSummary, "%s", interpolationSetting() && speedupEnabled() ? tr("Smoothed") : tr("30 Hz"));
+    }
+    if (opt::beginSubmenu("hz60", N_("60 Hz & motion"), hzSummary,
+                          N_("60 Hz fields, world map and battles (Enhanced engine), plus motion smoothing and high refresh rates."))) {
+        opt::group(N_("60 Hz"));
+        hz60Row("60 Hz fields", "field60", pcGameplayField60, pcGameplaySetField60,
+                N_("Fields run their logic every vblank: input every vblank, the player, sprites and camera moving every "
+                   "frame at their authored speed, scripts, dialogue, random encounters and effects at their authored "
+                   "cadence. Fields authored at 20 or 15 frames per second keep that. Takes effect at once."),
+                N_("The Original engine runs fields as the PlayStation did, at 30 frames per second."));
+        if (row("20 and 15 fps rooms", "field60slow", opt::ENHANCED | opt::RESTART)) {
+            bool slow = settingsBool("field60slow", 1) != 0;
+            ImGui::BeginDisabled(engineThis() == ENGINE_ENHANCED && !pcGameplayField60());
+            if (offOnList("##field60slow", &slow, N_("Authored rate"), N_("60 Hz"))) {
+                settingsDescribe("field60slow", "field60slow: 1 (default) runs the fields authored at 20 or 15 frames per "
+                                                "second at 60 Hz with 60 Hz fields, 0 keeps their own cadence");
+                settingsSetInt("field60slow", slow ? 1 : 0);
+                settingsSave();
+            }
+            ImGui::EndDisabled();
+            hint("The few rooms the game draws at 20 or 15 frames per second (with 60 Hz fields): at 60 Hz too, exact "
+                 "against the Original at every native frame (the default), or at their own rate, for a comparison.");
+            overrideNote("field60slow");
         }
-        ImGui::EndDisabled();
-        hint("The few rooms the game draws at 20 or 15 frames per second (with 60 Hz fields): at 60 Hz too, exact "
-             "against the Original at every native frame (the default), or at their own rate, for a comparison.");
-        overrideNote("field60slow");
-    }
-    hz60Row("60 Hz world map", "worldmap60", pcGameplayWorldmap60, pcGameplaySetWorldmap60,
-            N_("The world map draws every vblank: the party, vehicles, camera, clouds and dust move every frame, "
-               "and the game itself (input, random encounters, the rest) runs at its authored cadence, exactly as "
-               "on the PlayStation. Story scenes on the world map keep 30 frames per second. Takes effect at once."),
-            N_("The Original engine runs the world map as the PlayStation did, at 30 frames per second."));
-    hz60Row("60 Hz battles", "battle60", pcGameplayBattle60, pcGameplaySetBattle60,
-            N_("Battles move every vblank: the Gears' animation, which the game steps every other frame, and what "
-               "follows it, while the battle itself (turns, damage, random rolls) runs exactly as on the PlayStation. "
-               "Takes effect at once."),
-            N_("The Original engine runs battles as the PlayStation did."));
-    bool smoothing = interpolationSetting();
-    if (row("Motion smoothing", "interpolation")) {
-        ImGui::BeginDisabled(!speedupEnabled());
-        if (checkbox("Smooth motion", &smoothing)) interpolationSetEnabled(smoothing);
-        ImGui::EndDisabled();
-        hint("Smooths fields and the world map: models, Gears, terrain, character placement, camera motion, particles, clouds and screen effects. Gameplay, animation events and audio keep their original timing.");
-        hint("Adds one game frame of display delay (usually 33 ms; up to 67 ms in slower scenes). Animation pictures, text and lighting retain their original timing.");
-        hint("Available with Speedup. Supports wide/expanded framing, texture filters, packs and enhanced text. Scene cuts and unsafe state changes use the original picture.");
-        if (smoothing && interpolationStandsAside())
-            hint("Standing aside: the 60 Hz fields and world map already draw every vblank, so at 60 Hz or the native rate the game's own pictures are shown, with no added delay. Higher motion display rates still add pictures between.");
-        overrideNote("interpolation");
-    }
-    if (row("Motion display rate", "interpolation_hz")) {
-        static const char* const motionRates[] = {"Native (59.8 Hz)", "60 Hz", "120 Hz", "144 Hz", "240 Hz"};
-        static const int motionHz[] = {0, 60, 120, 144, 240};
-        int rate = presentationRate(), rateIndex = 0;
-        for (int i = 1; i < 5; i++) if (rate == motionHz[i]) rateIndex = i;
-        ImGui::BeginDisabled(!smoothing);
-        int rateChoice = choice("interpolation_hz", motionRates, 5, rateIndex);
-        if (rateChoice != rateIndex) presentationSetRate(motionHz[rateChoice]);
-        ImGui::EndDisabled();
-        hint("Speedup defaults to 60 Hz in supported fields. Higher rates add display samples. Shader presets and unsupported scenes use native presentation. Speedup off keeps authentic frame cadence.");
-        hint("Rates above your monitor's refresh can be discarded. VRR availability depends on your display and desktop; submission rate does not measure visible refreshes.");
-        char rateStatus[384]; presentationRateDescribe(rateStatus, sizeof(rateStatus)); hint("%s", rateStatus);
-        overrideNote("interpolation_hz");
+        hz60Row("60 Hz world map", "worldmap60", pcGameplayWorldmap60, pcGameplaySetWorldmap60,
+                N_("The world map draws every vblank: the party, vehicles, camera, clouds and dust move every frame, "
+                   "and the game itself (input, random encounters, the rest) runs at its authored cadence, exactly as "
+                   "on the PlayStation. Story scenes on the world map keep 30 frames per second. Takes effect at once."),
+                N_("The Original engine runs the world map as the PlayStation did, at 30 frames per second."));
+        hz60Row("60 Hz battles", "battle60", pcGameplayBattle60, pcGameplaySetBattle60,
+                N_("Battles move every vblank: the Gears' animation, which the game steps every other frame, and what "
+                   "follows it, while the battle itself (turns, damage, random rolls) runs exactly as on the PlayStation. "
+                   "Takes effect at once."),
+                N_("The Original engine runs battles as the PlayStation did."));
+        bool smoothing = interpolationSetting();
+        if (row("Motion smoothing", "interpolation")) {
+            ImGui::BeginDisabled(!speedupEnabled());
+            if (offOnList("##interpolation", &smoothing)) interpolationSetEnabled(smoothing);
+            ImGui::EndDisabled();
+            hint("Smooths fields and the world map: models, Gears, terrain, character placement, camera motion, particles, clouds and screen effects. Gameplay, animation events and audio keep their original timing.");
+            hint("Adds one game frame of display delay (usually 33 ms; up to 67 ms in slower scenes). Animation pictures, text and lighting retain their original timing.");
+            hint("Available with Speedup. Supports wide/expanded framing, texture filters, packs and enhanced text. Scene cuts and unsafe state changes use the original picture.");
+            if (smoothing && interpolationStandsAside())
+                hint("Standing aside: the 60 Hz fields and world map already draw every vblank, so at 60 Hz or the native rate the game's own pictures are shown, with no added delay. Higher motion display rates still add pictures between.");
+            overrideNote("interpolation");
+        }
+        if (row("Motion display rate", "interpolation_hz")) {
+            static const char* const motionRates[] = {"Native (59.8 Hz)", "60 Hz", "120 Hz", "144 Hz", "240 Hz"};
+            static const int motionHz[] = {0, 60, 120, 144, 240};
+            int rate = presentationRate(), rateIndex = 0;
+            for (int i = 1; i < 5; i++) if (rate == motionHz[i]) rateIndex = i;
+            ImGui::BeginDisabled(!smoothing);
+            int rateChoice = choice("interpolation_hz", motionRates, 5, rateIndex);
+            if (rateChoice != rateIndex) presentationSetRate(motionHz[rateChoice]);
+            ImGui::EndDisabled();
+            hint("Speedup defaults to 60 Hz in supported fields. Higher rates add display samples. Shader presets and unsupported scenes use native presentation. Speedup off keeps authentic frame cadence.");
+            hint("Rates above your monitor's refresh can be discarded. VRR availability depends on your display and desktop; submission rate does not measure visible refreshes.");
+            char rateStatus[384]; presentationRateDescribe(rateStatus, sizeof(rateStatus)); hint("%s", rateStatus);
+            overrideNote("interpolation_hz");
+        }
+        opt::endSubmenu();
     }
     opt::endPage();
 }
@@ -2820,7 +3051,7 @@ void battlesSection() {
         int mode = choice("##difficulty", modes, 2, hard);
         if (mode != hard) pcGameplaySetHardMode(mode);
         hint("Hard usually uses 2x enemy HP and 1.5x attack and ether, with boss, story and support exceptions. Character starts and Gear equipment stay original. "
-             "Battle changes apply when the next fight loads. Advanced below has a multiplier for each enemy stat.");
+             "Battle changes apply when the next fight loads. Enemy stats & rewards below has a multiplier for each enemy stat.");
         overrideNote("difficulty");
     }
     if (row("Retry lost battles", "battle_retry")) {
@@ -2834,7 +3065,7 @@ void battlesSection() {
     if (row("Enemy info", "enemy_info")) {
         static const char* const enemyInfoNames[] = {"Off", "Always", "HP once beaten"};
         int enemyInfoChoice = pcGameplayEnemyInfoMode();
-        int enemyInfoSelected = listChoice("##enemy_info", enemyInfoNames, 3, enemyInfoChoice);
+        int enemyInfoSelected = choice("##enemy_info", enemyInfoNames, 3, enemyInfoChoice);
         if (enemyInfoSelected != enemyInfoChoice && enemyInfoSelected >= 0) pcGameplaySetEnemyInfoMode(enemyInfoSelected);
         hint("Select, pressed and released on its own, opens and closes a window in the lower right of the battle "
              "with each enemy's name, HP and active statuses, named as the game names them; while you choose a "
@@ -2846,16 +3077,7 @@ void battlesSection() {
     }
     if (row("Random encounters", "encounter_rate")) {
         int rate = pcGameplayEncounterRate();
-        static const char* const names[] = {"Off", "Reduced", "Normal", "Increased"};
-        static const int rates[] = {0, 50, 100, 200};
-        int preset = 4;
-        for (int i = 0; i < 4; i++) if (rate == rates[i]) preset = i;
-        int selected = listChoice("##encounter_preset", names, 4, preset);
-        if (selected != preset && selected < 4) {
-            rate = rates[selected];
-            pcGameplaySetEncounterRate(rate);
-        }
-        ImGui::SetNextItemWidth(-1);
+        ImGui::SetNextItemWidth(sliderWidth());
         if (ImGui::SliderInt("##encounter_rate", &rate, 0, 400, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
             pcGameplaySetEncounterRate(rate);
         }
@@ -2865,7 +3087,7 @@ void battlesSection() {
     }
     if (row("Deathblow learning", "deathblow_learning")) {
         int practice = pcGameplayDeathblowLearning();
-        ImGui::SetNextItemWidth(-1);
+        ImGui::SetNextItemWidth(sliderWidth());
         if (ImGui::SliderInt("##deathblow_learning", &practice, 0, 1000, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
             pcGameplaySetDeathblowLearning(practice);
         }
@@ -2890,57 +3112,66 @@ void battlesSection() {
         overrideNote("disable_battle_flashes");
     }
 
-    // ---- the multipliers behind Difficulty and the rewards
-    opt::group(N_("Advanced"), opt::COLLAPSED);
-    static const char* const statNames[] = {
-        "Enemy HP", "Enemy attack", "Enemy ether", "Enemy defence", "Enemy ether defence", "Enemy agility"
-    };
-    for (int stat = 0; stat < GAMEPLAY_ENEMY_STAT_COUNT; stat++) {
-        if (!row(statNames[stat], pcGameplayEnemyKey(stat))) continue;
-        ImGui::PushID(stat);
-        int percent = pcGameplayEnemyMultiplier(stat);
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##enemy_stat", &percent, 25, 400, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
-            pcGameplaySetEnemyMultiplier(stat, percent);
+    opt::group(N_("More battles"));
+    if (opt::beginSubmenu("multipliers", N_("Enemy stats & rewards"), nullptr,
+                          N_("Per-stat enemy multipliers (HP, attack, ether, defence, agility) and EXP/gold multipliers."))) {
+        opt::group(N_("Enemy stats"));
+        static const char* const statNames[] = {
+            "Enemy HP", "Enemy attack", "Enemy ether", "Enemy defence", "Enemy ether defence", "Enemy agility"
+        };
+        for (int stat = 0; stat < GAMEPLAY_ENEMY_STAT_COUNT; stat++) {
+            if (!row(statNames[stat], pcGameplayEnemyKey(stat))) continue;
+            ImGui::PushID(stat);
+            int percent = pcGameplayEnemyMultiplier(stat);
+            ImGui::SetNextItemWidth(sliderWidth());
+            if (ImGui::SliderInt("##enemy_stat", &percent, 25, 400, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+                pcGameplaySetEnemyMultiplier(stat, percent);
+            }
+            overrideNote(pcGameplayEnemyKey(stat));
+            ImGui::PopID();
+            hint("Multipliers apply on top of Normal or Hard, in character and Gear battles. Stats stop at their native "
+                 "limits; agility stops at 16. Normal with every multiplier at 100%% keeps the original balance.");
         }
-        overrideNote(pcGameplayEnemyKey(stat));
-        ImGui::PopID();
-        hint("Multipliers apply on top of Normal or Hard, in character and Gear battles. Stats stop at their native "
-             "limits; agility stops at 16. Normal with every multiplier at 100%% keeps the original balance.");
-    }
-    if (row("Reset difficulty")) {
-        if (ImGui::Button(tr("Reset difficulty"))) {
-            pcGameplaySetHardMode(0);
-            for (int stat = 0; stat < GAMEPLAY_ENEMY_STAT_COUNT; stat++) pcGameplaySetEnemyMultiplier(stat, 100);
+        if (row("Reset difficulty")) {
+            if (ImGui::Button(tr("Reset difficulty"))) {
+                pcGameplaySetHardMode(0);
+                for (int stat = 0; stat < GAMEPLAY_ENEMY_STAT_COUNT; stat++) pcGameplaySetEnemyMultiplier(stat, 100);
+            }
+            hint("Normal, and every enemy multiplier at 100%%.");
         }
-        hint("Normal, and every enemy multiplier at 100%%.");
+
+        opt::group(N_("Rewards"));
+        static const char* const rewardNames[] = {"Random EXP", "Random gold", "Scripted EXP", "Scripted gold"};
+        for (int reward = 0; reward < GAMEPLAY_REWARD_COUNT; reward++) {
+            if (!row(rewardNames[reward], pcGameplayRewardKey(reward))) continue;
+            ImGui::PushID(100 + reward);
+            int percent = pcGameplayRewardMultiplier(reward);
+            ImGui::SetNextItemWidth(sliderWidth());
+            if (ImGui::SliderInt("##reward", &percent, 0, 1000, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+                pcGameplaySetRewardMultiplier(reward, percent);
+            }
+            overrideNote(pcGameplayRewardKey(reward));
+            ImGui::PopID();
+            hint("Random battles are the ones the encounter rate controls, while walking in fields and on the world map. "
+                 "Scripted battles are every other fight: bosses, story battles and enemies you walk into. 100%% is "
+                 "original, 0%% gives none. EXP includes ether EXP and reserve characters. To make up for fewer "
+                 "encounters, raise the random-battle rewards: try 200%% with 50%% encounters, or 400%% with 25%%.");
+        }
+        if (row("Reset rewards")) {
+            if (ImGui::Button(tr("Reset rewards"))) {
+                for (int reward = 0; reward < GAMEPLAY_REWARD_COUNT; reward++) pcGameplaySetRewardMultiplier(reward, 100);
+            }
+            hint("Every reward multiplier at 100%%.");
+        }
+        opt::endSubmenu();
     }
 
-    static const char* const rewardNames[] = {"Random EXP", "Random gold", "Scripted EXP", "Scripted gold"};
-    for (int reward = 0; reward < GAMEPLAY_REWARD_COUNT; reward++) {
-        if (!row(rewardNames[reward], pcGameplayRewardKey(reward))) continue;
-        ImGui::PushID(100 + reward);
-        int percent = pcGameplayRewardMultiplier(reward);
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::SliderInt("##reward", &percent, 0, 1000, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
-            pcGameplaySetRewardMultiplier(reward, percent);
-        }
-        overrideNote(pcGameplayRewardKey(reward));
-        ImGui::PopID();
-        hint("Random battles are the ones the encounter rate controls, while walking in fields and on the world map. "
-             "Scripted battles are every other fight: bosses, story battles and enemies you walk into. 100%% is "
-             "original, 0%% gives none. EXP includes ether EXP and reserve characters. To make up for fewer "
-             "encounters, raise the random-battle rewards: try 200%% with 50%% encounters, or 400%% with 25%%.");
+    if (opt::beginSubmenu("gauntlet", N_("Boss gauntlet"), nullptr,
+                          N_("Fight bosses back to back from your current party state."))) {
+        opt::group("");
+        if (opt::plain()) gauntletSection(); // gauntlet.cpp
+        opt::endSubmenu();
     }
-    if (row("Reset rewards")) {
-        if (ImGui::Button(tr("Reset rewards"))) {
-            for (int reward = 0; reward < GAMEPLAY_REWARD_COUNT; reward++) pcGameplaySetRewardMultiplier(reward, 100);
-        }
-        hint("Every reward multiplier at 100%%.");
-    }
-
-    opt::group(""); // the Gauntlet has its own heading
-    if (opt::plain()) gauntletSection(); // gauntlet.cpp
     opt::endPage();
 }
 
@@ -3062,7 +3293,7 @@ void engineRow(int* engine, bool live) {
          "own engine, which may change timing, pictures and loading on purpose. Saves on the memory cards are "
          "shared; save states and rewinds belong to the engine that made them.");
     if (!live) return;
-    ImGui::Text(tr("Running: the %s engine"), tr(engineTitle(engineThis())));
+    hint("Running: the %s engine.", tr(engineTitle(engineThis())));
     if (*engine != engineThis()) {
         const char* exe = engineExecutable(*engine);
         if (exe == NULL) {
@@ -3109,9 +3340,9 @@ struct DiscSetup {
     int foundCount;
     bool searched, valid;
     Message message, biosMessage;
-    bool accepted, noDisc, withoutBios, biosOk, askBios;
+    bool accepted, noDisc, startupMenu, withoutBios, biosOk, askBios;
     char chosen[4096];
-    int engine; // system/engine.h: the engine to start with (Start applies it)
+    int engine; // system/engine.h: synced with engineSetting()
 } setup;
 
 // A path into one of the setup's 4096-byte fields (from another of them).
@@ -3202,7 +3433,6 @@ bool acceptSetup() {
     }
     settingsDescribe("disc", "disc: the starting disc image (XG_DISC overrides for one run)");
     settingsSet("disc", setup.first);
-    if (setup.engine != engineThis() || engineSetting() >= 0) engineSetSetting(setup.engine);
     if (!(setup.biosOk ? kromSetBios(setup.bios) : kromSetBios("none"))) {
         setup.biosMessage.set(true, "%s is not a 512 KB PS1 BIOS image.", setup.bios);
         return false;
@@ -3261,15 +3491,15 @@ void menuLookRows() {
     }
 
     if (row("Menu size", "menu_scale")) {
-        // In steps of 10 (a value set in settings.ini shows as it is), and
-        // Reset: 100%. A choice made from a list, so the menu does not change
-        // size under the mouse while it drags.
+        // In steps of 10 (a value set in settings.ini shows as it is).
+        // A choice made from a list, so the menu does not change size under the mouse while it drags.
         static bool rescaled; // the menu changed size last frame: this row back in view
         int percent = skin::scalePercent();
         char now[16];
         snprintf(now, sizeof(now), "%d%%", percent);
-        float reset = ImGui::CalcTextSize(tr("Reset")).x + ImGui::GetStyle().FramePadding.x * 2;
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - reset - ImGui::GetStyle().ItemSpacing.x);
+        static const char* const scaleNames[] = {"50%",  "60%",  "70%",  "80%",  "90%",  "100%", "110%", "120%",
+                                                 "130%", "140%", "150%", "160%", "170%", "180%", "190%", "200%"};
+        ImGui::SetNextItemWidth(comboWidth(scaleNames, (int)IM_COUNTOF(scaleNames), now));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
         bool open = ImGui::BeginCombo("##menuscale", now);
         ImGui::PopStyleVar();
@@ -3284,10 +3514,6 @@ void menuLookRows() {
             }
             ImGui::EndCombo();
         }
-        ImGui::SameLine();
-        ImGui::BeginDisabled(percent == skin::SCALE_DEFAULT);
-        if (ImGui::Button(tr("Reset"))) chosen = skin::SCALE_DEFAULT;
-        ImGui::EndDisabled();
         if (rescaled) {
             ImGui::SetScrollHereY(0.5f);
             rescaled = false;
@@ -3300,7 +3526,7 @@ void menuLookRows() {
         SDL_GetWindowSizeInPixels(window(), &pw, &ph);
         float base = (float)skin::unitFor(pw, ph), unit = skin::menuUnitFor(pw, ph);
         hint("The whole menu, its letters, windows and gaps, at %d%% of the size its text size gives "
-             "(100%%: whole pixels, the sharpest). Reset goes back to 100%%.", percent);
+             "(100%%: whole pixels, the sharpest).", percent);
         if (fabsf(unit - base * percent / 100.0f) > 0.01f) {
             if (unit > base * percent / 100.0f) {
                 hint("In this window it goes no smaller than %d%% (a window pixel for each of the game's).",
@@ -3311,6 +3537,33 @@ void menuLookRows() {
             }
         }
         overrideNote("menu_scale");
+    }
+
+    if (row("Menu font size", "menu_font_scale")) {
+        static const int fontSteps[] = {75, 80, 85, 90, 95, 100, 110, 120, 130, 140, 150};
+        static const char* const fontNames[] = {"75%",  "80%",  "85%",  "90%",  "95%", "100%",
+                                                "110%", "120%", "130%", "140%", "150%"};
+        int percent = skin::fontScalePercent();
+        char now[16];
+        snprintf(now, sizeof(now), "%d%%", percent);
+        ImGui::SetNextItemWidth(comboWidth(fontNames, (int)IM_COUNTOF(fontNames), now));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
+        bool open = ImGui::BeginCombo("##menufontscale", now);
+        ImGui::PopStyleVar();
+        int chosen = percent;
+        if (open) {
+            skin::frameWindow();
+            for (int i = 0; i < (int)IM_COUNTOF(fontSteps); i++) {
+                if (ImGui::Selectable(fontNames[i], fontSteps[i] == percent)) chosen = fontSteps[i];
+                if (fontSteps[i] == percent) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        if (chosen != percent) {
+            skin::setFontScalePercent(chosen);
+        }
+        hint("Scales the menu's text independently of the panel's layout size (75%% to 150%%; 100%% is sharpest).");
+        overrideNote("menu_font_scale");
     }
 
     if (row("Dark mode", "menu_dark")) {
@@ -3324,7 +3577,7 @@ void menuLookRows() {
         overrideNote("menu_dark");
     }
 
-    if (row("Auto-scroll descriptions", "menu_desc_autoscroll")) {
+    if (row("Auto-scroll", "menu_desc_autoscroll")) {
         static const char* const offOnScroll[] = {"Off", "On"};
         int autoScroll = skin::descAutoScroll() ? 1 : 0;
         int v = choice("menudescscroll", offOnScroll, 2, autoScroll);
@@ -3335,6 +3588,20 @@ void menuLookRows() {
              "stick and mouse wheel scroll them at any time.");
         overrideNote("menu_desc_autoscroll");
     }
+
+    if (row("Startup menu", "menu_on_startup")) {
+        bool on = settingsBool("menu_on_startup", 0) != 0;
+        if (offOnList("##menu_on_startup", &on)) {
+            settingsDescribe("menu_on_startup",
+                             "menu_on_startup: 1 opens the pre-game menu before the game starts (0, default: launch straight in)");
+            settingsSetInt("menu_on_startup", on ? 1 : 0);
+            settingsSave();
+        }
+        hint("On: opens the pre-game menu (Presets, Settings, Discs, BIOS, Start) before booting the game, so "
+             "engine and restart-only settings apply immediately. Off (default): starts straight into the game after "
+             "first-run setup (--menu opens it for one run).");
+        overrideNote("menu_on_startup");
+    }
 }
 
 void aboutRows(); // System's About group (below)
@@ -3342,122 +3609,11 @@ void aboutRows(); // System's About group (below)
 void systemSection() {
     opt::beginPage("system", SYSTEM);
 
-    // ---- one choice for many settings
-    opt::group(N_("Presets"));
-    opt::presetRows(); // options.cpp
-
     opt::group(N_("Engine"));
     int engine = engineSetting() >= 0 ? engineSetting() : engineThis();
     int chosenEngine = engine;
     engineRow(&chosenEngine, true);
     if (chosenEngine != engine) engineSetSetting(chosenEngine);
-
-    opt::group(N_("Discs and BIOS"));
-#ifdef __ANDROID__
-    androidDiscRow();
-    // The activity holds the choice and opens the file (XgActivity: a file chosen here, else none
-    // when so chosen, else the disc folder's), read where it is (system/android.c).
-    if (row("BIOS (kanji)", "bios")) {
-        char shown[1024], taken[1024];
-        androidActivityText("biosName", shown, sizeof shown);
-        pathText(kromPath() == NULL ? NULL : shown[0] ? shown : kromPath(),
-                 "None read: the save titles on the memory card screens and the text that scrolls over some "
-                 "scenes are blank");
-        int answer = androidBiosTake(taken, sizeof taken);
-        if (answer == 1) {
-            biosMsg.set(false, "Kanji glyphs from %s", taken);
-        } else if (answer == -1) {
-            char* arg = strchr(taken, '|');
-            if (arg != NULL) *arg++ = '\0';
-            else arg = taken + strlen(taken); // ""
-            if (!strcmp(taken, "notbios")) biosMsg.set(true, "%s is not a 512 KB PS1 BIOS image", arg);
-            else if (!strcmp(taken, "nofolder")) biosMsg.set(true, "No BIOS image (a 512 KB .bin) in the disc folder %s", arg);
-            else if (!strcmp(taken, "open")) biosMsg.set(true, "%s cannot be opened", arg);
-            else biosMsg.set(true, "The system has no file picker");
-        }
-        if (ImGui::Button(tr("Choose a BIOS file"))) androidBiosChoose();
-        sameLineFor("Use the disc folder's");
-        if (ImGui::Button(tr("Use the disc folder's"))) androidBiosFromFolder();
-        sameLineFor("None##bios");
-        if (ImGui::Button(tr("None##bios"))) {
-            androidBiosNone();
-            biosMsg.set(false, "No BIOS: the kanji glyphs are blank");
-        }
-        biosMsg.draw();
-        hint("Only the font in the BIOS image is used (save titles, some text over movies): a file chosen here, else "
-             "a 512 KB .bin in the disc folder. It is read where it is and never copied.");
-    }
-#else
-    if (row("BIOS (kanji)", "bios")) {
-        pathText(kromPath(), "None read: the save titles on the memory card screens and the text that scrolls over some "
-                             "scenes are blank");
-        if (pathField("bios", biosPath, sizeof(biosPath), 30, false, biosFilters, 2, "Use")) {
-            if (kromSetBios(biosPath)) {
-                biosMsg.set(false, "Kanji glyphs from %s", biosPath);
-            } else {
-                biosMsg.set(true, "%s is not a 512 KB PS1 BIOS image", biosPath);
-            }
-        }
-        if (ImGui::Button(tr("Look beside the disc"))) {
-            if (kromSetBios("")) {
-                biosMsg.set(false, "Kanji glyphs from %s", kromPath());
-            } else {
-                biosMsg.set(true, "No BIOS image beside the disc or in the save folder");
-            }
-        }
-        sameLineFor("None##bios");
-        if (ImGui::Button(tr("None##bios"))) {
-            kromSetBios("none");
-            biosMsg.set(false, "No BIOS: the kanji glyphs are blank");
-        }
-        biosMsg.draw();
-        hint("Only the font in the BIOS image is used (save titles, some text over movies). The image is read where it "
-             "is and never copied.");
-        overrideNote("bios");
-    }
-#endif
-
-    if (row("Current disc")) {
-        pathText(cdSwapPath(0), "-");
-        hint("The disc image in the drive now.");
-    }
-    if (row("Other disc", "disc2 disc_swap")) {
-        pathText(cdSwapPath(1), "None found: set the other disc's image");
-        if (pathField("disc2", disc2Path, sizeof(disc2Path), 31, false, discFilters, 2, "Use")) {
-            if (cdSwapSetOther(disc2Path)) {
-                discMsg.set(false, "Other disc: %s", disc2Path);
-            } else {
-                CdImageInfo info[2]; char why[1024];
-                cdVerifyPair(cdSwapPath(0), disc2Path, NULL, info, why, sizeof why);
-                discMsg.set(true, "%s", why);
-            }
-        }
-        if (ImGui::Button(tr("Default##disc2"))) {
-            cdSwapSetOther("");
-            discMsg.set(false, cdSwapPath(1) != NULL ? "Other disc: the image beside the first one"
-                                                     : "No image beside the first one");
-        }
-        sameLineFor("Swap discs now");
-        ImGui::BeginDisabled(cdSwapPath(1) == NULL || !cdSwapWanted());
-        if (ImGui::Button(tr("Swap discs now"))) {
-            if (cdSwapRequest() > 0) {
-                discMsg.set(false, "Swapped: the drive has %s", shownPath(cdSwapPath(0)));
-            } else {
-                discMsg.set(true, "Could not swap discs");
-            }
-        }
-        ImGui::EndDisabled();
-        discMsg.draw();
-        bool automatic = cdSwapAutomatic();
-        if (checkbox("Swap when the game asks for the other disc", &automatic)) {
-            cdSwapSetAutomatic(automatic);
-        }
-        hint("Swapping works while the game asks for a disc (\"insert disc\"); F2 does the same. The game asks for disc 2 "
-             "at the end of disc 1, and for the other disc when a save from it is loaded. A swap at any other time would "
-             "break the game, as opening the lid mid-game does on a PS1.");
-        overrideNote("disc2");
-        overrideNote("disc_swap");
-    }
 
 #ifdef XG_UPDATER
     updatesRows(); // updates.cpp: a newer version, the update check's setting, its last check
@@ -3466,26 +3622,146 @@ void systemSection() {
     opt::group(N_("This menu"));
     menuLookRows();
 
-    opt::group(N_("Advanced"), opt::COLLAPSED);
-    if (row("Pause when minimised", "pause_minimized")) {
-        bool pause = settingsBool("pause_minimized", 0) != 0;
-        if (offOnList("##pause_minimized", &pause, N_("Off: the game plays on"), N_("On: the game waits"))) {
-            settingsDescribe("pause_minimized", "pause_minimized: 1 pauses the game while its window is minimised "
-                                                "(0, default: it plays on)");
-            settingsSetInt("pause_minimized", pause ? 1 : 0);
-            settingsSave();
+    opt::group(N_("More system"));
+    if (opt::beginSubmenu("discs", N_("Discs and BIOS"), nullptr,
+                          N_("Configure your PS1 BIOS image, current disc, other disc and automatic disc swap."))) {
+        opt::group(N_("Discs and BIOS"));
+#ifdef __ANDROID__
+        androidDiscRow();
+        // The activity holds the choice and opens the file (XgActivity: a file chosen here, else none
+        // when so chosen, else the disc folder's), read where it is (system/android.c).
+        if (row("BIOS (kanji)", "bios")) {
+            char shown[1024], taken[1024];
+            androidActivityText("biosName", shown, sizeof shown);
+            pathText(kromPath() == NULL ? NULL : shown[0] ? shown : kromPath(),
+                     "None read: the save titles on the memory card screens and the text that scrolls over some "
+                     "scenes are blank");
+            int answer = androidBiosTake(taken, sizeof taken);
+            if (answer == 1) {
+                biosMsg.set(false, "Kanji glyphs from %s", taken);
+            } else if (answer == -1) {
+                char* arg = strchr(taken, '|');
+                if (arg != NULL) *arg++ = '\0';
+                else arg = taken + strlen(taken); // ""
+                if (!strcmp(taken, "notbios")) biosMsg.set(true, "%s is not a 512 KB PS1 BIOS image", arg);
+                else if (!strcmp(taken, "nofolder")) biosMsg.set(true, "No BIOS image (a 512 KB .bin) in the disc folder %s", arg);
+                else if (!strcmp(taken, "open")) biosMsg.set(true, "%s cannot be opened", arg);
+                else biosMsg.set(true, "The system has no file picker");
+            }
+            if (ImGui::Button(tr("Choose a BIOS file"))) androidBiosChoose();
+            sameLineFor("Use the disc folder's");
+            if (ImGui::Button(tr("Use the disc folder's"))) androidBiosFromFolder();
+            sameLineFor("None##bios");
+            if (ImGui::Button(tr("None##bios"))) {
+                androidBiosNone();
+                biosMsg.set(false, "No BIOS: the kanji glyphs are blank");
+            }
+            biosMsg.draw();
+            hint("Only the font in the BIOS image is used (save titles, some text over movies): a file chosen here, else "
+                 "a 512 KB .bin in the disc folder. It is read where it is and never copied.");
         }
-        hint("While the window is minimised the game waits as while this menu is open: its clock stands still and "
-             "the sound fades out and back. A handheld's suspend and an app switch always pause it.");
-        overrideNote("pause_minimized");
-    }
-    if (row("Settings file")) {
-        pathText(settingsPath(), "None (XG_SETTINGS=none): nothing is kept");
-        hint("Every change here is written to it at once. XG_<KEY> in the environment overrides a key for one run.");
+#else
+        if (row("BIOS (kanji)", "bios")) {
+            pathText(kromPath(), "None read: the save titles on the memory card screens and the text that scrolls over some "
+                                 "scenes are blank");
+            if (pathField("bios", biosPath, sizeof(biosPath), 30, false, biosFilters, 2, "Use")) {
+                if (kromSetBios(biosPath)) {
+                    biosMsg.set(false, "Kanji glyphs from %s", biosPath);
+                } else {
+                    biosMsg.set(true, "%s is not a 512 KB PS1 BIOS image", biosPath);
+                }
+            }
+            if (ImGui::Button(tr("Look beside the disc"))) {
+                if (kromSetBios("")) {
+                    biosMsg.set(false, "Kanji glyphs from %s", kromPath());
+                } else {
+                    biosMsg.set(true, "No BIOS image beside the disc or in the save folder");
+                }
+            }
+            sameLineFor("None##bios");
+            if (ImGui::Button(tr("None##bios"))) {
+                kromSetBios("none");
+                biosMsg.set(false, "No BIOS: the kanji glyphs are blank");
+            }
+            biosMsg.draw();
+            hint("Only the font in the BIOS image is used (save titles, some text over movies). The image is read where it "
+                 "is and never copied.");
+            overrideNote("bios");
+        }
+#endif
+
+        if (row("Current disc")) {
+            pathText(cdSwapPath(0), "-");
+            hint("The disc image in the drive now.");
+        }
+        if (row("Other disc", "disc2 disc_swap")) {
+            pathText(cdSwapPath(1), "None found: set the other disc's image");
+            if (pathField("disc2", disc2Path, sizeof(disc2Path), 31, false, discFilters, 2, "Use")) {
+                if (cdSwapSetOther(disc2Path)) {
+                    discMsg.set(false, "Other disc: %s", disc2Path);
+                } else {
+                    CdImageInfo info[2]; char why[1024];
+                    cdVerifyPair(cdSwapPath(0), disc2Path, NULL, info, why, sizeof why);
+                    discMsg.set(true, "%s", why);
+                }
+            }
+            if (ImGui::Button(tr("Default##disc2"))) {
+                cdSwapSetOther("");
+                discMsg.set(false, cdSwapPath(1) != NULL ? "Other disc: the image beside the first one"
+                                                         : "No image beside the first one");
+            }
+            sameLineFor("Swap discs now");
+            ImGui::BeginDisabled(cdSwapPath(1) == NULL || !cdSwapWanted());
+            if (ImGui::Button(tr("Swap discs now"))) {
+                if (cdSwapRequest() > 0) {
+                    discMsg.set(false, "Swapped: the drive has %s", shownPath(cdSwapPath(0)));
+                } else {
+                    discMsg.set(true, "Could not swap discs");
+                }
+            }
+            ImGui::EndDisabled();
+            discMsg.draw();
+            bool automatic = cdSwapAutomatic();
+            if (checkbox("Swap when the game asks for the other disc", &automatic)) {
+                cdSwapSetAutomatic(automatic);
+            }
+            hint("Swapping works while the game asks for a disc (\"insert disc\"); F2 does the same. The game asks for disc 2 "
+                 "at the end of disc 1, and for the other disc when a save from it is loaded. A swap at any other time would "
+                 "break the game, as opening the lid mid-game does on a PS1.");
+            overrideNote("disc2");
+            overrideNote("disc_swap");
+        }
+        opt::endSubmenu();
     }
 
-    opt::group(N_("About"), opt::COLLAPSED | opt::STACKED);
-    aboutRows();
+    if (opt::beginSubmenu("advanced", N_("Advanced"), nullptr,
+                          N_("Window minimisation behaviour and settings file path."))) {
+        opt::group(N_("Advanced"));
+        if (row("Pause when minimised", "pause_minimized")) {
+            bool pause = settingsBool("pause_minimized", 0) != 0;
+            if (offOnList("##pause_minimized", &pause)) {
+                settingsDescribe("pause_minimized", "pause_minimized: 1 pauses the game while its window is minimised "
+                                                    "(0, default: it plays on)");
+                settingsSetInt("pause_minimized", pause ? 1 : 0);
+                settingsSave();
+            }
+            hint("While the window is minimised the game waits as while this menu is open: its clock stands still and "
+                 "the sound fades out and back. A handheld's suspend and an app switch always pause it.");
+            overrideNote("pause_minimized");
+        }
+        if (row("Settings file")) {
+            pathText(settingsPath(), "None (XG_SETTINGS=none): nothing is kept");
+            hint("Every change here is written to it at once. XG_<KEY> in the environment overrides a key for one run.");
+        }
+        opt::endSubmenu();
+    }
+
+    if (opt::beginSubmenu("about", N_("About & licences"), nullptr,
+                          N_("Build version, Vulkan/SDL info and open-source licences."))) {
+        opt::group(N_("About"), opt::STACKED);
+        aboutRows();
+        opt::endSubmenu();
+    }
     opt::endPage();
 }
 
@@ -3646,6 +3922,7 @@ void aboutRows() {
 
 void sectionsOpened() {
     opt::opened();
+    setup.noDisc = cdDiscSectorCount() == 0;
     readWindowSize();
     cap.active = false;
     touchKeptOpen = false;
@@ -3653,9 +3930,10 @@ void sectionsOpened() {
     cardMsg.text[0] = biosMsg.text[0] = discMsg.text[0] = aspectMsg.text[0] = '\0';
 }
 
-void discSetupOpened(const char* region, bool noDisc) {
+void discSetupOpened(const char* region, bool noDisc, bool startupMenu) {
     setup = {};
     setup.noDisc = noDisc;
+    setup.startupMenu = startupMenu;
     setup.engine = engineSetting() >= 0 ? engineSetting() : engineThis();
     const char* first = noDisc ? settingsGet("disc") : cdSwapPath(0);
     snprintf(setup.first, sizeof setup.first, "%s", first ? first : "");
@@ -3682,6 +3960,7 @@ void discSetupOpened(const char* region, bool noDisc) {
     else if (setup.imageDir[0]) searchImages();
 }
 bool discSetupAccepted() { return setup.accepted; }
+bool discSetupNoDisc() { return setup.noDisc; }
 const char* discSetupChosen() { return setup.chosen; }
 bool discSetupCommand(const char* command, const char* argument) {
     if (!strcmp(command, "setup-first") || !strcmp(command, "setup-other")) {
@@ -3709,13 +3988,32 @@ bool discSetupCommand(const char* command, const char* argument) {
     return !strcmp(command, "setup-start") && acceptSetup();
 }
 
-const char* const setupSectionNames[SETUP_SECTIONS] = {N_("Disc images"), "BIOS"};
+const char* const setupSectionNames[SETUP_SECTIONS] = {N_("Disc images"), "BIOS", N_("Presets")};
 
 // What a missing BIOS takes away: what the game draws with the BIOS's own
 // font (B(51h) Krom2RawAdd, port/src/system/krom.c): the save titles on the
 // memory card screens (renderSaveTitleImage) and the text that scrolls over
 // some scenes (the field's EX BEh lines, getScrollingTextGlyph).
 const char* const biosFeatures[] = {N_("Save titles on the memory card screens"), N_("Text that scrolls over some scenes")};
+
+void setupPresets() {
+    opt::beginPage("setup-presets", -1);
+    opt::group(N_("Presets"));
+    opt::presetRows();
+    opt::group(N_("Startup"));
+    if (row("Startup menu", "menu_on_startup")) {
+        bool on = settingsBool("menu_on_startup", 0) != 0;
+        if (offOnList("##setup_menu_on_startup", &on)) {
+            settingsDescribe("menu_on_startup",
+                             "menu_on_startup: 1 opens the pre-game menu before the game starts (0, default: launch straight in)");
+            settingsSetInt("menu_on_startup", on ? 1 : 0);
+            settingsSave();
+        }
+        hint("On: show this pre-game menu before launching the game. Off (default): start straight into the game "
+             "next time (you can always open Settings in-game with F1 or launch with --menu).");
+    }
+    opt::endPage();
+}
 
 void setupDiscs() {
     opt::beginPage("setup-discs", -1, true);
@@ -3764,7 +4062,14 @@ void setupDiscs() {
         }
     }
     hint("Start saves these and plays. XG_DISC and XG_DISC2 override them for one run.");
-    engineRow(&setup.engine, false);
+    int engine = engineSetting() >= 0 ? engineSetting() : engineThis();
+    int chosenEngine = engine;
+    engineRow(&chosenEngine, false);
+    if (chosenEngine != engine) {
+        engineSetSetting(chosenEngine);
+        settingsSave();
+    }
+    setup.engine = chosenEngine;
     opt::endPage();
 }
 
@@ -3817,7 +4122,8 @@ void setupBios() {
 
 void drawSetupSection(int section) {
     if (section == SETUP_DISCS) setupDiscs();
-    else setupBios();
+    else if (section == SETUP_BIOS) setupBios();
+    else setupPresets();
     // Start without a BIOS: asked once, explicitly.
     if (setup.askBios) {
         ImGui::OpenPopup("No BIOS");
@@ -3883,6 +4189,9 @@ namespace {
 // Search; options.h).
 void drawPage(int section) {
     switch (section) {
+    case PRESETS:
+        presetsSection();
+        break;
     case DISPLAY:
         displaySection();
         break;
@@ -3914,13 +4223,23 @@ void drawPage(int section) {
         packsSection();
         break;
     case CARDS:
-        cardsPageSection();
+        if (setup.noDisc && !opt::indexing()) {
+            markBlock();
+            textLines("Memory cards become available once a disc image is selected.");
+        } else {
+            cardsPageSection();
+        }
         break;
     case STATES:
-        statesPageSection();
+        if (setup.noDisc && !opt::indexing()) {
+            markBlock();
+            textLines("Save states become available once the game is running.");
+        } else {
+            statesPageSection();
+        }
         break;
     case SYSTEM:
-        systemSection(); // with About in its last group
+        systemSection();
         break;
     default:
         break;
@@ -3931,8 +4250,13 @@ void drawPage(int section) {
 
 void drawSection(int section) {
     if (section == EXTRAS) {
-        extrasSection();
-        arenaSection(); // arena.cpp: the Battle arena block
+        if (setup.noDisc) {
+            markBlock();
+            textLines("Extras become available once a disc image is selected.");
+        } else {
+            extrasSection();
+            arenaSection(); // arena.cpp: the Battle arena block
+        }
     } else if (section == SEARCH) {
         opt::searchPage(drawPage, SECTION_COUNT);
     } else {

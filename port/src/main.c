@@ -191,9 +191,10 @@ int main(int argc, char** argv) {
     if (argc > 1 && SDL_strcmp(argv[1], "--verify-discs") == 0)
         return cdVerifyCommand(argc - 2, argv + 2, BUILD_REGION);
     if (argc > 1 && SDL_strcmp(argv[1], "--help") == 0) {
-        puts("Usage: xenogears [--setup] [--extras] [--state FILE] [disc.cue]\n"
+        puts("Usage: xenogears [--setup] [--menu] [--extras] [--state FILE] [disc.cue]\n"
              "       xenogears --verify-discs FIRST.cue [OTHER.cue]\n"
              "--setup: choose, verify and save the starting and other disc\n"
+             "--menu: open the pre-game menu (presets, settings, discs, BIOS) before starting\n"
              "--state FILE: start the game from a save state (F1 > Save states)\n"
              "No image argument: XG_DISC, saved disc, then the local build default");
         return 0;
@@ -209,12 +210,14 @@ int main(int argc, char** argv) {
         return 2;
     }
     /* xenogears --extras [disc]: the extras alone (port/src/extras/extras.h). */
-    int extras = 0, setup = 0;
+    int extras = 0, setup = 0, startMenu = 0;
     static const char* state; /* static: still right after the soft reset's longjmp */
     while (argc > 1 && (SDL_strcmp(argv[1], "--extras") == 0 || SDL_strcmp(argv[1], "--setup") == 0 ||
+                        SDL_strcmp(argv[1], "--menu") == 0 ||
                         (SDL_strcmp(argv[1], "--state") == 0 && argc > 2))) {
         extras |= SDL_strcmp(argv[1], "--extras") == 0;
         setup |= SDL_strcmp(argv[1], "--setup") == 0;
+        startMenu |= SDL_strcmp(argv[1], "--menu") == 0;
         if (SDL_strcmp(argv[1], "--state") == 0) {
             state = argv[2];
             argc--;
@@ -324,13 +327,33 @@ int main(int argc, char** argv) {
         setup = 1;
         setupFlags |= UI_SETUP_BIOS;
     }
+    /* Opt-in pre-game menu (menu_on_startup=1, off by default, or --menu): opens
+     * before the game boots so presets, engine and settings apply immediately.
+     * Skipped after an engine hand-over from the pre-game menu (XG_STARTUP_DONE=1). */
+    if (!setup && !extras && !netplay && SDL_getenv("XG_STARTUP_DONE") == NULL &&
+        (startMenu || (cdSetupInteractive() && settingsBool("menu_on_startup", 0)))) {
+        setup = 1;
+        setupFlags |= UI_SETUP_STARTUP;
+    }
     if (setup && !uiDiscSetup(region, setupFlags, NULL, 0)) {
         gpuShutdown();
         SDL_DestroyWindow(window);
         SDL_Quit();
         return 0;
     }
-    /* The setup screen chose the other engine: it starts the game instead. */
+    /* The pre-game / setup screen may have switched engines (directly or via a
+     * preset): hand over to the chosen engine now before booting the game, and
+     * mark startup done so the handed-over process launches straight in. */
+    if (setup) {
+        SDL_setenv_unsafe("XG_STARTUP_DONE", "1", 1);
+        int wantEngine = engineSetting();
+        if (wantEngine >= 0 && wantEngine != engineThis() && engineExecutable(wantEngine) != NULL) {
+            gpuShutdown();
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            engineRestart(wantEngine);
+        }
+    }
     engineRedirect();
 #ifdef XG_UPDATER
     /* The update check (update/update_check.h): asked once, here, before the game (right after the

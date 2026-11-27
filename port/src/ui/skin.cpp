@@ -68,6 +68,7 @@ struct State {
     ImVector<Opening> openings;
     ImVector<Hidden> hidden;
     float unit = 1.0f; // ImGui units per game pixel (the menu works in window pixels)
+    int fontScale = FONT_SCALE_DEFAULT; // menu_font_scale applied in setUnit
     Sprite sprites[0x200];
     Sprite buttons[4]; // SPRITE_CROSS...
     ImFontAtlasRectId frameRect = ImFontAtlasRectId_Invalid; // the window frame's 48 x 16 pieces
@@ -453,6 +454,32 @@ void setScalePercent(int percent) {
     settingsSave();
 }
 
+int fontScalePercent() {
+    static bool described;
+    if (!described) {
+        described = true;
+        settingsDescribe("menu_font_scale", "menu_font_scale: the settings menu's font size in percent (75 to 150, "
+                                            "default 100)");
+    }
+    int p = settingsInt("menu_font_scale", FONT_SCALE_DEFAULT);
+    return p < FONT_SCALE_MIN ? FONT_SCALE_MIN : p > FONT_SCALE_MAX ? FONT_SCALE_MAX : p;
+}
+
+void setFontScalePercent(int percent) {
+    settingsSetInt("menu_font_scale",
+                   percent < FONT_SCALE_MIN ? FONT_SCALE_MIN : percent > FONT_SCALE_MAX ? FONT_SCALE_MAX : percent);
+    settingsSave();
+}
+
+float fontScale() {
+    return (float)fontScalePercent() / 100.0f;
+}
+
+float rowHeight() {
+    float line = LINE * st.unit * fontScale();
+    return std::max(16.0f * st.unit, line + 3.0f * st.unit);
+}
+
 float menuUnitFor(int w, int h) {
     // The text size's whole pixels times the percentage: game size, the
     // game's screen that much larger or smaller (still the game's layout,
@@ -469,6 +496,7 @@ float menuUnitFor(int w, int h) {
 
 void setUnit(float unit) {
     st.unit = unit;
+    st.fontScale = fontScalePercent();
     ImGuiStyle& s = ImGui::GetStyle();
     s = ImGuiStyle();
     s.WindowRounding = s.ChildRounding = s.FrameRounding = s.PopupRounding = s.GrabRounding = s.TabRounding = 0;
@@ -491,7 +519,7 @@ void setUnit(float unit) {
     s.SeparatorTextBorderSize = 1;
     s.TouchExtraPadding = ImVec2(0, 0);
     s.ScaleAllSizes(st.unit);
-    s.FontSizeBase = LINE * st.unit;
+    s.FontSizeBase = LINE * st.unit * ((float)st.fontScale / 100.0f);
     s.FontScaleMain = 1.0f;
     s.FontScaleDpi = 1.0f;
 
@@ -765,6 +793,41 @@ void pointer(ImDrawList* dl, ImVec2 at) {
     }
     float g = st.unit;
     dl->AddTriangleFilled(at, ImVec2(at.x + 7 * g, at.y + 5 * g), ImVec2(at.x, at.y + 10 * g), IM_COL32(220, 80, 90, 255));
+}
+
+void scrollArrow(ImDrawList* dl, ImVec2 center, bool up) {
+    float g = st.unit;
+    int frame = 4 - (int)(st.frames / 6 % 5);
+    if (st.native) {
+        const Sprite* s = getSprite(SPRITE_POINTER + frame);
+        ImFontAtlasRect r;
+        if (s != nullptr && atlas()->GetCustomRect(s->rect, &r)) {
+            // SPRITE_POINTER points right (w x h = 8 x 11); rotate 90 deg CCW for
+            // up or 90 deg CW for down so it matches the game's dialog continue arrow.
+            float hw = (s->h * g) * 0.5f;
+            float hh = (s->w * g) * 0.5f;
+            ImVec2 p1(floorf(center.x - hw), floorf(center.y - hh));
+            ImVec2 p2(p1.x + s->h * g, p1.y);
+            ImVec2 p3(p1.x + s->h * g, p1.y + s->w * g);
+            ImVec2 p4(p1.x, p1.y + s->w * g);
+            ImVec2 uvTL(r.uv0.x, r.uv0.y), uvTR(r.uv1.x, r.uv0.y);
+            ImVec2 uvBR(r.uv1.x, r.uv1.y), uvBL(r.uv0.x, r.uv1.y);
+            if (up) {
+                dl->AddImageQuad(atlas()->TexRef, p1, p2, p3, p4, uvTR, uvBR, uvBL, uvTL);
+            } else {
+                dl->AddImageQuad(atlas()->TexRef, p1, p2, p3, p4, uvBL, uvTL, uvTR, uvBR);
+            }
+            return;
+        }
+    }
+    ImU32 col = IM_COL32(220, 80, 90, 255);
+    if (up) {
+        dl->AddTriangleFilled(ImVec2(center.x, center.y - 4 * g), ImVec2(center.x - 5 * g, center.y + 3 * g),
+                              ImVec2(center.x + 5 * g, center.y + 3 * g), col);
+    } else {
+        dl->AddTriangleFilled(ImVec2(center.x, center.y + 4 * g), ImVec2(center.x - 5 * g, center.y - 3 * g),
+                              ImVec2(center.x + 5 * g, center.y - 3 * g), col);
+    }
 }
 
 void endFrame(ImGuiID skipWindow) {

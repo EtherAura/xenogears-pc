@@ -318,10 +318,20 @@ std::vector<Spec>& table() {
     add("menu_scale", N_("Menu size"), [](int) { return skin::scalePercent(); },
         [](int, int v) { skin::setScalePercent(v); }, skin::SCALE_DEFAULT, nullptr)
         .unit = "%";
+    add("menu_font_scale", N_("Menu font size"), [](int) { return skin::fontScalePercent(); },
+        [](int, int v) { skin::setFontScalePercent(v); }, skin::FONT_SCALE_DEFAULT, nullptr)
+        .unit = "%";
     add("menu_dark", N_("Dark mode"), [](int) { return skin::darkWindows() ? 1 : 0; },
         [](int, int v) { skin::setDarkWindows(v != 0); }, 0);
     add("menu_desc_autoscroll", N_("Auto-scroll descriptions"), [](int) { return skin::descAutoScroll() ? 1 : 0; },
         [](int, int v) { skin::setDescAutoScroll(v != 0); }, 1);
+    add("menu_on_startup", N_("Show menu on startup"), [](int) { return settingsBool("menu_on_startup", 0) != 0 ? 1 : 0; },
+        [](int, int v) {
+            settingsDescribe("menu_on_startup",
+                             "menu_on_startup: 1 opens the pre-game menu before the game starts (0, default: launch straight in)");
+            keySet("menu_on_startup", v);
+        },
+        0);
     // Packs
     add("movie_replacements", N_("Pack movies"), [](int) { return moviePackEnabled(); },
         [](int, int v) { moviePackSetEnabled(v); }, 1);
@@ -664,9 +674,17 @@ struct Page {
     int groupFlags;
     bool groupOpen;
     bool markPending; // the group's heading began a block: its first row joins it
-    bool tail;        // the last row's own description lines are still to be written
+    bool tail;        // the last row's own description lines (and inline Reset) are still to be written
     int tailFlags;
+    bool rowChanged;
+    std::string rowLabel;
+    std::vector<const Spec*> rowSpecs;
     int changedInGroup;
+    std::string submenu;         // submenu currently being traversed (empty at root)
+    std::string submenuLabel;
+    std::string activeSubmenu;   // submenu open in this section (MODE_NORMAL)
+    bool inActiveSubmenu;        // currently inside activeSubmenu's body
+    int changedInSubmenu;
     std::string lastHeading; // the Search page: the section and group shown last
 } pg;
 
@@ -679,11 +697,16 @@ int currentRow = -1; // the row the cursor (or the mouse) was on last frame
 bool currentChanged; // and whether it differs from its default (the footer's reset hint)
 std::map<std::string, bool> groupOpenState;   // section/group: a collapsed group opened
 std::map<std::string, int> groupChangedCount; // section/group: its rows that differ, last drawn
+std::map<int, std::string> sectionSubmenu;      // section -> active submenu id
+std::map<int, std::string> sectionSubmenuLabel; // section -> active submenu label (N_())
+std::map<int, std::string> returnSubmenu;       // section -> submenu id to focus after popping back
+std::map<std::string, int> submenuChangedCount; // section/submenu -> changed row count
+bool submenuEntered;
 
 // The Search page's index: each row's words.
 struct Entry {
     int section;
-    std::string group, label, text, keys;
+    std::string submenu, group, label, text, keys;
 };
 std::vector<Entry> entries;
 bool indexReady;
@@ -695,13 +718,13 @@ int matches;
 struct Target {
     bool set;
     int section;
-    std::string group, label;
+    std::string submenu, submenuLabel, group, label;
 };
 Target firstMatch;
 struct {
     bool pending, scroll;
     int section;
-    std::string group, label;
+    std::string submenu, submenuLabel, group, label;
 } jump;
 
 std::string groupKey(int section, const std::string& group) {
@@ -710,13 +733,28 @@ std::string groupKey(int section, const std::string& group) {
     return s + group;
 }
 
+std::string submenuKey(int section, const std::string& id) {
+    char s[16];
+    snprintf(s, sizeof s, "s%d/", section);
+    return s + id;
+}
+
+bool hiddenBySubmenu() {
+    return mode == MODE_NORMAL && !pg.activeSubmenu.empty() && !pg.inActiveSubmenu;
+}
+
 void openTable() {
     if (pg.tableOpen) return;
     char id[32];
     snprintf(id, sizeof id, "##rows%d", pg.tables++);
     pg.tableOpen = ImGui::BeginTable(id, pg.stacked ? 1 : 2, ImGuiTableFlags_SizingStretchProp);
     if (!pg.tableOpen) return;
-    if (!pg.stacked) ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 104.0f * scale());
+    if (!pg.stacked) {
+        float avail = ImGui::GetContentRegionAvail().x;
+        float labelW = std::min(avail * 0.44f, 132.0f * scale());
+        if (labelW < 96.0f * scale()) labelW = 96.0f * scale();
+        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, labelW);
+    }
     ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch);
 }
 
@@ -725,11 +763,22 @@ void closeTable() {
     pg.tableOpen = false;
 }
 
-// The last row's own lines, after its controls' (still in its cell and block).
+// The last row's own lines (and clickable inline Reset for changed rows), after its controls.
 void emitTail() {
     if (!pg.tail) return;
     pg.tail = false;
     if (mode == MODE_INDEX) return;
+    if (mode == MODE_NORMAL && pg.rowChanged && !pg.rowSpecs.empty() && !pg.stacked) {
+        ImGui::SameLine();
+        ImGui::PushID(pg.rowLabel.c_str());
+        ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
+        if (ImGui::SmallButton(tr("Reset##rowreset"))) {
+            restoreAll(pg.rowSpecs);
+            sfx::play(sfx::CHOOSE);
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopID();
+    }
     if (pg.tailFlags & RESTART) hint("Takes effect the next time the game starts.");
     if ((pg.tailFlags & ENHANCED) && engineThis() != ENGINE_ENHANCED)
         hint("Only the Enhanced engine has this (System > Engine).");
@@ -758,17 +807,18 @@ bool matchesQuery(const Entry* e, const char* label) {
     return true;
 }
 
-const Entry* entryFor(int section, const std::string& group, const char* label) {
+const Entry* entryFor(int section, const std::string& submenu, const std::string& group, const char* label) {
     for (const Entry& e : entries) {
-        if (e.section == section && e.label == label && e.group == group) return &e;
+        if (e.section == section && e.submenu == submenu && e.label == label && e.group == group) return &e;
     }
     return nullptr;
 }
 
-// The Search page: the result's section and group above it, choosing it opens there.
+// The Search page: the result's section (and submenu/group) above it, choosing it opens there.
 void resultHeading(const char* label) {
     std::string heading = tr(sectionNames[pg.section]);
-    if (!pg.group.empty()) heading = heading + " > " + tr(pg.group.c_str());
+    if (!pg.submenuLabel.empty()) heading = heading + " > " + tr(pg.submenuLabel.c_str());
+    if (!pg.group.empty() && pg.group != pg.submenuLabel) heading = heading + " > " + tr(pg.group.c_str());
     if (heading == pg.lastHeading) return;
     closeTable();
     pg.lastHeading = heading;
@@ -780,6 +830,8 @@ void resultHeading(const char* label) {
         jump = {};
         jump.pending = true;
         jump.section = pg.section;
+        jump.submenu = pg.submenu;
+        jump.submenuLabel = pg.submenuLabel;
         jump.group = pg.group;
         jump.label = label;
         sfx::play(sfx::CHOOSE);
@@ -808,14 +860,22 @@ void beginPage(const char* id, int section, bool stacked) {
     pg.groupOpen = true;
     pg.markPending = false;
     pg.tail = false;
+    pg.rowChanged = false;
+    pg.rowLabel.clear();
+    pg.rowSpecs.clear();
     pg.changedInGroup = 0;
+    pg.submenu.clear();
+    pg.submenuLabel.clear();
+    pg.activeSubmenu = mode == MODE_NORMAL ? sectionSubmenu[section] : std::string();
+    pg.inActiveSubmenu = false;
+    pg.changedInSubmenu = 0;
     ImGui::PushID(id);
 }
 
 void endPage() {
     emitTail();
     closeTable();
-    if (!pg.group.empty()) groupChangedCount[groupKey(pg.section, pg.group)] = pg.changedInGroup;
+    if (!pg.group.empty() && !hiddenBySubmenu()) groupChangedCount[groupKey(pg.section, pg.group)] = pg.changedInGroup;
     pg.active = false;
     ImGui::PopID();
 }
@@ -823,7 +883,7 @@ void endPage() {
 void group(const char* heading, int flags) {
     emitTail();
     closeTable();
-    if (!pg.group.empty()) groupChangedCount[groupKey(pg.section, pg.group)] = pg.changedInGroup;
+    if (!pg.group.empty() && !hiddenBySubmenu()) groupChangedCount[groupKey(pg.section, pg.group)] = pg.changedInGroup;
     pg.group = heading;
     pg.groupFlags = flags;
     pg.changedInGroup = 0;
@@ -834,7 +894,7 @@ void group(const char* heading, int flags) {
     }
     pg.groupOpen = !(flags & COLLAPSED) || groupOpenState[key];
     pg.markPending = false;
-    if (mode != MODE_NORMAL || heading[0] == '\0') return; // (no heading: what follows has its own)
+    if (mode != MODE_NORMAL || heading[0] == '\0' || hiddenBySubmenu()) return;
     ImGui::Dummy(ImVec2(0, (pg.tables > 0 || ImGui::GetCursorPosY() > 8 * scale()) ? 6 * scale() : 0));
     if (flags & COLLAPSED) {
         // A line the cursor can choose: "+ Advanced (2 changed)".
@@ -865,26 +925,148 @@ void group(const char* heading, int flags) {
     }
 }
 
+float resetReserve() {
+    if (mode != MODE_NORMAL || !pg.rowChanged || pg.rowSpecs.empty() || pg.stacked) return 0.0f;
+    return ImGui::CalcTextSize(tr("Reset")).x + ImGui::GetStyle().FramePadding.x * 2.0f +
+           ImGui::GetStyle().ItemSpacing.x;
+}
+
+bool beginSubmenu(const char* id, const char* label, const char* summary, const char* about) {
+    emitTail();
+    if (!pg.active) return true;
+    if (mode == MODE_INDEX || mode == MODE_FILTER) {
+        pg.submenu = id;
+        pg.submenuLabel = label;
+        pg.changedInSubmenu = 0;
+        return true;
+    }
+    if (!pg.activeSubmenu.empty()) {
+        if (pg.activeSubmenu != id) return false;
+        closeTable();
+        pg.submenu = id;
+        pg.submenuLabel = label;
+        pg.inActiveSubmenu = true;
+        pg.changedInSubmenu = 0;
+        return true;
+    }
+    // Root view: a single 1-line clickable submenu row in the table.
+    openTable();
+    if (!pg.tableOpen) return false;
+    if (ImGui::TableGetRowIndex() >= 0) ImGui::Dummy(ImVec2(0, 0));
+    ImGui::TableNextRow(0, skin::rowHeight());
+    ImGui::TableSetColumnIndex(0);
+    if (!pg.markPending) markBlock();
+    pg.markPending = false;
+    if (!pg.stacked) ImGui::AlignTextToFramePadding();
+    int changedCount = submenuChangedCount[submenuKey(pg.section, id)];
+    if (changedCount > 0) ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
+    ImGui::TextUnformatted(tr(label));
+    if (changedCount > 0) ImGui::PopStyleColor();
+    if (!pg.stacked) {
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6.0f * scale());
+    }
+    if (returnSubmenu[pg.section] == id) {
+        ImGui::SetKeyboardFocusHere();
+        returnSubmenu[pg.section].clear();
+    }
+    char right[160];
+    if (summary != nullptr && summary[0] != '\0') {
+        snprintf(right, sizeof right, "%s  >", summary);
+    } else if (changedCount > 0) {
+        snprintf(right, sizeof right, tr("%d changed  >"), changedCount);
+    } else {
+        snprintf(right, sizeof right, "%s  >", tr("Open"));
+    }
+    ImGui::PushID(id);
+    if (skin::selectable(right, false, 0, ImGui::CalcTextSize(right))) {
+        sectionSubmenu[pg.section] = id;
+        sectionSubmenuLabel[pg.section] = label;
+        submenuEntered = true;
+        sfx::play(sfx::CHOOSE);
+    }
+    ImGui::PopID();
+    if (about != nullptr && about[0] != '\0') {
+        hint("%s", tr(about));
+    } else {
+        hint("Choose to open %s.", tr(label));
+    }
+    return false;
+}
+
+void endSubmenu() {
+    emitTail();
+    closeTable();
+    if (mode == MODE_NORMAL && pg.inActiveSubmenu && !pg.submenu.empty()) {
+        submenuChangedCount[submenuKey(pg.section, pg.submenu)] = pg.changedInSubmenu;
+    }
+    pg.inActiveSubmenu = false;
+    pg.submenu.clear();
+    pg.submenuLabel.clear();
+}
+
+bool atRoot() {
+    return mode != MODE_NORMAL || pg.activeSubmenu.empty();
+}
+
+bool inSubmenu(int section) {
+    auto it = sectionSubmenu.find(section);
+    return it != sectionSubmenu.end() && !it->second.empty();
+}
+
+const char* submenuTitle(int section) {
+    auto it = sectionSubmenuLabel.find(section);
+    if (it == sectionSubmenuLabel.end() || it->second.empty()) return nullptr;
+    return tr(it->second.c_str());
+}
+
+bool popSubmenu(int section) {
+    auto it = sectionSubmenu.find(section);
+    if (it == sectionSubmenu.end() || it->second.empty()) return false;
+    returnSubmenu[section] = it->second;
+    it->second.clear();
+    sectionSubmenuLabel[section].clear();
+    return true;
+}
+
+void clearSubmenu(int section) {
+    sectionSubmenu.erase(section);
+    sectionSubmenuLabel.erase(section);
+    returnSubmenu.erase(section);
+}
+
+bool takeSubmenuEnter() {
+    if (!submenuEntered) return false;
+    submenuEntered = false;
+    return true;
+}
+
 bool row(const char* label, const char* keys, int flags) {
     emitTail();
     if (!pg.active) return true; // outside a page (no table): the caller lays it out
+    if (hiddenBySubmenu()) return false;
     std::vector<const Spec*> specs = specsOf(keys);
     bool isChanged = mode != MODE_INDEX && anyChanged(specs);
-    if (isChanged) pg.changedInGroup++;
+    if (isChanged) {
+        pg.changedInGroup++;
+        if (pg.inActiveSubmenu) pg.changedInSubmenu++;
+    }
     bool shown;
     if (mode == MODE_INDEX) {
         Entry e;
         e.section = pg.section;
+        e.submenu = pg.submenu;
         e.group = pg.group;
         e.label = label;
         e.keys = keys != nullptr ? keys : "";
         entries.push_back(e);
         shown = true;
     } else if (mode == MODE_FILTER) {
-        shown = (!changedOnly || isChanged) && (query[0] == '\0' || matchesQuery(entryFor(pg.section, pg.group, label), label));
+        shown = (!changedOnly || isChanged) &&
+                (query[0] == '\0' || matchesQuery(entryFor(pg.section, pg.submenu, pg.group, label), label));
         if (shown) {
             matches++;
-            if (!firstMatch.set) firstMatch = {true, pg.section, pg.group, label};
+            if (!firstMatch.set) firstMatch = {true, pg.section, pg.submenu, pg.submenuLabel, pg.group, label};
             resultHeading(label);
         }
     } else {
@@ -893,29 +1075,27 @@ bool row(const char* label, const char* keys, int flags) {
     if (!shown) return false;
     openTable();
     if (!pg.tableOpen) return false;
-    // A row's lines 16 apart, and the next row's first 16 below its last:
-    // 3 under what the row holds (ImGui's tables put nothing between rows).
+    // One clean line per option (scaled to menu_font_scale).
     if (ImGui::TableGetRowIndex() >= 0) ImGui::Dummy(ImVec2(0, 0));
-    ImGui::TableNextRow(0, ROW * scale());
+    ImGui::TableNextRow(0, skin::rowHeight());
     ImGui::TableSetColumnIndex(0);
     if (!pg.markPending) markBlock();
     pg.markPending = false;
     if (mode != MODE_INDEX) rowsNow.push_back({ImGui::GetCursorScreenPos().y, specs});
-    bool target = mode == MODE_NORMAL && jump.scroll && jump.section == pg.section && jump.label == label;
+    bool target = mode == MODE_NORMAL && jump.scroll && jump.section == pg.section && jump.submenu == pg.submenu &&
+                  jump.label == label;
     if (target) {
         ImGui::SetScrollHereY(0.25f);
         jump.scroll = false;
     }
     if (!pg.stacked) ImGui::AlignTextToFramePadding();
     if (isChanged) ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
-    textLines(label);
+    ImGui::TextUnformatted(tr(label));
     if (isChanged) ImGui::PopStyleColor();
-    // The badges.
-    ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-    if (flags & RESTART) textLines("After restart");
-    if (flags & ENHANCED) textLines("Enhanced only");
-    ImGui::PopStyleColor();
-    if (!pg.stacked) ImGui::TableSetColumnIndex(1);
+    if (!pg.stacked) {
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6.0f * scale());
+    }
     if (isChanged) {
         // The description's first line: what it was, and how to get it back.
         std::string defaults;
@@ -930,13 +1110,16 @@ bool row(const char* label, const char* keys, int flags) {
     if (target) ImGui::SetKeyboardFocusHere(); // the row's control gets the cursor
     pg.tail = true;
     pg.tailFlags = flags;
+    pg.rowChanged = isChanged;
+    pg.rowLabel = label;
+    pg.rowSpecs = std::move(specs);
     return true;
 }
 
 bool plain() {
     emitTail();
     closeTable();
-    return mode == MODE_NORMAL && pg.groupOpen;
+    return mode == MODE_NORMAL && !hiddenBySubmenu() && pg.groupOpen;
 }
 
 void noteHint(const char* text) {
@@ -978,6 +1161,13 @@ bool takeJump(int* section) {
     jump.pending = false;
     jump.scroll = true;
     *section = jump.section;
+    if (!jump.submenu.empty()) {
+        sectionSubmenu[jump.section] = jump.submenu;
+        sectionSubmenuLabel[jump.section] = jump.submenuLabel.empty() ? jump.submenu : jump.submenuLabel;
+    } else {
+        sectionSubmenu.erase(jump.section);
+        sectionSubmenuLabel.erase(jump.section);
+    }
     return true;
 }
 
@@ -986,6 +1176,10 @@ void focusSearch() { searchFocus = true; }
 void opened() {
     indexReady = false;
     rowsNow.clear();
+    sectionSubmenu.clear();
+    sectionSubmenuLabel.clear();
+    returnSubmenu.clear();
+    submenuEntered = false;
     jump = {};
 }
 
@@ -1036,7 +1230,7 @@ void searchPage(void (*drawPage)(int section), int sections) {
     if (query[0] != '\0' && (!indexReady || indexLanguage != l10nLanguage())) {
         float width = ImGui::GetContentRegionAvail().x;
         ImGui::SetNextWindowPos(ImVec2(-30000.0f, -30000.0f), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(width, 4000.0f), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(width, 60000.0f), ImGuiCond_Always);
         ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.0f);
         ImGui::Begin("##settings index", nullptr,
                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoDecoration |
@@ -1071,6 +1265,8 @@ void searchPage(void (*drawPage)(int section), int sections) {
         jump = {};
         jump.pending = true;
         jump.section = firstMatch.section;
+        jump.submenu = firstMatch.submenu;
+        jump.submenuLabel = firstMatch.submenuLabel;
         jump.group = firstMatch.group;
         jump.label = firstMatch.label;
         sfx::play(sfx::CHOOSE);
@@ -1097,12 +1293,14 @@ const std::vector<Preset>& presets() {
     static std::vector<Preset> p;
     if (!p.empty()) return p;
     p.push_back({N_("Faithful"),
-                 N_("The game as the PlayStation showed it: the Original engine, the 4:3 TV picture in its original "
-                    "framing, every texture, sprite, HUD, text and portrait in its original look (no packs, no "
-                    "redraws), no pack movies, no shader, no motion smoothing and no Speedup."),
+                 N_("The game as the PlayStation showed it: the Original engine, 1x resolution, 4:3 TV in its "
+                    "original framing, original textures, sprites, HUD, text and portraits (no packs or redraws), "
+                    "no shader, no HD-2D effects, no motion smoothing, no free camera and no Speedup."),
                  {{"engine", ENGINE_ORIGINAL, nullptr},
                   {"aspect", 0, "4:3tv"},
                   {"expanded_vertical", 0, nullptr},
+                  {"upscale", 1, nullptr},
+                  {"present_filter", 0, nullptr},
                   {"texture_style_3d", 0, nullptr},
                   {"texture_style_sprite", 0, nullptr},
                   {"texture_style_hud", 0, nullptr},
@@ -1118,7 +1316,73 @@ const std::vector<Preset>& presets() {
                   {"movie_replacements", 0, nullptr},
                   {"present_shader", 0, ""},
                   {"interpolation", 0, nullptr},
-                  {"speedup", 0, nullptr}}});
+                  {"speedup", 0, nullptr},
+                  {"free_camera", 0, nullptr},
+                  {"first_person_look", 0, nullptr},
+                  {"depth_of_field", 0, nullptr},
+                  {"tilt_shift", 0, nullptr},
+                  {"lighting", 0, nullptr},
+                  {"glow", 0, nullptr},
+                  {"shadows", 0, nullptr},
+                  {"cloud_shadows", 0, nullptr},
+                  {"light_shafts", 0, nullptr},
+                  {"sun_glare", 0, nullptr},
+                  {"fog", 0, nullptr},
+                  {"color_grade", 0, nullptr},
+                  {"vignette", 0, nullptr},
+                  {"particles", 0, nullptr}}});
+    p.push_back({N_("Enhanced HD-2D"),
+                 N_("The modern showcase setup: the Enhanced engine, 16:9 widescreen with expanded vertical framing, "
+                    "Auto resolution, 60 Hz fields, world map and battles, Speedup, free camera, and HD-2D scene "
+                    "effects (lighting, shadows, depth of field, glow, shafts, fog, colour grade and particles)."),
+                 {{"engine", ENGINE_ENHANCED, nullptr},
+                  {"aspect", 0, "16:9"},
+                  {"expanded_vertical", 1, nullptr},
+                  {"upscale", 0, nullptr},
+                  {"field60", 1, nullptr},
+                  {"field60slow", 1, nullptr},
+                  {"worldmap60", 1, nullptr},
+                  {"battle60", 1, nullptr},
+                  {"speedup", 1, nullptr},
+                  {"free_camera", 1, nullptr},
+                  {"depth_of_field", 2, nullptr},
+                  {"tilt_shift", 0, nullptr},
+                  {"lighting", 2, nullptr},
+                  {"glow", 2, nullptr},
+                  {"shadows", 2, nullptr},
+                  {"cloud_shadows", 2, nullptr},
+                  {"light_shafts", 2, nullptr},
+                  {"sun_glare", 2, nullptr},
+                  {"fog", 2, nullptr},
+                  {"color_grade", 2, nullptr},
+                  {"vignette", 1, nullptr},
+                  {"particles", 2, nullptr}}});
+    p.push_back({N_("Crisp Widescreen"),
+                 N_("Clean modern presentation without post-processing: the Enhanced engine, 16:9 widescreen with "
+                    "expanded vertical framing, Auto resolution, Nearest filter, 60 Hz modes, Speedup, and all "
+                    "HD-2D scene effects off."),
+                 {{"engine", ENGINE_ENHANCED, nullptr},
+                  {"aspect", 0, "16:9"},
+                  {"expanded_vertical", 1, nullptr},
+                  {"upscale", 0, nullptr},
+                  {"present_filter", 0, nullptr},
+                  {"field60", 1, nullptr},
+                  {"field60slow", 1, nullptr},
+                  {"worldmap60", 1, nullptr},
+                  {"battle60", 1, nullptr},
+                  {"speedup", 1, nullptr},
+                  {"depth_of_field", 0, nullptr},
+                  {"tilt_shift", 0, nullptr},
+                  {"lighting", 0, nullptr},
+                  {"glow", 0, nullptr},
+                  {"shadows", 0, nullptr},
+                  {"cloud_shadows", 0, nullptr},
+                  {"light_shafts", 0, nullptr},
+                  {"sun_glare", 0, nullptr},
+                  {"fog", 0, nullptr},
+                  {"color_grade", 0, nullptr},
+                  {"vignette", 0, nullptr},
+                  {"particles", 0, nullptr}}});
     p.push_back({N_("Enhanced 60 Hz"),
                  N_("The Enhanced engine with every 60 Hz mode on: fields (with their 20 and 15 fps rooms), the "
                     "world map and battles."),
@@ -1129,14 +1393,26 @@ const std::vector<Preset>& presets() {
                   {"battle60", 1, nullptr}}});
     p.push_back({N_("Performance"),
                  N_("For integrated GPUs and handhelds: 2x resolution, the large surfaces at half of it, no "
-                    "high-resolution pause blur (a CPU effect), no shader, motion shown at 60 Hz, and the game "
-                    "thread sleeping between frames."),
+                    "high-resolution pause blur (a CPU effect), no shader, HD-2D effects off, motion shown at 60 Hz, "
+                    "and the game thread sleeping between frames."),
                  {{"upscale", 2, nullptr},
                   {"upscale_large", 1, nullptr},
                   {"upscale_cpu_effects", 0, nullptr},
                   {"present_shader", 0, ""},
                   {"interpolation_hz", 60, nullptr},
-                  {"vsync_wait", 0, nullptr}}});
+                  {"vsync_wait", 0, nullptr},
+                  {"depth_of_field", 0, nullptr},
+                  {"tilt_shift", 0, nullptr},
+                  {"lighting", 0, nullptr},
+                  {"glow", 0, nullptr},
+                  {"shadows", 0, nullptr},
+                  {"cloud_shadows", 0, nullptr},
+                  {"light_shafts", 0, nullptr},
+                  {"sun_glare", 0, nullptr},
+                  {"fog", 0, nullptr},
+                  {"color_grade", 0, nullptr},
+                  {"vignette", 0, nullptr},
+                  {"particles", 0, nullptr}}});
     p.push_back({N_("Streaming"),
                  N_("More sound queued ahead (100 ms, growing up to 250 ms), so capture and streaming software "
                     "and busy machines do not make it crackle."),
@@ -1180,7 +1456,7 @@ int saveMine() {
         all += s.key + "=" + v;
         n++;
     }
-    settingsDescribe(MINE_KEY, "preset_mine: F1 > System > Presets' My setup: key=value;... of the settings it sets");
+    settingsDescribe(MINE_KEY, "preset_mine: F1 > Presets' My setup: key=value;... of the settings it sets");
     settingsSet(MINE_KEY, all.c_str());
     settingsSave();
     return n;
@@ -1218,6 +1494,7 @@ std::vector<Change> changesOf(int preset) {
 
 int asking = -1;   // the preset whose confirmation is open
 bool askWanted;
+bool resetAllWanted;
 char presetMessage[200];
 bool presetError;
 
@@ -1236,30 +1513,65 @@ bool beginModal(const char* name) {
 void presetRows() {
     int count = (int)presets().size();
     bool haveMine = settingsGet(MINE_KEY) != nullptr && settingsGet(MINE_KEY)[0] != '\0';
-    if (row("Presets")) {
-        ImGui::SetNextItemWidth(-1);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-        bool open = ImGui::BeginCombo("##preset", tr("Choose a preset..."));
-        ImGui::PopStyleVar();
-        if (open) {
-            skin::frameWindow();
-            for (int i = 0; i < count + (haveMine ? 1 : 0); i++) {
-                if (ImGui::Selectable(tr(i < count ? presets()[i].name : "My setup"), false)) {
-                    asking = i;
-                    askWanted = true;
-                }
+    int total = count + (haveMine ? 1 : 0);
+    for (int i = 0; i < total; i++) {
+        const char* name = i < count ? presets()[i].name : "My setup";
+        const char* about = i < count ? presets()[i].about
+                                      : "Your saved setup (preset_mine): restores every setting as saved.";
+        int diffs = (int)changesOf(i).size();
+        if (pg.active) {
+            if (hiddenBySubmenu()) continue;
+            if (mode == MODE_INDEX || mode == MODE_FILTER) {
+                if (!row(name)) continue;
+                hint("%s", tr(about));
+                continue;
             }
-            ImGui::EndCombo();
+            emitTail();
+            closeTable();
+            markBlock();
         }
-        for (int i = 0; i < count; i++) hint("%s: %s", tr(presets()[i].name), tr(presets()[i].about));
-        hint("Each lists what it changes before it applies. Settings it does not name stay as they are.");
-        if (presetMessage[0] != '\0') {
-            ImGui::PushStyleColor(ImGuiCol_Text, presetError ? skin::textError : skin::textGood);
-            textLines(presetMessage);
+        ImGui::PushID(i);
+        bool chosen = ImGui::Selectable(tr(name), diffs == 0, 0, ImGui::CalcTextSize(tr(name)));
+        ImGui::PopID();
+        if (chosen) {
+            asking = i;
+            askWanted = true;
+        }
+        if (diffs == 0) {
+            ImGui::SameLine(0, 10 * scale());
+            ImGui::PushStyleColor(ImGuiCol_Text, skin::textGood);
+            ImGui::TextUnformatted(tr("Active"));
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::SameLine(0, 10 * scale());
+            ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
+            ImGui::Text(tr("(%d change%s)"), diffs, diffs == 1 ? "" : "s");
             ImGui::PopStyleColor();
         }
+        hint("%s", tr(about));
+        hint("Shows every change before applying. Settings a preset does not name stay as they are.");
     }
-    if (row("My setup", MINE_KEY)) {
+    if (presetMessage[0] != '\0' && plain()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, presetError ? skin::textError : skin::textGood);
+        textLines(presetMessage);
+        ImGui::PopStyleColor();
+    }
+    if (pg.active) {
+        if (!hiddenBySubmenu() && mode == MODE_NORMAL) {
+            emitTail();
+            closeTable();
+            markBlock();
+            if (ImGui::Button(tr(haveMine ? "Save my current setup again" : "Save my current setup"))) {
+                int n = saveMine();
+                snprintf(presetMessage, sizeof presetMessage, tr("My setup saved: %d settings."), n);
+                presetError = false;
+                fprintf(stderr, "ui: my setup saved (%d settings)\n", n);
+                sfx::play(sfx::CHOOSE);
+            }
+            hint("Keeps every setting the presets know as it is now (in settings.ini, preset_mine): the presets' list "
+                 "then has My setup, to come back to it.");
+        }
+    } else if (row("My setup", MINE_KEY)) {
         if (ImGui::Button(tr(haveMine ? "Save my current setup again" : "Save my current setup"))) {
             int n = saveMine();
             snprintf(presetMessage, sizeof presetMessage, tr("My setup saved: %d settings."), n);
@@ -1286,6 +1598,11 @@ void presetRows() {
             snprintf(title, sizeof title, tr("Apply %s? It changes:"), name);
         }
         textLines(title);
+        bool scrolled = changes.size() > 10;
+        if (scrolled) {
+            float maxH = std::min(10.0f * skin::rowHeight(), ImGui::GetIO().DisplaySize.y * 0.45f);
+            ImGui::BeginChild("##presetchanges", ImVec2(0, maxH), ImGuiChildFlags_None);
+        }
         for (const Change& c : changes) {
             std::string to = c.spec->text() ? c.text : c.spec->show(c.value);
             char line[400];
@@ -1295,6 +1612,7 @@ void presetRows() {
             textLines(line);
             ImGui::PopStyleColor();
         }
+        if (scrolled) ImGui::EndChild();
         ImGui::BeginDisabled(changes.empty());
         if (ImGui::Button(tr("Apply"))) {
             for (const Change& c : changes) {
@@ -1316,6 +1634,60 @@ void presetRows() {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndDisabled();
+        ImGui::SameLine();
+        if (ImGui::Button(tr("Cancel")) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+            sfx::play(sfx::BACK);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void resetAllRow() {
+    int changedTotal = 0;
+    for (const Spec& s : table()) {
+        if (s.mine && s.isChanged()) changedTotal++;
+    }
+    if (plain()) {
+        markBlock();
+        ImGui::BeginDisabled(changedTotal == 0);
+        if (ImGui::Button(tr("Reset all to defaults"))) {
+            resetAllWanted = true;
+        }
+        ImGui::EndDisabled();
+        if (changedTotal > 0) {
+            ImGui::SameLine(0, 10 * scale());
+            ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
+            ImGui::Text(tr("(%d changed)"), changedTotal);
+            ImGui::PopStyleColor();
+        }
+        hint("Restores every port setting to its default value (disc paths, BIOS and saves stay untouched).");
+    }
+    if (indexing()) return;
+    closeTable();
+    if (resetAllWanted) {
+        ImGui::OpenPopup("##resetallask");
+        resetAllWanted = false;
+    }
+    if (beginModal("##resetallask")) {
+        char title[160];
+        snprintf(title, sizeof title, tr("Reset %d changed setting%s to defaults?"), changedTotal,
+                 changedTotal == 1 ? "" : "s");
+        textLines(title);
+        if (ImGui::Button(tr("Reset all"))) {
+            int n = 0;
+            for (const Spec& s : table()) {
+                if (s.mine && s.isChanged()) {
+                    s.restore();
+                    n++;
+                }
+            }
+            settingsSave();
+            snprintf(presetMessage, sizeof presetMessage, tr("Reset %d setting%s to defaults."), n, n == 1 ? "" : "s");
+            presetError = false;
+            sfx::play(sfx::CHOOSE);
+            ImGui::CloseCurrentPopup();
+        }
         ImGui::SameLine();
         if (ImGui::Button(tr("Cancel")) || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
             sfx::play(sfx::BACK);
