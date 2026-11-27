@@ -38,8 +38,7 @@ The layout:
     OUT_DIR/<config>/<case>/sweep.log
     OUT_DIR/executables/...                      a release's executables that are no asset (below)
 
-States hold game memory read from the disc: a corpus never leaves this host (work/state-corpus/<release>/,
-carl).
+States hold game memory read from the disc: a corpus never leaves this host (work/state-corpus/<release>/).
 
 A canonical release: one whose corpus manifest says "canonical": true. `release` writes that, and only
 for a release whose executables write portable slots and, with --gate, pass state_compat.py both ways
@@ -48,8 +47,8 @@ never in the set. `release TAG` takes the release's Linux tarball (--tarball, as
 before the upload; else downloaded from GitHub into the cache, checksum-verified), unpacks it in the cache
 and makes the corpus of both its engines (US: the tarball is US only), into work/state-corpus/TAG.
 
---build adds executables of the same release that are no asset: the JP ones (carl "JP for the
-gate only": the release run builds them, packaging/build_release.py --write-linux, and never publishes them).
+--build adds executables of the same release that are no asset: the JP ones (for the
+gate only: the release run builds them, packaging/build_release.py --write-linux, and never publishes them).
 Either that region's Linux tarball of the tag (FILE.tar.gz, FILE.sha256 beside it: both engines) or a folder
 (a build folder, an install; CONFIG=DIR to take one configuration of it). The corpus keeps them, since no
 later release can download them: the tarball and its .sha256 as executables/<region>/<name>, a folder's

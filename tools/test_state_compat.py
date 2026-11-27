@@ -407,7 +407,7 @@ class GateTest(TestCase):
 
 
 class KeptExecutablesTest(TestCase):
-    """Executables that are no asset (JP: carl "JP for the gate only") live in their release's corpus:
+    """Executables that are no asset (JP, for the gate only) live in their release's corpus:
     state_corpus.py release --build keeps them there, state_compat.py runs them from there."""
     TAG = "v2099.01.0"
 

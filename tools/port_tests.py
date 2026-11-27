@@ -21,7 +21,7 @@ not failed. GPU tests need a Vulkan 1.3 device; --no-gpu skips them.
 EXTRAS are scripted runs of `xenogears --extras` (XG_EXTRAS_SCRIPT) whose
 output must match a pattern: they need the disc image and a Vulkan device.
 
-KNOWN lists failures tracked in beads: they print as 'known' and don't fail
+KNOWN lists failures already tracked: they print as 'known' and don't fail
 the run.
 
 --jobs N runs independent tests side by side (default: the CPU count, at
@@ -203,7 +203,7 @@ gpu_lock = GpuLock()
 # under tools/gpu_lock.sh on the Intel GPU): holding it around them would deadlock.
 SELF_LOCKED = {"battle-speed"}
 
-# test -> beads issue; a failure prints as 'known' and doesn't count.
+# test -> a tracked failure; a failure prints as 'known' and doesn't count.
 # (gputest's intermittent 2x resident texture/CLUT failures, xg-htn.35.83,
 # were a wall-clock vblank switching the upscaled copy off mid-test; fixed in
 # gputest's useScale.)

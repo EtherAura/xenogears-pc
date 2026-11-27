@@ -87,7 +87,7 @@ static struct {
     int upscale; /* 0 auto, 1 exact, 2..12 */
     int lastUpscale; /* the upscaled choice Shift+F4 goes back to (0 auto) */
     int color;   /* HIRES_COLOR_* */
-    int orderedFallback, orderedFallbackDefault;
+    int orderingMode;
     int precision, perspective, seamGuard, cpuEffects, slivers;
     int coarseLarge; /* upscale_large=half: large batches at N/2 (vk.c drawHiBatch; the Enhanced engine only) */
     int effectScale, effectMargin, effectExpanded, effectWidth, effectShifted;
@@ -126,9 +126,10 @@ static void load(void) {
         return;
     }
     hr.loaded = 1;
-    settingsDescribe("gpu_ordered_batches", "gpu_ordered_batches: exact ordered GPU fallback on devices without fragment interlock; "
-                                         "default on for Android PowerVR DXT-48-1536, off otherwise; bounded 20 MiB arena");
-    hr.orderedFallback=settingsBool("gpu_ordered_batches",0);
+    settingsDescribe("gpu_ordered_batches", "gpu_ordered_batches: auto (default), 0 for exact split batches, 1 for the ordered "
+                     "fallback. Hardware interlock takes precedence. Auto uses accelerated tile reads or ordered compute "
+                     "on other GPUs, with exact split batches if ordered rendering is unavailable.");
+    hr.orderingMode = settingsBool("gpu_ordered_batches", GPU_ORDERING_AUTO);
     settingsDescribe("upscale_cpu_effects", "upscale_cpu_effects: keep rendered detail through the Gear arena pause blur above 1x, 0 off (default), 1 on");
     hr.cpuEffects = settingsBool("upscale_cpu_effects", 0);
     settingsDescribe("upscale_large", "upscale_large: full (default) or half: the Enhanced engine draws large surfaces (arenas, Gears, "
@@ -196,13 +197,15 @@ static void load(void) {
 
 /* ---- the settings menu (gpu.h) ------------------------------------------------- */
 
-int gpuOrderedFallback(void) {load();return hr.orderedFallback;}
-int gpuOrderedFallbackDefault(void) { return hr.orderedFallbackDefault; }
-void gpuSetOrderedFallback(int on) {
-    load();on=!!on;
-    if(hr.orderedFallback==on)return;
-    gvkSetOrderedFallback(on);
-    hr.orderedFallback=on;settingsSetInt("gpu_ordered_batches",on);
+int gpuOrderingMode(void) { load(); return hr.orderingMode; }
+void gpuSetOrderingMode(int mode) {
+    load();
+    if (mode < GPU_ORDERING_AUTO || mode > GPU_ORDERING_FALLBACK || hr.orderingMode == mode) return;
+    hr.orderingMode = mode;
+    gvkSetOrderingMode(mode);
+    if (mode == GPU_ORDERING_AUTO) settingsSet("gpu_ordered_batches", "auto");
+    else settingsSetInt("gpu_ordered_batches", mode);
+    settingsSave();
 }
 int hiresUpscale(void) {
     load();
@@ -215,11 +218,9 @@ int hiresGpuBudget(void) { load(); return hr.gpuMs; }
  * the hi-res copy of a Gear battle costs 9.4 ms per vblank at 12x, 3.8 at 4x,
  * 1.7 at 2x; an 8 ms budget settled it at 6x with the native rate kept. A
  * discrete GPU holds 12x everywhere, so it keeps the budget off. */
-void hiresDeviceDefaults(int orderedFallbackDefault) {
+void hiresDeviceDefaults(void) {
     load();
     if (hr.gpuMsDefault && hr.gpuMs == 0 && gvkDeviceIntegrated() > 0) hr.gpuMs = HI_AUTO_BUDGET_INTEGRATED;
-    hr.orderedFallbackDefault = orderedFallbackDefault;
-    hr.orderedFallback = settingsBool("gpu_ordered_batches", orderedFallbackDefault);
 }
 void hiresGpuTimePause(void) {
     hr.timingActive = 0;

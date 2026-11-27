@@ -177,7 +177,7 @@ int interpolationSetting(void) { load(); return ip.enabled && speedupEnabled(); 
  * a second time (the scene's draws and effects: the GPU's work about 1.4
  * times) a frame late, and add nothing. It stands aside there: the game's
  * own pictures, no delay; at 120/144/240 Hz it still adds pictures between
- * (xg-c4y7: carl's settings in Lahan, late vblanks 6 -> 0 of 341, GPU
+ * (xg-c4y7: measured in Lahan, late vblanks 6 -> 0 of 341, GPU
  * median 13.6 -> 9.5 ms). The setting itself stays as chosen. Weak: the
  * programs that link this file without the gameplay switches never stand
  * aside. */

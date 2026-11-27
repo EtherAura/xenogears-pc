@@ -2229,7 +2229,7 @@ static void pcFieldSceneDepth(int looking) {
     s32 x = fieldSceneState.m10_cameraAt.vx >> 16;
     s32 y = fieldSceneState.m10_cameraAt.vy >> 16;
     s32 z = fieldSceneState.m10_cameraAt.vz >> 16;
-    /* First-person look focuses where the view's centre is (carl,);
+    /* First-person look focuses where the view's centre is;
      * the port measures it in the picture's depth. */
     s32 focus = looking ? PC_SCENE_FOCUS_CENTRE : ((m->m[2][0] * x + m->m[2][1] * y + m->m[2][2] * z) >> 12) + m->t[2];
     s32 picture = -1;

@@ -8998,8 +8998,44 @@ msgid "Licences"
 msgstr "ライセンス"
 
 #: port/src/ui/sections.cpp
-msgid "May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. Enabled by default on the Android PowerVR DXT-48-1536."
-msgstr "ハードウェアで描画の順番を守る機能のない GPU で、速くなることがあります。GPU のメモリーを 20 MiB 使います。Android の PowerVR DXT-48-1536 では初期設定でオンです。"
+msgid "Hardware ordering always takes priority. On other GPUs, Auto prefers accelerated tile reads, then ordered compute. The ordered fallback uses about 24 MiB of GPU memory."
+msgstr "ハードウェアによる描画順序の制御を常に優先します。ほかの GPU では「自動」が高速タイル読み出し、次にコンピュートによる順序制御を選びます。代替処理には GPU メモリーを約 24 MiB 使用します。"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Split batches"
+msgstr "バッチ分割"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Ordered fallback"
+msgstr "順序制御の代替処理"
+
+#: port/src/ui/sections.cpp
+msgid "Renderer inactive."
+msgstr "描画機能は停止中です。"
+
+#: port/src/ui/sections.cpp
+msgid "Hardware ordered rendering is active."
+msgstr "ハードウェアによる描画順序の制御を使用しています。"
+
+#: port/src/ui/sections.cpp
+msgid "Accelerated tile reads are active."
+msgstr "高速タイル読み出しを使用しています。"
+
+#: port/src/ui/sections.cpp
+msgid "Tile reads and ordered compute are active."
+msgstr "タイル読み出しとコンピュートによる順序制御を使用しています。"
+
+#: port/src/ui/sections.cpp
+msgid "Ordered compute is active."
+msgstr "コンピュートによる描画順序の制御を使用しています。"
+
+#: port/src/ui/sections.cpp
+msgid "Exact split batches are active."
+msgstr "描画順序を保つためにバッチ分割を使用しています。"
+
+#: port/src/ui/sections.cpp
+msgid "Using exact split batches because ordered rendering is unavailable."
+msgstr "順序制御の代替処理を利用できないため、描画順序を保つバッチ分割を使用しています。"
 
 #: port/src/ui/sections.cpp
 #, c-format

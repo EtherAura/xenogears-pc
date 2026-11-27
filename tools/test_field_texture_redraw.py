@@ -99,7 +99,7 @@ class PlanReuseTests(unittest.TestCase):
                                                       plan=str(early.resolve())))])
 
 
-# the colour gate (carl xg-jqe8): a repaint keeps the original's brightness, colours and soft light;
+# the colour gate (xg-jqe8): a repaint keeps the original's brightness, colours and soft light;
 # blank areas stay blank
 class TextureGateTests(unittest.TestCase):
     def plan(self, tmp, paint):

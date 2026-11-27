@@ -119,7 +119,7 @@
 #define TABLES 2
 
 static const char* const levelNames[] = {"off", "subtle", "medium", "strong"};
-/* The largest radius by level and the focus range by setting. carl, testing
+/* The largest radius by level and the focus range by setting. Testing
  * at 9x: "a bit too strong still" (a step softer), then "still too blurry and
  * tall, looks like smeared vaseline": half the screen was half blurred. He
  * chose, from captures of Strong + Wide, the radius at 2/3 and the range
@@ -128,20 +128,20 @@ static const char* const levelNames[] = {"off", "subtle", "medium", "strong"};
 static const float levelRadius[] = {0, 0.65f, 1.25f, 2.0f};
 static const char* const focusNames[] = {"narrow", "normal", "wide"};
 static const float focusBand[] = {0.18f, 0.36f, 0.65f};
-/* Dialogue focus (xg-rgcf.5.18, carl's picks): while someone speaks the focus
+/* Dialogue focus (xg-rgcf.5.18): while someone speaks the focus
  * moves to the speaker and the sharp range narrows to this share, easing over
  * DIALOGUE_EASE vblanks (half a second) each way. */
 #define DIALOGUE_BAND 0.5f
 #define DIALOGUE_EASE 30.0f
 /* The tilt-shift's radius at the frame's edges per level (PS1 pixels; the
- * blur's sigma is half of it): carl chose Medium from the prototypes
+ * blur's sigma is half of it): Medium, from the prototypes
  * (xg-rgcf.5.14; its shape: tilt_shift.glsl), then, testing at 9x ("blur
  * stands out too much still, needs to be a smooth gradual transition"), a
  * third of it over a taller strip. */
 static const float tiltRadius[] = {0, 1.5f, 3.0f, 5.0f};
 /* Lighting and glow by level (light.comp has the fixed shares). Half what
- * was first chosen, the light shafts too (carl, testing at 9x: "tone down the
- * lighting"; he chose all three at half from captures,). */
+ * was first chosen, the light shafts too (testing at 9x: "tone down the
+ * lighting"; all three at half from captures,). */
 static const float lightTop[] = {0, 0.125f, 0.225f, 0.375f};
 static const float lightShade[] = {0, 0.3f, 0.5f, 0.7f};
 static const float lightBounce[] = {0, 0.3f, 0.5f, 0.75f};
@@ -154,15 +154,15 @@ static const float shadowDark[] = {0, 0.25f, 0.45f, 0.6f};
 static const float fogMost[] = {0, 0.35f, 0.5f, 0.7f};
 static const float fogDensity[] = {0, 0.8f, 1.1f, 1.4f};
 static const float gradeAmount[] = {0, 0.5f, 1.0f, 1.5f};
-/* The vignette: the corners' darkening per level (xg-rgcf.5.13, carl's pick). */
+/* The vignette: the corners' darkening per level (xg-rgcf.5.13). */
 static const float vignetteAmount[] = {0, 0.12f, 0.22f, 0.35f};
 /* Light shafts: their strength per level (xg-rgcf.5.16; Medium was the
- * prototype carl chose, light.comp's shares). Then half, as above, and then
- * 35% of that (carl: "light shafts still too strong"; from captures at 60,
+ * prototype that was chosen, light.comp's shares). Then half, as above, and then
+ * 35% of that ("light shafts still too strong"; from captures at 60,
  * 35 and 15%,). */
 static const float shaftAmount[] = {0, 0.105f, 0.175f, 0.2625f};
 /* Cloud shadows (xg-rgcf.5.17): how much of the sun a cloud takes per level
- * (Medium the prototype carl chose, work/hd2d/light/proto18.py), a cloud's
+ * (Medium the prototype that was chosen), a cloud's
  * size (the width of a 16:9 picture, CLOUD_PICTURE PS1 pixels, at the focus
  * distance when the room starts: "Large"), and their drift in cloud sizes a
  * second; it wraps after CLOUD_PERIOD of them, where light.comp's cover
@@ -173,19 +173,19 @@ static const float cloudDark[] = {0, 0.24f, 0.38f, 0.52f};
 #define CLOUD_DRIFT_ACROSS 0.012
 #define CLOUD_PERIOD 512.0
 /* Flickering firelight (xg-rgcf.5.20): how deep per level of Lighting (or
- * of Glow, when Lighting is off), and its character: carl chose "Torch" from
- * the prototypes (work/hd2d/light/proto20.py), about two flickers a second,
+ * of Glow, when Lighting is off), and its character: "Torch", from
+ * the prototypes, about two flickers a second,
  * somewhat irregular. */
 static const float flickerDepth[] = {0, 0.25f, 0.4f, 0.6f};
 #define FLICKER_SPEED 1.8f
-/* Footstep dust (xg-rgcf.5.23, carl chose the lingering "clouds", a step
- * paler than the ground, from in-game prototypes: work/hd2d/light/proto22.py):
+/* Footstep dust (xg-rgcf.5.23, the lingering "clouds", a step
+ * paler than the ground, from in-game prototypes):
  * how strong per level of Particles; a puff's life (vblanks), its radius when
  * born and how much it covers at most; a step, the farthest a foot moves from
  * one scene to the next, and a run's speed, in characters' heights
  * (DUST_HEIGHT view units, as light.comp FIGURE_HEIGHT) and heights a vblank. */
 static const float dustAmount[] = {0, 0.5f, 0.8f, 1.2f};
-/* Sun glare (xg-rgcf.5.24): its strength per level (Medium the prototype carl chose). */
+/* Sun glare (xg-rgcf.5.24): its strength per level (Medium the prototype that was chosen). */
 static const float glareAmount[] = {0, 0.5f, 1.0f, 1.6f};
 #define DUST_LIFE 60u
 #define DUST_SIZE 0.5f
@@ -315,7 +315,7 @@ static void load(void) {
     s = settingsGet("depth_of_field_focus");
     sc.focus = 1;
     for (int i = 0; s != NULL && i < 3; i++) if (strcmp(s, focusNames[i]) == 0) sc.focus = i;
-    /* Sprites blur by where they stand by default (carl, xg-rgcf.5.18). */
+    /* Sprites blur by where they stand by default (xg-rgcf.5.18). */
     settingsDescribe("depth_of_field_sprites", "depth_of_field_sprites: depth (default): a sprite blurs by where it "
                                                "stands; sharp: sprites stay in focus");
     s = settingsGet("depth_of_field_sprites");

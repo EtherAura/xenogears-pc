@@ -585,7 +585,7 @@ endif()
 target_compile_definitions(platform PRIVATE PLATFORM_PC VERSION_${XG_VERSION} ${XG_ROOT_DEFINE}
     XG_ENGINE_ENHANCED=${XG_ENGINE_ENHANCED})
 # Save state slots that other builds load (port/src/system/stateportable.c), in every build since
-# canonical states' compatibility phase (carl): the first release that writes them is the
+# canonical states' compatibility phase: the first release that writes them is the
 # first canonical one, and from then on each release's slots load in every earlier canonical release
 # and theirs in it (the state-compat gate at each release cut). OFF writes and converts none: every
 # slot is "This version only", as in the releases before.
@@ -686,8 +686,8 @@ target_link_libraries(ui PRIVATE SDL3::SDL3 Vulkan::Headers)
 # System > Updates, the system's own HTTPS (update_fetch.c: WinHTTP, Android's HttpURLConnection,
 # libcurl loaded at run time). On in every build to hand out (XG_DIST: each release's packages,
 # Linux, Windows, Arch and Gentoo; the Android APK by tools/build_android.sh --updater) since the
-# first canonical release, whose save states load both ways with every later one's (xg-4oq.14.7,
-# carl); off in a development build. The check is still asked before it ever runs.
+# first canonical release, whose save states load both ways with every later one's (xg-4oq.14.7);
+# off in a development build. The check is still asked before it ever runs.
 # Without it nothing of it is built.
 option(XG_UPDATER "the opt-in update check (port/src/update)" ${XG_DIST})
 if(XG_UPDATER)
@@ -1066,7 +1066,7 @@ if(WIN32)
         -Wl,--disable-high-entropy-va -Wl,--stack,0x800000 -static
         "-Wl,-Map,$<TARGET_FILE:xenogears>.map")
     # A GUI program (-mwindows): a start from Explorer or the Start menu opens no console window
-    # beside the game (carl xg-l5p4). A start from a terminal still logs there:
+    # beside the game (xg-l5p4). A start from a terminal still logs there:
     # main() attaches to its console (system/win32.c win32AttachConsole).
     set_target_properties(xenogears PROPERTIES WIN32_EXECUTABLE TRUE)
     # COFF symbols do not carry ELF sizes. Keep exact input placement for

@@ -187,8 +187,10 @@ std::vector<Spec>& table() {
         s.unit = " ms";
         s.mine = false; // the device's
     }
-    add("gpu_ordered_batches", N_("GPU ordering"), [](int) { return gpuOrderedFallback(); },
-        [](int, int v) { gpuSetOrderedFallback(v); }, 0).def = [](int) { return gpuOrderedFallbackDefault(); };
+    static const char* const orderingNames[] = {N_("Auto"), N_("Split batches"), N_("Ordered fallback")};
+    static const int orderingValues[] = {GPU_ORDERING_AUTO, GPU_ORDERING_SPLIT, GPU_ORDERING_FALLBACK};
+    add("gpu_ordered_batches", N_("GPU ordering"), [](int) { return gpuOrderingMode(); },
+        [](int, int v) { gpuSetOrderingMode(v); }, GPU_ORDERING_AUTO, orderingNames, 3, orderingValues).mine = false;
     static const char* const waits[] = {N_("Sleep between frames"), N_("Spin (steady clock)")};
     add("vsync_wait", N_("VSync wait"), [](int) { return hwSpinWait(); }, [](int, int v) { hwSetSpinWait(v); }, 0,
         waits);
@@ -1407,7 +1409,6 @@ const std::vector<Preset>& presets() {
                 {"scale", 0, nullptr},
                 {"widefill", 1, nullptr},
                 {"upscale", 0, nullptr},
-                {"gpu_ordered_batches", 1, nullptr},
                 {"vsync_wait", 1, nullptr},
                 {"display_lock", 1, nullptr},
                 {"display_lock_tolerance", 20, nullptr},

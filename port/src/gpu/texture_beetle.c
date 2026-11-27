@@ -2,7 +2,7 @@
  * RetroArch's Beetle PSX HW core, texture replacement on) drawn through the
  * texture pack path (texture_pack.c finds and decodes the files).
  *
- * The naming scheme was measured black-box (beads xg-mrj.1, no emulator
+ * The naming scheme was measured black-box (no emulator
  * source read: tools/beetle_front.c ran the core as a libretro frontend,
  * our own GPU test programs drew known uploads, standard hashes were tried
  * on the dumped names; docs/BEETLE_PACKS.md has the method and results):

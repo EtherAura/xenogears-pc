@@ -1702,14 +1702,12 @@ static int createDevice(void) {
     }
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(vk.physical, &props);
-    int orderedDefault = 0;
+    int powerVrCpuTilesOff = 0;
 #ifdef __ANDROID__
-    /* PowerVR DXT-48-1536: batching overlapping draws through the
-     * ordered fallback avoids the stalls measured with split batches. */
-    orderedDefault = !vk.interlock && props.vendorID == 0x1010 && props.deviceID == 0x71061212;
+    powerVrCpuTilesOff = !vk.interlock && props.vendorID == 0x1010 && props.deviceID == 0x71061212;
 #endif
-    hiresDeviceDefaults(orderedDefault);
-    /* The same GPU keeps CPU-owned tiles (vram.c) off by default: there a
+    hiresDeviceDefaults();
+    /* The PowerVR DXT-48-1536 keeps CPU-owned tiles (vram.c) off by default: a
      * CPU-drawn primitive over the GPU's pixels waits for them (the queue
      * flushed, about 10 ms in the app), and every tile so read becomes the
      * CPU's, so an ordinary battle's menu spread its CPU drawing over the
@@ -1717,8 +1715,8 @@ static int createDevice(void) {
      * with them, 0 and 0 without; the New Game intro (its screen effect
      * included) 2 and 0; field 13 0-2 and 0; the Gear battle 0 either way
      * (xg-mrj.3.10.4). */
-    vramOwnedDeviceDefault(!orderedDefault);
-    if (orderedDefault) gpuLog("vulkan: CPU-owned tiles off on this GPU by default (XG_CPU_OWNED=1 keeps them)");
+    vramOwnedDeviceDefault(!powerVrCpuTilesOff);
+    if (powerVrCpuTilesOff) gpuLog("vulkan: CPU-owned tiles off on this GPU by default (XG_CPU_OWNED=1 keeps them)");
     gpuLog("vulkan: using %s, %s", props.deviceName,
            vk.interlock ? "fragment shader interlock"
                         : vk.tileImage ? "no interlock, tile image reads (batches split on overlap without the ordered fallback)"
@@ -3330,7 +3328,7 @@ static int orderedMake(void) {
     if(!compute||envFlag("XG_ORDERED_TEST_FAIL"))return 0;
     vk.orderedCapacity=ORDERED_CAPACITY;
     /* Small bounded arenas exercise horizontal and vertical partitioning in
-     * tests. Production uses 20 MiB, independent of render resolution. */
+     * tests. Production uses 24 MiB, independent of render resolution. */
     const char* cap=getenv("XG_ORDERED_TEST_CAPACITY");
     if(cap) {unsigned long c=strtoul(cap,NULL,10);if(c>=ORDERED_TRIANGLES&&c<=ORDERED_CAPACITY)vk.orderedCapacity=(uint32_t)c;}
     VkDeviceSize bytes=(VkDeviceSize)vk.orderedCapacity*16+32+16*ORDERED_TRIANGLES;
@@ -3429,16 +3427,22 @@ static int orderedDepthMake(void) {
     return 1;
 }
 
-void gvkSetOrderedFallback(int on) {
-    if(!vk.device)return;
+void gvkSetOrderingMode(int mode) {
+    if (!vk.device || vk.interlock) return;
+    int on = mode != GPU_ORDERING_SPLIT;
+    if (on == vk.orderedEnabled) return;
     endBatch();
-    if(on&&!vk.interlock&&vk.orderedState==0) {resIdle();orderedMake();}
-    vk.orderedEnabled=on&&!vk.interlock&&vk.orderedState>0;
+    if (on && vk.orderedState == 0) {
+        resIdle();
+        orderedMake();
+    }
+    vk.orderedEnabled = on && vk.orderedState > 0;
     /* The scene's pipelines are made at the start when an effect is on (gvkInit):
      * this mode's depth ones with them, not at the first field scene (1.2 s of
      * the game thread on the Pixel's PowerVR, xg-mrj.3.27). */
-    if(vk.orderedEnabled&&vk.scene.state>0)orderedDepthMake();
-    if(on&&!vk.interlock&&!vk.orderedEnabled)gpuWarnOnce("ordered-fallback","vulkan: ordered fallback unavailable; using exact split batches");
+    if (vk.orderedEnabled && vk.scene.state > 0) orderedDepthMake();
+    if (on && !vk.orderedEnabled)
+        gpuWarnOnce("ordered-fallback", "vulkan: ordered fallback unavailable; using exact split batches");
 }
 uint32_t gvkOrderedOverflow(void) {
     if(vk.orderedState<=0)return 0;
@@ -3451,15 +3455,16 @@ uint32_t gvkOrderedOverflow(void) {
 }
 int gvkOrderedWrites(void) {return vk.interlock||vk.orderedEnabled;}
 int gpuPresentFormat(void) { return (int)vk.swapchainFormat; }
-const char* gpuOrderedStatus(void) {
-    if(!vk.device)return "Renderer has not started.";
-    if(vk.interlock)return "Hardware ordered rendering is active.";
-    if(vk.orderedEnabled&&vk.tileDraw&&vk.tileWideDraw&&vk.tileHiDraw&&vk.tileHiWideDraw)
-        return "Exact ordered fallback is active: tile image passes for every picture.";
-    if(vk.orderedEnabled&&vk.tileDraw)return "Exact ordered fallback is active: tile image passes for the native picture.";
-    if(vk.orderedEnabled)return "Exact ordered fallback is active.";
-    if(vk.orderedState<0)return "Ordered fallback is unavailable; exact split batches are active.";
-    return "Exact split batches are active.";
+GpuOrderingStatus gpuOrderingStatus(void) {
+    if (!vk.device) return GPU_ORDERING_INACTIVE;
+    if (vk.interlock) return GPU_ORDERING_INTERLOCK;
+    if (vk.orderedEnabled) {
+        if (vk.tileDraw && vk.tileWideDraw && vk.tileHiDraw && vk.tileHiWideDraw) return GPU_ORDERING_TILE;
+        if (vk.tileDraw || vk.tileWideDraw || vk.tileHiDraw || vk.tileHiWideDraw) return GPU_ORDERING_TILE_AND_COMPUTE;
+        return GPU_ORDERING_COMPUTE;
+    }
+    if (vk.orderedState < 0 && gpuOrderingMode() != GPU_ORDERING_SPLIT) return GPU_ORDERING_FALLBACK_UNAVAILABLE;
+    return GPU_ORDERING_SPLIT_ACTIVE;
 }
 
 static void resClear(void) {
@@ -4292,8 +4297,8 @@ static int sceneDepthImage(int t, int w, int h);
 static int sceneWorkImages(int w, int h);
 /* The blur's layers' pixels per PS1 pixel at n copy pixels per PS1 pixel
  * (shaders/dof.comp): one up to 3x, then enough that a layer pixel is two or
- * three of the copy's, so a blur can start small and grow with depth (carl,
- * at 9x: "needs to be a smooth gradual transition"; on the PS1's grid the
+ * three of the copy's, so a blur can start small and grow with depth
+ * (at 9x: "needs to be a smooth gradual transition"; on the PS1's grid the
  * smallest blur was 1.5 PS1 pixels, cross-faded in over the sharp picture).
  * XG_DOF_SCALE=<s> sets it (1: the PS1's grid, as before). */
 static int dofScale(int n) {
@@ -9136,7 +9141,7 @@ int gvkInit(void* sdlWindow) {
         createSwapchain();
     }
     gvkSubmit();
-    gvkSetOrderedFallback(gpuOrderedFallback());
+    gvkSetOrderingMode(gpuOrderingMode());
     UiVulkan dev = {(void*)vkGetInstanceProcAddr, vk.instance, vk.physical, vk.device, vk.queueFamily, vk.queue};
     if (uiVulkanReady != NULL) {
         uiVulkanReady(&dev);

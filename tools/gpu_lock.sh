@@ -1,6 +1,6 @@
 #!/bin/bash
-# Runs a command holding the Intel GPU lock that every headless game run on the Intel GPU shares (tools/intel.sh, the
-# art chapters' run.sh, the real-clock port tests), whichever account runs it: carl or the art lanes' hermes (xg-3tf).
+# Runs a command holding the Intel GPU lock that every headless game run on the Intel GPU shares (tools/intel.sh and
+# the real-clock port tests), including when another account runs one at the same time.
 #   tools/gpu_lock.sh <command...>
 # The lock file belongs to the account that made it first. With fs.protected_regular, flock's own open of another
 # account's file in /tmp (O_CREAT) is refused, so the file is opened read-only and its descriptor is locked.

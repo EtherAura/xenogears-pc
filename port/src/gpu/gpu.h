@@ -52,8 +52,7 @@
  *                          groups; tests cleanup, retry delay and recovery.
  *   XG_TEST_HI_WIDE_GROW_FAIL=1  force the overlap allocation to fail, testing
  *                          host-staged growth without changing the scale.
- *   XG_VK_NO_INTERLOCK=1   draw without fragment shader interlock (the
- *                          fallback that splits batches on overlap)
+ *   XG_VK_NO_INTERLOCK=1   test the GPU ordering fallback on an interlock device
  *   XG_VK_NO_MEMORY_BUDGET=1 ignore VK_EXT_memory_budget: the hi-res wide
  *                          canvas's unused rows are trimmed to system memory
  *                          whatever the device heap's fill (else only when it
@@ -201,12 +200,24 @@ int presentAspect(int* w, int* h);
 #define PRESENT_FILTER_XBR 4      /* smoothed edges in pixel art */
 #define PRESENT_FILTER_COUNT 5
 
+/* GPU ordering (hires.c, vk.c). Keep the legacy numeric choices for settings
+ * and saved presets. Hardware interlock takes precedence in every mode. */
+enum { GPU_ORDERING_AUTO = -1, GPU_ORDERING_SPLIT = 0, GPU_ORDERING_FALLBACK = 1 };
+typedef enum {
+    GPU_ORDERING_INACTIVE,
+    GPU_ORDERING_INTERLOCK,
+    GPU_ORDERING_TILE,
+    GPU_ORDERING_TILE_AND_COMPUTE,
+    GPU_ORDERING_COMPUTE,
+    GPU_ORDERING_SPLIT_ACTIVE,
+    GPU_ORDERING_FALLBACK_UNAVAILABLE,
+} GpuOrderingStatus;
+int gpuOrderingMode(void);
+void gpuSetOrderingMode(int mode);
+GpuOrderingStatus gpuOrderingStatus(void);
+
 /* The hi-res copy (hires.c): upscale= and upscale_color= in settings.ini,
  * written at once, applied from the next picture. */
-int gpuOrderedFallback(void);
-int gpuOrderedFallbackDefault(void);
-void gpuSetOrderedFallback(int on);
-const char* gpuOrderedStatus(void);
 int hiresUpscale(void);          /* 1 exact (default), 0 auto, 2..12 */
 void hiresSetUpscale(int v);
 int hiresGpuBudget(void);       /* Auto GPU budget in ms; 0 disabled (default), 1..50 */

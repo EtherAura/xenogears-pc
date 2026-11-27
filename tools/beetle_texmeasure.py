@@ -7,8 +7,8 @@ content (tools/beetle_runner.s, a PS-X EXE executing GP0/GP1 lists from a RAM
 mailbox). Each case uploads known texels and palettes, draws them, and reads
 what the core wrote into '<content>-texture-dump/' or shows from
 '<content>-texture-replacements/'. No emulator source is read: the scheme the
-port implements (port/src/gpu/texture_beetle.c, docs/BEETLE_PACKS.md, beads
-xg-mrj.1) is what these cases print.
+port implements (port/src/gpu/texture_beetle.c, docs/BEETLE_PACKS.md)
+is what these cases print.
 
     python tools/beetle_texmeasure.py search    # which standard hash names a dump (all candidates)
     python tools/beetle_texmeasure.py naming    # depths, sizes, positions, copies, fills, palettes

@@ -11,8 +11,8 @@ naming round: the event-battle movie flag, the result screen's label tables,
 the field's video-player flags). pc_link now resolves them by address and
 stops the build if two PC objects stand for one PS1 address, so a name that
 differs no longer splits anything on the PC. This stays as a naming check:
-a rename must reach every module that names the address (Beads memory
-naming-cross-module), and the PS1 build cannot notice when it does not.
+a rename must reach every module that names the address, and the PS1
+build cannot notice when it does not.
 
 For every module M, each data symbol its linked image (build/<ver>/M.elf)
 takes as an absolute address outside M's own image (symbol-file names and

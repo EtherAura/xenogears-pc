@@ -1827,7 +1827,7 @@ class Sites:
         return {c: self.cache[self.full(c)] for c in callers}
 
     # P2 prototype: what a site allocates where its line does not say (sizeof) and no static's field takes it.
-    # The C runtime replaces this table with the type each site's request names (PC_HEAP_*, carl: types in the
+    # The C runtime replaces this table with the type each site's request names (PC_HEAP_*, types in the
     # source); until then: (file, line) -> "prims" (a primitive buffer: OT tags and GPU words), "ptrs" (an
     # array of pointers), or a type name.
     OVERRIDES = {

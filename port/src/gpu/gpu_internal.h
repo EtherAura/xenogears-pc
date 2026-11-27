@@ -191,10 +191,10 @@ int gvkHasInterlock(void);
 /* 1: the chosen device is an integrated GPU, -1 a discrete or other one, 0 none chosen yet. */
 int gvkDeviceIntegrated(void);
 /* hires.c: the settings whose defaults depend on the device, applied once it is chosen. */
-void hiresDeviceDefaults(int orderedFallbackDefault);
+void hiresDeviceDefaults(void);
 int gvkOrderedWrites(void);
 uint32_t gvkOrderedOverflow(void);
-void gvkSetOrderedFallback(int on);
+void gvkSetOrderingMode(int mode);
 /* Append triangles (n vertices, a multiple of 3). */
 void gvkDraw(const GpuVertex* v, int n);
 /* The same, for a PS1 triangle walked in fixed point (gp0.c): `ints` int32 of

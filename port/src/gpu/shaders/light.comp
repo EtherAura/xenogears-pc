@@ -190,7 +190,7 @@ const float TOP_UP = 0.55, TOP_DOWN = 0.9, TOP_RESPONSE = 3.0;
 // sprite's pixel may be (PS1 pixels at the foot; depth as a share), and how
 // near the ground there must be to the shadow's depth; how high up the sprite
 // (PS1 pixels at the foot) its shadow has faded from the feet, and to what
-// (xg-rgcf.5.7: carl chose the fading shadow). The most dark.
+// (xg-rgcf.5.7: the shadow fades from the feet). The most dark.
 const float SHADOW_REACH = 48.0, SHADOW_THICK = 0.25, SHADOW_MOST = 0.85;
 // What is painted this bright (light, the squared 8-bit value) is a light: no shadow from here, none at all from there.
 const float SHADOW_KEEP_FROM = 0.45, SHADOW_KEEP_TO = 0.75;
@@ -200,8 +200,8 @@ const int SHADOW_STEPS = 24, MAX_FIGURES = 32;
 // which scenery counts as far for that colour, and where wholly; the
 // neutral the colour is taken half way to.
 const int FOG_SLOT = 2 + MAX_FIGURES;
-// Light shafts (xg-rgcf.5.16, carl chose the streaked beams with sunbeams
-// from the prototypes, work/hd2d/light/proto17.py): their settings' place in
+// Light shafts (xg-rgcf.5.16, the streaked beams with sunbeams
+// from the prototypes): their settings' place in
 // the block (x: their strength, 0 none; y: the frame's time in seconds; vk.c
 // lightBlock); a source is brighter than SHAFT_RATIO times the room's shown
 // brightness (at least SHAFT_FLOOR, at most SHAFT_CEIL), or the far backdrop
@@ -216,7 +216,7 @@ const float SHAFT_FAR_FROM = 0.44, SHAFT_FAR_TO = 0.50;
 const int SHAFT_STEPS = 16;
 const float SHAFT_FADE = 2.5, SHAFT_BEAMS = 1.1, SHAFT_SUN = 0.16, SHAFT_REACH = 0.55;
 const vec3 SUN_COLOUR = vec3(1.0, 0.94, 0.80);
-// Sun glare (xg-rgcf.5.24, carl's picks from work/hd2d/light/proto23.py): in
+// Sun glare (xg-rgcf.5.24): in
 // SHAFT_SLOT z its strength (0 none, 1 Medium) and w how open the sun's side
 // is (pass 18). The glare's sun sits just outside the picture's edge the
 // room's sun lies beyond, GLARE_OUT picture heights past it (the true sun is
@@ -226,8 +226,8 @@ const vec3 SUN_COLOUR = vec3(1.0, 0.94, 0.80);
 // shows near that point: GLARE_OPEN of it counts as all, GLARE_NEAR picture
 // heights the reach of "near".
 const float GLARE_OUT = 0.12, GLARE_OPEN = 0.5, GLARE_NEAR = 0.35;
-// Cloud shadows (xg-rgcf.5.17, carl chose the large soft clouds from the
-// prototypes, work/hd2d/light/proto18.py): their settings' place in the block
+// Cloud shadows (xg-rgcf.5.17, the large soft clouds from the
+// prototypes): their settings' place in the block
 // (x: how much of the sun a cloud takes, 0 none; y: a cloud's size, view
 // units; zw: the drift, in cloud sizes; then xyz: the room's origin in view
 // space, w: 1 where the far backdrop is a painting, vk.c lightBlock). The
@@ -243,8 +243,8 @@ const int CLOUD_SLOT = 4 + MAX_FIGURES;
 // FLICKER_CELL view units to each other flicker nearly together. The room's
 // origin is the clouds' (CLOUD_SLOT + 1).
 const int FLICKER_SLOT = 6 + MAX_FIGURES;
-// The colour grade adapting to the area (xg-rgcf.5.22, carl chose "subtle"
-// from the prototypes, work/hd2d/light/proto21.py): its place in the block
+// The colour grade adapting to the area (xg-rgcf.5.22, "subtle"
+// from the prototypes): its place in the block
 // (rgb: the room's scenery's average shown colour, which pass 18 writes; w:
 // how much, 0 none, 1 at the grade's Medium), and the lean at 1: a tint toward
 // that colour (at most AREA_MOST of it away from grey), more colour where a
@@ -267,8 +267,8 @@ const vec3 FOG_NEUTRAL = vec3(0.66, 0.70, 0.76);
 const float VIGNETTE_FROM = 0.45;
 const float FIGURE_HEIGHT = 96.0, FIGURE_WIDTH = 32.0, FIGURE_DEPTH = 0.15, GROUND_DEPTH = 0.05;
 const float FIGURE_FADE = 0.8 * FIGURE_HEIGHT, FIGURE_FADE_TO = 0.15;
-// The sprites in the lighting (xg-rgcf.5.19, carl chose "rounded + rim" from
-// the prototypes, work/hd2d/light/proto19.py): each row of a sprite lit by the
+// The sprites in the lighting (xg-rgcf.5.19, "rounded + rim" from
+// the prototypes): each row of a sprite lit by the
 // sun as a cylinder facing the camera, with a soft wrap, relative to the row's
 // mean (FIGURE_ROUND at Medium); a thin edge toward the sun (FIGURE_RIM steps
 // of a PS1 pixel, FIGURE_RIM_GAIN of the sprite's own colour in the sun's);
@@ -1181,7 +1181,7 @@ vec3 grade(vec3 c, float k) {
     return clamp(o, 0.0, 1.0);
 }
 
-// Footstep dust (carl's pick: lingering clouds, a step paler than the ground
+// Footstep dust (lingering clouds, a step paler than the ground
 // so they read on bright sand too): how much a ground's colour (light) looks
 // like dust: muted,
 // neither green (grass) nor bluer than it is red (water, snow), neither

@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 from types import SimpleNamespace
 
-WORKFLOW = '''Blocked doll workflow (Carl,): a refused page or exhausted quality tries stops that
+WORKFLOW = '''Blocked doll workflow: a refused page or exhausted quality tries stops that
 doll only. Keep every raw image and completed page. Write blocked/<doll>.json in this set, with
 {"page": "<page>", "kind": "refusal" or "quality", "reason": "what happened"}. Never change a prompt,
 attachment, model or policy to work around a refusal. Do not retry that page again in this run.
@@ -30,7 +30,7 @@ conditional second; existing failed raw tries are archived, completed pages stay
 Report blocked/parked, queued, drawn, visually approved and installed separately.'''
 
 
-COLOUR_GATE = '''Colour gate (carl every colour as the game's own): ingest refuses a try whose colours are not
+COLOUR_GATE = '''Colour gate (every colour as the game's own): ingest refuses a try whose colours are not
 the game's sprite's (exit status 3, nothing locked, and it prints what changed). That is a failed try: draw the second
 try with the page's prompt block followed by the lines of pages/<page>.colour-fix.txt, word for word (authorized by the
 user; `next` prints them too). If the second try is refused as well, the doll is blocked for quality: write

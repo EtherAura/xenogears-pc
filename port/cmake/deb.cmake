@@ -102,7 +102,7 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS libvulkan1)
 # The update check (XG_UPDATER) opens libcurl.so.4 at run time too; without it System > Updates
 # says no check is possible. Recommends, not Depends: apt installs it by default, and a player
-# who leaves it out still has the game (carl xg-4oq.14.7).
+# who leaves it out still has the game (xg-4oq.14.7).
 if(XG_UPDATER)
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS libcurl4t64)
 endif()

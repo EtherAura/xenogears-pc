@@ -1100,12 +1100,23 @@ void displaySection() {
                           N_("GPU batch ordering, VSync wait, display lock, pause blur and geometry precision."))) {
         opt::group(N_("Advanced"));
         if (row("GPU ordering", "gpu_ordered_batches")) {
-            bool ordered = gpuOrderedFallback();
-            if (offOnList("##gpu_ordered_batches", &ordered, N_("Hardware"), N_("Ordered fallback")))
-                gpuSetOrderedFallback(ordered);
-            hint("May improve speed on GPUs without hardware ordered rendering. Uses 20 MiB of GPU memory. "
-                 "Enabled by default on the Android PowerVR DXT-48-1536.");
-            hint("%s", gpuOrderedStatus());
+            static const char* const modes[] = {N_("Auto"), N_("Split batches"), N_("Ordered fallback")};
+            int mode = gpuOrderingMode();
+            int selected = choice("##gpu_ordered_batches", modes, IM_COUNTOF(modes), mode - GPU_ORDERING_AUTO)
+                           + GPU_ORDERING_AUTO;
+            if (selected != mode) gpuSetOrderingMode(selected);
+            static const char* const statuses[] = {
+                N_("Renderer inactive."),
+                N_("Hardware ordered rendering is active."),
+                N_("Accelerated tile reads are active."),
+                N_("Tile reads and ordered compute are active."),
+                N_("Ordered compute is active."),
+                N_("Exact split batches are active."),
+                N_("Using exact split batches because ordered rendering is unavailable."),
+            };
+            hint("Hardware ordering always takes priority. On other GPUs, Auto prefers accelerated tile reads, then ordered compute. "
+                 "The ordered fallback uses about 24 MiB of GPU memory.");
+            hint("%s", tr(statuses[gpuOrderingStatus()]));
             overrideNote("gpu_ordered_batches");
         }
 

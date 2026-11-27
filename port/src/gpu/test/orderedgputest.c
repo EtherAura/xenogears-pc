@@ -43,7 +43,8 @@ static void rectangle(int index,int wide,int enhanced) {
     else {if(wide)gvkDrawWide(v,6);else gvkDraw(v,6);}
 }
 static int run(int on,int wide,int n,int color,uint16_t* native,uint32_t* copy) {
-    gpuSetOrderedFallback(on);CHECK(gvkOrderedWrites()==(on||gvkHasInterlock()));
+    gpuSetOrderingMode(on ? GPU_ORDERING_FALLBACK : GPU_ORDERING_SPLIT);
+    CHECK(gvkOrderedWrites()==(on||gvkHasInterlock()));
     hiresSetUpscale(n);hiresSetColor(color);CHECK(gvkHiConfigure(n>1?n:0,color)==(n>1?n:0));
     if(wide)gvkWideTouch(ORIGIN+SIDE);
     uint16_t zero[SIDE*SIDE]={0},tex[64];
@@ -102,7 +103,8 @@ static int clipped(void) {
     uint32_t a[SIDE*SIDE*4],b[SIDE*SIDE*4];uint16_t clear[SIDE*SIDE]={0};
     VRect r={ORIGIN,ORIGIN,ORIGIN+SIDE-1,ORIGIN+SIDE-1};
     for(int on=0;on<2;on++) {
-        gpuSetOrderedFallback(on);gvkUpload(r,clear,SIDE);gvkHiLoad(r,clear,SIDE,HI_LOAD_REPLICATE,0,NULL,0);
+        gpuSetOrderingMode(on ? GPU_ORDERING_FALLBACK : GPU_ORDERING_SPLIT);
+        gvkUpload(r,clear,SIDE);gvkHiLoad(r,clear,SIDE,HI_LOAD_REPLICATE,0,NULL,0);
         HiVertex v[9]={0};
         for(int t=0;t<3;t++)for(int k=0;k<3;k++)v[t*3+k]=(HiVertex){
             .x=(float)(ORIGIN+8+(k==1?8:0)),.y=(float)(ORIGIN+8+(k==2?8:0)),
@@ -122,6 +124,9 @@ int main(int argc,char** argv) {
     CHECK(SDL_Init(SDL_INIT_VIDEO));
 #endif
     CHECK(gpuInit(NULL));gpuVBlank();CHECK(!gvkHasInterlock());
+    CHECK(gpuOrderingMode() == GPU_ORDERING_AUTO);
+    GpuOrderingStatus automatic = gpuOrderingStatus();
+    CHECK(automatic == GPU_ORDERING_TILE || automatic == GPU_ORDERING_TILE_AND_COMPUTE || automatic == GPU_ORDERING_COMPUTE);
     uint16_t a[SIDE*SIDE],b[SIDE*SIDE];
     const int scales[]={1,2,4,12};
     /* The backend grows the wide canvas to the touched area. A 40x40
@@ -139,6 +144,12 @@ int main(int argc,char** argv) {
         free(ha);free(hb);
     }
     CHECK(clipped()==0);
-    gpuSetOrderedFallback(0);CHECK(!gvkOrderedWrites());gpuSetOrderedFallback(1);CHECK(gvkOrderedWrites());CHECK(!gvkOrderedOverflow());
+    gpuSetOrderingMode(GPU_ORDERING_SPLIT);
+    CHECK(!gvkOrderedWrites());
+    CHECK(gpuOrderingStatus() == GPU_ORDERING_SPLIT_ACTIVE);
+    gpuSetOrderingMode(GPU_ORDERING_AUTO);
+    CHECK(gvkOrderedWrites());
+    CHECK(gpuOrderingStatus() == automatic);
+    CHECK(!gvkOrderedOverflow());
     gpuShutdown();SDL_Quit();printf("orderedgputest: %d checks passed\n",checks);return 0;
 }

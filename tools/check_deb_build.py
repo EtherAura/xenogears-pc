@@ -113,7 +113,8 @@ def scan_public(public: Path) -> None:
     spec = importlib.util.spec_from_file_location("publish_decomp", ROOT / "tools/publish_decomp.py")
     publish = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(publish)
-    patterns = (publish.LEFTOVER_DATE, publish.TIME_OF_DAY, publish.FORBIDDEN, re.compile(r"/home/|hermes", re.I))
+    patterns = (publish.LEFTOVER_DATE, publish.TIME_OF_DAY, publish.FORBIDDEN, publish.OPERATIONAL,
+                re.compile(r"/home/", re.I))
     for helper in HELPERS:
         text = (public / "packaging" / helper).read_text()
         imports = set()

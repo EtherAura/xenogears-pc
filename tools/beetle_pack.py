@@ -3,7 +3,7 @@
 
 The port draws a Beetle pack's files where a category uses the texture pack
 (F1 > Packs > Beetle PSX pack, settings.ini beetle_pack=<folder>); the naming
-scheme was measured black-box (docs/BEETLE_PACKS.md, beads xg-mrj.1):
+scheme was measured black-box (docs/BEETLE_PACKS.md):
 '<upload>-<palette>.png', CRC-32s in lowercase hex without leading zeros,
 '<upload>-0.png' for 15-bit textures, the whole upload at its draw's depth
 times 1, 2, 4, 8 or 16.

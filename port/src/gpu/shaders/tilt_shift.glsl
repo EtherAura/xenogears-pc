@@ -2,10 +2,10 @@
 // particles: what the display shows blurs toward each of its edges, from this
 // share of its height in from them, faintly at first and most at the edge,
 // around a sharp area whose corners are rounded, the radius this share of the
-// height (carl chose them from in-game captures: strips 5% of the height at
+// height (from in-game captures: strips 5% of the height at
 // the top and bottom, then the sides too, the corners rounded, and the fade
 // eased in from three strips' depth).
-// (carl, testing: the blur a step softer and reaching less far in: 0.15 to
+// (testing: the blur a step softer and reaching less far in: 0.15 to
 // 0.10, then 0.07; then, at 9x, a third as strong (scene.c tiltRadius) over
 // 0.12, so it fades in gradually rather than smearing a thin strip)
 const float TILT_REACH = 0.12;
