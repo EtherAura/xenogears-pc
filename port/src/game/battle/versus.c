@@ -30,15 +30,12 @@
  * targets, on pad 2;
  * then the turn's script runs for real for a current outcome. An additional
  * technique queues its battle commands without changing story state or
- * executing the surrounding AI phase changes. "Auto" leaves the turn to
- * the game's random draws, as does a missing pad 2. The enemies' reactions (when attacked, at the end of the
- * party's turn) stay the game's.
+ * executing the surrounding AI phase changes. A missing controller still
+ * leaves the turn to the game. Enemy reactions stay the game's.
  *
- * Player 2 picks from a paged battle dialogue window with the enemy's
- * name and its available actions, including Auto. The native target cursor
- * picks between the selected action's outcomes. If the cursor is unavailable,
- * a window lists the targets. Cancel returns to the action list, and the
- * acting enemy blinks until a choice is made.
+ * The acting player chooses from the native battle ring. Attack opens a
+ * side window of techniques, and Item opens the game's inventory screen.
+ * The native battle cursor selects a target in either flow.
  *
  * The end: whoever wins, a line in the same window says so ("Player 1 wins",
  * "Player 2 wins"); in a match (one started from the menu, which kept the
@@ -77,6 +74,7 @@
 #include "pc_arena.h"
 #include "pc_gameplay.h"
 #include "pc_backlog.h"
+#include "../../system/arena_roster.h"
 #include "versus.h"
 
 s32 battleRenderDebugAndMain(void);
@@ -105,6 +103,14 @@ extern u8 isEntityReadyForBattle[11];
 extern u8 battleConfigs[0x220];
 extern u8 requestedBattleConfig;
 extern u8 targetsPerPriority[12];
+extern sBattle800D2204 D_800D2204[];
+extern u8 selectedItemRow, selectedItemColumn, abilitySelectedTarget;
+extern u16 abilityTargetBitmask;
+void executeItem(u8 entity);
+u8 drawCircleMenuItem_update(u8 entity);
+s32 updateBattleMenuSpriteForMenu(u8 entity, u8 set, u8 dimOnly);
+extern u8* battleCommandsSetups[19];
+extern u8 battleInputButton;
 
 #define MAX_DRAWS 24     /* draws a turn's script makes (a target op redraws) */
 #define MAX_RUNS 6000    /* probe runs a turn */
@@ -117,6 +123,8 @@ extern u8 targetsPerPriority[12];
 #define PAGE 6           /* choices shown at once */
 #endif
 
+#define BUTTON_RIGHT 0x2000
+#define BUTTON_LEFT 0x8000
 #define BUTTON_UP 0x1000
 #define BUTTON_DOWN 0x4000
 #define BUTTON_CONFIRM 0x20 /* remapped as the battle reads it */
@@ -752,6 +760,10 @@ static void numberSame(u8 (*l)[LABEL], s32 count) {
 #define WINDOW_Y 0x34
 
 static DialogWindow18 window;
+static DialogWindow18 ringCaption;
+static int ringCaptionShown;
+static int enemyRingShown;
+static int enemyItemMenu;
 static s32 shown;
 static s32 choosing;
 static s32 choosingPort;
@@ -760,6 +772,18 @@ static u8 text[(PAGE + 2) * (LABEL + 1) + 2];
 
 void pcVersusPartySelection(int player) {
     partySelection = player;
+}
+
+int pcVersusEnemyRing(void) {
+    return enemyRingShown;
+}
+
+int pcVersusEnemyItemMenu(void) {
+    return enemyItemMenu;
+}
+
+int pcVersusEnemyItemPad2(void) {
+    return enemyItemMenu && choosingPort == 1;
 }
 
 int pcVersusPrivateSelection(void) {
@@ -771,6 +795,11 @@ int pcVersusPrivateSelection(void) {
 /* drawBattleMode1/2 (src/battle/b_800728B8.c), after the dialogue windows. */
 void pcVersusDraw(void) {
     pcVersusMirrorLabel(); /* a mirror match: player 2's name label (mirror.c) */
+    if (ringCaptionShown) {
+        OTag hidden = 0;
+        updateAndRenderTextForDialogWindow(&ringCaption, pcVersusPrivateSelection() ? &hidden : D_800CCB04.m0_pCurrentBattleOT + 1,
+                                           D_800CCB04.m30_battleOddOrEven);
+    }
     if (shown) {
         /* The text has to finish printing on both peers before input goes
          * through. Keep its update and discard only the opponent's draw. */
@@ -780,12 +809,12 @@ void pcVersusDraw(void) {
     }
 }
 
-/* The window, `count` lines of `units` 4-pixel units, centred; the text
+/* The window, `count` lines of `units` 4-pixel units, at x; the text
  * `lines` in it (fewer lines than the window may have). */
-static int openWindowSized(const u8* lines, s32 count, s32 units, s32 selected) {
+static int openWindowSized(const u8* lines, s32 count, s32 units, s32 selected, s32 x) {
     s32 h = count * 16 + 12;
     s32 w = units * 4 + 0x18;
-    s32 x = (0x140 - w) / 2;
+    if (x < 0) x = (0x140 - w) / 2;
 
     if (battleVar1 == NULL || battleVar1->mB0_isDialogWindowInitialized[WINDOW] ||
         battleVar1->mB8_isDialogWindowInitialized2[WINDOW]) {
@@ -810,7 +839,7 @@ static int openWindowSized(const u8* lines, s32 count, s32 units, s32 selected) 
 }
 
 static int openWindow(const u8* lines, s32 count, s32 selected) {
-    return openWindowSized(lines, count, TEXT_UNITS, selected);
+    return openWindowSized(lines, count, TEXT_UNITS, selected, -1);
 }
 
 static void closeWindow(void) {
@@ -828,9 +857,8 @@ static s32 append(s32 at, const u8* s) {
     return at;
 }
 
-/* Player 2 picks one of `count` labels under `title` (pad 2's Up/Down,
- * confirm; cancel when canCancel): the index, or -1 for cancel. -2 when the
- * window could not open. */
+/* The active player picks a label. The title is optional. Returns the index,
+ * -1 on cancel and -2 if the window could not open. */
 static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel) {
     s32 choice = 0;
     s32 first = -1;
@@ -843,13 +871,16 @@ static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel
     s32 units;
     s32 width;
 
-    /* Each retail glyph occupies at most three units and consumes at least
-     * one byte. Reserve another unit for the line edge. */
+    /* Measure rendered widths so the side window stays as narrow as its text. */
+    u16 image[(0x49 + 3) * 13];
+    const s32 firstChoiceLine = title != NULL;
     units = TEXT_UNITS;
-    width = (s32)__builtin_strlen((const char*)title) * 3 + 1;
-    if (width > units) units = width;
+    if (title != NULL) {
+        width = renderString((u8*)title, image, 0x49, 0) / 4 + 2;
+        if (width > units) units = width;
+    }
     for (i = 0; i < count; i++) {
-        width = (s32)__builtin_strlen((const char*)labels[i]) * 3 + 1;
+        width = renderString(labels[i], image, 0x49, 0) / 4 + 2;
         if (width > units) units = width;
     }
 
@@ -859,9 +890,9 @@ static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel
             closeWindow();
             first = choice - choice % PAGE;
             shownCount = count - first < PAGE ? count - first : PAGE;
-            at = append(0, title);
+            at = title != NULL ? append(0, title) : 0;
             for (i = 0; i < shownCount; i++) {
-                text[at++] = 1;
+                if (i != 0 || firstChoiceLine) text[at++] = 1;
                 at = append(at, labels[first + i]);
             }
             text[at] = 0;
@@ -874,9 +905,9 @@ static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel
                     hex[3 * k + 2] = ' ';
                 }
                 hex[3 * k] = 0;
-                pcArenaLog("  window: %d lines: %s", shownCount + 1, hex);
+                pcArenaLog("  window: %d lines: %s", shownCount + firstChoiceLine, hex);
             }
-            if (!openWindowSized(text, shownCount + 1, units, choice - first + 1)) {
+            if (!openWindowSized(text, shownCount + firstChoiceLine, units, choice - first + firstChoiceLine, 8)) {
                 return -2;
             }
         }
@@ -890,7 +921,7 @@ static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel
         if (pressed & (BUTTON_UP | BUTTON_DOWN)) {
             choice = (choice + (pressed & BUTTON_UP ? count - 1 : 1)) % count;
             if (choice >= first && choice < first + PAGE) {
-                setSelectedLineForMultiChoice(&window, choice - first + 1);
+                setSelectedLineForMultiChoice(&window, choice - first + firstChoiceLine);
             }
             battleSoundEffect2(0x4C);
         } else if (pressed & BUTTON_EXECUTE) {
@@ -908,15 +939,29 @@ static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel
 
 /* ---- battleTickMain: an enemy's turn ---- */
 
-static s32 gearCalled;
+static s32 enemyTurnResolved;
 
+typedef struct {
+    sBattleEntity foot, gear;
+    sBattleVisualEntity footVisual;
+    sBattleScriptEntity footScript, gearScript;
+    sUnkMonsterStatus footStatus, gearStatus;
+    u8 gearSaved;
+} EnemyGearState;
+
+static EnemyGearState enemyGear[ARENA_ROSTER_SLOTS];
+
+void characterPerformDefendAction(u8 entity);
+void clearEntityFlag15A_1(u8 entity);
 void releaseSpriteActor(s32 entity);
+void freeMecha_battle(s32 entity);
+void createBattleSpriteActor(u32 entity, s32 visualBufferIndex, s32 animationId);
 void initMechaForBattle(u32 entity);
 void mechaInitEnvironmentMechaMesh(s32 entity, u16 flags, void* controls, void* model,
                                  s16 tpageX, s16 tpageY, s16 clutX, s16 clutY, SVECTOR* position);
 extern sBattleMechaInitData* battleMechaInitData;
 
-int pcVersusGearCalled(void) { return gearCalled; }
+int pcVersusEnemyTurnResolved(void) { return enemyTurnResolved; }
 
 static void callEnemyGear(u8 slot) {
     const u8* controls;
@@ -928,6 +973,7 @@ static void callEnemyGear(u8 slot) {
     s32 x, position, side, bank, type;
     s32 i;
     u8 m = slot - 3;
+    EnemyGearState* saved = &enemyGear[m];
 
     if (!pcArenaRosterGear(slot, &controls, &model, &x, &position)) return;
     side = pcArenaRosterSide(slot);
@@ -936,6 +982,10 @@ static void callEnemyGear(u8 slot) {
     scripts = (const u16*)(data + ((const u16*)data)[type]);
     visual = &battleVisualEntities[slot];
     entity = &battleEntities.m0_entities[slot];
+    saved->foot = *entity;
+    saved->footVisual = *visual;
+    saved->footScript = monstersScriptsEntities[m];
+    saved->footStatus = unknownMonsterStatus0[m];
     releaseSpriteActor(slot);
     __builtin_memcpy(entity, data + 0x32 + type * sizeof(*entity), sizeof(*entity));
     pcGameplayEnemyLoaded(entity, slot, bank, type);
@@ -955,10 +1005,49 @@ static void callEnemyGear(u8 slot) {
     __builtin_memset(monstersScriptsEntities[m].m10_s32Vars, 0, sizeof(monstersScriptsEntities[m].m10_s32Vars));
     __builtin_memset(monstersScriptsEntities[m].m20_s16Vars, 0, sizeof(monstersScriptsEntities[m].m20_s16Vars));
     __builtin_memset(monstersScriptsEntities[m].m30_s8Vars, 0, sizeof(monstersScriptsEntities[m].m30_s8Vars));
+    if (saved->gearSaved) {
+        *entity = saved->gear;
+        monstersScriptsEntities[m] = saved->gearScript;
+        unknownMonsterStatus0[m] = saved->gearStatus;
+    }
     mechaInitEnvironmentMechaMesh(slot, 0x80, (void*)controls, (void*)model, x, 0x100, 0, slot + 0x1C0, NULL);
     initMechaForBattle(slot);
-    gearCalled = 1;
+    enemyTurnResolved = 1;
     pcArenaLog("  player %d called Gear %d.%d for slot %d", side + 1, bank, type, slot);
+}
+
+static void exitEnemyGear(u8 slot) {
+    u8 m = slot - 3;
+    EnemyGearState* saved = &enemyGear[m];
+    saved->gear = battleEntities.m0_entities[slot];
+    saved->gearScript = monstersScriptsEntities[m];
+    saved->gearStatus = unknownMonsterStatus0[m];
+    saved->gearSaved = 1;
+    freeMecha_battle(slot);
+    releaseSpriteActor(slot);
+    battleEntities.m0_entities[slot] = saved->foot;
+    monstersScriptsEntities[m] = saved->footScript;
+    unknownMonsterStatus0[m] = saved->footStatus;
+    battleVisualEntities[slot] = saved->footVisual;
+    apConfigArray[slot].m1_gearState = 0;
+    pcArenaRosterGearDeactivated(slot);
+    int index = saved->footVisual.m2_characterId + 3;
+    const void* sheet = pcArenaRosterFootSheet(slot);
+    if (sheet != NULL) {
+        uploadNpcSpriteSheet((s32*)sheet, battleBssBlock.m8D24_visualBuffers[index].m4_vramX, 0x100);
+        DrawSync(0);
+    }
+    createBattleSpriteActor(slot, index, 1);
+    enemyTurnResolved = 1;
+    pcArenaLog("  player %d exited Gear at slot %d", pcArenaRosterSide(slot) + 1, slot);
+}
+
+void pcVersusRosterDeployGears(void) {
+    int slot;
+    if (!pcArenaRosterStartInGear()) return;
+    for (slot = 3; slot < 11; slot++) {
+        if (pcArenaRosterGear(slot, NULL, NULL, NULL, NULL)) callEnemyGear(slot);
+    }
 }
 
 static u8 labels[MAX_CHOICES][LABEL];
@@ -1159,6 +1248,179 @@ static s32 pickTarget(u8 entity, const s32* targetOf, const u16* maskOf, s32 cou
     }
 }
 
+enum { RING_ATTACK, RING_ITEM, RING_DEFEND, RING_UTILITY, RING_ABORT };
+
+static s32 chooseCommand(u8 entity, int canAttack, int hasItems, int canCallGear, int canExitGear) {
+    const int gear = canCallGear || canExitGear;
+    const int onGear = apConfigArray[entity].m1_gearState != 0;
+    sBattleVar2Sub* menu = &battleVar2->m0_entityMenus[entity];
+    sBattleVar2Sub savedMenu = *menu;
+    u8 savedNames[4];
+    u8 caption[LABEL];
+    s32 choice = canAttack ? RING_ATTACK : RING_DEFEND;
+    s32 shownChoice = -1;
+    s32 previous = pcPadHeldRemappedPort(choosingPort);
+
+    __builtin_memcpy(savedNames, battleVar2->m2C0_circleMenuCommandsNames, sizeof savedNames);
+    /* Use the usual Attack, Item and Defend glyphs. The top slot is the PvP command. */
+    u8* const names = onGear ? menu->m8_extraCommandsMapping : menu->m0_circleMenuBattleCommandsMapping;
+    __builtin_memcpy(names, battleCommandsSetups[0], 3);
+    names[RING_UTILITY] = 0xFF;
+    menu->m1C_isCommandEnabled[9] = !canAttack;
+    menu->m1C_isCommandEnabled[11] = !hasItems;
+
+    if (gear) {
+        word(caption, canCallGear ? "Call Gear" : "Exit Gear");
+        setupWindowSize2(&ringCaption, 0x380, 0x100, 0x60, 0x30, 22, 1);
+        ringCaption.m10_flags |= 2;
+        ringCaption.m68_charsPerStep = 0x20;
+        resetDialogWindow18(&ringCaption);
+        if (pcBacklogIgnore) pcBacklogIgnore(&ringCaption);
+        addDialogWindowsToOTSub2(&ringCaption, caption);
+        setupMultiChoiceColor(&ringCaption, 0xEF, 0x1E, 0xF0);
+        ringCaptionShown = 1;
+    }
+    enemyRingShown = 1;
+
+    pcArenaLog("  command ring for player %d (vblank %u)", choosingPort + 1, hwVSyncCount());
+    for (;;) {
+        if (choice != shownChoice) {
+            battleVar1->mA3_641COddOrEven = updateBattleMenuSpriteForMenu(entity, (onGear ? 16 : 1) + choice, 0);
+            battleVar1->mCB_drawCommandRing = 1;
+            if (gear) setSelectedLineForMultiChoice(&ringCaption, choice == RING_UTILITY ? 0 : 0xFF);
+            shownChoice = choice;
+        }
+        battleRenderDebugAndMain();
+        s32 pressed = padPressed(&previous);
+        if (pressed & (BUTTON_RIGHT | BUTTON_DOWN | BUTTON_LEFT | BUTTON_UP)) {
+            if (pressed & BUTTON_RIGHT) choice = RING_ATTACK;
+            else if (pressed & BUTTON_DOWN) choice = RING_ITEM;
+            else if (pressed & BUTTON_LEFT) choice = RING_DEFEND;
+            else if (gear) choice = RING_UTILITY;
+            battleSoundEffect2(0x4C);
+        } else if (battleInputButton == 0xFF || !isControllerConnected(choosingPort)) {
+            choice = RING_ABORT;
+            break;
+        } else if (pressed & BUTTON_EXECUTE) {
+            if ((choice == RING_ATTACK && !canAttack) || (choice == RING_ITEM && !hasItems)) {
+                battleSoundEffect2(0x4F);
+                continue;
+            }
+            battleSoundEffect2(0x4D);
+            break;
+        }
+    }
+    battleVar1->mCB_drawCommandRing = 0;
+    enemyRingShown = 0;
+    if (gear) {
+        ringCaptionShown = 0;
+        dealocateDialogWindow18Memory(&ringCaption);
+    }
+    *menu = savedMenu;
+    __builtin_memcpy(battleVar2->m2C0_circleMenuCommandsNames, savedNames, sizeof savedNames);
+    return choice;
+}
+
+static u16 itemTargets(u8 entity, u16 flags) {
+    int target;
+    if (flags & 0x4000) return characterIdToTargetBitmask(entity);
+    u16 result = 0;
+    for (target = 0; target < 11; target++) {
+        if (!isBattleSlotFilled.m0_isBattleSlotFilled[target] || !battleBssBlock.m8C8C_spriteActorCores[target] ||
+            (battleVisualEntities[target].m3_hidden & 0x80)) continue;
+        int opponent = pcArenaRosterSide(target) != choosingPort;
+        if (!(flags & 0x2000) && opponent != ((flags & 0x1000) != 0)) continue;
+        const sBattleEntity* e = &battleEntities.m0_entities[target];
+        u16 status = apConfigArray[target].m1_gearState ? e->mA4_gear.m7C_statusFlags : e->m0_base.m7C_statusFlags[0];
+        if (((status ^ flags) & 0x8000) == 0) result |= characterIdToTargetBitmask(target);
+    }
+    return result;
+}
+
+/* useItemInSlot supplies the regular menu and asks which PvP targets are legal. */
+int pcVersusEnemyItemTarget(u8 entity, u16 flags) {
+    if (!enemyItemMenu) return -1;
+
+    u16 mask = itemTargets(entity, flags);
+    if (!mask) {
+        battleSoundEffect2(0x4F);
+        return 0;
+    }
+    s32 targets[11];
+    u16 masks[11];
+    int count = 0;
+    int candidate, i;
+    for (candidate = 0; candidate < 11; candidate++) {
+        if (!bitmaskCharacterCheck(mask, candidate)) continue;
+        u16 choice = characterIdToTargetBitmask(candidate);
+        if (flags & 7) {
+            choice = mask;
+            if ((flags & 7) == 2) {
+                for (i = 0; i < 11; i++) {
+                    if (pcArenaRosterSide(i) != pcArenaRosterSide(candidate) ||
+                        battleVisualEntities[i].m0_positionSlot != battleVisualEntities[candidate].m0_positionSlot) {
+                        choice &= ~characterIdToTargetBitmask(i);
+                    }
+                }
+            }
+        }
+        targets[count] = candidate;
+        masks[count++] = choice;
+    }
+    u8 savedTargets[sizeof targetsPerPriority];
+    sBattle800c3e24 savedCursor = *battleG3;
+    u8 savedConfirmed = battleVar2->m2E9_targetConfirmed;
+    __builtin_memcpy(savedTargets, targetsPerPriority, sizeof savedTargets);
+    int target = pickTarget(entity, targets, masks, count);
+    __builtin_memcpy(targetsPerPriority, savedTargets, sizeof savedTargets);
+    *battleG3 = savedCursor;
+    battleVar2->m2E9_targetConfirmed = savedConfirmed;
+    if (target < 0) {
+        updateCharacterBlinkingTask(characterIdToTargetBitmask(entity));
+        return 0;
+    }
+    for (i = 0; i < count; i++) {
+        if (targets[i] == target) abilityTargetBitmask = masks[i];
+    }
+    abilitySelectedTarget = target;
+    return 1;
+}
+
+static s32 chooseEnemyItem(u8 entity, const u8* inventory) {
+    sBattleItemList saved = battleEffectBF;
+    u8 savedRow = selectedItemRow, savedColumn = selectedItemColumn;
+    battleEffectBF.m0_flags = 0;
+    __builtin_memset(battleEffectBF.m42_ids, 0, sizeof battleEffectBF.m42_ids);
+    __builtin_memset(battleEffectBF.m12_counts, 0, sizeof battleEffectBF.m12_counts);
+    int slot = 0, id;
+    for (id = 1; id <= ARENA_ROSTER_ITEMS; id++) {
+        if (inventory[id - 1]) {
+            battleEffectBF.m42_ids[slot] = id;
+            battleEffectBF.m12_counts[slot++] = inventory[id - 1];
+        }
+    }
+    pcArenaLog("  native item screen for player %d (vblank %u)", choosingPort + 1, hwVSyncCount());
+    enemyItemMenu = 1;
+    int selected = drawCircleMenuItem_update(entity) == 1;
+    enemyItemMenu = 0;
+    battleVar1->mCB_drawCommandRing = 0;
+    if (selected) {
+        int item = battleVar2->m2E6_menuSelection;
+        slot = selectedItemRow * 2 + selectedItemColumn;
+        pcArenaLog("  confirmed item %d on target %d (vblank %u)", item, abilitySelectedTarget, hwVSyncCount());
+        choosing = 0;
+        executeItem(entity);
+        if (battleEffectBF.m12_counts[slot] < inventory[item - 1]) pcArenaRosterUseItem(choosingPort, item);
+        enemyTurnResolved = 1;
+        pcArenaLog("  player %d used item %d with slot %d, target %d, %d left",
+                   choosingPort + 1, item, entity, abilitySelectedTarget, inventory[item - 1]);
+    }
+    battleEffectBF = saved;
+    selectedItemRow = savedRow;
+    selectedItemColumn = savedColumn;
+    return selected;
+}
+
 /* In place of battleTickMain's executeMonsterScript (src/battle/b_80070E2C.c). */
 void pcVersusMonsterTurn(u8 entity, s32 status) {
     u8 title[LABEL];
@@ -1172,10 +1434,19 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
     s32 j;
     s32 chosen = -1;
     s32 canCallGear = pcArenaRosterGear(entity, NULL, NULL, NULL, NULL);
+    s32 canExitGear = pcArenaRosterCanExitGear(entity);
+    const sBattleEntity* actor = &battleEntities.m0_entities[entity];
 
-    gearCalled = 0;
+    enemyTurnResolved = 0;
     choosingPort = pcArenaRosterSide(entity);
-    if (pcVersusSession() != PC_VERSUS_IN || isControllerConnected(choosingPort) == 0) {
+    const u8* inventory = pcArenaRosterItemCounts(choosingPort);
+    int hasItems = 0;
+    if (inventory != NULL && !apConfigArray[entity].m1_gearState) {
+        for (i = 0; i < ARENA_ROSTER_ITEMS; i++) hasItems |= inventory[i] != 0;
+    }
+    if (pcVersusSession() == PC_VERSUS_IN) clearEntityFlag15A_1(entity);
+    if (pcVersusSession() != PC_VERSUS_IN || isControllerConnected(choosingPort) == 0 ||
+        (actor->m0_base.m7C_statusFlags[0] & 0x2080) || (actor->m0_base.m7C_statusFlags[2] & 0x3000)) {
         executeMonsterScript(entity, status);
         resolveRosterTargets(entity);
         return;
@@ -1183,7 +1454,7 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
     probeTurn(entity);
     pcArenaLog("enemy %d's turn: %d outcomes in %d runs", entity, outcomeCount, runs);
     actions = 0;
-    for (i = 0; i < outcomeCount && actions < MAX_CHOICES - 1 - canCallGear; i++) {
+    for (i = 0; i < outcomeCount && actions < MAX_CHOICES; i++) {
         for (j = 0; j < actions; j++) {
             if (sameAction(outcomes[actionOf[j]].ctx, outcomes[i].ctx)) {
                 break;
@@ -1213,26 +1484,38 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
                    outcomes[i].ctx[1].m6_mask, outcomes[i].planLen);
     }
     choosing = 1;
-    while ((actions > 0 || canCallGear) && chosen < 0) {
-        entityName(title, entity);
+    while (chosen < 0) {
+        updateCharacterBlinkingTask(characterIdToTargetBitmask(entity));
+        s32 command = chooseCommand(entity, actions != 0, hasItems, canCallGear, canExitGear);
+        if (command == RING_DEFEND) {
+            updateCharacterBlinkingTask(0);
+            choosing = 0;
+            characterPerformDefendAction(entity);
+            enemyTurnResolved = 1;
+            pcArenaLog("  player %d defended with slot %d", choosingPort + 1, entity);
+            return;
+        }
+        if (command == RING_ITEM) {
+            if (chooseEnemyItem(entity, inventory)) return;
+            continue;
+        }
+        if (command == RING_UTILITY && (canCallGear || canExitGear)) {
+            updateCharacterBlinkingTask(0);
+            choosing = 0;
+            if (canCallGear) callEnemyGear(entity);
+            else exitEnemyGear(entity);
+            return;
+        }
+        if (command != RING_ATTACK) break;
+
         for (i = 0; i < actions; i++) {
             actionLabel(labels[i], entity, outcomes[actionOf[i]].ctx);
         }
         numberSame(labels, actions);
-        if (canCallGear) word(labels[actions], "CALL GEAR");
-        word(labels[actions + canCallGear], "AUTO");
-        pcArenaLog("  action window: %d actions and Auto (vblank %u)", actions, hwVSyncCount());
-        updateCharacterBlinkingTask(characterIdToTargetBitmask(entity));
-        a = choose(title, labels, actions + 1 + canCallGear, 0);
-        if (canCallGear && a == actions) {
-            updateCharacterBlinkingTask(0);
-            choosing = 0;
-            callEnemyGear(entity);
-            return;
-        }
-        if (a < 0 || a == actions + canCallGear) {
-            break; /* Auto (or no window): the game's own draws */
-        }
+        pcArenaLog("  attack selector: %d actions (vblank %u)", actions, hwVSyncCount());
+        a = choose(NULL, labels, actions, 1);
+        if (a == -2) break;
+        if (a < 0) continue;
         pcArenaLog("  selected action %d", a);
         __builtin_memcpy(title, labels[a], LABEL);
         targets = 0;
@@ -1310,7 +1593,15 @@ void pcVersusBattleSetup(void) {
     freeHeap(buf);
     setCurrentDirectory(dir, sub);
     requestedBattleConfig = pcVersusConfig();
-    if (pcArenaRosterConfig(battleConfigs + requestedBattleConfig * 0x20)) return;
+    if (pcArenaRosterConfig(battleConfigs + requestedBattleConfig * 0x20)) {
+        __builtin_memset(enemyGear, 0, sizeof enemyGear);
+        int ready = pcArenaRosterStartInGear();
+        for (i = 0; i < 3; i++) {
+            c = gameState.m1D34_currentParty[i];
+            gameState.m22B1_isOnGear[i] = ready && c != 0xFF && gameState.m26C_party[c].mA0_gearNum != 0xFF;
+        }
+        return;
+    }
     pcVersusMirrorSetup(); /* a mirror match: the copy's places in the formation (mirror.c) */
     if (pcVersusGears() && !pcVersusMirror() && !(battleConfigs[requestedBattleConfig * 0x20 + 1] & 0x40)) {
         /* Gear against Gear: the members with a Gear ride it (the battle loader
@@ -1610,7 +1901,7 @@ void pcVersusBattleOver(void) {
                                                      !battleVar1->mB8_isDialogWindowInitialized2[WINDOW] ? "free" : "busy");
     if (pcArenaMatchOn()) {
         /* the window for the prompt's lines too (matchPrompt); a whole line a step */
-        opened = openWindowSized(line, 1 + (pcArenaMatchOn() == 2 || isControllerConnected(1) ? 2 : 1), PROMPT_UNITS, -1);
+        opened = openWindowSized(line, 1 + (pcArenaMatchOn() == 2 || isControllerConnected(1) ? 2 : 1), PROMPT_UNITS, -1, -1);
         if (opened) {
             window.m68_charsPerStep = 0xFF;
         }

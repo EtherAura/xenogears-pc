@@ -93,8 +93,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <SDL3/SDL.h>
 
 #include "common.h"
+#include "psyq.h"
 #include "main/game_state.h"
 #include "arena.h"
 #include "arena_roster.h"
@@ -102,7 +104,9 @@
 #include "card/saves.h"
 #include "cd/cd.h"
 #include "hw.h"
+#include "gpu/gpu.h"
 #include "pc_arena.h"
+#include "pc_wide.h"
 #include "savestate.h"
 #include "settings.h"
 #include "stateimage.h"
@@ -553,9 +557,93 @@ static struct {
 } S;
 static GameState keptState; /* the kept game's gameState, as the match was asked for */
 static int gameSeen;        /* a field past the title, the world map or a battle since the boot: a game is loaded */
+static int holdVersusIntro;
+enum { MENU_PICTURE_W = 512, MENU_PICTURE_H = 288 };
+static uint16_t menuPicture[MENU_PICTURE_W * MENU_PICTURE_H];
+static int haveMenuPicture;
 
 static int matchOnline(void) {
     return netplayActive != NULL && netplayActive();
+}
+
+void pcArenaCaptureMenuPicture(void) {
+    haveMenuPicture = gpuCaptureMenu15(menuPicture, MENU_PICTURE_W, MENU_PICTURE_H);
+}
+
+char* pcArenaWriteMenuPicture(void) {
+    if (!haveMenuPicture) return NULL;
+    char* directory = SDL_GetPrefPath(NULL, "xenogears");
+    char* path = NULL;
+    if (directory != NULL) {
+        SDL_asprintf(&path, "%s.xg-arena-%016llx-%08x.rgb555", directory,
+                     (unsigned long long)SDL_GetTicksNS(), SDL_rand_bits());
+        SDL_free(directory);
+    }
+    if (path != NULL && !SDL_SaveFile(path, menuPicture, sizeof menuPicture)) {
+        SDL_RemovePath(path);
+        SDL_free(path);
+        path = NULL;
+    }
+    haveMenuPicture = 0;
+    return path;
+}
+
+static void readMenuPicture(void) {
+    const char* path = SDL_getenv("XG_NETPLAY_INTRO_FILE");
+    if (path == NULL || *path == '\0') return;
+    size_t size = 0;
+    void* data = SDL_LoadFile(path, &size);
+    if (data != NULL && size == sizeof menuPicture) {
+        memcpy(menuPicture, data, size);
+        haveMenuPicture = 1;
+    }
+    SDL_free(data);
+}
+
+/* Upload the menu as the same texture the retail shatter would sample,
+ * including the side columns when the battle uses widescreen. */
+int pcArenaUploadMenuShatter(void) {
+    if (!holdVersusIntro) return -1;
+    enum { W = 320, H = 224, MAX_MARGIN = 384 };
+    static uint16_t picture[(2 * W + 2 * MAX_MARGIN) * H];
+    int margin = pcWideView;
+    if (margin < 0 || margin > MAX_MARGIN) margin = 0;
+    int width = W + 2 * margin;
+    uint16_t* center = picture + width * H;
+    for (int y = 0; y < H; y++) {
+        const uint16_t* row = menuPicture + y * MENU_PICTURE_H / H * MENU_PICTURE_W;
+        for (int x = 0; x < width; x++) {
+            picture[y * width + x] = haveMenuPicture ? row[x * MENU_PICTURE_W / width] : 0x8000;
+        }
+        memcpy(center + y * W, picture + y * width + margin, W * sizeof *picture);
+    }
+    RECT texture = {0x2C0, 0x100, W, H};
+    LoadImage(&texture, center);
+    pcWideCaptureLoad(&texture, picture, margin, 0);
+    DrawSync(0);
+    pcArenaLog("arena intro: glass shatter uses %s", haveMenuPicture ? "the approval menu" : "a blank backdrop");
+    return margin;
+}
+
+/* The field still prepares the battle's music and the shatter texture, but it
+ * never becomes a separate shot in a match launched from the arena. */
+int pcArenaHoldVersusIntro(void) {
+    const char* versus = getenv("XG_VERSUS");
+    holdVersusIntro = (M.armed && M.kind != ARENA_MATCH_BATTLING) ||
+                      (matchOnline() && (S.on || (versus != NULL && *versus != '\0')));
+    if (holdVersusIntro && !haveMenuPicture && matchOnline()) readMenuPicture();
+    if (holdVersusIntro) pcArenaLog("arena intro: holding the picture during battle setup");
+    return holdVersusIntro;
+}
+
+int pcArenaVersusIntroHidden(void) {
+    return holdVersusIntro && (M.armed || matchOnline());
+}
+
+void pcArenaGlassShatterStarted(void) {
+    if (!holdVersusIntro) return;
+    holdVersusIntro = 0;
+    pcArenaLog("arena intro: showing the glass shatter at vblank %u", hwVSyncCount());
 }
 
 int pcArenaGameLoaded(void) {
@@ -768,6 +856,7 @@ void pcArenaMatchLeave(void) {
  * again; one without a match ends the loaded game. Online the session's own
  * start comes again (its options are still set: netplay.c). */
 void pcArenaSoftReset(void) {
+    holdVersusIntro = 0;
     if (M.phase == MATCH_ASKED || M.phase == MATCH_ON) {
         M.armed = 1;
         M.seen = 0;

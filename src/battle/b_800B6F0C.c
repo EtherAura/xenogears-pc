@@ -26,6 +26,7 @@
 #include "gte_pc.h"
 #include "battle/pc_wide_fx.h"
 #include "pc_gameplay.h"
+#include "pc_arena.h"
 #endif
 
 /* main */
@@ -522,6 +523,12 @@ void battleStartEffect(void) {
     resetSpriteCallbacks();
     state = 1;
     n = 0;
+#ifdef PLATFORM_PC
+    s32 menuMargin = pcArenaUploadMenuShatter();
+    if (menuMargin >= 0) {
+        pcWideShatterCapture(menuMargin);
+    } else {
+#endif
     buf = allocateHeap(0x30000, 1);
     p = buf;
     r.x = 0;
@@ -546,6 +553,9 @@ void battleStartEffect(void) {
     }
 #endif
     freeHeap(buf);
+#ifdef PLATFORM_PC
+    }
+#endif
     battleBssBlock.m8C50_currentRenderStruct = (battleBssBlock.m8C50_currentRenderStruct == &battleBssBlock.mB70_renderStructs[0]) ? &battleBssBlock.mB70_renderStructs[1] : &battleBssBlock.mB70_renderStructs[0];
     battleBssBlock.m8C54_currentOT = battleBssBlock.m8C50_currentRenderStruct->m70_ot;
     ClearOTagR(battleBssBlock.m8C54_currentOT, 0x1000);
@@ -611,6 +621,9 @@ void battleStartEffect(void) {
         PutDispEnv(&battleBssBlock.m8C50_currentRenderStruct->m5C_dispEnv);
         PutDrawEnv(&battleBssBlock.m8C50_currentRenderStruct->m0_drawEnv);
         DrawOTag(&battleBssBlock.m8C50_currentRenderStruct->m70_ot[0xFFF]);
+#ifdef PLATFORM_PC
+        pcArenaGlassShatterStarted();
+#endif
     }
     freeBattleStartEffect(e);
     SetDispMask(0);

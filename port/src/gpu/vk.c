@@ -124,6 +124,7 @@ extern void extrasVulkanShutdown(void) __attribute__((weak));
 /* port/src/system/battlespeed.c: this vblank's picture is withheld (a game
  * frame between two shown ones at 2x/4x battle speed; weak: GPU tests). */
 extern int battleSpeedHidden(void) __attribute__((weak));
+extern int pcArenaVersusIntroHidden(void) __attribute__((weak));
 
 static const uint32_t drawVertSpv[] =
 #include "draw.vert.spv.inc"
@@ -193,6 +194,9 @@ static const uint32_t presentFragSpv[] =
     ;
 static const uint32_t presentPictureFragSpv[] =
 #include "present_picture.frag.spv.inc"
+    ;
+static const uint32_t presentNearestFragSpv[] =
+#include "present_nearest.frag.spv.inc"
     ;
 static const uint32_t rotateFragSpv[] =
 #include "rotate.frag.spv.inc"
@@ -678,6 +682,7 @@ static struct {
     VkDescriptorPool descriptorPool;
     VkPipeline drawPipeline;
     VkPipeline presentPipeline;
+    VkPipeline presentNearest[2];
     VkFormat presentFormat;
 
     VkCommandPool commandPool;
@@ -1011,6 +1016,30 @@ static void rasterBarrier(VkCommandBuffer cmd) {
     memory.dstAccessMask=VK_ACCESS_2_MEMORY_READ_BIT|VK_ACCESS_2_MEMORY_WRITE_BIT;
     VkDependencyInfo dep={.sType=VK_STRUCTURE_TYPE_DEPENDENCY_INFO,.memoryBarrierCount=1,.pMemoryBarriers=&memory};
     vkCmdPipelineBarrier2(cmd,&dep);
+}
+
+/* Lighting's internal passes only exchange compute shader writes. The
+ * barriers at the edges of the chain still cover raster and transfer. */
+static void lightingPassBarrier(VkCommandBuffer cmd) {
+    static int computeOnly = -1;
+    if (computeOnly < 0) computeOnly = getenv("XG_EXPERIMENT_LIGHT_BARRIERS") != NULL;
+    if (!computeOnly || vk.env.fullBarriers) {
+        rasterBarrier(cmd);
+        return;
+    }
+    VkMemoryBarrier2 memory = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+        .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+    };
+    VkDependencyInfo dependency = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1,
+        .pMemoryBarriers = &memory,
+    };
+    vkCmdPipelineBarrier2(cmd, &dependency);
 }
 
 /* A copy into a host buffer, for the host to read once the submission's
@@ -5906,14 +5935,17 @@ static void sceneCompile(ScenePipelines* p) {
     ci.stage.module = shaderModule(lightCompSpv, sizeof(lightCompSpv));
     ci.layout = vk.scene.lightLayout;
     if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &p->light) != VK_SUCCESS) p->light = VK_NULL_HANDLE;
-    static const int32_t own[] = {LIGHT_FOG, LIGHT_COMPOSITE, 21};
-    for (size_t k = 0; k < sizeof(own) / sizeof(own[0]); k++) {
-        VkSpecializationMapEntry entry = {0, 0, sizeof(int32_t)};
-        VkSpecializationInfo spec = {1, &entry, sizeof(int32_t), &own[k]};
+    /* Compare specialised stages with the shared pipeline on the PowerVR.
+     * The specialisation changes only which branch the driver compiles. */
+    int separateLighting = envFlag("XG_EXPERIMENT_LIGHT_SPECIALIZE");
+    for (int32_t pass = 0; pass < LIGHT_PASS_COUNT; pass++) {
+        if (!separateLighting && pass != LIGHT_FOG && pass != LIGHT_COMPOSITE && pass != 21) continue;
+        VkSpecializationMapEntry entry = {0, 0, sizeof(pass)};
+        VkSpecializationInfo spec = {1, &entry, sizeof(pass), &pass};
         VkComputePipelineCreateInfo one = ci;
         one.stage.pSpecializationInfo = &spec;
-        if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &one, NULL, &p->lightOnly[own[k]]) != VK_SUCCESS)
-            p->lightOnly[own[k]] = VK_NULL_HANDLE;
+        if (vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &one, NULL, &p->lightOnly[pass]) != VK_SUCCESS)
+            p->lightOnly[pass] = VK_NULL_HANDLE;
     }
     vkDestroyShaderModule(vk.device, ci.stage.module, NULL);
     /* [wide][coarse][unordered]: as the copy's own eight pipelines (gvkInit). */
@@ -6535,7 +6567,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
             lightPipeline(cmd, c.pass, &bound);
             vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
             vkCmdDispatch(cmd, (uint32_t)(w + 7) / 8, (uint32_t)(h + 7) / 8, 1);
-            rasterBarrier(cmd);
+            lightingPassBarrier(cmd);
             if (perPass) { gtStop(cmd, pq); q = gtStart(cmd, GT_LIGHT); }
         }
         if (!needed) continue;
@@ -6547,7 +6579,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
             lightPipeline(cmd, c.pass, &bound);
             vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
             vkCmdDispatch(cmd, (uint32_t)((w + 3) / 4 + 7) / 8, (uint32_t)((h + 3) / 4 + 7) / 8, 1);
-            rasterBarrier(cmd);
+            lightingPassBarrier(cmd);
         }
         c.pass = pass;
         if (pass == LIGHT_COMPOSITE) { /* XG_GPU_TIMING: the composite on its own ("composite") */
@@ -6568,7 +6600,7 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
         int gw = pass == LIGHT_COMPOSITE ? w * n : pass == LIGHT_FOG ? 1 : quarter ? (w + 3) / 4 : w;
         int gh = pass == LIGHT_COMPOSITE ? h * n : pass == LIGHT_FOG ? 1 : quarter ? (h + 3) / 4 : h;
         vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
-        rasterBarrier(cmd);
+        lightingPassBarrier(cmd);
     }
     if (second >= 0 && sw > 0 && sh > 0 && composite) {
         lightPipeline(cmd, LIGHT_COMPOSITE, &bound);
@@ -6578,8 +6610,8 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
         c.layerX = layerX; c.layerY = layerY;
         vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
         vkCmdDispatch(cmd, (uint32_t)(sw * n + 7) / 8, (uint32_t)(sh * n + 7) / 8, 1);
-        rasterBarrier(cmd);
     }
+    rasterBarrier(cmd);
     gtStop(cmd, q);
     vk.needBarrier = 1;
     return particles ? block : -1;
@@ -8024,16 +8056,74 @@ static void bindPresentSets(VkCommandBuffer cmd, FrameCtx* f) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipelineLayout, 0, 2, sets, 0, NULL);
 }
 
+/* Fast path for an unfiltered Enhanced picture. The per-axis integer maps
+ * use the same pixel centres and wrapping as present.frag. The scissor and
+ * the attachment clear take care of the black bars. */
+static VkPipeline prepareNearestPresent(FrameCtx* f, VkFormat format, int w, int h,
+                                        const PresentConstants* pc, PresentConstants* mapped, VkRect2D* rect) {
+    static int enabled = -1;
+    if (enabled < 0) enabled = envFlag("XG_EXPERIMENT_PRESENT_NEAREST");
+    if (!enabled || !vk.hiN || !pc->enabled || pc->rgb24 || pc->fill || pc->osd[2] ||
+        pc->picture >= 0 || pc->filterMode != PRESENT_FILTER_NEAREST || (pc->src != 2 && pc->src != 3) ||
+        (format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_B8G8R8A8_UNORM)) return VK_NULL_HANDLE;
+
+    int axisSize[2] = {w, h};
+    int sourceSize[2] = {vk.hiN * (pc->src == 2 ? VRAM_W : vk.hiWideW),
+                         vk.hiN * (pc->src == 2 ? VRAM_H : vk.hiWideH)};
+    int start[2], count[2];
+    for (int i = 0; i < 2; i++) {
+        start[i] = pc->dest[i] > pc->clip[i] ? pc->dest[i] : pc->clip[i];
+        if (start[i] < 0) start[i] = 0;
+        int end = pc->dest[i] + pc->dest[i + 2];
+        int clipEnd = pc->clip[i] + pc->clip[i + 2];
+        if (end > clipEnd) end = clipEnd;
+        if (end > axisSize[i]) end = axisSize[i];
+        count[i] = end - start[i];
+        if (count[i] <= 0 || sourceSize[i] <= 0 || pc->disp[i] < 0) return VK_NULL_HANDLE;
+    }
+    size_t bytes = (size_t)(count[0] + count[1]) * sizeof(uint32_t);
+    size_t next = (f->spanUsed + bytes + 15) & ~(size_t)15;
+    if (next > SPAN_BYTES) return VK_NULL_HANDLE;
+
+    VkPipeline* pipeline = &vk.presentNearest[format == VK_FORMAT_B8G8R8A8_UNORM];
+    if (*pipeline == VK_NULL_HANDLE) {
+        *pipeline = createPipeline(presentVertSpv, sizeof(presentVertSpv), presentNearestFragSpv,
+                                   sizeof(presentNearestFragSpv), 0, format);
+        if (*pipeline == VK_NULL_HANDLE) return VK_NULL_HANDLE;
+    }
+    *mapped = *pc;
+    mapped->picture = (int)(f->spanUsed / sizeof(uint32_t));
+    mapped->codes = mapped->picture + count[0];
+    uint32_t* axis = (uint32_t*)(f->spans.map + f->spanUsed);
+    for (int i = 0; i < 2; i++) {
+        int64_t numerator = (2LL * (start[i] - pc->dest[i]) + 1) * pc->disp[i + 2];
+        int64_t denominator = 2LL * pc->dest[i + 2];
+        for (int j = 0; j < count[i]; j++) {
+            int64_t at = pc->disp[i] + numerator / denominator;
+            *axis++ = (uint32_t)(at % sourceSize[i]);
+            numerator += 2LL * pc->disp[i + 2];
+        }
+        mapped->dest[i] = start[i];
+    }
+    f->spanUsed = next;
+    *rect = (VkRect2D){{start[0], start[1]}, {(uint32_t)count[0], (uint32_t)count[1]}};
+    return *pipeline;
+}
+
 /* The present pass into a w x h target, the settings menu over it. With a
  * shader preset (chain) its last pass draws the picture instead, and the
  * present pass only the note, over black, inside the note's rectangle. */
 static void recordPresentPass(VkCommandBuffer cmd, VkImageView view, VkPipeline pipeline, VkFormat format, int w,
                               int h, const PresentConstants* pc, int chain) {
+    PresentConstants mapped;
+    VkRect2D pictureRect;
+    VkPipeline nearest = chain ? VK_NULL_HANDLE : prepareNearestPresent(frame(), format, w, h, pc, &mapped, &pictureRect);
     VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     att.imageView = view;
     att.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     att.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    if (nearest) att.clearValue.color.float32[3] = 1.0f;
     VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO};
     ri.renderArea.extent.width = (uint32_t)w;
     ri.renderArea.extent.height = (uint32_t)h;
@@ -8041,7 +8131,7 @@ static void recordPresentPass(VkCommandBuffer cmd, VkImageView view, VkPipeline 
     ri.colorAttachmentCount = 1;
     ri.pColorAttachments = &att;
     vkCmdBeginRendering(cmd, &ri);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, nearest ? nearest : pipeline);
     bindPresentSets(cmd, frame());
     VkViewport viewport = {0.0f, 0.0f, (float)w, (float)h, 0.0f, 1.0f};
     VkRect2D scissor = {{0, 0}, {(uint32_t)w, (uint32_t)h}};
@@ -8061,6 +8151,11 @@ static void recordPresentPass(VkCommandBuffer cmd, VkImageView view, VkPipeline 
             vkCmdDraw(cmd, 3, 1, 0, 0);
             vkCmdSetScissor(cmd, 0, 1, &scissor);
         }
+    } else if (nearest) {
+        vkCmdSetScissor(cmd, 0, 1, &pictureRect);
+        vkCmdPushConstants(cmd, vk.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(mapped), &mapped);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
     } else {
         vkCmdPushConstants(cmd, vk.pipelineLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(*pc), pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);
@@ -8251,12 +8346,12 @@ static void recordRotation(VkCommandBuffer cmd, VkImageView target, int tw, int 
 
 /* XG_DUMP_PRESENT: the same pass into the dump image, copied out for the host; w x h the
  * player's view (the dump image is that turned, with pre-rotation). */
-static void recordDumpPass(VkCommandBuffer cmd, const PresentConstants* pc, int chain, int w, int h) {
+static void recordDumpPass(VkCommandBuffer cmd, const PresentConstants* pc, int chain, int w, int h, int rotated) {
     imageBarrier(cmd, vk.dumpImage, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                  VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                  VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     int q = gtStart(cmd, GT_PRESENT); /* timed too: headless runs have only this one */
-    if (vk.rotate) {
+    if (rotated) {
         ensureRotation(w, h, vk.dumpFormat);
         rotationTargetBarrier(cmd);
         recordPresentPass(cmd, vk.rotView, vk.dumpPipeline, vk.dumpFormat, w, h, pc, chain);
@@ -8288,6 +8383,36 @@ static const uint8_t* dumpPixels(void) {
         }
     }
     return p;
+}
+
+/* A finished ImGui frame, including its backdrop, in the game's 15-bit
+ * texture format. The small target deliberately stays in player orientation. */
+int gvkCaptureMenu15(const GpuDisplay* d, uint16_t* pixels, int w, int h) {
+    int menu = (uiIsOpen != NULL && uiIsOpen()) || (extrasIsOpen != NULL && extrasIsOpen());
+    if (vk.device == VK_NULL_HANDLE || !menu) return 0;
+    cpuResolveFlush();
+    endBatch();
+    ensureDumpTarget(w, h);
+    if (vk.dumpBuffer.map == NULL) return 0;
+    VkCommandBuffer cmd = recording();
+    FrameCtx* f = frame();
+    PresentConstants pc;
+    presentConstants(d, w, h, &pc, NULL, 0);
+    if (vk.hiN && !pc.rgb24 && (pc.src == 0 || pc.disp[0] + pc.disp[2] <= vk.hiWideW)) {
+        pc.src += 2;
+        for (int i = 0; i < 4; i++) pc.disp[i] *= vk.hiN;
+    }
+    pc.osd[2] = 0;
+    pc.filterMode = PRESENT_FILTER_NEAREST;
+    barrierIfNeeded(cmd);
+    recordDumpPass(cmd, &pc, 0, w, h, 0);
+    submitFrame(NULL, NULL);
+    waitFrame(f);
+    const uint8_t* rgba = dumpPixels();
+    for (int i = 0; i < w * h; i++, rgba += 4) {
+        pixels[i] = 0x8000 | (rgba[0] >> 3) | ((rgba[1] >> 3) << 5) | ((rgba[2] >> 3) << 10);
+    }
+    return 1;
 }
 
 
@@ -8637,7 +8762,7 @@ static void presentPicture(const GpuDisplay* d, uint32_t vblank, int menu, const
     }
     if (dump) {
         ensureDumpTarget(vk.rotate & 1 ? h : w, vk.rotate & 1 ? w : h);
-        recordDumpPass(cmd, &pc, chain, w, h);
+        recordDumpPass(cmd, &pc, chain, w, h, vk.rotate);
     }
     if (shown) {
         VkImage output=copy?copy->image:vk.swapchainImages[index];
@@ -8749,7 +8874,8 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
      * acquired or presented for them, so the game thread never waits on the
      * display for them; native dumps keep their vblanks (kind 2). The
      * corner note ages with the shown pictures (it stays up as long). */
-    int hidden = battleSpeedHidden != NULL && battleSpeedHidden();
+    int arenaIntro = pcArenaVersusIntroHidden != NULL && pcArenaVersusIntroHidden();
+    int hidden = arenaIntro || (battleSpeedHidden != NULL && battleSpeedHidden());
     if (!hidden) presentVBlank();
     gtVBlank(vblank);
     int before, after; double alpha;
@@ -8770,7 +8896,7 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
         "Native rate: waiting for supported field frames";
     if (hidden) {
         gpuHostInvalidate();
-        if (dumpPresentWanted(vblank)) presentPicture(d, vblank, 0, NULL, (double)vblank, 2, 1);
+        if (!arenaIntro && dumpPresentWanted(vblank)) presentPicture(d, vblank, 0, NULL, (double)vblank, 2, 1);
         else { endBatch(); submitFrame(NULL, NULL); }
     } else if (active) {
         if (!hostPresent.active) {
@@ -9248,6 +9374,9 @@ void gvkShutdown(void) {
     vkDestroyPipeline(vk.device, vk.drawPipeline, NULL);
     if (vk.presentPipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(vk.device, vk.presentPipeline, NULL);
+    }
+    for (int i = 0; i < 2; i++) {
+        if (vk.presentNearest[i]) vkDestroyPipeline(vk.device, vk.presentNearest[i], NULL);
     }
     vkDestroyDescriptorPool(vk.device, vk.descriptorPool, NULL);
     vkDestroyDescriptorPool(vk.device, vk.moviePool, NULL);

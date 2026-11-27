@@ -78,7 +78,7 @@ struct Browser {
     bool haveCodes = false;
     uint8_t codes[XG_PARTY_CODE_TABLE];
 };
-Browser browsers[4];      // local players 1 and 2, online, and gauntlet
+Browser browsers[6];      // local players 1 and 2, online, gauntlet, and each roster's items
 Browser* B = &browsers[0]; // the one being drawn
 
 int pickedCount() {
@@ -243,8 +243,8 @@ void memberPicker(const CardGameSave& s, bool focus) {
 
 } // namespace
 
-const uint8_t* gauntletSavePicker() {
-    B = &browsers[3];
+static const uint8_t* saveBlockPicker(int browser) {
+    B = &browsers[browser];
     int frame = ImGui::GetFrameCount();
     if (frame != B->lastFrame + 1) readCards(false);
     B->lastFrame = frame;
@@ -253,7 +253,7 @@ const uint8_t* gauntletSavePicker() {
     ImGui::SameLine();
     std::string current = B->selected < 0 ? tr("Choose a save") : saveLabel(B->saves[B->selected].info, true);
     ImGui::BeginDisabled(B->saves.empty());
-    if (skin::beginCombo("##gauntlet_save", current.c_str(), 0, ImGui::GetContentRegionAvail().x)) {
+    if (skin::beginCombo("##arena_save", current.c_str(), 0, ImGui::GetContentRegionAvail().x)) {
         for (int i = 0; i < (int)B->saves.size(); i++) {
             ImGui::PushID(i);
             bool selected = B->selected == i;
@@ -270,6 +270,9 @@ const uint8_t* gauntletSavePicker() {
     if (B->saves.empty()) hint("No saves of this game on the memory cards (F1 > Saves > Memory cards).");
     return B->selected < 0 ? nullptr : B->saves[B->selected].block.data();
 }
+
+const uint8_t* gauntletSavePicker() { return saveBlockPicker(3); }
+const uint8_t* arenaItemSavePicker(int side) { return saveBlockPicker(4 + side); }
 
 void arenaPartyReason(int reason, int characterId, char* out, size_t size) {
     const char* who = characterId >= 0 && characterId < CARD_SAVE_MEMBERS ? tr(memberNames[characterId]) : tr("A member");

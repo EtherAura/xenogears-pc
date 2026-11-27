@@ -121,6 +121,9 @@ typedef struct {
 int xgPartyPack(XgPartyRecord* out, const uint8_t* block, const int members[XG_PARTY_MEMBERS],
                 const uint8_t* codes, XgPartyWhy* why);
 
+/* A checked save's battle item counts, indexed by item ID minus one. */
+int xgPartyReadItems(const uint8_t* block, uint8_t counts[XG_PARTY_ITEMS]);
+
 /* Every range check of the record (the reasons above). codes: the code
  * table every name glyph must be one of (the game's names can only have
  * those). Returns XG_PARTY_OK or why not (why may be NULL). */

@@ -51,17 +51,17 @@ void drawGauntlet(const Area& area) {
 const Viewer arena = {
     "battle-arena", N_("Battle arena"), N_("Two-player Gear Battling, local or online."), 1,
     openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Battling>, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, true,
+    nullptr, nullptr, nullptr, nullptr, nullptr, true, true,
 };
 const Viewer versus = {
     "versus-battle", N_("Versus battle"), N_("Local battles"), 2,
     openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Versus>, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, true,
+    nullptr, nullptr, nullptr, nullptr, nullptr, true, true,
 };
 const Viewer online = {
     "online-play", N_("Online play"), N_("Host or join an online match."), 3,
     openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Online>, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, true,
+    nullptr, nullptr, nullptr, nullptr, nullptr, true, true,
 };
 const Viewer gauntlet = {
     "boss-gauntlet", N_("Boss gauntlet"), N_("Fight story bosses back to back."), 4,

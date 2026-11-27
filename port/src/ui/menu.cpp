@@ -33,6 +33,7 @@ extern "C" {
 #include "gpu/gpu.h"
 #include "cd/regional.h"
 #include "spu/output.h"
+#include "system/arena.h"
 #include "system/mouse.h"
 #include "system/netplay.h"
 #include "system/pad.h"
@@ -2042,6 +2043,7 @@ void frame() {
     }
     st.escapeFree = !popupOpen() && !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput;
     st.rendered = true;
+    arenaFinishMenuFrame();
 }
 
 // ---- suspend and resume -------------------------------------------------------------
@@ -2190,6 +2192,11 @@ void run() {
         padPumpEvents(); // the window's events: ImGui's through uiEvent, the hotkeys, quitting
         runScript(false, st.frames);
         if (st.closing && !st.leaving) {
+            int matchKind = 0;
+            if (pcArenaMatchPhase(&matchKind) == ARENA_PHASE_PENDING && matchKind != ARENA_MATCH_BATTLING) {
+                // Keep the approval screen visible while the versus battle boots.
+                break;
+            }
             st.leaving = true;
             st.closedAt = st.frames;
             // As a sub-menu starts turning away (processLoadSaveMenuSub1Alt2).

@@ -56,6 +56,7 @@
 #include "picker.h"
 #include "shell.h"
 #include "ui/sfx.h"
+#include "ui/menu.h"
 #include "ui/l10n.h"
 #include "ui/pointer.h"
 #include "ui/skin.h"
@@ -1262,8 +1263,9 @@ void drawShell() {
         st.leftFrom = g.NavId;
     }
 
-    // The game's picture behind, darkened (black with --extras).
-    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 8, 200));
+    // Arena menus also supply the shatter picture. Keep the field out of them.
+    const int opacity = st.viewer && st.viewer->opaqueBackground ? 255 : 200;
+    ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 8, opacity));
 
     const int edge = 12, bar = 17, gap = 12;
     int cw = std::min((int)(io.DisplaySize.x / u), 560);
@@ -1404,6 +1406,7 @@ void frame() {
     saveBookmark();
     st.escapeFree = !popupOpen() && !ImGui::IsAnyItemActive() && !io.WantTextInput;
     st.rendered = true;
+    menu::arenaFinishMenuFrame();
 }
 
 bool run(bool fromMenu) {

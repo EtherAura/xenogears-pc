@@ -44,6 +44,7 @@ void drawSection(int section);   // inside the content pane
 enum class ArenaPart { Battling, Versus, Online };
 void arenaSection(ArenaPart part, void (*resumeGame)());
 void arenaFallback(void (*resumeGame)());
+void arenaFinishMenuFrame();
 void gauntletSection(void (*resumeGame)());
 // The pre-game / setup screen (ui.h uiDiscSetup): pages on the commands' arc,
 // plus Settings (opens the full menu before launch), Start and Quit.

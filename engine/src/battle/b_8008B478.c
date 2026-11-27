@@ -37,6 +37,10 @@ extern void startCharacterJumpToEnemy(u8 entity);
 extern void moveEntityToOtherEntity(u8 entity, u8 target);
 extern u8 battleInputButton; /* battle menu input (1 down, 3 up, 4 confirm, 5 cancel) */
 extern void initBattleG3Array(void);
+#ifdef PLATFORM_PC
+int pcVersusEnemyItemMenu(void);
+int pcVersusEnemyItemTarget(u8 entity, u16 flags);
+#endif
 extern void setupGearSpecialMenu(u8 entity, u8* ids, u16* costs);
 extern void updateGearSpecialMenuCursor(u8 entity, u8 cursor);
 extern void drawCircleMenuChi_updateSub4(s32 x, s32 y, s32* a, u8* b);
@@ -315,6 +319,9 @@ void itemCancelSelection(u8 arg0) {
     battleVar1->m9C_renderBA8 = battleVar1->m9D_render1E68 = battleVar1->m9E_render27C8 = 1;
     battleVar1->mB0_isDialogWindowInitialized[0] = battleVar1->mB0_isDialogWindowInitialized[1] = 1;
     battleVar1->mB7_openMenuType = 2;
+#ifdef PLATFORM_PC
+    if (pcVersusEnemyItemMenu()) return;
+#endif
     temp = characterIdToTargetBitmask(arg0);
     setCameraVisibleEntities((temp | characterIdToTargetBitmask(battleVar2->m0_entityMenus[arg0].m3C_currentTarget)) & 0xFFFF);
     updateCharacterBlinkingTask(characterIdToTargetBitmask(battleVar2->m0_entityMenus[arg0].m3C_currentTarget) & 0xFFFF);
@@ -337,7 +344,13 @@ u8 useItemInSlot(u8 entity, u8 col, u8 row, u8 mode) {
         if (mode == 0) {
             itemMenuHideWindows(1);
             battleVar1->mC6_isTargetSelectionCursorVisible = 1;
+#ifdef PLATFORM_PC
+            int selected = pcVersusEnemyItemTarget(entity, id);
+            if (selected < 0) selected = abilitySelectTarget(id, entity, 0);
+            if (selected != 0) {
+#else
             if (abilitySelectTarget(id, entity, 0) != 0) {
+#endif
                 result = 1;
             } else {
                 battleVar1->mC6_isTargetSelectionCursorVisible = 0;
@@ -409,6 +422,12 @@ u8 drawCircleMenuItem_update(u8 entity) {
         }
         drawCircleMenuChi_updateSub4((x % 2) * 0x80 | (x % 2) * 2 + 0x2A, (x / 2) * 13 + 0x63, &count, &flag);
         battleRenderDebugAndMain();
+#ifdef PLATFORM_PC
+        if (battleInputButton == 0xFF && pcVersusEnemyItemMenu()) {
+            state = 0;
+            break;
+        }
+#endif
         switch (battleInputButton) {
         case 5:
             state = 0;

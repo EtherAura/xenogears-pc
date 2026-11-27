@@ -236,6 +236,7 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank);
  * the menu drawn over it (port/src/ui); shot: also write it as <shot>.png in
  * the present dump directory (dumpPresentNamed). */
 void gvkPresentMenu(const GpuDisplay* d, uint32_t vblank, const char* shot);
+int gvkCaptureMenu15(const GpuDisplay* d, uint16_t* pixels, int w, int h);
 /* The wide target (wide.c): triangles drawn into it, after the current
  * batch's VRAM draws (coordinates in the target; texels from VRAM, or from
  * the target itself where GpuVertex.wideTex says so). */

@@ -312,6 +312,10 @@ void gpuPresentMenu(const char* shot) {
     }
 }
 
+int gpuCaptureMenu15(uint16_t* pixels, int w, int h) {
+    return g.ready && gvkCaptureMenu15(&g.display, pixels, w, h);
+}
+
 /* The GPU's own vblanks, while nobody calls gpuVBlank. */
 static void selfVBlank(void* arg) {
     (void)arg;

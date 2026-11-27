@@ -376,6 +376,9 @@ void battleMain(void) {
         currentBattleMode = 1;
     }
     battleStartPartyFixups();
+#ifdef PLATFORM_PC
+    pcVersusRosterDeployGears();
+#endif
     for (i = 0; i < 3; i++) {
         if (battleCharacters[i] != 0x7F) {
             battleStartUnlockedAbilities[i][0] = gameState.m16C0_abilities[battleCharacters[i]].m0_unlockedAbilitiesBitField[0];
@@ -609,7 +612,7 @@ void battleTickMain(u8 arg0) {
         if (arg0 == 0) {
             /* a versus battle: player 2 makes the script's choices (versus.c); else as below */
             pcVersusMonsterTurn(battleVar2->m2D3_currentEntityTurn, battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m7C_statusFlags[2] & 0x2000);
-            if (pcVersusGearCalled()) goto mirrorTurnDone;
+            if (pcVersusEnemyTurnResolved()) goto mirrorTurnDone;
             if (!(battleVisualEntities[battleVar2->m2D3_currentEntityTurn].m3_hidden & 0x80) &&
                 !(battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m34_monsterFlags & 0x400)) {
                 battleVar1->mB0_isDialogWindowInitialized[5] = 1;

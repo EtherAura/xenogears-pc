@@ -113,6 +113,8 @@ typedef struct {
     uint8_t data[NP_PARTY_MAX];
 } NpAssembly;
 
+enum { NP_RECORD_PENDING = -1 }; /* a custom roster awaits the local player's approval */
+
 typedef struct NpSession NpSession;
 struct NpSession {
     int host;
@@ -173,6 +175,8 @@ struct NpSession {
     /* the program's */
     void (*note)(NpSession* s, int what, const char* text);
     void (*poll)(void); /* while a vblank waits (the window can close) */
+    int (*cancel)(void); /* the pre-match lobby can close from the menu */
+    int reviewRoster; /* this host accepts an approved proposal from the joiner */
     void* user;
     /* tests: every testDrop-th datagram this side sends is lost (0: none);
      * none goes out until testBlackoutUntil (npTestBlackout) */

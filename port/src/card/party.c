@@ -325,6 +325,23 @@ static void takeList(const uint8_t* ids, const uint8_t* counts, int entries, int
     }
 }
 
+static void takeItems(const uint8_t* block, uint8_t* ids, uint8_t* counts) {
+    takeList(block + CARD_SAVE_AT(offsetof(GameState, m2026_inventory0Ids)),
+             block + CARD_SAVE_AT(offsetof(GameState, m1F90_inventory0Counts)), sizeof(gameState.m2026_inventory0Ids), 1,
+             ITEM_LAST, ids, counts);
+}
+
+int xgPartyReadItems(const uint8_t* block, uint8_t counts[XG_PARTY_ITEMS]) {
+    CardGameSave save;
+    if (!cardGameSaveRead(block, &save)) return 0;
+    uint8_t ids[XG_PARTY_ITEMS] = {0};
+    uint8_t packed[XG_PARTY_ITEMS] = {0};
+    takeItems(block, ids, packed);
+    memset(counts, 0, XG_PARTY_ITEMS);
+    for (int i = 0; i < XG_PARTY_ITEMS && ids[i] != 0; i++) counts[ids[i] - 1] = packed[i];
+    return 1;
+}
+
 int xgPartyPack(XgPartyRecord* out, const uint8_t* b, const int members[XG_PARTY_MEMBERS], const uint8_t* codes,
                 XgPartyWhy* why) {
     memset(out, 0, sizeof(*out));
@@ -361,9 +378,7 @@ int xgPartyPack(XgPartyRecord* out, const uint8_t* b, const int members[XG_PARTY
             return fail(why, XG_PARTY_BAD_NAME, k, "member %d (id %d): a name the code table cannot decode", k + 1, id);
         }
     }
-    takeList(b + CARD_SAVE_AT(offsetof(GameState, m2026_inventory0Ids)),
-             b + CARD_SAVE_AT(offsetof(GameState, m1F90_inventory0Counts)), sizeof(gameState.m2026_inventory0Ids), 1,
-             ITEM_LAST, out->m298_itemIds, out->m2C8_itemCounts);
+    takeItems(b, out->m298_itemIds, out->m2C8_itemCounts);
     takeList(b + CARD_SAVE_AT(offsetof(GameState, m1D9C_inventory1Ids)),
              b + CARD_SAVE_AT(offsetof(GameState, m1D38_inventory1Counts)), sizeof(gameState.m1D9C_inventory1Ids),
              AMMO_FIRST, AMMO_LAST, out->m2F8_ammoIds, out->m328_ammoCounts);

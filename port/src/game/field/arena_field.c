@@ -86,6 +86,7 @@ static void startSong(s32 music, s32 volume0) {
  * music: f_800775C0.c); the battle puts the formation in (versus.c). */
 static void startVersusBattle(s32 config) {
     op9DVar1.m10C_battleMusicId = pcArenaMusic(0x1D);
+    op9DVar1.m1D1_randomBattleTransitionEffect = 0; /* native glass shatter */
     requestedBattleConfig = config;
     battleInitVar1 = 0;
     if (mechaOverlayLoadingMode == 0) {

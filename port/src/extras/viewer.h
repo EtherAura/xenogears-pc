@@ -74,6 +74,7 @@ struct Viewer {
     // Optional decoded RGBA cache for viewers without a primitive View.
     bool (*thumbnail)(std::vector<uint32_t>&) = nullptr;
     bool gameOnly = false;
+    bool opaqueBackground = false;
 };
 
 struct ViewerRegistration {

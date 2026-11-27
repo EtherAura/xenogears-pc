@@ -37,10 +37,12 @@ static int sessionReturned;
 
 #include "common.h"
 #include "main/game_state.h"
+#include "arena.h"
 #include "cd/cd.h"
 #include "hw.h"
 #include "net.h"
 #include "netplay.h"
+#include "netplay_core.h"
 #include "settings.h"
 #include "spu/output.h"
 #include "system.h"
@@ -48,6 +50,7 @@ static int sessionReturned;
 
 static struct {
     SDL_Process* proc;
+    char* introPath;
     int state;
     char detail[256];
     int delay;
@@ -58,8 +61,167 @@ static struct {
     size_t used;
 } L;
 
+static void removeIntroPicture(void) {
+    if (L.introPath == NULL) return;
+    SDL_RemovePath(L.introPath);
+    SDL_free(L.introPath);
+    L.introPath = NULL;
+}
+
 static void copy(char* out, size_t size, const char* text) {
     SDL_strlcpy(out, text, size);
+}
+
+
+/* The custom roster lobby uses the same authenticated record exchange as a
+ * match. Its socket closes before the session process begins. While it runs,
+ * both players stay in their own game menus, including on Android. */
+static struct {
+    SDL_Thread* worker;
+    SDL_Mutex* lock;
+    SDL_AtomicInt cancelled;
+    NetplayStart start;
+    char proposal[ARENA_LOADOUT_CODE];
+    char detail[200];
+    int phase, confirmed;
+} R;
+
+static int rosterLobbyCancelled(void) {
+    return SDL_GetAtomicInt(&R.cancelled);
+}
+
+static int rosterLobbyCheck(NpSession* session, const uint8_t* data, int bytes, int* member) {
+    char roster[ARENA_LOADOUT_CODE];
+    ArenaLoadout loadout;
+    int party[3];
+    *member = -1;
+    if (bytes <= 0 || bytes >= (int)sizeof roster || memchr(data, 0, (size_t)bytes) != NULL) return 1;
+    memcpy(roster, data, (size_t)bytes);
+    roster[bytes] = '\0';
+    if (!pcArenaLoadoutDecode(roster, &loadout, party)) return 1;
+    if (!session->host) return strcmp(roster, R.start.roster) != 0;
+
+    SDL_LockMutex(R.lock);
+    if (strcmp(R.proposal, roster) != 0) {
+        copy(R.proposal, sizeof R.proposal, roster);
+        R.confirmed = 0;
+    }
+    R.phase = NETPLAY_ROSTER_REVIEW;
+    int confirmed = R.confirmed;
+    SDL_UnlockMutex(R.lock);
+    if (!confirmed) return NP_RECORD_PENDING;
+    return !npSetParty(session, data, bytes);
+}
+
+static int rosterLobbyRun(void* unused) {
+    (void)unused;
+    NetplayStart start = R.start;
+    char lobbyCode[sizeof start.code + sizeof "roster review:"];
+    SDL_snprintf(lobbyCode, sizeof lobbyCode, "roster review:%s", start.code);
+    NpSession session;
+#if VERSION_JP
+    const int region = 'J';
+#else
+    const int region = 'U';
+#endif
+    npInit(&session, start.host, lobbyCode, netplayCompatibilityId(), region);
+    session.terms.mode = NP_MODE_ROSTER;
+    session.terms.delay = 1;
+    session.terms.table = 2;
+    session.terms.config = 13;
+    session.terms.party[0] = 0;
+    session.terms.party[1] = 2;
+    session.terms.party[2] = 255;
+    session.partyCheck = rosterLobbyCheck;
+    session.reviewRoster = start.host;
+    session.cancel = rosterLobbyCancelled;
+    session.silentNs = 5000000000ull;
+
+    const char* failure = NULL;
+    NetAddr address;
+    int agreed = 0;
+    if (!npOpen(&session, start.host ? start.port : 0)) {
+        failure = session.why;
+    } else {
+        const uint64_t wait = 300000000000ull;
+        if (!start.host) npSetParty(&session, (const uint8_t*)start.roster, (int)strlen(start.roster));
+        if (start.host) agreed = npHost(&session, wait);
+        else if (netResolveHostPort(start.address, &address)) agreed = npJoin(&session, &address, wait);
+        else failure = netError();
+        if (agreed && session.terms.mode == NP_MODE_ROSTER) {
+            unsigned p1, p2;
+            /* Let both peers acknowledge the accepted record before the host
+             * releases this port. The live game uses the original code. */
+            agreed = npFrame(&session, 1, 0, 0, &p1, &p2) && npFrame(&session, 2, 0, 0, &p1, &p2);
+            if (agreed) {
+                const uint64_t until = SDL_GetTicksNS() + 500000000ull;
+                while (!rosterLobbyCancelled() && SDL_GetTicksNS() < until && !session.over) {
+                    npIdle(&session);
+                    SDL_Delay(25);
+                }
+                agreed = !session.over;
+            }
+        } else {
+            agreed = 0;
+        }
+        if (failure == NULL) failure = session.why;
+        npClose(&session);
+    }
+
+    SDL_LockMutex(R.lock);
+    if (agreed && !rosterLobbyCancelled()) {
+        if (start.host) copy(R.start.roster, sizeof R.start.roster, R.proposal);
+        R.phase = NETPLAY_ROSTER_READY;
+    } else {
+        copy(R.detail, sizeof R.detail, failure != NULL && *failure ? failure : "The lobby could not complete.");
+        R.phase = NETPLAY_ROSTER_FAILED;
+    }
+    SDL_UnlockMutex(R.lock);
+    return 0;
+}
+
+void netplayRosterLobbyStop(void) {
+    if (R.worker == NULL) return;
+    SDL_SetAtomicInt(&R.cancelled, 1);
+    SDL_WaitThread(R.worker, NULL);
+    R.worker = NULL;
+    SDL_DestroyMutex(R.lock);
+    R.lock = NULL;
+}
+
+int netplayRosterLobbyStart(const NetplayStart* start) {
+    netplayRosterLobbyStop();
+    R.lock = SDL_CreateMutex();
+    if (R.lock == NULL) return 0;
+    R.start = *start;
+    R.proposal[0] = R.detail[0] = 0;
+    R.phase = NETPLAY_ROSTER_WAITING;
+    R.confirmed = 0;
+    SDL_SetAtomicInt(&R.cancelled, 0);
+    R.worker = SDL_CreateThread(rosterLobbyRun, "PvP roster lobby", NULL);
+    if (R.worker != NULL) return 1;
+    SDL_DestroyMutex(R.lock);
+    R.lock = NULL;
+    return 0;
+}
+
+int netplayRosterLobbyState(NetplayStart* start, char* proposal, char* detail, size_t detailSize) {
+    if (R.worker == NULL) return NETPLAY_ROSTER_IDLE;
+    SDL_LockMutex(R.lock);
+    int phase = R.phase;
+    *start = R.start;
+    copy(proposal, ARENA_LOADOUT_CODE, R.proposal);
+    copy(detail, detailSize, R.detail);
+    if (phase == NETPLAY_ROSTER_REVIEW && R.confirmed) phase = NETPLAY_ROSTER_WAITING;
+    SDL_UnlockMutex(R.lock);
+    return phase;
+}
+
+void netplayRosterLobbyConfirm(const char* proposal) {
+    if (R.worker == NULL) return;
+    SDL_LockMutex(R.lock);
+    if (R.phase == NETPLAY_ROSTER_REVIEW && strcmp(R.proposal, proposal) == 0) R.confirmed = 1;
+    SDL_UnlockMutex(R.lock);
 }
 
 static void parse(const char* line) {
@@ -81,10 +243,12 @@ static void parse(const char* line) {
         char peer[64] = "";
         int delay = 0;
         if (sscanf(line + 10, "%63s %d", peer, &delay) >= 1) {
-            L.state = NETPLAY_CONNECTED;
+            L.state = NETPLAY_LOADING;
             copy(L.detail, sizeof L.detail, peer);
             L.delay = delay;
         }
+    } else if (SDL_strcmp(line, "ready") == 0 && L.state == NETPLAY_LOADING) {
+        L.state = NETPLAY_CONNECTED;
     } else if (SDL_strcmp(line, "paused") == 0) {
         L.paused = 1;
     } else if (SDL_strcmp(line, "back") == 0) {
@@ -99,7 +263,8 @@ static void parse(const char* line) {
             L.refusedReason = reason;
             L.refusedMember = member;
         }
-    } else if (SDL_strncmp(line, "moved ", 6) == 0 && L.state == NETPLAY_CONNECTED) {
+    } else if (SDL_strncmp(line, "moved ", 6) == 0 &&
+               (L.state == NETPLAY_LOADING || L.state == NETPLAY_CONNECTED)) {
         copy(L.detail, sizeof L.detail, line + 6);
     } else if (SDL_strncmp(line, "over ", 5) == 0) {
         L.state = NETPLAY_OVER;
@@ -142,6 +307,7 @@ static void checkProcess(void) {
             fclose(sessionOutput);
             sessionOutput = NULL;
             SDL_RemovePath(sessionPath);
+            removeIntroPicture();
             if (L.state != NETPLAY_OVER) {
                 L.state = NETPLAY_OVER;
                 copy(L.detail, sizeof L.detail, "exit");
@@ -162,6 +328,7 @@ static void checkProcess(void) {
         fprintf(stderr, "netplay: the session's process ended (%s)\n", L.detail);
         SDL_DestroyProcess(L.proc);
         L.proc = NULL;
+        removeIntroPicture();
     }
 }
 
@@ -170,6 +337,7 @@ static void stopAtExit(void) {
     if (sessionOutput != NULL) androidActivityAction("stopNetplay");
 #endif
     if (L.proc != NULL) SDL_KillProcess(L.proc, false); /* it tells the other player itself */
+    removeIntroPicture();
 }
 
 int netplayLaunch(const NetplayStart* o) {
@@ -225,6 +393,13 @@ int netplayLaunch(const NetplayStart* o) {
     const char* disc = settingsGet("disc");
     if ((disc == NULL || disc[0] == '\0') && cdSwapPath(0) != NULL) args[n++] = cdSwapPath(0);
 #endif
+    L.introPath = pcArenaWriteMenuPicture();
+#ifdef __ANDROID__
+    if (L.introPath != NULL) {
+        args[n++] = "--netplay-intro-file";
+        args[n++] = L.introPath;
+    }
+#endif
     args[n] = NULL;
     hex[0] = 0;
     if (o->hasParty) {
@@ -249,6 +424,8 @@ int netplayLaunch(const NetplayStart* o) {
     SDL_PropertiesID props = SDL_CreateProperties();
     if (env == NULL || props == 0) {
         if (env != NULL) SDL_DestroyEnvironment(env);
+        if (props != 0) SDL_DestroyProperties(props);
+        removeIntroPicture();
         return 0;
     }
     static const char* const mine[] = {"XG_PAD_SCRIPT",  "XG_PAD_SCRIPT2", "XG_UI_SCRIPT",  "XG_QUIT_AT",
@@ -268,6 +445,8 @@ int netplayLaunch(const NetplayStart* o) {
     SDL_SetEnvironmentVariable(env, "XG_NETPLAY_STATUS", "1", true);
     SDL_SetEnvironmentVariable(env, "XG_ENGINE_LAUNCHED", "1", true); /* this engine, whatever the setting says */
     SDL_SetEnvironmentVariable(env, "XG_NETPLAY_CODE", o->code, true);
+    if (L.introPath != NULL) SDL_SetEnvironmentVariable(env, "XG_NETPLAY_INTRO_FILE", L.introPath, true);
+    else SDL_UnsetEnvironmentVariable(env, "XG_NETPLAY_INTRO_FILE");
     if (o->roster[0] != 0) SDL_SetEnvironmentVariable(env, "XG_NETPLAY_ROSTER", o->roster, true);
     else SDL_UnsetEnvironmentVariable(env, "XG_NETPLAY_ROSTER");
 
@@ -294,12 +473,14 @@ int netplayLaunch(const NetplayStart* o) {
     L.refusedMember = 255;
 #ifdef __ANDROID__
     if (sessionOutput == NULL) {
+        removeIntroPicture();
         L.state = NETPLAY_OVER;
         copy(L.detail, sizeof L.detail, "error");
         return 0;
     }
 #else
     if (L.proc == NULL) {
+        removeIntroPicture();
         L.state = NETPLAY_OVER;
         SDL_snprintf(L.detail, sizeof L.detail, "start %s", SDL_GetError());
         fprintf(stderr, "netplay: the session's process did not start: %s\n", SDL_GetError());

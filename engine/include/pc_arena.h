@@ -43,7 +43,11 @@ int pcVersusRosterResult(unsigned mask);
 int pcVersusRosterTargetOp(const unsigned char* op, int actor);
 int pcArenaRosterGear(int slot, const unsigned char** controls, const unsigned char** model, int* x, int* position);
 void pcArenaRosterGearActivated(int slot);
-int pcVersusGearCalled(void);
+void pcArenaRosterGearDeactivated(int slot);
+int pcArenaRosterStartInGear(void);
+int pcArenaRosterCanExitGear(int slot);
+void pcVersusRosterDeployGears(void);
+int pcVersusEnemyTurnResolved(void);
 
 /* The session (pcArenaSession; port/src/system/arena.h's phases, which add
  * PENDING for a request not taken yet). */
@@ -56,6 +60,9 @@ enum {
 
 /* Platform, for the game. */
 void pcArenaLog(const char* fmt, ...); /* XG_ARENA_LOG=1 */
+int pcArenaHoldVersusIntro(void);
+void pcArenaGlassShatterStarted(void);
+int pcArenaUploadMenuShatter(void); /* texture at 0x2c0,0x100 and its wide margin, or -1 */
 int pcArenaPending(void);       /* asked (or XG_ARENA), not taken yet */
 void pcArenaTaken(void);        /* the field takes it now */
 void pcArenaKeyboard(int arena); /* 1 in Battling: player 2's keyboard, if chosen */

@@ -7,6 +7,8 @@
  * lockstep queue are netplay_core.h.
  */
 
+#include <stddef.h>
+
 #include "card/party.h"
 #include "arena_roster.h"
 
@@ -55,7 +57,14 @@ typedef struct {
     char roster[ARENA_LOADOUT_CODE]; /* both players approve the same roster before launching */
     XgPartyRecord record; /* ... (checked) */
 } NetplayStart;
-enum { NETPLAY_IDLE, NETPLAY_STARTING, NETPLAY_HOSTING, NETPLAY_JOINING, NETPLAY_CONNECTED, NETPLAY_OVER };
+enum { NETPLAY_IDLE, NETPLAY_STARTING, NETPLAY_HOSTING, NETPLAY_JOINING, NETPLAY_LOADING, NETPLAY_CONNECTED, NETPLAY_OVER };
+
+enum { NETPLAY_ROSTER_IDLE, NETPLAY_ROSTER_WAITING, NETPLAY_ROSTER_REVIEW, NETPLAY_ROSTER_READY, NETPLAY_ROSTER_FAILED };
+uint64_t netplayCompatibilityId(void);
+int netplayRosterLobbyStart(const NetplayStart* start);
+int netplayRosterLobbyState(NetplayStart* start, char* proposal, char* detail, size_t detailSize);
+void netplayRosterLobbyConfirm(const char* proposal);
+void netplayRosterLobbyStop(void);
 
 /* The session's process started: 1. */
 int netplayLaunch(const NetplayStart* start);

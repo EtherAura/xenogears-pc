@@ -59,6 +59,20 @@ layout(location = 0) out uint outCode;
 layout(location = 0) out vec4 outColor;
 #endif
 
+#ifdef NEAREST_LOOKUP
+
+// The host turns the two nearest-neighbour axes into absolute source
+// coordinates once per frame. The scissor keeps fragments inside the maps.
+void main() {
+    ivec2 p = ivec2(gl_FragCoord.xy) - pc.dest.xy;
+    ivec2 s = ivec2(osd.words[pc.picture + p.x], osd.words[pc.codes + p.y]);
+    uint w = pc.src == 2 ? imageLoad(hiVram, s).r : imageLoad(hiWide, s).r;
+    vec3 c = vec3(uvec3(w, w >> 8, w >> 16) & 255u);
+    outColor = vec4(c / 255.0, 1.0);
+}
+
+#else
+
 uint fetch(int x, int y) {
     return imageLoad(vram, ivec2(x & 1023, y & 511)).r;
 }
@@ -172,4 +186,5 @@ void main() {
     }
     outColor = vec4(col / 255.0, 1.0);
 }
+#endif
 #endif

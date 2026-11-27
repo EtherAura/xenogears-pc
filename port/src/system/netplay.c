@@ -112,10 +112,11 @@
  * Started from the F1 menu (Extras > Battle arena > Online, netplay_launch.c),
  * this runs as a process of its own with XG_NETPLAY_STATUS=1: its state goes
  * to stdout as lines "XGNP <state> ...", which the menu reads: hosting <port>,
- * joining <host:port>, connected <address> <delay>, waiting, paused, back,
+ * joining <host:port>, connected <address> <delay> (loading), ready (first
+ * synchronized inputs), waiting, paused, back,
  * lost, resumed, moved <address>,
  * over <why> [vblank] (why: error nobody noanswer build region busy desync
- * disc left silent battling quit address leave; versus p1|p2|escaped: who
+ * disc left silent startingtimeout battling quit address leave; versus p1|p2|escaped: who
  * won; party vs party: noparty, partyrefused R ID (the other side refused
  * this side's party), peerparty R ID (this side refused the other's),
  * ownparty R ID (this side's own fails the check), stage (the host's stage
@@ -219,6 +220,7 @@ void stateRequestRestart(int keep, void (*entry)(void));
 static struct {
     int active;
     int host;
+    int synchronized; /* the first peer input has made it into the game */
     char code[64];
     int port;
     char joinTo[256];
@@ -384,6 +386,8 @@ static int memberId(const int ids[3], int place) {
 static void statusEnd(const NpSession* s) {
     if (s->reason == NP_END_DESYNC) {
         status("over desync %u", s->endFrame);
+    } else if (s->reason == NP_END_SILENT && !N.synchronized) {
+        status("over startingtimeout");
     } else if (N.roster[0] && (s->reason == NP_END_PARTY_REFUSED ||
                               s->reason == NP_END_PEER_PARTY || s->reason == NP_END_NO_PARTY)) {
         status("over loadout");
@@ -437,6 +441,9 @@ static void stop(int end) {
         end = N.np.peerEnd; /* the other side got to the same end first */
     }
     const char* text = end != END_NONE ? endTexts[end] : N.np.why;
+    if (end == END_NONE && N.np.reason == NP_END_SILENT && !N.synchronized) {
+        text = "The other player's game did not finish connecting.";
+    }
     say("%s", text);
     if (end != END_NONE) status("over %s", endWords[end]);
     else statusEnd(&N.np);
@@ -480,40 +487,51 @@ static void note(NpSession* s, int what, const char* text) {
         break;
     case NP_NOTE_WAITING: say("waiting for the other player..."); status("waiting"); break;
     case NP_NOTE_PAUSED:
-        say("the other player paused (the menu, or the game in the background)");
-        status("paused");
+        if (N.synchronized) {
+            say("the other player paused (the menu, or the game in the background)");
+            status("paused");
+        }
         N.lostShown = 0;
         break;
     case NP_NOTE_BACK:
-        say("the other player is back");
-        status("back");
+        if (N.synchronized) {
+            say("the other player is back");
+            status("back");
+        }
         uiNetplayNotice(NULL, 0);
         break;
     case NP_NOTE_LOST:
-        say("the connection is lost: waiting for it to come back (up to %d s)", (int)(N.np.silentNs / 1000000000ull));
-        status("lost");
+        if (N.synchronized) {
+            say("the connection is lost: waiting for it to come back (up to %d s)", (int)(N.np.silentNs / 1000000000ull));
+            status("lost");
+        } else {
+            say("starting the match: waiting for the other player's game to load");
+        }
         N.lostShown = 0;
         break;
     case NP_NOTE_RESUMED:
-        say("the connection is back: going on");
-        status("resumed");
+        if (N.synchronized) {
+            say("the connection is back: going on");
+            status("resumed");
+        }
         uiNetplayNotice(NULL, 0);
         break;
     case NP_NOTE_MOVED: say("the other player is at %s now", text); status("moved %s", text); break;
     }
 }
 
-/* While a vblank waits for the other side: the window can still close, the
- * stall watchdog knows the wait is meant, and with the connection lost, a
- * note on the picture says so. */
+/* While a vblank waits for the other side, keep the window responsive and
+ * explain the wait. The first wait can be a slow start on the peer. */
 static void pollQuit(void) {
     quitPoll(1);
     hwPausedFrame(); /* the stall watchdog: waiting here is no stall */
     uint64_t now = SDL_GetTicksNS();
     if ((N.np.lost || N.np.peerPaused) && now - N.lostShown > 1000000000ull) {
         N.lostShown = now;
-        uiNetplayNotice(N.np.lost ? "Connection lost. Waiting for the other player."
-                                 : "The other player paused.", 0);
+        const char* notice = !N.synchronized ? "Starting the match. Waiting for the other player's game to load."
+                             : N.np.lost ? "Connection lost. Waiting for the other player."
+                                         : "The other player paused.";
+        uiNetplayNotice(notice, 0);
         gpuPresentMenu(NULL);
     }
 }
@@ -540,7 +558,7 @@ static uint64_t hashFile(const char* path) {
     return h;
 }
 
-static uint64_t compatId(void) {
+uint64_t netplayCompatibilityId(void) {
     char path[4096];
     if (XG_NETPLAY_COMPAT != 0) return XG_NETPLAY_COMPAT;
     return netSelfPath(path, sizeof path) ? hashFile(path) : 0;
@@ -780,7 +798,7 @@ int netplayConnect(const char* disc) {
             for (int i = 0; i < 3; i++) N.terms.party[i] = approvedParty[i];
         }
     }
-    npInit(s, N.host, N.code, compatId(), REGION);
+    npInit(s, N.host, N.code, netplayCompatibilityId(), REGION);
     say("this game's compatibility id: %016llx", (unsigned long long)s->compatId);
     s->note = note;
     s->poll = NULL; /* no window yet */
@@ -997,6 +1015,12 @@ static uint64_t stateHash(void) {
             u32 p2 = pcVersusPartyHash(); /* player 2's side between its turns (mirror.c) */
             h = npFnv(h, &p2, sizeof p2);
         }
+        if (N.np.terms.mode == NP_MODE_ROSTER) {
+            for (int side = 0; side < 2; side++) {
+                const u8* counts = pcArenaRosterItemCounts(side);
+                if (counts != NULL) h = npFnv(h, counts, ARENA_ROSTER_ITEMS);
+            }
+        }
     }
     if (N.np.terms.mode == NP_MODE_PARTY) h = npFnv(h, &N.sidesHash, sizeof N.sidesHash); /* the two records */
     return h;
@@ -1113,5 +1137,10 @@ void netplayFrame(unsigned local, unsigned* port1, unsigned* port2) {
     if (!npFrame(&N.np, n, local, h, port1, port2)) {
         if (N.hashLog != NULL) fflush(N.hashLog);
         stop(END_NONE);
+    } else if (!N.synchronized && n - N.np.base >= (uint32_t)N.np.terms.delay) {
+        N.synchronized = 1;
+        say("both games are ready");
+        status("ready");
+        if (N.np.peerPaused) status("paused");
     }
 }

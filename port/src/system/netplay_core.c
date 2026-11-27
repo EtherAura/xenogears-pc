@@ -409,6 +409,10 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
                 return 0;
             }
             reason = s->partyCheck != NULL ? s->partyCheck(s, a->data, a->bytes, &member) : 0;
+            if (s->reviewRoster && reason == NP_RECORD_PENDING) {
+                *wait = 1;
+                return 0;
+            }
             if (reason != 0) {
                 refuse = NP_REFUSE_PARTY;
                 reason = reason > 255 ? 255 : reason;
@@ -472,10 +476,11 @@ int npHost(NpSession* s, uint64_t waitNs) {
     int waiting = 0; /* `hello` from `helloFrom` waits for its party's pages */
 
     memset(&a, 0, sizeof a);
-    if (hasMatchRecord(s->terms.mode) && npPartyPages(s->partyBytes) == 0) {
+    if (hasMatchRecord(s->terms.mode) && !s->reviewRoster && npPartyPages(s->partyBytes) == 0) {
         return end(s, NP_END_ERROR, "party vs party without a party of this side's");
     }
     for (;;) {
+        if (s->cancel != NULL && s->cancel()) return end(s, NP_END_ERROR, "lobby closed");
         if (SDL_GetTicksNS() > until) return end(s, NP_END_NOBODY, "nobody joined");
         if (s->poll != NULL) s->poll();
         if (!netWait(s->s, 50)) continue;
@@ -563,6 +568,7 @@ int npJoin(NpSession* s, const NetAddr* host, uint64_t waitNs) {
     s->peer = *host;
     for (;;) {
         uint64_t now = SDL_GetTicksNS();
+        if (s->cancel != NULL && s->cancel()) return end(s, NP_END_ERROR, "lobby closed");
         if (now > until) return end(s, NP_END_NO_ANSWER, "no answer (the address, the port, a firewall, or the code)");
         if (s->poll != NULL) s->poll();
         if (now - last > HELLO_EVERY_NS) {
@@ -810,6 +816,7 @@ int npFrame(NpSession* s, uint32_t n, unsigned local, uint64_t hash, unsigned* p
     compareHash(s, n);
     if (n >= s->base + delay) {
         while (!s->over && s->theirsTag[n % NP_RING] != n) {
+            if (s->cancel != NULL && s->cancel()) return end(s, NP_END_ERROR, "lobby closed");
             uint64_t now = SDL_GetTicksNS();
             if (now - s->lastSend > RESEND_NS) sendInput(s, f, n, hash, 0);
             if (now - s->lastHeard > s->silentNs) end(s, NP_END_SILENT, "the other player stopped answering");

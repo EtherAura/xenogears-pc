@@ -113,6 +113,7 @@ void gpuReadVram(uint16_t* dst);
  * last vblank's picture shown again with the menu over it. shot: also write
  * it as <shot>.png (XG_DUMP_PRESENT's directory). */
 void gpuPresentMenu(const char* shot);
+int gpuCaptureMenu15(uint16_t* pixels, int w, int h);
 
 /* Game code run outside the game (the extras' sandbox, port/src/extras):
  * while a capture is set, what the game hands LIBGPU goes to it instead of

@@ -23,6 +23,7 @@ typedef struct {
 typedef struct {
     RosterType type;
     int column, position, control, model;
+    int replacesFootSheet;
 } RosterGear;
 
 typedef struct {
@@ -34,6 +35,7 @@ typedef struct {
     int typeCount;
     unsigned char ids[ARENA_ROSTER_SLOTS];
     unsigned char split, count, activeGears, online;
+    unsigned char items[2][ARENA_ROSTER_ITEMS];
 } RosterAssets;
 
 static RosterAssets roster;
@@ -163,6 +165,7 @@ static int packVisuals(RosterAssets* a, const char** why) {
         /* A solo pilot frees its sprite strip as soon as it calls. Copies
          * still on foot need the original strip until they leave the fight. */
         int id = sheetId[a->ids[i]];
+        a->gear[i].replacesFootSheet = instances[id] == 1;
         a->gear[i].column = instances[id] == 1 ? sheetColumn[id] : columns++;
     }
     if (columns > 7) return refused(why, "The combined sprites and Gear slots exceed this arena's texture space.");
@@ -256,6 +259,8 @@ static int validLoadout(const ArenaLoadout* loadout, const int party[3]) {
     int members = 0;
     if (loadout->side[0].count > 3 || loadout->side[1].count == 0 || loadout->side[1].count > 5 ||
         loadout->stage >= 75 || loadout->callGear > 1 || party[0] == 255) return 0;
+    if (loadout->startInGear > 1 || loadout->allowExitGear > 1 ||
+        (!loadout->callGear && (loadout->startInGear || loadout->allowExitGear))) return 0;
     for (int i = 0; i < 3; i++) {
         if (party[i] == 255) continue;
         if (party[i] < 0 || party[i] > 10 || (members & (1 << party[i]))) return 0;
@@ -264,6 +269,9 @@ static int validLoadout(const ArenaLoadout* loadout, const int party[3]) {
     for (int side = 0; side < 2; side++) {
         const ArenaEnemyTeam* team = &loadout->side[side];
         if (team->gearSlots >= (1u << team->count)) return 0;
+        for (int i = 0; i < ARENA_ROSTER_ITEMS; i++) {
+            if (team->items[i] > 99 || (team->count == 0 && team->items[i] != 0)) return 0;
+        }
         for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
             if (team->multiplier[i] < 25 || team->multiplier[i] > 400) return 0;
         }
@@ -279,7 +287,13 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
     uint8_t bytes[ARENA_LOADOUT_CODE / 2];
     int n = 0;
     if (!validLoadout(loadout, party)) return 0;
-    bytes[n++] = 1;
+    unsigned flags = loadout->startInGear | (loadout->allowExitGear << 1);
+    for (int side = 0; side < 2; side++) {
+        for (int i = 0; i < ARENA_ROSTER_ITEMS; i++) {
+            if (loadout->side[side].items[i] != 0) flags |= 4u << side;
+        }
+    }
+    bytes[n++] = flags ? 2 : 1;
     bytes[n++] = loadout->stage;
     bytes[n++] = loadout->callGear;
     for (int i = 0; i < 3; i++) bytes[n++] = party[i];
@@ -298,6 +312,14 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
                 bytes[n++] = team->gear[i].bank;
                 bytes[n++] = team->gear[i].type;
             }
+        }
+    }
+    if (flags) {
+        bytes[n++] = flags;
+        for (int side = 0; side < 2; side++) {
+            if (!(flags & (4u << side))) continue;
+            memcpy(bytes + n, loadout->side[side].items, ARENA_ROSTER_ITEMS);
+            n += ARENA_ROSTER_ITEMS;
         }
     }
     for (int i = 0; i < n; i++) {
@@ -327,7 +349,8 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
         if (high < 0 || low < 0) return 0;
         bytes[i] = high * 16 + low;
     }
-    if (bytes[at++] != 1) return 0;
+    unsigned version = bytes[at++];
+    if (version != 1 && version != 2) return 0;
     decoded.stage = bytes[at++];
     decoded.callGear = bytes[at++];
     for (int i = 0; i < 3; i++) party[i] = bytes[at++];
@@ -347,6 +370,19 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
                 team->gear[i] = (ArenaEnemy){bytes[at], bytes[at + 1]};
                 at += 2;
             }
+        }
+    }
+    if (version == 2) {
+        if (at == length) return 0;
+        unsigned flags = bytes[at++];
+        if (flags & ~15u) return 0;
+        decoded.startInGear = flags & 1;
+        decoded.allowExitGear = (flags >> 1) & 1;
+        for (int side = 0; side < 2; side++) {
+            if (!(flags & (4u << side))) continue;
+            if (at + ARENA_ROSTER_ITEMS > length) return 0;
+            memcpy(decoded.side[side].items, bytes + at, ARENA_ROSTER_ITEMS);
+            at += ARENA_ROSTER_ITEMS;
         }
     }
     if (at != length || !validLoadout(&decoded, party)) return 0;
@@ -402,6 +438,9 @@ int pcArenaRosterConfig(unsigned char* config) {
     pcVersusStage(party, places);
     unsigned char position = places[0] & 0x7F;
     roster.activeGears = 0;
+    for (int side = 0; side < 2; side++) {
+        memcpy(roster.items[side], roster.loadout.side[side].items, ARENA_ROSTER_ITEMS);
+    }
     config[1] = (config[1] & ~0x60) | (roster.loadout.callGear ? 0x80 : 0xC0);
     config[2] = roster.loadout.stage;
     config[3] = 0;
@@ -449,3 +488,28 @@ int pcArenaRosterGear(int slot, const unsigned char** controls, const unsigned c
 }
 
 void pcArenaRosterGearActivated(int slot) { roster.activeGears |= 1 << (slot - 3); }
+
+void pcArenaRosterGearDeactivated(int slot) { roster.activeGears &= ~(1 << (slot - 3)); }
+
+const void* pcArenaRosterFootSheet(int slot) {
+    int i = slot - 3;
+    if (!roster.gear[i].replacesFootSheet) return NULL;
+    const RosterType* foot = &roster.types[roster.ids[i]];
+    return foot->visuals + foot->sprite.sheetOffset;
+}
+
+int pcArenaRosterStartInGear(void) { return pcArenaRosterActive() && roster.loadout.startInGear; }
+
+int pcArenaRosterCanExitGear(int slot) {
+    return pcArenaRosterActive() && roster.loadout.allowExitGear && slot >= 3 && slot < roster.count + 3 &&
+           (roster.activeGears & (1 << (slot - 3))) != 0;
+}
+
+const unsigned char* pcArenaRosterItemCounts(int side) {
+    return pcArenaRosterActive() ? roster.items[side] : NULL;
+}
+
+void pcArenaRosterUseItem(int side, int item) {
+    unsigned char* count = &roster.items[side][item - 1];
+    if (*count) --*count;
+}

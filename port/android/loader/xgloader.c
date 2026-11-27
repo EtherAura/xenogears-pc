@@ -417,6 +417,8 @@ int SDL_main(int argc, char* argv[]) {
             setenv("XG_ENGINE", argv[++i], 1);
             setenv("XG_NETPLAY_STATUS_FILE", argv[++i], 1);
             setenv("XG_NETPLAY_STATUS", "1", 1);
+        } else if (strcmp(argv[i], "--netplay-intro-file") == 0 && i + 1 < argc) {
+            setenv("XG_NETPLAY_INTRO_FILE", argv[++i], 1);
         } else if (strcmp(argv[i], "--image") == 0 && i + 1 < argc) {
             addImage(argv[++i]);
         } else if (strcmp(argv[i], "--app-version") == 0 && i + 1 < argc) {

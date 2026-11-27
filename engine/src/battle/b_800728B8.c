@@ -901,6 +901,7 @@ void renderGearHP(void) {
 void pcBattleEnemyInfo(void); /* port/src/game/battle/enemyinfo.c: an option, off by default */
 void pcBattleRetryDraw(void); /* port/src/game/battle/retryprompt.c: the retry setting's choice */
 void pcVersusDraw(void); /* port/src/game/battle/versus.c: player 2's window in a versus battle */
+int pcVersusEnemyRing(void);
 
 void drawBattleMode1(void) {
     if (!drawBattleMode1Disabled) {
@@ -1131,9 +1132,11 @@ static void wideBattleHud(void) {
         pcVersusViewSwap(0);
         wideHudArray(battleVar0->m9C8_APCounterDisplayPolys[0], battleVar1->m7B_apCounterLength,
                      battleVar1->mA4_oddOrEven7B, left);
-        for (i = 0; i < 2; i++) {
-            wideHudArray(battleVar0->m641C_commandGlyphs[i], battleVar1->mD0_battleCommandLength[i],
-                         battleVar1->mA3_641COddOrEven, left);
+        if (!pcVersusEnemyRing()) {
+            for (i = 0; i < 2; i++) {
+                wideHudArray(battleVar0->m641C_commandGlyphs[i], battleVar1->mD0_battleCommandLength[i],
+                             battleVar1->mA3_641COddOrEven, left);
+            }
         }
         if (battleVar1->mA8_drawComboInput) {
             wideHudArray(pBattleRenderStruct2->m5550_commandNames, pBattleRenderStruct2->m5D70_count[0x10],

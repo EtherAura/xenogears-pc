@@ -51,7 +51,9 @@
  * colour changed, is replicated N x N. The optional upscale_cpu_effects=1
  * supplies an explicit display-only twin of the Gear arena pause blur.
  *
- * Env: XG_DUMP_HIRES=1 with XG_DUMP_FRAMES: beside each frame_<vblank>.png
+ * Env: XG_UPSCALE_AUTO_START=1..12 seeds Auto when a GPU budget is active.
+ * Its normal headroom check can raise the scale.
+ * XG_DUMP_HIRES=1 with XG_DUMP_FRAMES: beside each frame_<vblank>.png
  * the copy's display area as hires_<vblank>.png, and with a wide picture its
  * copy as hireswide_<vblank>.png (tools/hirescheck.py compares them);
  * XG_DUMP_HIRES=<lo-hi[/n],...>: only inside those vblank ranges (with /n
@@ -95,6 +97,7 @@ static struct {
     int pending, pendingFor;
     int failedAt; /* an N the device could not hold */
     int gpuMs, timingActive;
+    int autoStart; /* initial GPU-budgeted Auto limit, 0 for the window ceiling */
     int gpuMsDefault; /* upscale_gpu_ms unset: the device's default (hiresDeviceDefaults) */
     AutoResolution automatic;
     int dump;
@@ -141,6 +144,8 @@ static void load(void) {
                                        "discrete GPU, 8 on an integrated one (handhelds, laptops); fixed resolution is unaffected");
     hr.gpuMsDefault = settingsGet("upscale_gpu_ms") == NULL;
     hr.gpuMs = settingsInt("upscale_gpu_ms", 0);
+    hr.autoStart = settingsInt("upscale_auto_start", 0);
+    if (hr.autoStart < 1 || hr.autoStart > 12) hr.autoStart = 0;
     if (hr.gpuMs < 0 || hr.gpuMs > 50) hr.gpuMs = 0;
     if (hr.gpuMsDefault && gvkDeviceIntegrated() > 0) hr.gpuMs = HI_AUTO_BUDGET_INTEGRATED;
     settingsDescribe("geometry_precision", "geometry_precision: 1 for subpixel geometry in the display copy, 0 for PS1 vertices; defaults off at 1x, on with upscaling");
@@ -448,8 +453,16 @@ void hiresVBlank(const GpuDisplay* d, int W, int H) {
         gpuWarnOnce("autotime", "hires: GPU timing unavailable; Auto uses window and device limits");
     int ceiling = want > 0 ? want : 1;
     if (active != hr.timingActive) {
-        if (hr.automatic.ceiling == 0) autoResolutionReset(&hr.automatic, ceiling);
-        else autoResolutionRestart(&hr.automatic);
+        if (hr.automatic.ceiling == 0) {
+            autoResolutionReset(&hr.automatic, ceiling);
+            if (active && hr.autoStart > 0) {
+                hr.automatic.limit = hr.autoStart < ceiling ? hr.autoStart : ceiling;
+                hr.automatic.constrained = 1;
+                gpuLog("hires: Auto starts at %dx with a %dx ceiling", hr.automatic.limit, ceiling);
+            }
+        } else {
+            autoResolutionRestart(&hr.automatic);
+        }
         hr.timingActive = active;
     }
     if (active) {

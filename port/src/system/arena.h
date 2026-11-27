@@ -61,6 +61,8 @@ enum {
 };
 
 int pcArenaRequest(void); /* 1: asked */
+void pcArenaCaptureMenuPicture(void);
+char* pcArenaWriteMenuPicture(void); /* SDL-allocated path, owned by the session launcher */
 void pcArenaCancel(void); /* a request not taken yet */
 int pcArenaPhase(void);
 int pcArenaKeyboardOffered(void); /* the keyboard can play as player 2 (pad.c padSetKeyboardPort) */

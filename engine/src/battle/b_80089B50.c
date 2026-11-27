@@ -64,6 +64,7 @@ extern u16 newPadButtonForField;                        /* pad 0 pressed with au
 extern u16 newPadButtonForDialogs2; /* pad 1 newly pressed */
 extern u16 newPadButtonForField2;   /* pad 1 pressed with auto-repeat */
 int pcVersusMirrorPad2(void);       /* port/src/game/battle/mirror.c */
+int pcVersusEnemyItemPad2(void);    /* port/src/game/battle/versus.c */
 extern u8 battleIsPaused;
 extern u8 battleInputButton;
 s32 isControllerConnected(s32);
@@ -274,8 +275,8 @@ void battleHandleInput(u8 arg0) {
             resetInputs();
         } else {
             while (loadInputFromVSyncBuffer()) {
-                if (pcVersusMirrorPad2()) {
-                    /* a mirror match: player 2's member's turn is pad 2's (mirror.c) */
+                if (pcVersusMirrorPad2() || pcVersusEnemyItemPad2()) {
+                    /* Player 2 owns the current battle menu. */
                     newPadButtonForField = newPadButtonForField2;
                     newPadButtonForDialogs = newPadButtonForDialogs2;
                 }
