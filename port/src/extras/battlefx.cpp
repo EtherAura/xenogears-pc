@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include "ui/l10n.h"
+#include "ui/skin.h"
 #include "ui/wrapped.h"
 #include "viewer.h"
 #include "replace.h"
@@ -480,7 +481,7 @@ void draw(const Area& a) {
 void fxOptions() {
     if (commandPopup("fxoptions")) {
         if (ImGui::Button(tr("Bookmark"))) bookmarkSelection();
-        ImGui::Checkbox(tr("Follow effect bounds"), &S->followBounds);
+        skin::checkbox(tr("Follow effect bounds"), &S->followBounds);
         lookOptions(battleLibraries, lookCovered(S->view.get(), battleLibraries));
         if (ImGui::Button(tr("Export PNG"))) exportPng();
         XgSpriteState sprite{};

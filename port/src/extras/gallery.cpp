@@ -937,7 +937,7 @@ void picturePane(ImVec2 min, ImVec2 max) {
             ImGui::SameLine();
         }
         bool zero = S->zeroClear;
-        ImGui::Checkbox(tr(portrait?"Original: texel 0 clear":"Texel 0 clear"), &zero);
+        skin::checkbox(tr(portrait?"Original: texel 0 clear":"Texel 0 clear"), &zero);
         if(!portrait) ImGui::SameLine();
         if (ImGui::Button(tr(portrait?"Export original PNG":"Export PNG"))) {
             exportPicture(S->picSel, S->clut);
@@ -1123,7 +1123,7 @@ void scenePane(ImVec2 min, ImVec2 max) {
         }
         ImGui::Dummy(ImVec2(0, 4 * u));
         ImGui::SeparatorText(tr("Start the game here"));
-        if (ImGui::Checkbox(tr("Override unverified start"), &S->overrideStart)) {
+        if (skin::checkbox(tr("Override unverified start"), &S->overrideStart)) {
             S->confirm = false;
             if (!S->overrideStart) selectScene(S->sceneSel);
         }

@@ -1652,7 +1652,7 @@ void detailPane(ImVec2 min, ImVec2 max) {
         ImGui::SetNextItemWidth(fminf(150 * unit(), ImGui::GetContentRegionAvail().x));
         const char* modes[] = {tr("Play once"), tr("Next track"), tr("Repeat track"), tr("Repeat list")};
         if (ImGui::Combo(tr("Playback"), &S->playback, modes, 4)) changePlayback(S->playback);
-        if (ImGui::Checkbox(tr("Keep music in menus"), &S->keepMenu)) savePlayback();
+        if (skin::checkbox(tr("Keep music in menus"), &S->keepMenu)) savePlayback();
         hint("Continues in Extras and F1; stops when the game resumes.");
         int language = japaneseTitles() ? 1 : 0;
         ImGui::SetNextItemWidth(fminf(130 * unit(), ImGui::GetContentRegionAvail().x * 0.65f));

@@ -502,7 +502,7 @@ void flow(const char* label) {
 
 bool layer(const char* label, unsigned bit) {
     bool on = (S->layers & bit) != 0;
-    if (ImGui::Checkbox(tr(label), &on)) { // tools/l10n.py extracts layer()'s text
+    if (skin::checkbox(tr(label), &on)) { // tools/l10n.py extracts layer()'s text
         S->layers = on ? S->layers | bit : S->layers & ~bit;
         S->redraw = true;
         return true;
@@ -524,7 +524,7 @@ void viewTab() {
         refit();
     }
     flow("Animate");
-    if (ImGui::Checkbox(tr("Animate"), &S->animate)) {
+    if (skin::checkbox(tr("Animate"), &S->animate)) {
         S->redraw = true;
     }
     layer("Models", XG_FIELD_MODELS);
@@ -969,13 +969,13 @@ void exportTab() {
     wrappedText(tr("The layers shown (View) are drawn: models, sprites, walkmesh, triggers, exits, actors."));
     ImGui::PopStyleColor();
     ImGui::SeparatorText(tr("Scene (glTF binary)"));
-    ImGui::Checkbox(tr("Models"), &S->exportModels);
+    skin::checkbox(tr("Models"), &S->exportModels);
     flow("Walkmesh");
-    ImGui::Checkbox(tr("Walkmesh"), &S->exportWalkmesh);
+    skin::checkbox(tr("Walkmesh"), &S->exportWalkmesh);
     flow("Trigger zones");
-    ImGui::Checkbox(tr("Trigger zones"), &S->exportTriggers);
+    skin::checkbox(tr("Trigger zones"), &S->exportTriggers);
     flow("Actors");
-    ImGui::Checkbox(tr("Actors"), &S->exportActors);
+    skin::checkbox(tr("Actors"), &S->exportActors);
     if (ImGui::Button(tr("Export the scene"))) {
         exportScene();
     }
@@ -1281,7 +1281,7 @@ void worldScenePane(ImVec2 min, ImVec2 max, bool focused = false) {
 
 bool worldLayer(const char* label, unsigned bit) {
     bool on = (S->worldLayers & bit) != 0;
-    if (ImGui::Checkbox(tr(label), &on)) {
+    if (skin::checkbox(tr(label), &on)) {
         S->worldLayers = on ? S->worldLayers | bit : S->worldLayers & ~bit;
         S->worldRedraw = true;
         return true;
@@ -1374,7 +1374,7 @@ void worldDetailPane(ImVec2 min, ImVec2 max) {
                 worldLayer("Trees", XG_WORLD_TREES);
                 flow("Sky");
                 worldLayer("Sky", XG_WORLD_SKY);
-                if (ImGui::Checkbox(tr("Animate"), &S->worldAnimate)) {
+                if (skin::checkbox(tr("Animate"), &S->worldAnimate)) {
                     S->worldRedraw = true;
                 }
                 flow("Depth fog");

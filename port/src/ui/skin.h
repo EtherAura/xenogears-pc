@@ -133,6 +133,8 @@ bool selectable(const char* label, bool selected, ImGuiSelectableFlags flags = 0
 // An item inside an attached dropdown (beginCombo): no backdrop; the focused/hovered
 // (or selected) item uses Xenogears purple text.
 bool comboItem(const char* label, bool selected);
+// A pixel-art checkbox on the game's grid: PS1 metallic bevel box with an outlined red check mark.
+bool checkbox(const char* label, bool* v);
 
 // The purple selection band behind this window's keyboard/gamepad cursor.
 // Call after Begin/BeginChild and its background, before its controls.

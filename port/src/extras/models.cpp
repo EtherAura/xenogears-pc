@@ -1356,7 +1356,7 @@ void transport() {
         S->dirty = true;
     }
     ImGui::SameLine();
-    ImGui::Checkbox(tr("Loop"), &S->loop);
+    skin::checkbox(tr("Loop"), &S->loop);
     int last = S->length > 0 ? S->length : std::max(300, xgSceneFrame(S->scene));
     S->scrub = xgSceneFrame(S->scene);
     char fmt[48];
@@ -1439,13 +1439,13 @@ void vmState(bool full) {
 }
 
 void viewToggles() {
-    if (ImGui::Checkbox(tr("Textures"), &S->textures)) {
+    if (skin::checkbox(tr("Textures"), &S->textures)) {
         S->dirty = true;
     }
     ImGui::SameLine();
-    ImGui::Checkbox(tr("Edges"), &S->edges);
+    skin::checkbox(tr("Edges"), &S->edges);
     ImGui::SameLine();
-    if (ImGui::Checkbox(tr("Light"), &S->lightView)) {
+    if (skin::checkbox(tr("Light"), &S->lightView)) {
         S->dirty = true;
     }
     if (ImGui::IsItemHovered()) {
@@ -1453,7 +1453,7 @@ void viewToggles() {
     }
     if (S->info.bones > 0 && S->shownSrc != SRC_ARENAS && S->shownSrc != SRC_BATTLING) {
         ImGui::SameLine();
-        if (ImGui::Checkbox(tr("Shadow"), &S->shadow)) {
+        if (skin::checkbox(tr("Shadow"), &S->shadow)) {
             xgSceneSetShadow(S->scene, S->shadow);
             S->dirty = true;
         }
@@ -1603,7 +1603,7 @@ void exportRow() {
     }
     ImGui::SameLine();
     if (S->info.animations > 0 || xgSceneMorphCount(S->scene) > 0) {
-        ImGui::Checkbox(tr("All"), &S->exportAll);
+        skin::checkbox(tr("All"), &S->exportAll);
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(tr("Every program and MIMe target (else the current program and selected target).\n"
                               "MIMe clips go from zero to full weight and back, using Transition ticks."));

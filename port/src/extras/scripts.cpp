@@ -2,6 +2,7 @@
 // image <path>; field <id>; actor <id>; routine <0-31>; tab scripts|variables|exits|trace|history
 // watch <hex byte address>; trace <0|1>; history <0|1>; clear trace|history; info
 #include "ui/l10n.h"
+#include "ui/skin.h"
 #include "ui/wrapped.h"
 #include "viewer.h"
 #include "view.h"
@@ -163,7 +164,7 @@ void exits() {
     }
 }
 void traces() {
-    bool on = xgTraceEnabled(); if (ImGui::Checkbox(tr("Record execution trace"), &on)) xgTraceEnable(on);
+    bool on = xgTraceEnabled(); if (skin::checkbox(tr("Record execution trace"), &on)) xgTraceEnable(on);
     ImGui::SameLine(); if (ImGui::Button(tr("Clear trace"))) xgTraceClear();
     wrappedText(tr("Latest %d / %d operations from the running game, oldest first. Recording takes effect on resume; inspection never executes a script or advances paused time."), xgTraceCount(), XG_TRACE_CAPACITY);
     ImGui::BeginChild("##trace", ImVec2(0,0), 0, ImGuiWindowFlags_HorizontalScrollbar);
@@ -173,7 +174,7 @@ void traces() {
     ImGui::EndChild();
 }
 void history() {
-    bool on = xgHistoryEnabled(); if (ImGui::Checkbox(tr("Keep dialogue history"), &on)) xgHistoryEnable(on);
+    bool on = xgHistoryEnabled(); if (skin::checkbox(tr("Keep dialogue history"), &on)) xgHistoryEnable(on);
     ImGui::SameLine(); if (ImGui::Button(tr("Clear history"))) { xgHistoryClear(); S->shown = 0; }
     wrappedText(tr("The last %d dialogue entries as printed by the game. Only revealed text is retained, including Japanese glyphs, names and number substitutions. History lasts for this run."), XG_HISTORY_CAPACITY);
     int count = xgHistoryCount();
@@ -204,7 +205,7 @@ void draw(const Area& a) {
     if (beginPane("##scripts", a.min, a.max, "Scripts and dialogue", false)) {
         ImGui::SetNextItemWidth(90 * unit()); int field = S->id;
         if (ImGui::InputInt(tr("Field"), &field) && field >= 0 && field < 730) { S->id = field; S->live = false; load(); }
-        ImGui::SameLine(); if (ImGui::Checkbox(tr("Sandbox from paused state"), &S->fromState)) { S->live = false; load(); }
+        ImGui::SameLine(); if (skin::checkbox(tr("Sandbox from paused state"), &S->fromState)) { S->live = false; load(); }
         if (fromGame() && ImGui::Button(tr("Inspect paused field"))) {
             int id = -1, actors = 0;
             if (xgFieldPausedVM(0, &id, &actors, &S->vm, S->vars)) { S->id = id; S->actor = 0; S->live = true; load(); }

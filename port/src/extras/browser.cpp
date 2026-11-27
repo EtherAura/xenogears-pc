@@ -637,7 +637,7 @@ void pictureTab() {
         ImGui::SliderInt(tr("CLUT"), &b.clut, 0, cluts - 1);
         ImGui::SameLine();
     }
-    ImGui::Checkbox(tr("Texel 0 clear"), &S->zeroClear);
+    skin::checkbox(tr("Texel 0 clear"), &S->zeroClear);
     ImGui::SameLine();
     if (ImGui::Button(tr("Export PNG"))) {
         exportPicture(b.clut);
@@ -780,11 +780,11 @@ void modelTab() {
     ImGui::SameLine();
     ImGui::SetNextItemWidth(110 * u);
     ImGui::SliderInt(tr("Pitch"), &S->pitch, -1024, 1024);
-    ImGui::Checkbox(tr("Turn"), &S->spin);
+    skin::checkbox(tr("Turn"), &S->spin);
     ImGui::SameLine();
-    ImGui::Checkbox(tr("Textures"), &S->textures);
+    skin::checkbox(tr("Textures"), &S->textures);
     ImGui::SameLine();
-    ImGui::Checkbox(tr("Edges"), &S->wireframe);
+    skin::checkbox(tr("Edges"), &S->wireframe);
     if (S->spin) {
         S->yaw = (S->yaw + 2048 + 16) % 4096 - 2048;
     }

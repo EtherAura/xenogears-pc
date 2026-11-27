@@ -1896,7 +1896,7 @@ bool focusButton(const char* label, bool enabled) {
 bool focusCheckbox(const char* label, bool* v) {
     label = tr(label);
     barFlow(ImGui::CalcTextSize(label, nullptr, true).x + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x);
-    return ImGui::Checkbox(label, v);
+    return skin::checkbox(label, v);
 }
 
 void focusText(const char* fmt, ...) {

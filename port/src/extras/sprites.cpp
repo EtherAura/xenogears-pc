@@ -1337,7 +1337,7 @@ bool flowButton(const char* label, bool first = false) {
 bool flowCheckbox(const char* label, bool* v) {
     label = tr(label);
     flow(buttonWidth(label) + ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x);
-    return ImGui::Checkbox(label, v);
+    return skin::checkbox(label, v);
 }
 
 
@@ -1590,11 +1590,11 @@ void controls() {
             if (flags & XG_SPRITE_ANIM_SKIPS) ImGui::TextUnformatted(tr("Battle audio, hit logic and scene commands omitted."));
             ImGui::Text(tr("Frame %d / step %d / %d effects%s"), S->state.frame, S->state.step, S->state.effects,
                         S->state.heapFull ? tr(" / heap full") : "");
-        } else if (ImGui::Checkbox(tr("Mirror"), &S->flip)) restart();
+        } else if (skin::checkbox(tr("Mirror"), &S->flip)) restart();
         int palettes = xgSpritePaletteCount(sp);
         if (palettes > 1 && ImGui::SliderInt(tr("Palette"), &S->palette, 0, palettes - 1)) restart();
-        ImGui::Checkbox(tr("Clear background"), &S->transparent);
-        ImGui::SameLine(); ImGui::Checkbox(tr("Edges"), &S->edges);
+        skin::checkbox(tr("Clear background"), &S->transparent);
+        ImGui::SameLine(); skin::checkbox(tr("Edges"), &S->edges);
         for (int z = 1; z <= 4; z *= 2) {
             if (z > 1) ImGui::SameLine();
             char label[16]; snprintf(label, sizeof(label), "x%d", z);

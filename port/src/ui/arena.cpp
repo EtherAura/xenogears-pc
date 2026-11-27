@@ -83,7 +83,7 @@ void players() {
     hint("%s", line);
     if (pcArenaKeyboardOffered()) {
         bool on = keyboard2;
-        if (ImGui::Checkbox(tr("Player 2 on the keyboard"), &on)) {
+        if (skin::checkbox(tr("Player 2 on the keyboard"), &on)) {
             sfx::play(sfx::CHOOSE);
             pcArenaSetPlayer2Keyboard(on);
         }
@@ -289,7 +289,7 @@ void partyPicker(bool online) {
             char label[96];
             snprintf(label, sizeof label, "%s##member%d", tr(memberNames[c]), c);
             ImGui::BeginDisabled(!on && count >= 3);
-            if (ImGui::Checkbox(label, &on)) {
+            if (skin::checkbox(label, &on)) {
                 sfx::play(sfx::CHOOSE);
                 if (on) {
                     for (int i = 0; i < 3; i++) {
@@ -349,7 +349,7 @@ int matchChoice(const char* const* labels, int count, int selected) {
 void allGearsOption() {
     markBlock();
     bool all = pcArenaAllGearsSetting() != 0;
-    if (ImGui::Checkbox(tr("Every Gear"), &all)) {
+    if (skin::checkbox(tr("Every Gear"), &all)) {
         sfx::play(sfx::CHOOSE);
         pcArenaSetAllGears(all);
     }
@@ -485,7 +485,7 @@ void opponentHpOption() {
     markBlock();
     bool opponentHp = pcVersusOpponentHpSetting() != 0;
     ImGui::BeginDisabled(settingsPinned("arena_opponent_hp") != 0);
-    if (ImGui::Checkbox(tr("Opponent's HP and EP"), &opponentHp)) {
+    if (skin::checkbox(tr("Opponent's HP and EP"), &opponentHp)) {
         sfx::play(sfx::CHOOSE);
         pcVersusSetOpponentHp(opponentHp);
     }
@@ -611,7 +611,7 @@ void versusBlock(void (*resumeGame)()) {
     const XgVersusFormation* formation = formationPicker(formations.local);
     markBlock();
     bool gears = pcVersusGearsSetting() != 0;
-    if (ImGui::Checkbox(tr("Party in its Gears"), &gears)) {
+    if (skin::checkbox(tr("Party in its Gears"), &gears)) {
         sfx::play(sfx::CHOOSE);
         pcVersusSetGears(gears);
     }
@@ -817,7 +817,7 @@ void onlineBlock() {
     case OnlineVersus:
         if (O.host) {
             markBlock();
-            ImGui::Checkbox(tr("Player 2 chooses the formation"), &O.joinerPicks);
+            skin::checkbox(tr("Player 2 chooses the formation"), &O.joinerPicks);
             hint("On, Player 2 chooses the enemy formation when joining. Off, the host chooses it here.");
         }
         if (!O.host || !O.joinerPicks) formation = formationPicker(formations.online);

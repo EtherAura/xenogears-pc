@@ -1,6 +1,7 @@
 // The retail battle loader/renderers run in a private hardware world. The
 // controls choose its actors and moves; they never touch the paused game.
 #include "ui/l10n.h"
+#include "ui/skin.h"
 #include "ui/wrapped.h"
 #include "viewer.h"
 #include "replace.h"
@@ -563,7 +564,7 @@ void draw(const Area &a) {
                 }
             ImGui::EndCombo();
         }
-        if (ImGui::Checkbox(tr("Enemy acts"), &S->enemyActs)) {
+        if (skin::checkbox(tr("Enemy acts"), &S->enemyActs)) {
             S->slot = S->enemyActs ? 3 : 0;
             S->target = S->enemyActs ? 0 : 3;
             catalog();
@@ -600,7 +601,7 @@ void draw(const Area &a) {
                   false)) {
         if (S->selected >= 0 && S->selected < int(S->moves.size()))
             wrappedText("%s", S->moves[S->selected].label.c_str());
-        if (ImGui::Checkbox(tr("Full battle"), &S->full)) {
+        if (skin::checkbox(tr("Full battle"), &S->full)) {
             if (S->selected >= 0)
                 seek(0);
             else {
@@ -651,9 +652,9 @@ void draw(const Area &a) {
 void battleOptions() {
     if (commandPopup("battleoptions")) {
         if (ImGui::Button(tr("Bookmark"))) bookmarkSelection();
-        if (ImGui::Checkbox(tr("Include all ability banks"), &S->allAbilities))
+        if (skin::checkbox(tr("Include all ability banks"), &S->allAbilities))
             catalog();
-        if (ImGui::Checkbox(tr("Battle audio"), &S->audio))
+        if (skin::checkbox(tr("Battle audio"), &S->audio))
             xgBattlePreviewAudio(S->preview, S->playing && S->full && S->audio);
         lookOptions(battleLibraries, lookCovered(S->view.get(), battleLibraries));
         if (ImGui::Button(tr("Open disc image...")))

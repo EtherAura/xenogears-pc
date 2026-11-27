@@ -201,7 +201,7 @@ void memberPicker(const CardGameSave& s, bool focus) {
             focus = false;
         }
         ImGui::BeginDisabled(!on && count >= 3);
-        if (ImGui::Checkbox(label, &on)) {
+        if (skin::checkbox(label, &on)) {
             sfx::play(sfx::CHOOSE);
             if (on) {
                 for (int i = 0; i < 3; i++) {

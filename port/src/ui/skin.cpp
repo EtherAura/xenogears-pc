@@ -74,6 +74,9 @@ struct State {
     Sprite sprites[0x200];
     Sprite buttons[4]; // SPRITE_CROSS...
     ImFontAtlasRectId frameRect = ImFontAtlasRectId_Invalid; // the window frame's 48 x 16 pieces
+    ImFontAtlas* checkAtlas = nullptr;
+    ImFontAtlasRectId checkRects[4] = {ImFontAtlasRectId_Invalid, ImFontAtlasRectId_Invalid,
+                                       ImFontAtlasRectId_Invalid, ImFontAtlasRectId_Invalid}; // [checked*2 + hot]
     unsigned frames;
     uint32_t textBody[2], textOutline[2];
     ImFont* optionFont = nullptr;
@@ -263,6 +266,71 @@ void framePiece(ImDrawList* dl, const ImFontAtlasRect& r, ImVec2 p0, ImVec2 p1, 
     const float tw = (r.uv1.x - r.uv0.x) / r.w, th = (r.uv1.y - r.uv0.y) / r.h;
     dl->AddImage(atlas()->TexRef, p0, p1, ImVec2(r.uv0.x + u0 * tw, r.uv0.y + v0 * th),
                  ImVec2(r.uv0.x + u1 * tw, r.uv0.y + v1 * th));
+}
+
+// 13 x 13 pixel-art checkbox on the game's pixel grid: PS1 metallic bevel
+// border (inspired by the menu's beveled frames) with an outlined red check
+// mark matching Xenogears' red cursor/orb/thumb accent.
+ImFontAtlasRectId checkboxRect(bool checked, bool hot) {
+    ImFontAtlas* current = atlas();
+    if (st.checkAtlas != current) {
+        st.checkAtlas = current;
+        for (int i = 0; i < 4; i++) st.checkRects[i] = ImFontAtlasRectId_Invalid;
+    }
+    int idx = (checked ? 2 : 0) + (hot ? 1 : 0);
+    if (st.checkRects[idx] != ImFontAtlasRectId_Invalid) {
+        return st.checkRects[idx];
+    }
+    constexpr int S = 13;
+    uint32_t px[S * S];
+    const uint32_t outer = IM_COL32(20, 20, 28, 255);
+    const uint32_t fill = hot ? IM_COL32(38, 38, 52, 255) : IM_COL32(28, 28, 38, 255);
+    const uint32_t topCol = hot ? IM_COL32(236, 236, 248, 255) : IM_COL32(204, 204, 218, 255);
+    const uint32_t leftCol = hot ? IM_COL32(216, 216, 234, 255) : IM_COL32(184, 184, 202, 255);
+    const uint32_t rightCol = hot ? IM_COL32(138, 138, 162, 255) : IM_COL32(112, 112, 134, 255);
+    const uint32_t bottomCol = hot ? IM_COL32(120, 120, 144, 255) : IM_COL32(96, 96, 118, 255);
+    for (int y = 0; y < S; y++) {
+        for (int x = 0; x < S; x++) {
+            uint32_t c = fill;
+            if (x == 0 || y == 0 || x == S - 1 || y == S - 1) c = outer;
+            else if (y == 1) c = topCol;
+            else if (x == 1) c = leftCol;
+            else if (y == S - 2) c = bottomCol;
+            else if (x == S - 2) c = rightCol;
+            px[y * S + x] = c;
+        }
+    }
+    if (checked) {
+        static const char* const mark[7] = {
+            "........#",
+            ".......##",
+            "......##.",
+            "#....##..",
+            "##..##...",
+            ".####....",
+            "..##.....",
+        };
+        const uint32_t markOutline = IM_COL32(56, 12, 16, 255);
+        const uint32_t markBody = hot ? IM_COL32(255, 76, 76, 255) : IM_COL32(248, 56, 56, 255);
+        for (int r = 0; r < 7; r++) {
+            for (int c = 0; c < 9; c++) {
+                if (mark[r][c] != '#') continue;
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int tx = 2 + c + dx, ty = 3 + r + dy;
+                        if (tx >= 1 && tx < S - 1 && ty >= 1 && ty < S - 1) px[ty * S + tx] = markOutline;
+                    }
+                }
+            }
+        }
+        for (int r = 0; r < 7; r++) {
+            for (int c = 0; c < 9; c++) {
+                if (mark[r][c] == '#') px[(3 + r) * S + (2 + c)] = markBody;
+            }
+        }
+    }
+    st.checkRects[idx] = addPicture(px, S, S);
+    return st.checkRects[idx];
 }
 
 } // namespace
@@ -744,6 +812,93 @@ bool comboItem(const char* label, bool selected) {
     pushOptionText(purple);
     bool pressed = ImGui::Selectable(label, selected);
     popOptionText();
+    return pressed;
+}
+
+bool checkbox(const char* label, bool* v) {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    if (window->SkipItems) {
+        return false;
+    }
+    ImGuiContext& g = *GImGui;
+    const ImGuiStyle& style = g.Style;
+    const ImGuiID id = window->GetID(label);
+    const char* labelEnd = ImGui::FindRenderedTextEnd(label);
+    const ImVec2 labelSize = ImGui::CalcTextSize(label, labelEnd, false);
+
+    const float squareSz = ImGui::GetFrameHeight();
+    const ImVec2 pos = window->DC.CursorPos;
+    const ImRect totalBb(
+        pos, ImVec2(pos.x + squareSz + (labelSize.x > 0.0f ? style.ItemInnerSpacing.x + labelSize.x : 0.0f),
+                    pos.y + labelSize.y + style.FramePadding.y * 2.0f));
+    ImGui::ItemSize(totalBb, style.FramePadding.y);
+    const bool isVisible = ImGui::ItemAdd(totalBb, id);
+    const bool isMultiSelect = (g.LastItemData.ItemFlags & ImGuiItemFlags_IsMultiSelect) != 0;
+    if (!isVisible) {
+        if (!isMultiSelect || !g.BoxSelectState.UnclipMode || !g.BoxSelectState.UnclipRect.Overlaps(totalBb)) {
+            return false;
+        }
+    }
+
+    bool checked = *v;
+    if (isMultiSelect) {
+        ImGui::MultiSelectItemHeader(id, &checked, nullptr);
+    }
+    bool hovered, held;
+    bool pressed = ImGui::ButtonBehavior(totalBb, id, &hovered, &held);
+    if (isMultiSelect) {
+        ImGui::MultiSelectItemFooter(id, &checked, &pressed, ImGuiMultiSelectFlags_CheckboxMode_);
+    } else if (pressed) {
+        checked = !checked;
+    }
+    if (*v != checked) {
+        *v = checked;
+        pressed = true;
+        ImGui::MarkItemEdited(id);
+    }
+
+    const ImRect checkBb(pos, ImVec2(pos.x + squareSz, pos.y + squareSz));
+    const bool mixedValue = (g.LastItemData.ItemFlags & ImGuiItemFlags_MixedValue) != 0;
+    if (isVisible) {
+        ImGui::RenderNavCursor(totalBb, id);
+        bool navHere = g.NavWindow == window && g.NavId == id && g.NavCursorVisible;
+        bool hot = hovered || held || navHere;
+        ImVec2 p0(floorf(checkBb.Min.x), floorf(checkBb.Min.y));
+        ImVec2 p1(floorf(checkBb.Min.x + squareSz), floorf(checkBb.Min.y + squareSz));
+        int alpha = (int)roundf(255.0f * style.Alpha);
+        if (alpha < 0) alpha = 0;
+        if (alpha > 255) alpha = 255;
+        ImU32 tint = IM_COL32(255, 255, 255, alpha);
+        ImFontAtlasRect r;
+        ImFontAtlasRectId rectId = checkboxRect(*v && !mixedValue, hot);
+        if (rectId != ImFontAtlasRectId_Invalid && atlas()->GetCustomRect(rectId, &r)) {
+            window->DrawList->AddImage(atlas()->TexRef, p0, p1, r.uv0, r.uv1, tint);
+        } else {
+            // Fallback when no RGBA32 font atlas texture is available yet.
+            float step = squareSz / 13.0f;
+            window->DrawList->AddRectFilled(p0, p1, IM_COL32(20, 20, 28, alpha));
+            window->DrawList->AddRectFilled(ImVec2(p0.x + step, p0.y + step), ImVec2(p1.x - step, p1.y - step),
+                                            hot ? IM_COL32(224, 224, 240, alpha) : IM_COL32(192, 192, 210, alpha));
+            window->DrawList->AddRectFilled(ImVec2(p0.x + 2 * step, p0.y + 2 * step),
+                                            ImVec2(p1.x - 2 * step, p1.y - 2 * step),
+                                            hot ? IM_COL32(38, 38, 52, alpha) : IM_COL32(28, 28, 38, alpha));
+            if (*v && !mixedValue) {
+                ImGui::RenderCheckMark(window->DrawList, ImVec2(p0.x + 2 * step, p0.y + 2 * step),
+                                       IM_COL32(248, 56, 56, alpha), squareSz - 4 * step);
+            }
+        }
+        if (mixedValue) {
+            float px = squareSz / 13.0f;
+            window->DrawList->AddRectFilled(ImVec2(p0.x + 3 * px, p0.y + 5 * px),
+                                            ImVec2(p1.x - 3 * px, p1.y - 5 * px), IM_COL32(56, 12, 16, alpha));
+            window->DrawList->AddRectFilled(ImVec2(p0.x + 4 * px, p0.y + 6 * px),
+                                            ImVec2(p1.x - 4 * px, p1.y - 6 * px), IM_COL32(248, 56, 56, alpha));
+        }
+    }
+    const ImVec2 labelPos(checkBb.Max.x + style.ItemInnerSpacing.x, checkBb.Min.y + style.FramePadding.y);
+    if (isVisible && labelSize.x > 0.0f) {
+        ImGui::RenderText(labelPos, label, labelEnd, false);
+    }
     return pressed;
 }
 
