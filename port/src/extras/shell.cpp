@@ -125,7 +125,8 @@ enum class HomeGroup { Battle, Media, Reference, Tools };
 HomeGroup homeGroup(const HomeEntry& entry) {
     if (entry.viewer && entry.viewer->gameOnly) return HomeGroup::Battle;
     if (!strcmp(entry.id, "visuals") || !strcmp(entry.id, "jukebox")) return HomeGroup::Media;
-    if (!strcmp(entry.id, "browser") || !strcmp(entry.id, "scripts")) return HomeGroup::Tools;
+    if (!strcmp(entry.id, "browser") || !strcmp(entry.id, "scripts") || !strcmp(entry.id, "exports"))
+        return HomeGroup::Tools;
     return HomeGroup::Reference;
 }
 
@@ -338,6 +339,7 @@ void closeViewer() {
 }
 
 bool openViewer(const char* id) {
+    if (strcmp(id, "online-play") == 0) id = "versus-battle"; // older script and startup entries
     ViewerTarget target = visualTarget({id, {}});
     for (const Viewer* v : registry()) {
         if (v->id == target.viewer) {
@@ -1070,8 +1072,10 @@ void drawHome(ImVec2 min, ImVec2 max) {
         }
     }
     endPane();
-    ImVec2 exportMin(paneMin.x, aboutMax.y + 12 * u);
-    if (beginPane("##exports", exportMin, max, "Exports", true)) {
+}
+
+void drawExports(const Area& area) {
+    if (beginPane("##exports", area.min, area.max)) {
         ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
         wrappedText("%s", exportDir());
         ImGui::PopStyleColor();
@@ -1079,20 +1083,16 @@ void drawHome(ImVec2 min, ImVec2 max) {
             openPicker("export", tr("The export folder"), exportDir(), "", true);
         }
         ImGui::SameLine();
-        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(tr("Default")).x + 8 * u) ImGui::NewLine();
+        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(tr("Default")).x + 8 * area.unit) ImGui::NewLine();
         if (ImGui::Button(tr("Default"))) {
             setExportDir("");
             status("Exports go to %s", exportDir());
         }
         ImGui::SameLine();
-        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(tr("Open folder")).x + 8 * u) ImGui::NewLine();
+        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(tr("Open folder")).x + 8 * area.unit) ImGui::NewLine();
         if (ImGui::Button(tr("Open folder")) && !openExportDir()) {
             error("Cannot open %s", exportDir());
         }
-        ImGui::Dummy(ImVec2(0, 8 * u));
-        ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        wrappedText(tr("Save an asset with Bookmark in its Options menu."));
-        ImGui::PopStyleColor();
     }
     endPane();
     std::string folder;
@@ -1101,6 +1101,12 @@ void drawHome(ImVec2 min, ImVec2 max) {
         status("Exports go to %s", exportDir());
     }
 }
+
+const Viewer exportsViewer = {
+    "exports", N_("Exports"), N_("Choose where exported files are saved."), 90,
+    nullptr, nullptr, drawExports, nullptr, nullptr,
+};
+XG_EXTRAS_VIEWER(exportsViewer);
 
 bool assetBrowser();
 

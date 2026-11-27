@@ -9853,6 +9853,122 @@ msgid "Two-player Gear Battling, local or online."
 msgstr "ギアの 2 人対戦。ローカルでもオンラインでも遊べます。"
 
 #: port/src/extras/modes.cpp
+msgid "Play on this device or online."
+msgstr "この端末で、またはオンラインで対戦できます。"
+
+#: port/src/extras/shell.cpp
+msgid "Choose where exported files are saved."
+msgstr "エクスポートしたファイルの保存先を設定します。"
+
+#: port/src/ui/arena.cpp
+msgid "Connection"
+msgstr "接続方法"
+
+#: port/src/ui/arena.cpp
+msgid "Two-player Gear Battling on this device."
+msgstr "この端末でギアの 2 人対戦を行います。"
+
+#: port/src/ui/arena.cpp
+msgid "Two-player Gear Battling online."
+msgstr "オンラインでギアの 2 人対戦を行います。"
+
+#: port/src/ui/arena.cpp
+msgid "One player controls a party, the other its enemies."
+msgstr "一方がパーティを、もう一方が敵を操作します。"
+
+#: port/src/ui/arena.cpp
+msgid "Both players bring a party from their own save."
+msgstr "それぞれが自分のセーブからパーティを選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 2 proposes the teams. Both players approve the same loadout."
+msgstr "プレイヤー 2 がチームを提案し、二人で同じ編成を承認します。"
+
+#: port/src/ui/arena.cpp
+msgid "Choose the members"
+msgstr "メンバーを選ぶ"
+
+#: port/src/ui/arena.cpp
+msgid "Custom enemy teams"
+msgstr "カスタム敵チーム"
+
+#: port/src/ui/arena.cpp
+msgid "Starting form"
+msgstr "開始時の状態"
+
+#: port/src/ui/arena.cpp
+msgid "Start in Gear"
+msgstr "ギアで開始"
+
+#: port/src/ui/arena.cpp
+msgid "Start on foot"
+msgstr "徒歩で開始"
+
+#: port/src/ui/arena.cpp
+msgid "Allow Exit Gear"
+msgstr "ギアから降りられる"
+
+#: port/src/ui/arena.cpp
+msgid "Enemy teams on both sides"
+msgstr "両方を敵チームにする"
+
+#: port/src/ui/arena.cpp
+msgid "Call Gear for both players"
+msgstr "両方がギアを呼べる"
+
+#: port/src/ui/arena.cpp
+msgid "Player 1 enemies"
+msgstr "プレイヤー 1 の敵チーム"
+
+#: port/src/ui/arena.cpp
+msgid "Player 2 enemies"
+msgstr "プレイヤー 2 の敵チーム"
+
+#: port/src/ui/arena.cpp
+msgid "Enemy"
+msgstr "敵"
+
+#: port/src/ui/arena.cpp
+msgid "Choose an enemy"
+msgstr "敵を選ぶ"
+
+#: port/src/ui/arena.cpp
+msgid "Quantity"
+msgstr "数"
+
+#: port/src/ui/arena.cpp
+msgid "Enemy stats"
+msgstr "敵の能力値"
+
+#: port/src/ui/arena.cpp
+msgid "No Gear assigned"
+msgstr "ギアなし"
+
+#: port/src/ui/arena.cpp
+msgid "Unavailable"
+msgstr "利用不可"
+
+#: port/src/ui/arena.cpp
+msgid "Use items from a save"
+msgstr "セーブのアイテムを使う"
+
+#: port/src/ui/arena.cpp
+msgid "Use this save's items"
+msgstr "このセーブのアイテムを使う"
+
+#: port/src/ui/arena.cpp
+msgid "Clear items"
+msgstr "アイテムを外す"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Player 1's save"
+msgstr "プレイヤー 1 のセーブ"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Player 2's save"
+msgstr "プレイヤー 2 のセーブ"
+
+#: port/src/extras/modes.cpp
 msgid "Local battles"
 msgstr "ローカル対戦"
 

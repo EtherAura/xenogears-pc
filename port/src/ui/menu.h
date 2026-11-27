@@ -41,7 +41,7 @@ extern const char* const sectionNames[SECTION_COUNT];
 // sections.cpp
 void sectionsOpened();           // the menu opened: read what may have changed since
 void drawSection(int section);   // inside the content pane
-enum class ArenaPart { Battling, Versus, Online };
+enum class ArenaPart { Battling, Versus };
 void arenaSection(ArenaPart part, void (*resumeGame)());
 void arenaFallback(void (*resumeGame)());
 void arenaFinishMenuFrame();

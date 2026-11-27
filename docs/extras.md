@@ -100,6 +100,9 @@ code, with TSV export.
 
 Scripts: a room's actor routines, variables, a trace and the dialogue history.
 
+**Tools → Exports** shows the current export folder. Use it to choose another
+folder, restore the default or open the folder.
+
 ## Battle arena
 
 ![F1 > Extras](img/extras-f1.png)
@@ -107,9 +110,9 @@ Scripts: a room's actor routines, variables, a trace and the dialogue history.
 In **F1 → Extras → Battle modes → Battle arena**, choose **Local play** or
 **Online play** for Gear Battling. For online matches, one player hosts and
 the other joins using the host's address, port and session code. Once
-connected, choose **BONUS BATTLING → PLAYER1 VS PLAYER2**. The Battle modes
-menu also offers **Versus battle** and a general **Online play** page.
-The bottom box describes the selected control.
+connected, choose **BONUS BATTLING → PLAYER1 VS PLAYER2**.
+**Battle modes → Versus battle** lists the local and online match types.
+Open a match type to set it up. The bottom box describes the selected control.
 When a match ends both players choose **Rematch** or **Leave**. Leave goes
 back to where you were.
 
@@ -127,8 +130,8 @@ information window (Select). **Battle music** plays any of the jukebox's
 songs, and **Battle stage** sets where a mirror match or party vs party is
 fought, from 17 places in the game.
 
-Online plays Battling, versus battles against an enemy formation, and party
-vs party with someone elsewhere: one hosts, the other joins with the same
+Online play supports Gear Battling, versus battles against an enemy formation,
+party vs party, and custom enemy teams. One player hosts and the other joins with the same
 session word (UDP port 7461 by default). In party vs party each player brings a
 party from a save on their own machine; the other player's party is not
 verified, only kept within the game's ranges, and the host's battle music,

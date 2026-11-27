@@ -16,6 +16,7 @@
 #include "imgui_internal.h" // NavActivateId: a choice made with the keyboard or a gamepad
 #include "l10n.h"
 #include "menu.h"
+#include "options.h"
 #include "sfx.h"
 #include "skin.h"
 
@@ -164,35 +165,30 @@ std::string saveLabel(const CardGameSave& s, bool showTime = false) {
 }
 
 void saveList(bool* chosenByNav) {
-    if (ImGui::BeginListBox("##arenasavelist", ImVec2(-1, 6 * ROW * skin::unit()))) {
+    std::string current = B->selected < 0 ? tr("Choose a save") : saveLabel(B->saves[B->selected].info, true);
+    ImGui::BeginDisabled(B->saves.empty());
+    if (skin::beginCombo("##arenasavelist", current.c_str(), ImGuiComboFlags_HeightLarge)) {
         for (int i = 0; i < (int)B->saves.size(); i++) {
             const CardGameSave& s = B->saves[i].info;
-            std::string label = saveLabel(s);
-            char time[32];
-            unsigned minutes = s.playTime / 3600;
-            snprintf(time, sizeof time, "%u:%02u", minutes / 60, minutes % 60);
             ImGui::PushID(i);
-            float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-            if (ImGui::Selectable(label.c_str(), B->selected == i)) {
+            if (skin::comboItem(saveLabel(s, true).c_str(), B->selected == i)) {
                 if (B->selected != i) {
-                    sfx::play(sfx::MOVE);
+                    sfx::play(sfx::CHOOSE);
                     B->selected = i;
                     pickSaveParty(s);
                     B->dirty = true;
                 }
                 *chosenByNav = ImGui::GetCurrentContext()->NavActivateId != 0;
             }
-            // the play time at the row's end, as the game's own save list has it
-            ImGui::SameLine(right - ImGui::CalcTextSize(time).x);
-            ImGui::TextUnformatted(time);
+            if (B->selected == i) ImGui::SetItemDefaultFocus();
             ImGui::PopID();
         }
-        ImGui::EndListBox();
+        skin::endCombo();
     }
+    ImGui::EndDisabled();
 }
 
 void memberPicker(const CardGameSave& s, bool focus) {
-    ImGui::TextUnformatted(tr("Members (one to three; the first leads)"));
     int count = pickedCount();
     for (int c = 0; c < CARD_SAVE_MEMBERS; c++) {
         if (!(s.joined & 1 << c)) continue;
@@ -202,15 +198,14 @@ void memberPicker(const CardGameSave& s, bool focus) {
         }
         bool on = at >= 0;
         const CardSaveMember& m = s.members[c];
-        char label[160];
-        snprintf(label, sizeof label, tr("%s: level %d, HP %d/%d"), tr(memberNames[c]), m.level, m.hp, m.maxHp);
+        opt::row(memberNames[c]);
         ImGui::PushID(c);
         if (focus) {
             ImGui::SetKeyboardFocusHere(); // the list's choice moves the cursor on to its members
             focus = false;
         }
         ImGui::BeginDisabled(!on && count >= 3);
-        if (skin::checkbox(label, &on)) {
+        if (skin::checkbox("##member", &on)) {
             sfx::play(sfx::CHOOSE);
             if (on) {
                 for (int i = 0; i < 3; i++) {
@@ -227,6 +222,7 @@ void memberPicker(const CardGameSave& s, bool focus) {
         }
         ImGui::EndDisabled();
         ImGui::PopID();
+        hint("%s: level %d, HP %d/%d", tr(memberNames[c]), m.level, m.hp, m.maxHp);
     }
     count = pickedCount();
     if (count == 0) {
@@ -248,9 +244,6 @@ static const uint8_t* saveBlockPicker(int browser) {
     int frame = ImGui::GetFrameCount();
     if (frame != B->lastFrame + 1) readCards(false);
     B->lastFrame = frame;
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(tr("Memory card save"));
-    ImGui::SameLine();
     std::string current = B->selected < 0 ? tr("Choose a save") : saveLabel(B->saves[B->selected].info, true);
     ImGui::BeginDisabled(B->saves.empty());
     if (skin::beginCombo("##arena_save", current.c_str(), 0, ImGui::GetContentRegionAvail().x)) {
@@ -271,8 +264,17 @@ static const uint8_t* saveBlockPicker(int browser) {
     return B->selected < 0 ? nullptr : B->saves[B->selected].block.data();
 }
 
-const uint8_t* gauntletSavePicker() { return saveBlockPicker(3); }
-const uint8_t* arenaItemSavePicker(int side) { return saveBlockPicker(4 + side); }
+const uint8_t* gauntletSavePicker() {
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(tr("Memory card save"));
+    ImGui::SameLine();
+    return saveBlockPicker(3);
+}
+
+const uint8_t* arenaItemSavePicker(int side) {
+    opt::row(N_("Memory card save"));
+    return saveBlockPicker(4 + side);
+}
 
 void arenaPartyReason(int reason, int characterId, char* out, size_t size) {
     const char* who = characterId >= 0 && characterId < CARD_SAVE_MEMBERS ? tr(memberNames[characterId]) : tr("A member");
@@ -288,17 +290,14 @@ bool arenaSavesPanel(int player, XgPartyRecord* out) {
     int frame = ImGui::GetFrameCount();
     if (frame > B->lastFrame + 1) readCards(); // shown again: the cards may have changed meanwhile
     B->lastFrame = frame;
+    opt::plain();
     ImGui::PushID("arenasaves");
     ImGui::PushID(player);
-    markBlock();
-    ImGui::TextUnformatted(tr(player == 2   ? "Player 2's party, from a save"
-                              : player == 0 ? "Your party, from a save"
-                                            : "Player 1's party, from a save"));
+    opt::row(player == 2 ? N_("Player 2's save") : player == 0 ? N_("Memory card save") : N_("Player 1's save"));
     bool chosenByNav = false;
+    saveList(&chosenByNav);
     if (B->saves.empty()) {
         hint("No saves of this game on the memory cards (F1 > Saves > Memory cards).");
-    } else {
-        saveList(&chosenByNav);
     }
     bool ok = false;
     if (B->selected < 0 || B->selected >= (int)B->saves.size()) {
@@ -315,6 +314,7 @@ bool arenaSavesPanel(int player, XgPartyRecord* out) {
         if (B->dirty) pack();
         ok = B->reason == XG_PARTY_OK;
         if (!ok && pickedCount() > 0) {
+            opt::plain();
             char line[512];
             const char* who = B->reasonMember >= 0 && B->reasonMember < CARD_SAVE_MEMBERS ? tr(memberNames[B->reasonMember])
                                                                                        : "";
@@ -326,6 +326,7 @@ bool arenaSavesPanel(int player, XgPartyRecord* out) {
         }
         if (ok) *out = B->record;
     }
+    opt::plain();
     markBlock();
     if (ImGui::Button(tr("Read the memory cards again"))) {
         sfx::play(sfx::CHOOSE);

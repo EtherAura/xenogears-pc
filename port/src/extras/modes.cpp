@@ -3,14 +3,25 @@
 #include "imgui_internal.h"
 #include "ui/l10n.h"
 #include "ui/menu.h"
+#include "ui/options.h"
 
 namespace extras {
 namespace {
 
 menu::OptionHelp modeHelp;
+bool focusMode;
 
 void openArenaMode() {
+    menu::opt::clearSubmenu(menu::EXTRAS);
     modeHelp = {};
+    focusMode = true;
+}
+
+bool backArenaMode() {
+    if (!menu::opt::popSubmenu(menu::EXTRAS)) return false;
+    modeHelp = {};
+    focusMode = true;
+    return true;
 }
 
 template<menu::ArenaPart part>
@@ -21,7 +32,15 @@ void drawArenaMode(const Area& area) {
     const ImVec2 helpMin(area.min.x, area.max.y - helpHeight);
     const ImVec2 paneMax(area.max.x, helpMin.y - 6 * area.unit);
     std::string description;
-    if (beginPane("##arena", area.min, paneMax)) {
+    if (beginPane("##arena", area.min, paneMax, menu::opt::submenuTitle(menu::EXTRAS))) {
+        ImGuiWindow* pane = ImGui::GetCurrentWindow();
+        if (focusMode) {
+            ImGui::SetScrollY(0);
+            ImGui::FocusWindow(pane);
+            ImGui::NavInitWindow(pane, true);
+            ImGui::SetNavCursorVisible(true);
+            focusMode = false;
+        }
         if (modeHelp.overflow() <= 0 && fabsf(rightStick) > 0.2f && viewerShortcuts()) {
             ImGui::SetScrollY(ImGui::GetScrollY() + rightStick * 6 * area.unit);
         }
@@ -29,10 +48,19 @@ void drawArenaMode(const Area& area) {
         modeHelp.begin();
         menu::arenaSection(part, leaveIntoGame);
         description = modeHelp.finish();
+        ImGuiContext& g = *ImGui::GetCurrentContext();
+        float y = g.NavWindow == pane && g.NavId && g.NavCursorVisible
+                      ? ImGui::WindowRectRelToAbs(pane, pane->NavRectRel[g.NavLayer]).GetCenter().y
+                      : -FLT_MAX;
+        menu::opt::finishPage(y, false);
         ImGui::PopStyleVar();
     }
     endPane(false);
     modeHelp.draw(description, helpMin, area.max, area.unit, rightStick);
+    if (menu::opt::takeSubmenuEnter()) {
+        modeHelp = {};
+        focusMode = true;
+    }
 }
 
 void closeArena() {
@@ -50,17 +78,12 @@ void drawGauntlet(const Area& area) {
 
 const Viewer arena = {
     "battle-arena", N_("Battle arena"), N_("Two-player Gear Battling, local or online."), 1,
-    openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Battling>, nullptr, nullptr,
+    openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Battling>, backArenaMode, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, true, true,
 };
 const Viewer versus = {
-    "versus-battle", N_("Versus battle"), N_("Local battles"), 2,
-    openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Versus>, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, true, true,
-};
-const Viewer online = {
-    "online-play", N_("Online play"), N_("Host or join an online match."), 3,
-    openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Online>, nullptr, nullptr,
+    "versus-battle", N_("Versus battle"), N_("Play on this device or online."), 2,
+    openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Versus>, backArenaMode, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, true, true,
 };
 const Viewer gauntlet = {
@@ -71,7 +94,6 @@ const Viewer gauntlet = {
 
 XG_EXTRAS_VIEWER(arena);
 XG_EXTRAS_VIEWER(versus);
-XG_EXTRAS_VIEWER(online);
 XG_EXTRAS_VIEWER(gauntlet);
 
 } // namespace
