@@ -25,6 +25,7 @@
 #ifdef PLATFORM_PC
 #include "gte_pc.h"
 #include "battle/pc_wide_fx.h"
+#include "pc_gameplay.h"
 #endif
 
 /* main */
@@ -116,6 +117,7 @@ static s32 wideShatterX(WideShatter* w, s32 c) {
 static void wideShatterInit(sBattleStartEffect* e) {
     WideShatter* w;
     s32 base, i, j, c, l, kx, jx, gz;
+    u8 shade;
     SVECTOR rot;
     MATRIX m;
 
@@ -123,6 +125,7 @@ static void wideShatterInit(sBattleStartEffect* e) {
     if (wideShatterMargin <= 0) {
         return;
     }
+    shade = pcGameplayDisableBattleFlashes() ? 0x80 : 0xFF;
     w = wideShatter[0].cols == 0 ? &wideShatter[0] : &wideShatter[1];
     w->owner = e;
     w->cols = (wideShatterMargin + 15) / 16;
@@ -169,7 +172,7 @@ static void wideShatterInit(sBattleStartEffect* e) {
 
                     SetPolyFT3(poly);
                     SetShadeTex(poly, 0);
-                    poly->r0 = poly->g0 = poly->b0 = 0xFF;
+                    poly->r0 = poly->g0 = poly->b0 = shade;
                     poly->code &= ~2;
                     poly->tpage = GetTPage(2, 1, 0x2C0, 0x100);
                     poly->u0 = i == 0 ? 0 : 16;
@@ -187,6 +190,7 @@ static void wideShatterInit(sBattleStartEffect* e) {
 static void wideShatterUpdate(sBattleStartEffect* e) {
     WideShatter* w = wideShatterOf(e);
     s32 i, j, c;
+    s32 fade = pcGameplayDisableBattleFlashes() ? -3 : -6;
 
     for (i = 0; w != NULL && i != 2; i++) {
         for (j = 0; j != 14; j++) {
@@ -197,9 +201,9 @@ static void wideShatterUpdate(sBattleStartEffect* e) {
                     p->m64_delay--;
                 } else {
                     POLY_FT3* poly = &p->m24_poly[battleBssBlock.m8C84_oddOrEven];
-                    poly->r0 = addClamp255(poly->r0, -6);
-                    poly->g0 = addClamp255(poly->g0, -6);
-                    poly->b0 = addClamp255(poly->b0, -6);
+                    poly->r0 = addClamp255(poly->r0, fade);
+                    poly->g0 = addClamp255(poly->g0, fade);
+                    poly->b0 = addClamp255(poly->b0, fade);
                     p->m10_position.vx += p->m68_velocity.vx >> 16;
                     p->m10_position.vy += p->m68_velocity.vy >> 16;
                     p->m10_position.vz += p->m68_velocity.vz >> 16;
@@ -263,6 +267,9 @@ void updateBattleStartEffect(TaskHeader* task) {
     sBattleStartEffect* e = (sBattleStartEffect*)task->m4_data;
     s32 i, j, k;
     SVECTOR v;
+#ifdef PLATFORM_PC
+    s32 fade = pcGameplayDisableBattleFlashes() ? -3 : -6;
+#endif
 
     e->m38_frameCounter++;
     for (i = 0; i != 2; i++) {
@@ -273,9 +280,15 @@ void updateBattleStartEffect(TaskHeader* task) {
                     p->m64_delay--;
                 } else {
                     POLY_FT3* poly = &p->m24_poly[battleBssBlock.m8C84_oddOrEven];
+#ifdef PLATFORM_PC
+                    poly->r0 = addClamp255(poly->r0, fade);
+                    poly->g0 = addClamp255(poly->g0, fade);
+                    poly->b0 = addClamp255(poly->b0, fade);
+#else
                     poly->r0 = addClamp255(poly->r0, -6);
                     poly->g0 = addClamp255(poly->g0, -6);
                     poly->b0 = addClamp255(poly->b0, -6);
+#endif
                     v.vx = p->m68_velocity.vx >> 16;
                     v.vy = p->m68_velocity.vy >> 16;
                     v.vz = p->m68_velocity.vz >> 16;
@@ -392,6 +405,9 @@ sBattleStartEffect* initBattleStartEffect(sBattleStartEffect* e) {
     VECTOR sq;
     SVECTOR rot;
     MATRIX m;
+#ifdef PLATFORM_PC
+    u8 shade = pcGameplayDisableBattleFlashes() ? 0x80 : 0xFF;
+#endif
 
     e->m38_frameCounter = 0;
     base = SquareRoot0(0x9500) << 10;
@@ -454,9 +470,15 @@ sBattleStartEffect* initBattleStartEffect(sBattleStartEffect* e) {
                         POLY_FT3* poly = &p->m24_poly[l];
                         SetPolyFT3(poly);
                         SetShadeTex(poly, 0);
+#ifdef PLATFORM_PC
+                        poly->r0 = shade;
+                        poly->g0 = shade;
+                        poly->b0 = shade;
+#else
                         poly->r0 = 0xFF;
                         poly->g0 = 0xFF;
                         poly->b0 = 0xFF;
+#endif
                         poly->code &= ~2;
                         poly->tpage = GetTPage(2, 1, tx + 0x2C0, 0x100);
                         if (i == 0) {
@@ -531,12 +553,24 @@ void battleStartEffect(void) {
     battleBssBlock.m8C50_currentRenderStruct = &battleBssBlock.mB70_renderStructs[0];
     battleBssBlock.mB70_renderStructs[0].m0_drawEnv.isbg = 1;
     battleBssBlock.mB70_renderStructs[1].m0_drawEnv.isbg = 1;
+#ifdef PLATFORM_PC
+    {
+        u8 bg = pcGameplayDisableBattleFlashes() ? 0 : 0xFF;
+        battleBssBlock.mB70_renderStructs[0].m0_drawEnv.r0 = bg;
+        battleBssBlock.mB70_renderStructs[1].m0_drawEnv.r0 = bg;
+        battleBssBlock.mB70_renderStructs[0].m0_drawEnv.g0 = bg;
+        battleBssBlock.mB70_renderStructs[1].m0_drawEnv.g0 = bg;
+        battleBssBlock.mB70_renderStructs[0].m0_drawEnv.b0 = bg;
+        battleBssBlock.mB70_renderStructs[1].m0_drawEnv.b0 = bg;
+    }
+#else
     battleBssBlock.mB70_renderStructs[0].m0_drawEnv.r0 = 0xFF;
     battleBssBlock.mB70_renderStructs[1].m0_drawEnv.r0 = 0xFF;
     battleBssBlock.mB70_renderStructs[0].m0_drawEnv.g0 = 0xFF;
     battleBssBlock.mB70_renderStructs[1].m0_drawEnv.g0 = 0xFF;
     battleBssBlock.mB70_renderStructs[0].m0_drawEnv.b0 = 0xFF;
     battleBssBlock.mB70_renderStructs[1].m0_drawEnv.b0 = 0xFF;
+#endif
     e = createBattleStartEffect();
     while (counter != 0 || state != 5) {
         if (counter > 0) {

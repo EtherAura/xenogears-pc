@@ -65,6 +65,10 @@ int pcGameplayOriginalBugFixes(void);
  * first, the charge-up (port/src/game/battle/combo.c, from the battle sprite
  * VM, b_800C11CC.c: the opening guard of a deathblow script, and the call op). */
 int pcGameplayUninterruptedCombos(void);
+/* Disable battle flashes (F1 > Gameplay > Battles, default off): removes the
+ * white flash when the screen shatters at the start of a battle (b_800B6F0C.c)
+ * and additive full-screen flashes during battle attacks (b_800B15D8.c). */
+int pcGameplayDisableBattleFlashes(void);
 /* A field channel's looping sound effect, which a menu's sounds cut, starts
  * again after the menu (port/src/game/field/sfxkeep.c): OP_C4SubSub1 notes
  * each start; openFieldMenu takes the mask before the menu, restores after. */

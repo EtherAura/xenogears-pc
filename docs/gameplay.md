@@ -164,3 +164,4 @@ F1 > Audio > Japanese audio.
 | Auto-advance text | A finished page goes on by itself after 1 to 8 s |
 | Deathblow learning | Practice per attack, 0% to 1000% |
 | Uninterrupted combos | A Combo's deathblows back to back: no charge-up pose before each after the first, and the jump back into the ready stance only where a deathblow needs it (to start on the enemy's far side, or well away from where the last one ended) |
+| Disable battle flashes | Removes the white flash when a battle starts and the screen shatters, and the full-screen flashes when performing attacks; fades to and from black stay as they are |

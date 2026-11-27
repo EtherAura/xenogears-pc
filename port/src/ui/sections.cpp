@@ -2882,6 +2882,13 @@ void battlesSection() {
              "deathblow learning stay the game's own. Off: the original.");
         overrideNote("uninterrupted_combos");
     }
+    if (row("Disable battle flashes", "disable_battle_flashes")) {
+        bool disableFlashes = pcGameplayDisableBattleFlashes() != 0;
+        if (offOnList("##disable_battle_flashes", &disableFlashes)) pcGameplaySetDisableBattleFlashes(disableFlashes);
+        hint("Removes the white flash when a battle starts and the screen shatters, and the full-screen flashes "
+             "when performing attacks. Fades to and from black stay as they are. Off: the original.");
+        overrideNote("disable_battle_flashes");
+    }
 
     // ---- the multipliers behind Difficulty and the rewards
     opt::group(N_("Advanced"), opt::COLLAPSED);

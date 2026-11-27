@@ -9606,3 +9606,16 @@ msgstr "そのパーティは使えませんでした(理由 %d)。"
 #: port/src/ui/arena_saves.cpp
 msgid "Your party, from a save"
 msgstr "あなたのパーティ(セーブから)"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Disable battle flashes"
+msgstr "バトルのフラッシュを無効にする"
+
+#: port/src/ui/sections.cpp
+msgid ""
+"Removes the white flash when a battle starts and the screen shatters, and "
+"the full-screen flashes when performing attacks. Fades to and from black "
+"stay as they are. Off: the original."
+msgstr ""
+"バトル開始時に画面が割れるときの白いフラッシュと、攻撃時の画面全体のフラッシュをなくします。"
+"黒へのフェードアウト・フェードインはそのままです。オフで原作どおりです。"

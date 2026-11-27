@@ -517,6 +517,8 @@ std::vector<Spec>& table() {
         [](int, int v) { pcGameplaySetDeusCameraFix(v); }, 1);
     add("uninterrupted_combos", N_("Uninterrupted combos"), [](int) { return pcGameplayUninterruptedCombos(); },
         [](int, int v) { pcGameplaySetUninterruptedCombos(v); }, 0);
+    add("disable_battle_flashes", N_("Disable battle flashes"), [](int) { return pcGameplayDisableBattleFlashes(); },
+        [](int, int v) { pcGameplaySetDisableBattleFlashes(v); }, 0);
     static const char* const difficulty[] = {N_("Normal"), N_("Hard")};
     add("difficulty", N_("Difficulty"), [](int) { return pcGameplayHardMode(); },
         [](int, int v) { pcGameplaySetHardMode(v); }, 0, difficulty);

@@ -358,7 +358,7 @@ SETTINGS = [
     "gameplay_bugfixtest", "gameplay_combattest", "gameplay_deathblowtest",
     "gameplay_dialoguetest", "gameplay_encountertest", "gameplay_field60slowtest", "gameplay_gauntlettest",
     "gameplay_retrytest",
-    "gameplay_rewardtest", "gameplay_uninterruptedtest", "gameplay_battlejumptest",
+    "gameplay_rewardtest", "gameplay_uninterruptedtest", "gameplay_battleflashestest", "gameplay_battlejumptest",
 ]
 
 def disc(region: str, n: int) -> Path:

@@ -471,6 +471,10 @@ xg_gameplay_test(gameplay_deathblowtest SOURCES src/system/test/deathblowtest.c 
 xg_gameplay_code(gameplay_uninterrupted_code "${CMAKE_CURRENT_SOURCE_DIR}/src/game/battle/combo.c")
 xg_gameplay_test(gameplay_uninterruptedtest SOURCES src/system/test/uninterruptedtest.c GAME gameplay_uninterrupted_code)
 
+# Disable battle flashes: additive battle fader suppression and glass-shatter brightness.
+xg_gameplay_code(gameplay_battleflashes_code "${XG_GAME_ROOT}/src/battle/b_800B15D8.c" "${XG_GAME_ROOT}/src/battle/b_800B6F0C.c")
+xg_gameplay_test(gameplay_battleflashestest SOURCES src/system/test/battleflashestest.c GAME gameplay_battleflashes_code)
+
 # A jump pressed as a random battle comes (Original-game bug fixes).
 xg_gameplay_code(gameplay_battlejump_code "${CMAKE_CURRENT_SOURCE_DIR}/src/game/field/battlejump.c")
 xg_gameplay_test(gameplay_battlejumptest SOURCES src/system/test/battlejumptest.c GAME gameplay_battlejump_code)

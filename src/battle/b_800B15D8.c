@@ -29,6 +29,9 @@
 #include "stack.h"
 #include "main/memory.h"
 #include "battle/battle.h"
+#ifdef PLATFORM_PC
+#include "pc_gameplay.h"
+#endif
 
 void registerSpriteCallback2(TaskHeader* owner, TaskHeader* task);
 void registerSpriteCallback2Sub0(TaskHeader* task);
@@ -1186,6 +1189,13 @@ void battleFader_draw(TaskHeader* task) {
     sBattleFader* fader = (sBattleFader*)task->m4_data;
     DR_MODE* mode;
 
+#ifdef PLATFORM_PC
+    /* Disable battle flashes: skip additive full-screen flashes (abe 1: 100%,
+     * abe 3: 25%) while keeping subtractive fades (abe 2) and task lifetime. */
+    if (pcGameplayDisableBattleFlashes() && (fader->m41_tpageABE == 1 || fader->m41_tpageABE == 3)) {
+        return;
+    }
+#endif
     if (shapeTransfertTableCurrentEntry + 0x50 < shapeTransfertTableEnd) {
         mode = (DR_MODE*)(p + 1);
         shapeTransfertTableCurrentEntry = (u8*)(mode + 1);

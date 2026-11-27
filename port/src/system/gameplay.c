@@ -40,6 +40,18 @@ void pcGameplaySetUninterruptedCombos(int enabled) {
     settingsSave();
 }
 
+int pcGameplayDisableBattleFlashes(void) {
+    return settingsBool("disable_battle_flashes", 0);
+}
+
+void pcGameplaySetDisableBattleFlashes(int enabled) {
+    settingsDescribe("disable_battle_flashes",
+                     "Remove the white flash when a battle starts and the screen shatters, and additive full-screen "
+                     "flashes during battle attacks");
+    settingsSetInt("disable_battle_flashes", enabled != 0);
+    settingsSave();
+}
+
 int pcGameplayDeusCameraFix(void) {
     return settingsBool("deus_camera_fix", 1);
 }
