@@ -11,6 +11,7 @@
 
 #include "assets.h"
 #include "imgui_internal.h"
+#include "l10n.h"
 
 extern "C" {
 #include "cd/cd.h"
@@ -437,7 +438,7 @@ bool menuMouse() {
     if (!described) {
         described = true;
         settingsDescribe("menu_mouse",
-                         "menu_mouse: 1 enables mouse input in the F1/startup menu (0, default: off; touch still works)");
+                         "menu_mouse: 1 enables mouse input in F1, its Extras, and the startup menu (0, default: off; touch still works)");
     }
     return settingsBool("menu_mouse", 0) != 0;
 }
@@ -445,6 +446,29 @@ bool menuMouse() {
 void setMenuMouse(bool on) {
     settingsSetInt("menu_mouse", on ? 1 : 0);
     settingsSave();
+}
+
+const char* const menuPointerNames[MENU_POINTER_COUNT] = {N_("Automatic"), N_("Show"), N_("Hide")};
+
+MenuPointer menuPointer() {
+    static bool described;
+    if (!described) {
+        described = true;
+        settingsDescribe("menu_pointer",
+                         "menu_pointer: 0 follows menu_mouse (default), 1 shows the pointer, 2 hides it");
+    }
+    int mode = settingsInt("menu_pointer", MENU_POINTER_AUTO);
+    return mode >= 0 && mode < MENU_POINTER_COUNT ? static_cast<MenuPointer>(mode) : MENU_POINTER_AUTO;
+}
+
+void setMenuPointer(MenuPointer mode) {
+    settingsSetInt("menu_pointer", mode);
+    settingsSave();
+}
+
+bool menuPointerVisible(bool mouseEnabled) {
+    MenuPointer mode = menuPointer();
+    return mode == MENU_POINTER_SHOW || (mode == MENU_POINTER_AUTO && mouseEnabled);
 }
 
 int unitFor(int w, int h) {

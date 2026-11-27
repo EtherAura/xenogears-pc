@@ -2258,6 +2258,22 @@ msgid "Mouse"
 msgstr "マウス"
 
 #: port/src/ui/sections.cpp
+msgid "Mouse controls"
+msgstr "マウス操作"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Mouse in F1 menu"
+msgstr "F1 メニューでマウスを使う"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Mouse pointer"
+msgstr "マウスポインター"
+
+#: port/src/ui/sections.cpp
+msgid "Show or hide the pointer in F1, its Extras, and the startup screen. Automatic follows Mouse in F1 menu."
+msgstr "F1 メニューとエクストラ、起動画面でマウスポインターを表示するかどうかを選びます。自動は「F1 メニューでマウスを使う」の設定に従います。"
+
+#: port/src/ui/sections.cpp
 msgid "Mouse in the game"
 msgstr "ゲーム中のマウス"
 
@@ -4864,7 +4880,7 @@ msgstr "ストーリーのバトル"
 msgid "%zu enemies on these discs. You have met %d and defeated %d."
 msgstr "このディスクの敵は %zu 体。出会ったのは %d 体、倒したのは %d 体です。"
 
-#: port/src/extras/bestiary.cpp
+#: port/src/extras/bestiary.cpp port/src/ui/skin.cpp
 msgid "Show"
 msgstr "表示"
 
@@ -4908,6 +4924,10 @@ msgstr "ID より前にセーブしたゲーム(共通の記録)"
 #, c-format
 msgid "Slot %d: %s (%s, story %d) - shared record"
 msgstr "スロット %d: %s(%s、ストーリー %d)- 共通の記録"
+
+#: port/src/ui/skin.cpp
+msgid "Hide"
+msgstr "隠す"
 
 #: port/src/extras/bestiary.cpp
 msgid "Catch up"

@@ -57,6 +57,7 @@
 #include "shell.h"
 #include "ui/sfx.h"
 #include "ui/l10n.h"
+#include "ui/pointer.h"
 #include "ui/skin.h"
 #include "view.h"
 #include "replace.h"
@@ -140,6 +141,7 @@ struct PaneFrame { ImVec2 min, max; };
 
 struct State {
     bool haveDevice, ready, open, leaving, quitAfter, rendered, fromMenu, openedOnce, escapeFree;
+    bool mouseEnabled;
     UiVulkan dev;
     Device device;
     ImGuiContext* ctx;
@@ -474,17 +476,20 @@ void pushMouse(SDL_EventType type, float x, float y, float wheel) {
     if (type == SDL_EVENT_MOUSE_MOTION) {
         e.motion.timestamp = SDL_GetTicksNS();
         e.motion.windowID = window;
+        e.motion.which = uiPointer::scriptId;
         e.motion.x = x;
         e.motion.y = y;
     } else if (type == SDL_EVENT_MOUSE_WHEEL) {
         e.wheel.timestamp = SDL_GetTicksNS();
         e.wheel.windowID = window;
+        e.wheel.which = uiPointer::scriptId;
         e.wheel.y = wheel;
         e.wheel.mouse_x = x;
         e.wheel.mouse_y = y;
     } else {
         e.button.timestamp = SDL_GetTicksNS();
         e.button.windowID = window;
+        e.button.which = uiPointer::scriptId;
         e.button.button = SDL_BUTTON_LEFT;
         e.button.down = type == SDL_EVENT_MOUSE_BUTTON_DOWN;
         e.button.clicks = 1;
@@ -563,6 +568,7 @@ void runStep(Step& s) {
             e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
             e.button.timestamp = SDL_GetTicksNS();
             e.button.windowID = presentWindow() != nullptr ? SDL_GetWindowID(presentWindow()) : 0;
+            e.button.which = uiPointer::scriptId;
             e.button.button = SDL_BUTTON_RIGHT;
             e.button.down = down != 0;
             e.button.clicks = 1;
@@ -808,12 +814,20 @@ void pump() {
             ImGui_ImplSDL3_ProcessEvent(&e);
             break;
         case SDL_EVENT_MOUSE_MOTION: {
+            if (!st.mouseEnabled && !uiPointer::emulated(e.motion.which)) break;
             SDL_Event m = e; // into window pixels, as ImGui works
             m.motion.x *= st.pixelsPerUnit;
             m.motion.y *= st.pixelsPerUnit;
             ImGui_ImplSDL3_ProcessEvent(&m);
             break;
         }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            if (st.mouseEnabled || uiPointer::emulated(e.button.which)) ImGui_ImplSDL3_ProcessEvent(&e);
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            if (st.mouseEnabled || uiPointer::emulated(e.wheel.which)) ImGui_ImplSDL3_ProcessEvent(&e);
+            break;
         case SDL_EVENT_GAMEPAD_ADDED:
         case SDL_EVENT_GAMEPAD_REMOVED:
             ImGui_ImplSDL3_ProcessEvent(&e);
@@ -1330,7 +1344,7 @@ void frame() {
     updateScale();
     viewsBeginFrame();
     ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
+    uiPointer::newFrame(st.mouseEnabled, !st.fromMenu || skin::menuPointerVisible(st.mouseEnabled));
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(presentWindow(), &pw, &ph);
     ImGuiIO& io = ImGui::GetIO();
@@ -1370,6 +1384,12 @@ void run(bool fromMenu) {
     st.menuUnit = skin::unit();
     ImGui::SetCurrentContext(st.ctx);
     st.fromMenu = fromMenu;
+    st.mouseEnabled = !fromMenu || skin::menuMouse();
+    if (!st.mouseEnabled) {
+        // The Extras context is reused even if mouse input was enabled on a previous visit.
+        st.ctx->IO.ClearInputMouse();
+        uiPointer::discardQueuedMouse(st.ctx->InputEventsQueue, 0);
+    }
     st.open = true;
     st.leaving = st.quitAfter = false;
     st.escapeFree = false;

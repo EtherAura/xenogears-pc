@@ -23,6 +23,7 @@
 #include "menu.h"
 #include "motion.h"
 #include "options.h"
+#include "pointer.h"
 #include "sfx.h"
 #include "skin.h"
 #include "textwrap.h"
@@ -61,9 +62,6 @@ const char* const listNames[SECTION_COUNT] = {
     N_("Presets")};
 
 namespace {
-
-// XG_UI_SCRIPT (ui.h).
-constexpr SDL_MouseID scriptMouseId = static_cast<SDL_MouseID>(-3);
 
 struct Step {
     unsigned long at; // menu frame, or vblank with onVBlank
@@ -341,7 +339,7 @@ void runStep(Step& s) {
         e.type = SDL_EVENT_MOUSE_MOTION;
         e.motion.timestamp = SDL_GetTicksNS();
         e.motion.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
-        e.motion.which = scriptMouseId;
+        e.motion.which = uiPointer::scriptId;
         e.motion.x = x;
         e.motion.y = y;
         SDL_PushEvent(&e);
@@ -350,7 +348,7 @@ void runStep(Step& s) {
             b.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
             b.button.timestamp = SDL_GetTicksNS();
             b.button.windowID = e.motion.windowID;
-            b.button.which = scriptMouseId;
+            b.button.which = uiPointer::scriptId;
             b.button.button = SDL_BUTTON_LEFT;
             b.button.down = true;
             b.button.clicks = 1;
@@ -407,7 +405,7 @@ void runStep(Step& s) {
         SDL_Event e = {};
         e.type = SDL_EVENT_MOUSE_WHEEL;
         e.wheel.timestamp = SDL_GetTicksNS();
-        e.wheel.which = scriptMouseId;
+        e.wheel.which = uiPointer::scriptId;
         e.wheel.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
         e.wheel.y = (float)atof(s.arg);
         e.wheel.integer_y = (int)e.wheel.y;
@@ -422,7 +420,7 @@ void runStep(Step& s) {
         b.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
         b.button.timestamp = SDL_GetTicksNS();
         b.button.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
-        b.button.which = scriptMouseId;
+        b.button.which = uiPointer::scriptId;
         b.button.button = SDL_BUTTON_RIGHT;
         b.button.down = true;
         b.button.clicks = 1;
@@ -437,7 +435,7 @@ void runStep(Step& s) {
         b.type = SDL_EVENT_MOUSE_BUTTON_UP;
         b.button.timestamp = SDL_GetTicksNS();
         b.button.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
-        b.button.which = scriptMouseId;
+        b.button.which = uiPointer::scriptId;
         b.button.button = SDL_BUTTON_RIGHT;
         SDL_PushEvent(&b);
     } else if (strcmp(s.cmd, "background") == 0) {
@@ -479,7 +477,7 @@ void runScript(bool onVBlank, unsigned long now, bool all = false) {
             b.type = SDL_EVENT_MOUSE_BUTTON_UP;
             b.button.timestamp = SDL_GetTicksNS();
             b.button.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
-            b.button.which = scriptMouseId;
+            b.button.which = uiPointer::scriptId;
             b.button.button = r.kind == 4 ? SDL_BUTTON_LEFT : SDL_BUTTON_RIGHT;
             SDL_PushEvent(&b);
         }
@@ -2066,14 +2064,8 @@ void frame() {
     updateScale();
     ImGuiIO& io = ImGui::GetIO();
     const bool mouseEnabled = skin::menuMouse();
-    if (mouseEnabled) {
-        io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
-    } else {
-        io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
-        if (SDL_CursorVisible()) SDL_HideCursor();
-    }
     ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
+    uiPointer::newFrame(mouseEnabled, skin::menuPointerVisible(mouseEnabled));
     {
         // ImGui in window pixels: each game pixel a whole block of them
         // (uiEvent brings the mouse into pixels too).
@@ -2125,8 +2117,7 @@ void frame() {
                                        : menuMotion::opening(st.centre, skin::unit(), age);
     if ((!mouseEnabled && st.emulatedMouse) ||
         (!st.setup && !st.backlog && !st.ask && ImGui::IsMousePosValid(&st.mouse))) {
-        // Touch and scripted positions take precedence over the SDL
-        // backend's desktop cursor position when the mouse is disabled.
+        // Touch and scripted positions still follow the menu's animation.
         ImVec2 mouse = st.mouse;
         if (moving && ImGui::IsMousePosValid(&mouse)) {
             if (st.leaving) mouse = ImVec2(-FLT_MAX, -FLT_MAX);
@@ -2601,7 +2592,7 @@ extern "C" int uiIsOpen(void) {
 }
 
 static bool acceptMenuPointer(SDL_MouseID id) {
-    const bool emulated = id == SDL_TOUCH_MOUSEID || id == scriptMouseId;
+    const bool emulated = uiPointer::emulated(id);
     if (!emulated && !skin::menuMouse()) return false;
     st.emulatedMouse = emulated;
     return true;

@@ -2405,9 +2405,16 @@ void controlsSection() {
             if (offOnList("##menu_mouse", &v)) {
                 skin::setMenuMouse(v);
             }
-            hint("Allow mouse hover, clicks and scroll wheel in the F1 settings menu and startup screen "
+            hint("Allow mouse hover, clicks and scroll wheel in the F1 settings menu, its Extras, and the startup screen "
                  "(off by default; touch input still works).");
             overrideNote("menu_mouse");
+        }
+        if (row("Mouse pointer", "menu_pointer")) {
+            auto mode = skin::menuPointer();
+            int chosen = choice("menu_pointer", skin::menuPointerNames, skin::MENU_POINTER_COUNT, mode);
+            if (chosen != mode) skin::setMenuPointer(static_cast<skin::MenuPointer>(chosen));
+            hint("Show or hide the pointer in F1, its Extras, and the startup screen. Automatic follows Mouse in F1 menu.");
+            overrideNote("menu_pointer");
         }
         bool mouse = mouseGameEnabled() != 0;
         if (row("Mouse in the game", "mouse_game")) {

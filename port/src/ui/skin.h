@@ -99,6 +99,13 @@ void setDescAutoScroll(bool on);
 bool menuMouse();
 void setMenuMouse(bool on);
 
+// OS pointer visibility in the same menus, independent of their input.
+enum MenuPointer : int { MENU_POINTER_AUTO, MENU_POINTER_SHOW, MENU_POINTER_HIDE, MENU_POINTER_COUNT };
+extern const char* const menuPointerNames[MENU_POINTER_COUNT];
+MenuPointer menuPointer();
+void setMenuPointer(MenuPointer mode);
+bool menuPointerVisible(bool mouseEnabled);
+
 // Each frame, right after ImGui::NewFrame.
 void beginFrame();
 
