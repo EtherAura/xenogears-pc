@@ -115,6 +115,28 @@ int portStartPending(void) {
     return start.pending;
 }
 
+/* The F1 menu asked for the soft reset (Start+Select+L1+R1's, without the
+ * chord): the game's next checkSoftReboot (kernel.c) does it at its own safe
+ * point, never inside a callback, where a longjmp would strand the clock. */
+static int softResetPending;
+
+void portRequestSoftReset(void) {
+    softResetPending = 1;
+    fprintf(stderr, "options: soft reset requested from the menu\n");
+}
+
+int portSoftResetPending(void) {
+    return softResetPending;
+}
+
+/* hw.c's vblank wait, for the loops that never call checkSoftReboot (the
+ * title's New Game / Continue / Sound menu): the request, once. */
+int portTakeSoftReset(void) {
+    int was = softResetPending;
+    softResetPending = 0;
+    return was;
+}
+
 int portSceneReplayActive(void) {
     return start.active;
 }
@@ -125,6 +147,7 @@ int cdSwapForReset(void);
 void cdBootTablesReload(void);
 
 void portStartPrepare(void) {
+    softResetPending = 0; /* a soft reset served by checkSoftReboot is now done */
     start.active = 0;
     if (!start.pending) {
         return;

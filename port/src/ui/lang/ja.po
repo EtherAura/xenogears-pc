@@ -988,6 +988,14 @@ msgstr "もどる"
 msgid "Quit"
 msgstr "終了"
 
+#: port/src/ui/menu.cpp
+msgid "Reset the game now? It starts over from the beginning, and progress since your last save is lost."
+msgstr "ゲームをリセットしますか? 最初からやり直します。最後にセーブしてからの進み具合は失われます。"
+
+#: port/src/ui/menu.cpp
+msgid "Quit the game now? Progress since your last save is lost."
+msgstr "ゲームを終了しますか? 最後にセーブしてからの進み具合は失われます。"
+
 #: port/src/extras/shell.cpp
 #, c-format
 msgid "%s  %s disc %d"
@@ -1391,7 +1399,7 @@ msgstr "このフォルダを使う"
 msgid "System dialog..."
 msgstr "システムのダイアログ..."
 
-#: port/src/ui/arena.cpp port/src/ui/sections.cpp
+#: port/src/ui/arena.cpp port/src/ui/menu.cpp port/src/ui/sections.cpp
 msgid "Cancel"
 msgstr "キャンセル"
 
@@ -1889,7 +1897,7 @@ msgstr "ウィンドウの大きさから整数ピクセルで決めるので、
 msgid "Menu size"
 msgstr "メニューの大きさ"
 
-#: port/src/ui/sections.cpp
+#: port/src/ui/menu.cpp port/src/ui/sections.cpp
 msgid "Reset"
 msgstr "リセット"
 

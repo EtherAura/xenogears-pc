@@ -52,6 +52,7 @@ s32 portBootMode(void); /* port/src/system/options.c: XG_BOOT_MODE (or 1 for XG_
 void portStartState(void); /* options.c: XG_PRESET, XG_PARTY, XG_GAMESTATE, XG_FIELD */
 void gameStackScrub(void); /* port/src/system/gamestack.c: the dead stack below here to zeros */
 s32 portStartPending(void); /* options.c: the extras ask for a start (a scene to replay) */
+s32 portSoftResetPending(void); /* options.c: the F1 menu asked for the soft reset */
 void cdBootTables(u8* fileTable, u16* directoryTable); /* port/src/cd/boot.c: started on disc 2 */
 void deinitDebugFont(void);
 void kernelBootMenu(void);
@@ -501,8 +502,9 @@ void resetDefaultMemoryAllocStats(void) {
 /* checkSoftReboot: L1+R1+SELECT+START */
 void checkSoftReboot(void) {
     /* The PC also resets into a start the extras asked for (their cutscene
-     * replay: port/src/system/options.c), as the player's combination would. */
-    if (newPadButtonForScripts == 0x90C || portStartPending()) {
+     * replay: port/src/system/options.c), as the player's combination would;
+     * and it resets when the F1 menu asked it to (options.c portSoftResetPending). */
+    if (newPadButtonForScripts == 0x90C || portStartPending() || portSoftResetPending()) {
         softReboot();
     }
 }

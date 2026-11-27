@@ -51,25 +51,13 @@ void sameLineFor(const char* label) {
 // is too narrow.
 int settingChoice(int value) {
     static const char* const names[] = {N_("Ask at the next start"), N_("Once a day"), N_("Never")};
-    float width = 2 * 14 * scale();
-    for (const char* n : names) width += ImGui::CalcTextSize(tr(n)).x;
     ImGui::PushID("update_check");
-    if (width <= ImGui::GetContentRegionAvail().x) {
+    if (skin::beginCombo("##list", tr(names[value]))) {
         for (int i = 0; i < 3; i++) {
-            if (i > 0) ImGui::SameLine(0, 14 * scale());
-            ImGui::AlignTextToFramePadding();
-            if (skin::selectable(tr(names[i]), value == i, 0, ImGui::CalcTextSize(tr(names[i])))) value = i;
+            if (skin::comboItem(tr(names[i]), value == i)) value = i;
+            if (value == i) ImGui::SetItemDefaultFocus();
         }
-    } else {
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::BeginCombo("##list", tr(names[value]))) {
-            skin::frameWindow();
-            for (int i = 0; i < 3; i++) {
-                if (ImGui::Selectable(tr(names[i]), value == i)) value = i;
-                if (value == i) ImGui::SetItemDefaultFocus();
-            }
-            ImGui::EndCombo();
-        }
+        skin::endCombo();
     }
     ImGui::PopID();
     return value;

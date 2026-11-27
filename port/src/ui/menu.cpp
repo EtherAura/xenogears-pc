@@ -40,6 +40,7 @@ extern "C" {
 #include "ui/ui.h"
 void extrasJukeboxTick(void) __attribute__((weak));
 void extrasJukeboxEnd(void) __attribute__((weak));
+void portRequestSoftReset(void); /* options.c: the game's checkSoftReboot does the soft reset at its safe point */
 }
 
 #define IMAGE_COUNT 8 // ImGui's vertex buffers in flight: two passes a frame (dump, window), two frames
@@ -131,6 +132,8 @@ struct State {
     ImGuiID leftFrom;        // Left was pressed on this item: no move means back to the list
     unsigned long closedAt;
     bool leaving;
+    bool resetWanted, quitWanted; // a Reset or Quit chosen on the arc and confirmed: act on it once the menu closes
+    bool resetAsk, quitAsk;       // their confirmation is open (##reset-ask, ##quit-ask)
     ImVec2 centre;           // the opening's projection centre (game mode: the game screen's)
     int modalStyles;         // nextModal's pushed style variables
     unsigned playsSeen;      // sfx::plays() after the last frame's sounds
@@ -759,6 +762,50 @@ std::string helpText;
 int helpIndex;
 ImVector<float> blocks; // screen y of each block's top, this frame
 
+// Smooth scrolling of the settings pane: whatever asks it to scroll (the
+// cursor's block, a search result, the mouse wheel) sets where it goes; the
+// pane glides there, a little each frame. A new section, the scroll bar's
+// thumb and the right stick move it at once (snap).
+struct {
+    ImGuiWindow* w;
+    float shown, target, last;
+    bool snap;
+} smooth;
+
+void smoothScrollBegin() {
+    ImGuiWindow* w = smooth.w;
+    if (w == nullptr) return;
+    const ImGuiIO& io = ImGui::GetIO();
+    if (w->ScrollTarget.y < FLT_MAX) {
+        float view = w->SizeFull.y - w->ScrollbarSizes.y;
+        float want = w->ScrollTarget.y - w->ScrollTargetCenterRatio.y * view;
+        // The wheel: a step on from where it is going, not from where it is.
+        if (io.MouseWheel != 0.0f) want = smooth.target + (want - w->Scroll.y);
+        smooth.target = fmaxf(0.0f, fminf(want, w->ScrollMax.y));
+        w->ScrollTarget.y = FLT_MAX;
+        w->ScrollTargetCenterRatio.y = 0.0f;
+    } else if (fabsf(w->Scroll.y - smooth.last) > 0.5f) {
+        smooth.shown = smooth.target = w->Scroll.y; // moved (or clamped) by ImGui itself
+    }
+    if (smooth.snap) {
+        smooth.shown = smooth.target;
+        smooth.snap = false;
+    }
+    float k = 1.0f - expf(-fmaxf(io.DeltaTime, 0.0f) * 18.0f);
+    smooth.shown += (smooth.target - smooth.shown) * k;
+    if (fabsf(smooth.target - smooth.shown) < 0.5f) smooth.shown = smooth.target;
+    ImGui::SetNextWindowScroll(ImVec2(-1.0f, smooth.shown));
+}
+
+void smoothScrollEnd(ImGuiWindow* w) {
+    if (smooth.w != w) {
+        smooth.w = w;
+        smooth.shown = smooth.target = w->Scroll.y;
+    }
+    smooth.last = w->Scroll.y;
+    if (fabsf(smooth.shown - w->Scroll.y) > 0.5f) smooth.shown = w->Scroll.y; // clamped
+}
+
 void scrollToBlock(ImGuiWindow* w, float endY) {
     ImGuiContext& g = *ImGui::GetCurrentContext();
     if (g.NavWindow != w || g.NavId == 0 || g.NavId == st.lastContentNav || !g.NavCursorVisible ||
@@ -1170,9 +1217,12 @@ void drawFrame() {
 
     // The pre-game / setup screen (ui.h uiDiscSetup): its pages (Presets, Discs, BIOS),
     // plus Settings (opens all F1 sections before boot), Start and Quit on the commands' arc.
+    // Browsing full Settings before boot keeps only Back to start; a running game's arc
+    // adds Reset and Quit after Back.
     const bool inSetup = st.setup && !st.preGameSettings;
     const int sections = inSetup ? (int)SETUP_SECTIONS : (int)SECTION_COUNT;
-    const int entries = inSetup ? (int)SETUP_SECTIONS + 3 : (int)SECTION_COUNT + 1;
+    const int extras = inSetup ? 3 : (st.preGameSettings ? 1 : 3);
+    const int entries = sections + extras;
     st.section = std::clamp(st.section, 0, sections - 1);
     auto leaveOrReturn = [&]() {
         if (st.preGameSettings) {
@@ -1418,8 +1468,16 @@ void drawFrame() {
             else if (i == sections) name = tr("Settings");
             else if (i == sections + 1) name = tr("Start");
             else name = tr("Quit");
+        } else if (i < sections) {
+            name = tr(listNames[i]);
+        } else if (st.preGameSettings) {
+            name = tr("Back to start"); // i == sections
+        } else if (i == sections) {
+            name = tr("Back");
+        } else if (i == sections + 1) {
+            name = tr("Reset");
         } else {
-            name = tr(i >= sections ? (st.preGameSettings ? "Back to start" : "Back") : listNames[i]);
+            name = tr("Quit");
         }
         if (i >= sections) {
             if (listEntry(i, name, false, L.command(slot), st.inContent, &focused)) {
@@ -1436,8 +1494,14 @@ void drawFrame() {
                     } else {
                         st.closing = true; // Quit
                     }
+                } else if (st.preGameSettings) {
+                    leaveOrReturn(); // Back to start
+                } else if (i == sections) {
+                    leaveOrReturn(); // Back
+                } else if (i == sections + 1) {
+                    st.resetAsk = true; // Reset: confirm first
                 } else {
-                    leaveOrReturn();
+                    st.quitAsk = true; // Quit: confirm first
                 }
             }
         } else if (listEntry(i, name, st.section == i, L.command(slot), st.inContent, &focused)) {
@@ -1493,10 +1557,12 @@ void drawFrame() {
     float headH = std::max(16.0f * u, skin::rowHeight());
     ImGui::SetCursorScreenPos(ImVec2(pane.Min.x + 8 * u, pane.Min.y + headH + 2 * u));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2((kListText - 8) * u, (kListTop - 2) * u));
+    smoothScrollBegin();
     ImGui::BeginChild("content", ImVec2(pane.GetWidth() + 4 * u, pane.GetHeight() - headH - 4 * u),
                       ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoScrollbar);
     ImGui::PopStyleVar();
     content = ImGui::GetCurrentWindow();
+    smoothScrollEnd(content);
     settingsClickRestore(content);
     // The box, its header bar and the scrolled contents in this draw list.
     st.paneDrawList = content->DrawList;
@@ -1561,12 +1627,14 @@ void drawFrame() {
         helpIndex = 0;
         st.currentBlockTall = false;
         ImGui::SetScrollY(0.0f); // each section/submenu from its top (one child shows them all)
+        smooth.snap = true;
         st.shownSection = st.section;
         st.resetScroll = false;
     }
     // When the description fits (or a long licence block is open), the right stick scrolls the pane.
     if (st.inContent && (st.descMaxScroll <= 0.0f || st.currentBlockTall) && fabsf(rightStick) > 0.2f) {
         ImGui::SetScrollY(ImGui::GetScrollY() + rightStick * 6.0f * u);
+        smooth.snap = true; // already smooth: the stick's own motion
     }
     if (st.jumpFocus) {
         // The cursor where the row asks (options.h: a search result's control,
@@ -1675,6 +1743,7 @@ void drawFrame() {
                 // The thumb's middle follows the mouse.
                 float at = (io.MousePos.y - pane.Min.y - 8 * u - thumbH / 2) / fmaxf(1.0f, inner - thumbH);
                 ImGui::SetScrollY(content, fminf(1.0f, fmaxf(0.0f, at)) * maxScroll);
+                smooth.snap = true;
             }
         }
     }
@@ -1773,6 +1842,58 @@ void drawFrame() {
         }
         if (ImGui::Button(tr("Back")) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
             (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+    // Reset and Quit, chosen on the commands' arc: each asks once, as the
+    // game's message box does (both lose progress since the last save).
+    if (st.resetAsk) {
+        ImGui::OpenPopup("##reset-ask");
+        st.resetAsk = false;
+    }
+    nextModal();
+    bool resetOpen = ImGui::BeginPopupModal("##reset-ask", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+                                            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings);
+    modalStyleEnd();
+    if (resetOpen) {
+        skin::frameWindow(true);
+        textLines(tr("Reset the game now? It starts over from the beginning, and progress since your last save is lost."));
+        if (ImGui::Button(tr("Reset"))) {
+            st.resetWanted = true;
+            st.closing = true;
+            sfx::play(sfx::CHOOSE);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(tr("Cancel")) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+            (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
+            sfx::play(sfx::BACK);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (st.quitAsk) {
+        ImGui::OpenPopup("##quit-ask");
+        st.quitAsk = false;
+    }
+    nextModal();
+    bool quitOpen = ImGui::BeginPopupModal("##quit-ask", nullptr, ImGuiWindowFlags_AlwaysAutoResize |
+                                           ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings);
+    modalStyleEnd();
+    if (quitOpen) {
+        skin::frameWindow(true);
+        textLines(tr("Quit the game now? Progress since your last save is lost."));
+        if (ImGui::Button(tr("Quit"))) {
+            st.quitWanted = true;
+            st.closing = true;
+            sfx::play(sfx::CHOOSE);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(tr("Cancel")) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+            (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
+            sfx::play(sfx::BACK);
+            ImGui::CloseCurrentPopup();
+        }
         ImGui::EndPopup();
     }
     noteSettingsClick();
@@ -2099,6 +2220,8 @@ void run() {
     st.closing = false;
     st.leaving = false;
     st.preGameSettings = false;
+    st.resetWanted = st.quitWanted = false;
+    st.resetAsk = st.quitAsk = false;
     st.resetScroll = false;
     st.section = st.setup ? st.setupSection : 0;
     st.shownSection = -1;
@@ -2176,6 +2299,17 @@ void run() {
     hwPause(0);
     fprintf(stderr, "ui: %s closed; the game goes on\n",
             st.backlog ? "dialogue backlog" : st.ask ? "update question" : "settings menu");
+    // A Reset or Quit chosen and confirmed on the commands' arc: the game is
+    // un-paused and the menu is closed, so it is safe to hand over. The reset
+    // is only requested here: the game's checkSoftReboot does it at its own
+    // safe point, never inside a vblank callback where its longjmp would
+    // strand the clock (system/quit.c quitRequest is safe to call anywhere).
+    if (st.resetWanted) {
+        portRequestSoftReset();
+    }
+    if (st.quitWanted) {
+        quitRequest(); /* the game thread quits at its next safe point (system/quit.c) */
+    }
 }
 
 } // namespace

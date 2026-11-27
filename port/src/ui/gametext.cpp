@@ -142,17 +142,15 @@ void languageSelector() {
         selected = gameTextPack(GT_DIALOGUE);
         for (const auto& p : packs) if (p.id == gameTextPack(GT_DIALOGUE)) selected = p.name;
     }
-    ImGui::SetNextItemWidth(-1);
-    if (ImGui::BeginCombo("##game-language", selected.c_str())) {
+    if (skin::beginCombo("##game-language", selected.c_str())) {
         static int otherMask;
         if (ImGui::IsWindowAppearing() || !imagesRead) {
             readPacks();
             readImages();
             otherMask = gameTextOtherDiscs();
         }
-        skin::frameWindow();
         auto option = [](const char* label, bool active) {
-            bool picked = ImGui::Selectable(label, active);
+            bool picked = skin::comboItem(label, active);
             if (active) ImGui::SetItemDefaultFocus();
             return picked;
         };
@@ -188,25 +186,13 @@ void languageSelector() {
                 gameTextSetLanguage(GT_SOURCE_PACK, p.id.c_str());
             ImGui::PopID();
         }
-        ImGui::EndCombo();
+        skin::endCombo();
     }
     hint("Changes dialogue, menus, names, battle labels and movie subtitles together. Reopen the game menu or enter a new battle to refresh its labels.");
     if (source >= 0 && source != GT_SOURCE_DISC && !regionalSubtitlesEnabled())
         hint("This source has no separate movie subtitle track.");
     if (source == GT_SOURCE_OTHER && regionalSubtitlesEnabled() == 2)
         hint("Movie subtitles use the English translation of the Japanese dialogue.");
-}
-
-// As the menu's own (sections.cpp): a box and its translated label.
-bool checkbox(const char* label, bool* value) {
-    ImGui::PushID(label);
-    ImGui::BeginGroup();
-    bool changed = ImGui::Checkbox("##value", value);
-    ImGui::SameLine();
-    wrappedText("%s", tr(label));
-    ImGui::EndGroup();
-    ImGui::PopID();
-    return changed;
 }
 
 } // namespace
@@ -232,22 +218,22 @@ void gameTextRows() {
         for (int p = 0; p < (int)packs.size() && source == GT_SOURCE_PACK; p++) {
             if (!strcmp(packs[p].id.c_str(), gameTextPack(c))) now = 3 + p;
         }
-        for (int i = 0; i < 3 + (int)packs.size(); i++) {
-            const char* name = i == 0 ? tr("Disc") : i == 1 ? other : i == 2 ? tr("Text image") : packs[i - 3].name.c_str();
-            if (i > 0) {
-                ImGui::SameLine(0, 14 * scale());
-                if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(name).x) ImGui::NewLine();
+        const char* preview = now == 0 ? tr("Disc") : now == 1 ? other : now == 2 ? tr("Text image") : packs[now - 3].name.c_str();
+        if (skin::beginCombo("##source", preview)) {
+            for (int i = 0; i < 3 + (int)packs.size(); i++) {
+                const char* name = i == 0 ? tr("Disc") : i == 1 ? other : i == 2 ? tr("Text image") : packs[i - 3].name.c_str();
+                ImGui::PushID(i);
+                if (skin::comboItem(name, now == i) && i != now) {
+                    if (i == 0) gameTextSetSource(c, GT_SOURCE_DISC, nullptr);
+                    else if (i == 1) gameTextSetSource(c, GT_SOURCE_OTHER, nullptr);
+                    else if (i == 2) gameTextSetSource(c, GT_SOURCE_IMAGE, nullptr);
+                    else gameTextSetSource(c, GT_SOURCE_PACK, packs[i - 3].id.c_str());
+                    now = i;
+                }
+                if (now == i) ImGui::SetItemDefaultFocus();
+                ImGui::PopID();
             }
-            ImGui::AlignTextToFramePadding();
-            ImGui::PushID(i);
-            if (skin::selectable(name, now == i, 0, ImGui::CalcTextSize(name)) && i != now) {
-                if (i == 0) gameTextSetSource(c, GT_SOURCE_DISC, nullptr);
-                else if (i == 1) gameTextSetSource(c, GT_SOURCE_OTHER, nullptr);
-                else if (i == 2) gameTextSetSource(c, GT_SOURCE_IMAGE, nullptr);
-                else gameTextSetSource(c, GT_SOURCE_PACK, packs[i - 3].id.c_str());
-                now = i;
-            }
-            ImGui::PopID();
+            skin::endCombo();
         }
         ImGui::PopID();
         ImGui::PopID();
@@ -263,15 +249,6 @@ void gameTextRows() {
                 if (layout.windows == GT_WINDOWS_PACK) hint("The pack gives the dialogue windows' sizes.");
                 if (layout.windows == GT_WINDOWS_GROW) hint("The dialogue windows grow to fit the pack's text.");
             }
-            if (gameTextHasPictures(c)) {
-                // the word pictures (Status, Attack...) from the same source: opt-in
-                bool pictures = gameTextPictures(c);
-                ImGui::PushID(c);
-                if (checkbox("Pictures with text too", &pictures)) gameTextSetPictures(c, pictures);
-                ImGui::PopID();
-                hint("The word pictures (menu and battle labels) from the same source: its own, or the pack's "
-                     "pictures. From the next menu or battle.");
-            }
         }
         char key[32];
         snprintf(key, sizeof key, "text_%s", gameTextCategoryKey(c));
@@ -282,6 +259,22 @@ void gameTextRows() {
                  "fields' scripts differ between the releases) keeps the disc's. Applies to texts shown from now on.");
             hint("The other release's discs: text_other_disc1 and 2 in settings.ini, the Japanese discs of Audio (US "
                  "build), or images beside the game's.");
+        }
+        if (now != 0 && gameTextHasPictures(c) && opt::row("Pictures with text")) {
+            bool pictures = gameTextPictures(c);
+            static const char* const offOn[] = {N_("Off"), N_("On")};
+            ImGui::PushID(c);
+            if (skin::beginCombo("##pictures", tr(offOn[pictures ? 1 : 0]))) {
+                for (int i = 0; i < 2; i++) {
+                    bool sel = (pictures ? 1 : 0) == i;
+                    if (skin::comboItem(tr(offOn[i]), sel) && !sel) gameTextSetPictures(c, i == 1);
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                skin::endCombo();
+            }
+            ImGui::PopID();
+            hint("The word pictures (menu and battle labels) from the same source: its own, or the pack's "
+                 "pictures. From the next menu or battle.");
         }
     }
 

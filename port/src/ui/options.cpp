@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
@@ -677,6 +678,9 @@ struct Page {
     bool tail;        // the last row's own description lines (and inline Reset) are still to be written
     int tailFlags;
     bool rowChanged;
+    bool aligned;     // the row's controls are in a group: right-aligned to the pane's edge
+    ImGuiID alignId;
+    float alignAvail; // full right-column width for this row (invalidates stale rowWidths on resize)
     std::string rowLabel;
     std::vector<const Spec*> rowSpecs;
     int changedInGroup;
@@ -690,6 +694,7 @@ struct Page {
 
 struct RowRecord {
     float y;
+    float labelX; // where the label starts: the cursor's pointer goes left of it
     std::vector<const Spec*> specs;
 };
 std::vector<RowRecord> rowsNow;
@@ -702,6 +707,12 @@ std::map<int, std::string> sectionSubmenuLabel; // section -> active submenu lab
 std::map<int, std::string> returnSubmenu;       // section -> submenu id to focus after popping back
 std::map<std::string, int> submenuChangedCount; // section/submenu -> changed row count
 bool submenuEntered;
+// Right-aligned values: each row's controls' width last frame (they are laid
+// out from where that width ends at the pane's right edge), and the rows whose
+// controls take more than a line (left as they are: shifting them would wrap them).
+std::map<ImGuiID, float> rowWidths;
+std::map<ImGuiID, float> rowColAvail;
+std::map<ImGuiID, bool> rowNoAlign;
 
 // The Search page's index: each row's words.
 struct Entry {
@@ -747,12 +758,17 @@ void openTable() {
     if (pg.tableOpen) return;
     char id[32];
     snprintf(id, sizeof id, "##rows%d", pg.tables++);
-    pg.tableOpen = ImGui::BeginTable(id, pg.stacked ? 1 : 2, ImGuiTableFlags_SizingStretchProp);
+    // StretchSame (not StretchProp): gives column 1 its full width on frame 1
+    // instead of a tiny auto-fit measurement width that would collapse combos.
+    pg.tableOpen = ImGui::BeginTable(id, pg.stacked ? 1 : 2, ImGuiTableFlags_SizingStretchSame);
     if (!pg.tableOpen) return;
     if (!pg.stacked) {
         float avail = ImGui::GetContentRegionAvail().x;
-        float labelW = std::min(avail * 0.44f, 132.0f * scale());
-        if (labelW < 96.0f * scale()) labelW = 96.0f * scale();
+        float cellPad = ImGui::GetStyle().CellPadding.x * 4.0f;
+        float valueCol = std::min(avail * 0.52f, 224.0f * scale());
+        float labelW = avail - valueCol - cellPad;
+        float minLabel = std::min(avail * 0.44f, 96.0f * scale());
+        if (labelW < minLabel) labelW = minLabel;
         ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, labelW);
     }
     ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthStretch);
@@ -763,22 +779,20 @@ void closeTable() {
     pg.tableOpen = false;
 }
 
-// The last row's own lines (and clickable inline Reset for changed rows), after its controls.
+// The last row's own lines, after its controls (Square or Delete resets a changed row: finishPage).
 void emitTail() {
     if (!pg.tail) return;
     pg.tail = false;
-    if (mode == MODE_INDEX) return;
-    if (mode == MODE_NORMAL && pg.rowChanged && !pg.rowSpecs.empty() && !pg.stacked) {
-        ImGui::SameLine();
-        ImGui::PushID(pg.rowLabel.c_str());
-        ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
-        if (ImGui::SmallButton(tr("Reset##rowreset"))) {
-            restoreAll(pg.rowSpecs);
-            sfx::play(sfx::CHOOSE);
-        }
-        ImGui::PopStyleColor();
-        ImGui::PopID();
+    if (pg.aligned) {
+        pg.aligned = false;
+        ImGui::EndGroup();
+        skin::setRowAvail(0.0f);
+        ImVec2 size = ImGui::GetItemRectSize();
+        rowWidths[pg.alignId] = size.x;
+        rowColAvail[pg.alignId] = pg.alignAvail;
+        if (size.y > skin::rowHeight() * 1.5f) rowNoAlign[pg.alignId] = true;
     }
+    if (mode == MODE_INDEX) return;
     if (pg.tailFlags & RESTART) hint("Takes effect the next time the game starts.");
     if ((pg.tailFlags & ENHANCED) && engineThis() != ENGINE_ENHANCED)
         hint("Only the Enhanced engine has this (System > Engine).");
@@ -861,6 +875,7 @@ void beginPage(const char* id, int section, bool stacked) {
     pg.markPending = false;
     pg.tail = false;
     pg.rowChanged = false;
+    pg.aligned = false;
     pg.rowLabel.clear();
     pg.rowSpecs.clear();
     pg.changedInGroup = 0;
@@ -907,9 +922,7 @@ void group(const char* heading, int flags) {
             snprintf(text, sizeof text, "%s %s", pg.groupOpen ? "-" : "+", tr(heading));
         }
         ImGui::PushID(heading);
-        if (changedCount > 0) ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
         bool chosen = skin::selectable(text, false);
-        if (changedCount > 0) ImGui::PopStyleColor();
         ImGui::PopID();
         if (chosen) {
             groupOpenState[key] = !pg.groupOpen;
@@ -926,9 +939,7 @@ void group(const char* heading, int flags) {
 }
 
 float resetReserve() {
-    if (mode != MODE_NORMAL || !pg.rowChanged || pg.rowSpecs.empty() || pg.stacked) return 0.0f;
-    return ImGui::CalcTextSize(tr("Reset")).x + ImGui::GetStyle().FramePadding.x * 2.0f +
-           ImGui::GetStyle().ItemSpacing.x;
+    return 0.0f; // no inline Reset any more (Square or Delete resets the cursor's row)
 }
 
 bool beginSubmenu(const char* id, const char* label, const char* summary, const char* about) {
@@ -957,15 +968,17 @@ bool beginSubmenu(const char* id, const char* label, const char* summary, const 
     ImGui::TableSetColumnIndex(0);
     if (!pg.markPending) markBlock();
     pg.markPending = false;
+    bool focused = false;
+    if (mode != MODE_INDEX) {
+        focused = (int)rowsNow.size() == currentRow;
+        rowsNow.push_back({ImGui::GetCursorScreenPos().y, ImGui::GetCursorScreenPos().x, {}});
+    }
     if (!pg.stacked) ImGui::AlignTextToFramePadding();
     int changedCount = submenuChangedCount[submenuKey(pg.section, id)];
-    if (changedCount > 0) ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
+    skin::pushOptionText(focused);
     ImGui::TextUnformatted(tr(label));
-    if (changedCount > 0) ImGui::PopStyleColor();
-    if (!pg.stacked) {
-        ImGui::TableSetColumnIndex(1);
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6.0f * scale());
-    }
+    skin::popOptionText();
+    if (!pg.stacked) ImGui::TableSetColumnIndex(1);
     if (returnSubmenu[pg.section] == id) {
         ImGui::SetKeyboardFocusHere();
         returnSubmenu[pg.section].clear();
@@ -978,13 +991,23 @@ bool beginSubmenu(const char* id, const char* label, const char* summary, const 
     } else {
         snprintf(right, sizeof right, "%s  >", tr("Open"));
     }
+    if (!pg.stacked) {
+        float w = ImGui::CalcTextSize(right).x, avail = ImGui::GetContentRegionAvail().x;
+        if (w < avail) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + floorf(avail - w));
+    }
     ImGui::PushID(id);
-    if (skin::selectable(right, false, 0, ImGui::CalcTextSize(right))) {
+    skin::pushOptionText(focused);
+    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+    if (ImGui::Selectable(right, false, 0, ImGui::CalcTextSize(right))) {
         sectionSubmenu[pg.section] = id;
         sectionSubmenuLabel[pg.section] = label;
         submenuEntered = true;
         sfx::play(sfx::CHOOSE);
     }
+    ImGui::PopStyleColor(3);
+    skin::popOptionText();
     ImGui::PopID();
     if (about != nullptr && about[0] != '\0') {
         hint("%s", tr(about));
@@ -1081,7 +1104,11 @@ bool row(const char* label, const char* keys, int flags) {
     ImGui::TableSetColumnIndex(0);
     if (!pg.markPending) markBlock();
     pg.markPending = false;
-    if (mode != MODE_INDEX) rowsNow.push_back({ImGui::GetCursorScreenPos().y, specs});
+    bool focused = false;
+    if (mode != MODE_INDEX) {
+        focused = (int)rowsNow.size() == currentRow;
+        rowsNow.push_back({ImGui::GetCursorScreenPos().y, ImGui::GetCursorScreenPos().x, specs});
+    }
     bool target = mode == MODE_NORMAL && jump.scroll && jump.section == pg.section && jump.submenu == pg.submenu &&
                   jump.label == label;
     if (target) {
@@ -1089,12 +1116,29 @@ bool row(const char* label, const char* keys, int flags) {
         jump.scroll = false;
     }
     if (!pg.stacked) ImGui::AlignTextToFramePadding();
-    if (isChanged) ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
+    skin::pushOptionText(focused);
     ImGui::TextUnformatted(tr(label));
-    if (isChanged) ImGui::PopStyleColor();
+    skin::popOptionText();
+    pg.aligned = false;
     if (!pg.stacked) {
         ImGui::TableSetColumnIndex(1);
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 6.0f * scale());
+        if (mode != MODE_INDEX) {
+            // The value on the right: laid out from last frame's width back from the edge.
+            // Pass the full column width to skin::valueWidth() so shifting never shrinks combos.
+            pg.alignId = ImGui::GetID(label);
+            float avail = ImGui::GetContentRegionAvail().x;
+            pg.alignAvail = avail;
+            skin::setRowAvail(avail);
+            auto w = rowWidths.find(pg.alignId);
+            auto ca = rowColAvail.find(pg.alignId);
+            bool sameAvail = ca != rowColAvail.end() && fabsf(ca->second - avail) < 1.0f;
+            if (!rowNoAlign[pg.alignId] && sameAvail && w != rowWidths.end() && w->second > 0.0f && w->second < avail) {
+                // Whole pixels, rounded down: the controls get at least last frame's width back.
+                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + floorf(avail - w->second));
+            }
+            ImGui::BeginGroup();
+            pg.aligned = true;
+        }
     }
     if (isChanged) {
         // The description's first line: what it was, and how to get it back.
@@ -1138,6 +1182,12 @@ bool finishPage(float cursorY, bool resetWanted) {
     currentRow = -1;
     for (int i = 0; cursorY != -FLT_MAX && i < (int)rowsNow.size() && rowsNow[i].y <= cursorY; i++) currentRow = i;
     currentChanged = currentRow >= 0 && anyChanged(rowsNow[currentRow].specs);
+    if (currentRow >= 0) {
+        // The cursor's pointer left of the row's label, not of its control.
+        float y0 = rowsNow[currentRow].y;
+        float y1 = currentRow + 1 < (int)rowsNow.size() ? rowsNow[currentRow + 1].y : y0 + skin::rowHeight();
+        skin::pointerRow(ImGui::GetCurrentWindow(), rowsNow[currentRow].labelX, y0, std::min(y1, y0 + skin::rowHeight()));
+    }
     if (resetWanted && cursorY != -FLT_MAX) {
         const RowRecord* on = nullptr;
         for (const RowRecord& r : rowsNow) {
@@ -1180,6 +1230,9 @@ void opened() {
     sectionSubmenuLabel.clear();
     returnSubmenu.clear();
     submenuEntered = false;
+    rowWidths.clear();
+    rowColAvail.clear();
+    rowNoAlign.clear();
     jump = {};
 }
 
@@ -1207,16 +1260,20 @@ void searchPage(void (*drawPage)(int section), int sections) {
          "result's heading opens its section there. Ctrl+F comes here from any section.");
     markBlock();
     ImGui::AlignTextToFramePadding();
-    textLines("Show");
+    ImGui::TextUnformatted(tr("Show"));
     static const char* const shows[] = {N_("Every setting"), N_("Only changed")};
-    ImGui::SameLine(0, 14 * scale());
-    for (int i = 0; i < 2; i++) {
-        if (i > 0) ImGui::SameLine(0, 14 * scale());
-        ImGui::PushID(i);
-        if (skin::selectable(tr(shows[i]), changedOnly == (i == 1), 0, ImGui::CalcTextSize(tr(shows[i])))) {
-            changedOnly = i == 1;
+    ImGui::SameLine();
+    {
+        float w = skin::valueWidth();
+        float avail = ImGui::GetContentRegionAvail().x;
+        if (w < avail) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + floorf(avail - w));
+    }
+    if (skin::beginCombo("##search_show", tr(shows[changedOnly ? 1 : 0]))) {
+        for (int i = 0; i < 2; i++) {
+            if (skin::comboItem(tr(shows[i]), changedOnly == (i == 1))) changedOnly = i == 1;
+            if (changedOnly == (i == 1)) ImGui::SetItemDefaultFocus();
         }
-        ImGui::PopID();
+        skin::endCombo();
     }
     hint("Only changed: the settings that differ from their defaults, wherever they are. "
          "%s on a setting resets it.", resetKeysText());

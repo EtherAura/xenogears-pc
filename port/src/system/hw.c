@@ -59,6 +59,8 @@ extern void displayLockVBlank(void) __attribute__((weak));
 /* savestate.c: the game parks there for a save state or a rewind capture
  * (weak, like the GPU's: tests that link this file alone have none). */
 extern void stateVBlankPoint(void) __attribute__((weak));
+extern int portTakeSoftReset(void) __attribute__((weak)); /* options.c: the F1 menu's Reset */
+extern void softReboot(void) __attribute__((weak));       /* the game's soft reset (kernel.c) */
 extern void gpuHostClock(int realtime) __attribute__((weak));
 extern uint64_t gpuHostDeadline(void) __attribute__((weak));
 extern void gpuHostPoll(uint64_t now, double vblank, uint64_t available) __attribute__((weak));
@@ -783,6 +785,12 @@ uint32_t hwWaitVSync(void) {
         stateVBlankPoint();
     }
     invariantVBlank(); /* XG_INVARIANT_LOG: the state this vblank left (invariants.c) */
+    /* The F1 menu's Reset, in a loop that never calls checkSoftReboot (the
+     * title menu): nothing is being delivered here, so the game's own soft
+     * reset is as safe as the chord's. */
+    if (portTakeSoftReset != NULL && softReboot != NULL && portTakeSoftReset()) {
+        softReboot();
+    }
     return vblankCount;
 }
 

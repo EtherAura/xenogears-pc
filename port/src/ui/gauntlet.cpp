@@ -2,6 +2,7 @@
 // discs (the extras' reader), the preset or custom list, the party of each
 // fight, the recovery, Start, the run's progress and the records.
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -80,25 +81,19 @@ std::string timeText(unsigned vblanks) {
 int pick(const char* label, const char* id, const char* const* names, int count, int value) {
     ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(tr(label));
-    ImGui::SameLine(0, 20 * scale());
-    float width = (count - 1) * 14 * scale();
-    for (int i = 0; i < count; i++) width += ImGui::CalcTextSize(tr(names[i])).x;
+    ImGui::SameLine();
+    float avail = ImGui::GetContentRegionAvail().x;
+    float w = skin::valueWidth();
+    if (w > avail && avail > 0.0f) w = avail;
+    if (w < avail) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + floorf(avail - w));
     int chosen = value;
     ImGui::PushID(id);
-    if (width > ImGui::GetContentRegionAvail().x) {
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::BeginCombo("##list", tr(names[value]))) {
-            skin::frameWindow();
-            for (int i = 0; i < count; i++) {
-                if (ImGui::Selectable(tr(names[i]), value == i)) chosen = i;
-            }
-            ImGui::EndCombo();
-        }
-    } else {
+    if (skin::beginCombo("##list", tr(names[value]), 0, w)) {
         for (int i = 0; i < count; i++) {
-            if (i) ImGui::SameLine(0, 14 * scale());
-            if (skin::selectable(tr(names[i]), value == i, 0, ImGui::CalcTextSize(tr(names[i])))) chosen = i;
+            if (skin::comboItem(tr(names[i]), value == i)) chosen = i;
+            if (value == i) ImGui::SetItemDefaultFocus();
         }
+        skin::endCombo();
     }
     ImGui::PopID();
     if (chosen != value) sfx::play(sfx::CHOOSE);
@@ -137,22 +132,20 @@ void partyPickers(const PcGauntletBoss& b, const PcGauntletRoster& r, int row) {
     for (int slot = 0; slot < 3; slot++) {
         ImGui::PushID(row * 4 + slot);
         if (slot) ImGui::SameLine(0, 6 * scale());
-        ImGui::SetNextItemWidth(width);
         std::string shown = party[slot] == 0xFF ? "-" : memberName(r, party[slot]);
-        if (ImGui::BeginCombo("##member", shown.c_str())) {
-            skin::frameWindow();
-            if (ImGui::Selectable("-", party[slot] == 0xFF)) {
+        if (skin::beginCombo("##member", shown.c_str(), 0, width)) {
+            if (skin::comboItem("-", party[slot] == 0xFF)) {
                 party[slot] = 0xFF;
                 changed = true;
             }
             for (int k = 0; k < r.count; k++) {
                 if (b.gear && !r.hasGear[k]) continue;
-                if (ImGui::Selectable(memberName(r, r.ids[k]).c_str(), party[slot] == r.ids[k])) {
+                if (skin::comboItem(memberName(r, r.ids[k]).c_str(), party[slot] == r.ids[k])) {
                     party[slot] = r.ids[k];
                     changed = true;
                 }
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         ImGui::PopID();
     }
@@ -213,17 +206,16 @@ void fightList(int preset, const PcGauntletRoster& roster) {
     }
     if (custom && !G.bosses.empty()) {
         if (G.addChoice >= (int)G.bosses.size()) G.addChoice = 0;
-        ImGui::SetNextItemWidth(-60 * scale());
+        float addW = std::max(60.0f * scale(), ImGui::GetContentRegionAvail().x - 60.0f * scale());
         const PcGauntletBoss& shown = G.bosses[G.addChoice];
-        if (ImGui::BeginCombo("##gauntlet_add", shown.name)) {
-            skin::frameWindow();
+        if (skin::beginCombo("##gauntlet_add", shown.name, 0, addW)) {
             for (int i = 0; i < (int)G.bosses.size(); i++) {
                 ImGui::PushID(i);
                 std::string label = std::string(G.bosses[i].name) + (G.bosses[i].gear ? "  (Gear)" : "");
-                if (ImGui::Selectable(label.c_str(), i == G.addChoice)) G.addChoice = i;
+                if (skin::comboItem(label.c_str(), i == G.addChoice)) G.addChoice = i;
                 ImGui::PopID();
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         ImGui::SameLine();
         if (ImGui::Button(tr("Add")) && (int)picks.size() < PC_GAUNTLET_MAX) {

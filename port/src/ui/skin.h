@@ -12,6 +12,8 @@
 
 #include "imgui.h"
 
+struct ImGuiWindow; // imgui_internal.h
+
 namespace skin {
 
 // Sprites of the menu's sprite table, and the pad's buttons (the pictures
@@ -113,7 +115,12 @@ void hideUnopened(ImDrawList* original, ImDrawList* copy);
 
 // Field multichoice text: the selected option uses the game's
 // (EF, 1E, F0) texture modulation, including its outline, without a band.
+void pushOptionText(bool selected);
+void popOptionText();
 bool selectable(const char* label, bool selected, ImGuiSelectableFlags flags = 0, ImVec2 size = ImVec2(0, 0));
+// An item inside an attached dropdown (beginCombo): no backdrop; the focused/hovered
+// (or selected) item uses Xenogears purple text.
+bool comboItem(const char* label, bool selected);
 
 // The purple selection band behind this window's keyboard/gamepad cursor.
 // Call after Begin/BeginChild and its background, before its controls.
@@ -141,6 +148,15 @@ void scrollBar(ImDrawList* dl, ImVec2 top, float height, float thumbTop, float t
 
 // The list pointer (animated) with its top left at `at`.
 void pointer(ImDrawList* dl, ImVec2 at);
+// A setting's value: every drop-down (and slider) the same width, as wide as fits up to that.
+void setRowAvail(float avail);
+float valueWidth();
+// ImGui::BeginCombo as an attached single-line dropdown (default width valueWidth()),
+// its chosen value drawn right-aligned beside the arrow, and its list flush beneath it.
+bool beginCombo(const char* id, const char* preview, ImGuiComboFlags flags = 0, float width = 0.0f);
+void endCombo();
+// A settings row (options.cpp): the pointer left of its label at x while the cursor is within y0..y1.
+void pointerRow(ImGuiWindow* w, float x, float y0, float y1);
 
 // The animated Xenogears dialog/list arrow rotated to point up or down,
 // centred at `center` (for off-screen list and description indicators).

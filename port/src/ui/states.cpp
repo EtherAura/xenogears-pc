@@ -174,17 +174,12 @@ int listRow(const char* id, const int* values, const char* const* names, int cou
         if (values[i] == value) now = i;
     }
     int out = value;
-    ImGui::SetNextItemWidth(-1);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-    bool open = ImGui::BeginCombo(id, now >= 0 ? tr(names[now]) : tr("Custom"));
-    ImGui::PopStyleVar();
-    if (open) {
-        skin::frameWindow();
+    if (skin::beginCombo(id, now >= 0 ? tr(names[now]) : tr("Custom"))) {
         for (int i = 0; i < count; i++) {
-            if (ImGui::Selectable(tr(names[i]), now == i)) out = values[i];
+            if (skin::comboItem(tr(names[i]), now == i)) out = values[i];
             if (now == i) ImGui::SetItemDefaultFocus();
         }
-        ImGui::EndCombo();
+        skin::endCombo();
     }
     return out;
 }

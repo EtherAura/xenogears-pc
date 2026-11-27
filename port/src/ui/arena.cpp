@@ -114,15 +114,11 @@ void musicPicker() {
         BM.labelFor = value;
     }
     ImGui::BeginDisabled(settingsPinned("arena_music") != 0);
-    ImGui::SetNextItemWidth(-1);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale())); // as sections.cpp listChoice
-    bool open = ImGui::BeginCombo("##arenamusic", BM.label.c_str());
-    ImGui::PopStyleVar();
+    bool open = skin::beginCombo("##arenamusic", BM.label.c_str());
     if (open) {
-        skin::frameWindow();
         int n = extrasJukeboxSongCount();
         int highlighted = -2;
-        if (ImGui::Selectable(tr("Game's default"), value == 0)) pcArenaSetMusic(0);
+        if (skin::comboItem(tr("Game's default"), value == 0)) pcArenaSetMusic(0);
         if (value == 0) ImGui::SetItemDefaultFocus();
         if (ImGui::IsItemHovered() || ImGui::IsItemFocused()) highlighted = -1;
         for (int i = 0; i < n; i++) {
@@ -132,11 +128,11 @@ void musicPicker() {
             char label[256];
             snprintf(label, sizeof label, "%s##song%d", t, i);
             bool chosen = value == id + 1;
-            if (ImGui::Selectable(label, chosen)) pcArenaSetMusic(id + 1);
+            if (skin::comboItem(label, chosen)) pcArenaSetMusic(id + 1);
             if (chosen) ImGui::SetItemDefaultFocus();
             if (ImGui::IsItemHovered() || ImGui::IsItemFocused()) highlighted = id;
         }
-        ImGui::EndCombo();
+        skin::endCombo();
         if (highlighted != -2 && highlighted != BM.previewing) {
             extrasJukeboxPreview(highlighted);
             BM.previewing = highlighted;
@@ -193,12 +189,7 @@ void stagePicker() {
     if (shown == nullptr) snprintf(label, sizeof label, tr("Stage %d"), value - 1);
     ImGui::TextUnformatted(tr("Battle stage"));
     ImGui::BeginDisabled(settingsPinned("arena_stage") != 0);
-    ImGui::SetNextItemWidth(-1);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale())); // as musicPicker
-    bool open = ImGui::BeginCombo("##arenastage", shown != nullptr ? tr(shown->name) : label);
-    ImGui::PopStyleVar();
-    if (open) {
-        skin::frameWindow();
+    if (skin::beginCombo("##arenastage", shown != nullptr ? tr(shown->name) : label)) {
         for (int i = 0; i < pcArenaStageCount(); i++) {
             int id = pcArenaStageId(i);
             const StageName* s = stageName(id);
@@ -206,10 +197,10 @@ void stagePicker() {
             snprintf(number, sizeof number, tr("Stage %d"), id);
             snprintf(item, sizeof item, "%s##stage%d", s != nullptr ? tr(s->name) : number, id);
             bool chosen = value == id + 1;
-            if (ImGui::Selectable(item, chosen)) pcArenaSetStage(id + 1);
+            if (skin::comboItem(item, chosen)) pcArenaSetStage(id + 1);
             if (chosen) ImGui::SetItemDefaultFocus();
         }
-        ImGui::EndCombo();
+        skin::endCombo();
     }
     ImGui::EndDisabled();
     if (shown != nullptr) hint("%s", tr(shown->where));

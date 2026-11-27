@@ -39,6 +39,11 @@
  *                           Start or the back button (from the section list)
  *                           close it too
  *
+ * The commands' arc lists the sections, then Back, Reset and Quit. Back
+ * returns to the game; Reset is its soft reset (Start+Select+L1+R1: back to
+ * the boot screen); Quit leaves the game. Reset and Quit each ask once first
+ * (progress since the last save is lost).
+ *
  * In it the PS1 buttons work as in the game, through their keys and gamepad
  * inputs (Controls; key_<button>, pad_<button>): the D-pad moves, the game's
  * confirm button chooses (US Cross, JP Circle), its cancel button goes back

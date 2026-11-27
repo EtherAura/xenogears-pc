@@ -68,6 +68,7 @@ struct State {
     ImVector<Opening> openings;
     ImVector<Hidden> hidden;
     float unit = 1.0f; // ImGui units per game pixel (the menu works in window pixels)
+    float rowAvail = 0.0f; // full right-column width for the current settings row (0 outside a row)
     int fontScale = FONT_SCALE_DEFAULT; // menu_font_scale applied in setUnit
     Sprite sprites[0x200];
     Sprite buttons[4]; // SPRITE_CROSS...
@@ -375,6 +376,7 @@ const char* inputGlyph(int input) { return buttonGlyph(padInputGlyph(input)); }
 
 void beginFrame() {
     st.hidden.clear();
+    st.rowAvail = 0.0f;
     // Every texel of the menu to a whole block of pixels: no filtering.
     if (ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest != nullptr) {
         ImGui::GetBackgroundDrawList()->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest, nullptr);
@@ -691,10 +693,30 @@ void popOptionText() {
     ImGui::PopFont();
 }
 
+bool comboItem(const char* label, bool selected) {
+    ImGuiContext& g = *GImGui;
+    ImGuiWindow* win = g.CurrentWindow;
+    ImGuiID id = win->GetID(label);
+    bool navHere = g.NavWindow == win && g.NavId == id && g.NavCursorVisible;
+    bool hovHere = g.HoveredIdPreviousFrame == id;
+    bool anyHere = (g.NavWindow == win && g.NavId != 0 && g.NavCursorVisible) ||
+                   (g.HoveredWindow == win && g.HoveredIdPreviousFrame != 0);
+    bool purple = navHere || hovHere || (!anyHere && selected);
+    pushOptionText(purple);
+    bool pressed = ImGui::Selectable(label, selected);
+    popOptionText();
+    return pressed;
+}
+
 bool selectable(const char* label, bool selected, ImGuiSelectableFlags flags, ImVec2 size) {
     pushOptionText(selected);
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
     bool pressed = ImGui::Selectable(label, selected, flags, size);
+    if (selected) {
+        // The chosen one underlined too: magenta alone is hard to see on the game's red.
+        ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+        ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(a.x, b.y), ImVec2(b.x, b.y + st.unit), IM_COL32(255, 48, 255, 255));
+    }
     ImGui::PopStyleColor();
     popOptionText();
     return pressed;
@@ -795,9 +817,9 @@ void pointer(ImDrawList* dl, ImVec2 at) {
     dl->AddTriangleFilled(at, ImVec2(at.x + 7 * g, at.y + 5 * g), ImVec2(at.x, at.y + 10 * g), IM_COL32(220, 80, 90, 255));
 }
 
-void scrollArrow(ImDrawList* dl, ImVec2 center, bool up) {
+static void drawDialogArrow(ImDrawList* dl, ImVec2 center, bool up, bool animate) {
     float g = st.unit;
-    int frame = 4 - (int)(st.frames / 6 % 5);
+    int frame = animate ? 4 - (int)(st.frames / 6 % 5) : 4;
     if (st.native) {
         const Sprite* s = getSprite(SPRITE_POINTER + frame);
         ImFontAtlasRect r;
@@ -830,8 +852,93 @@ void scrollArrow(ImDrawList* dl, ImVec2 center, bool up) {
     }
 }
 
+void scrollArrow(ImDrawList* dl, ImVec2 center, bool up) {
+    drawDialogArrow(dl, center, up, true);
+}
+
+void setRowAvail(float avail) {
+    st.rowAvail = avail > 0.0f ? avail : 0.0f;
+}
+
+float valueWidth() {
+    float avail = st.rowAvail > 0.0f ? st.rowAvail : ImGui::GetContentRegionAvail().x;
+    float want = 220.0f * st.unit;
+    return avail > 0.0f && avail < want ? avail : want;
+}
+
+bool beginCombo(const char* id, const char* preview, ImGuiComboFlags flags, float width) {
+    float w = IM_TRUNC(width > 0.0f ? width : valueWidth());
+    ImGui::SetNextItemWidth(w);
+    ImGuiWindow* win = ImGui::GetCurrentWindow();
+    bool skip = win->SkipItems;
+    ImVec2 pos = win->DC.CursorPos;
+    ImDrawList* dl = win->DrawList;
+    float h = ImGui::GetFrameHeight();
+    float u = st.unit;
+    ImVec4 popupBg = st.native ? ImVec4(0, 0, 0, 0)
+                               : (darkWindows() ? ImVec4(0.10f, 0.10f, 0.13f, 1.0f) : ImVec4(0.16f, 0.16f, 0.21f, 1.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f * u, 6.0f * u));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, st.native ? 0.0f : u);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, popupBg);
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.68f, 0.68f, 0.85f, 0.85f));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0, 0, 0, 0));
+    bool open = ImGui::BeginCombo(id, "", flags | ImGuiComboFlags_NoArrowButton);
+    ImGui::PopStyleColor(5);
+    ImGui::PopStyleVar(2);
+    if (!skip) {
+        bool hot = open || ImGui::IsItemHovered() || ImGui::IsItemFocused();
+        bool showArrow = (flags & ImGuiComboFlags_NoArrowButton) == 0;
+        float arrowW = showArrow ? std::max(h, 15.0f * u) : 0.0f;
+        if (showArrow && w >= arrowW) {
+            drawDialogArrow(dl, ImVec2(pos.x + w - arrowW * 0.5f, pos.y + h * 0.5f), open, hot);
+        }
+        if (preview != nullptr && preview[0] != '\0') {
+            const ImGuiStyle& s = ImGui::GetStyle();
+            ImVec2 a(pos.x + s.FramePadding.x, pos.y + s.FramePadding.y);
+            ImVec2 b(pos.x + w - arrowW - s.FramePadding.x, pos.y + h);
+            const char* end = ImGui::FindRenderedTextEnd(preview);
+            float tw = ImGui::CalcTextSize(preview, end).x;
+            // At the right; a value longer than the box shows from its start.
+            float x = b.x - tw < a.x ? a.x : b.x - tw;
+            ImFont* font = hot && st.optionFont ? st.optionFont : ImGui::GetFont();
+            ImU32 col = hot ? (st.optionFont ? IM_COL32_WHITE : IM_COL32(255, 48, 255, 255))
+                            : ImGui::GetColorU32(ImGuiCol_Text);
+            dl->PushClipRect(ImVec2(a.x, pos.y), b, true);
+            dl->AddText(font, ImGui::GetFontSize(), ImVec2(x, a.y), col, preview, end);
+            dl->PopClipRect();
+        }
+    }
+    if (open) {
+        frameWindow();
+        ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0, 0, 0, 0));
+    }
+    return open;
+}
+
+void endCombo() {
+    ImGui::PopStyleColor(3);
+    ImGui::EndCombo();
+}
+
+// A settings row's label (options.cpp): the pointer goes left of it when the
+// cursor is on that row's control. Set each frame, used once by endFrame.
+struct PointerRow {
+    ImGuiWindow* window;
+    float x, y0, y1;
+} pointerRowNow;
+
+void pointerRow(ImGuiWindow* w, float x, float y0, float y1) {
+    pointerRowNow = {w, x, y0, y1};
+}
+
 void endFrame(ImGuiID skipWindow) {
     st.frames++;
+    PointerRow rowAt = pointerRowNow;
+    pointerRowNow = {};
     ImGuiContext& g = *GImGui;
     ImGuiWindow* w = g.NavWindow;
     if (w == nullptr || g.NavId == 0 || !g.NavCursorVisible || w->ID == skipWindow || hidesContents(w->DrawList) ||
@@ -848,6 +955,9 @@ void endFrame(ImGuiID skipWindow) {
     // away.
     bool popup = (w->Flags & ImGuiWindowFlags_Popup) != 0;
     float x = r.Min.x - 16 * u;
+    if (!popup && rowAt.window == w && r.GetCenter().y >= rowAt.y0 && r.GetCenter().y < rowAt.y1) {
+        x = rowAt.x - 12 * u;
+    }
     if (!popup && x < clip.Min.x + u) {
         x = clip.Min.x + u;
     }
@@ -856,7 +966,7 @@ void endFrame(ImGuiID skipWindow) {
         return;
     }
     ImDrawList* dl = ImGui::GetForegroundDrawList();
-    dl->PushClipRect(ImVec2(clip.Min.x - 14 * u, clip.Min.y), clip.Max, false);
+    dl->PushClipRect(ImVec2(clip.Min.x - 18 * u, clip.Min.y), clip.Max, false);
     pointer(dl, at);
     dl->PopClipRect();
 }

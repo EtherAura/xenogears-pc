@@ -79,17 +79,6 @@ namespace {
 
 // ---- layout helpers ---------------------------------------------------------------------
 
-bool checkbox(const char* label, bool* value) {
-    ImGui::PushID(label);
-    ImGui::BeginGroup();
-    bool changed = ImGui::Checkbox("##value", value);
-    ImGui::SameLine();
-    wrappedText("%s", tr(label));
-    ImGui::EndGroup();
-    ImGui::PopID();
-    return changed;
-}
-
 // A setting's row (options.h): the label on the left, the control after
 // (sizes in the game's pixels: menu.h scale()); where the pane is narrow (a
 // small window), each label is a line of its own above its controls. False
@@ -106,46 +95,22 @@ float comboWidth(const char* const* names, int count, const char* preview = null
         float w = ImGui::CalcTextSize(tr(names[i])).x;
         if (w > maxText) maxText = w;
     }
-    float want = maxText + 32.0f * scale();
-    float minW = 72.0f * scale();
-    if (want < minW) want = minW;
-    float avail = ImGui::GetContentRegionAvail().x - opt::resetReserve();
-    if (avail > 0.0f && want > avail) want = avail;
-    return want;
+    (void)maxText; // every drop-down the same width now (skin::beginCombo sets it)
+    return skin::valueWidth();
 }
 
 float sliderWidth(float extraRight = 0.0f) {
-    float avail = ImGui::GetContentRegionAvail().x - opt::resetReserve() - extraRight;
-    float cap = 170.0f * scale();
-    if (avail <= 0.0f) return cap;
-    return std::min(avail, cap);
+    // As wide as the drop-downs, with what follows it (extraRight) inside that width.
+    float w = skin::valueWidth() - extraRight;
+    return w > 32.0f * scale() ? w : 32.0f * scale();
 }
 
-// The choices on one line, as the game's menus show them: the chosen one
-// magenta, the other available choices white, and the pointer on the cursor.
+// A setting's choices: a drop-down (every setting's the same width), the chosen one shown at its right.
 int listChoice(const char* id, const char* const* names, int count, int value);
 int choice(const char* id, const char* const* names, int count, int value) {
-    float gap = 8.0f * scale();
-    float width = (count - 1) * gap;
-    for (int i = 0; i < count; i++) width += ImGui::CalcTextSize(tr(names[i])).x;
-    float avail = ImGui::GetContentRegionAvail().x - opt::resetReserve();
-    if (width > avail) return listChoice(id, names, count, value);
-    ImGui::PushID(id);
-    for (int i = 0; i < count; i++) {
-        if (i > 0) {
-            ImGui::SameLine(0, gap);
-        }
-        ImGui::AlignTextToFramePadding();
-        if (skin::selectable(tr(names[i]), value == i, 0, ImGui::CalcTextSize(tr(names[i])))) {
-            value = i;
-        }
-    }
-    ImGui::PopID();
-    return value;
+    return listChoice(id, names, count, value);
 }
 
-// More choices than a line holds: the chosen one shown in a compact drop-down
-// sized to its choices, not stretched across the pane.
 int listChoice(const char* id, const char* const* names, int count, int value) {
     int chosen = value;
     const char* preview = value >= 0 && value < count ? tr(names[value]) : tr("Custom");
@@ -156,20 +121,16 @@ int listChoice(const char* id, const char* const* names, int count, int value) {
         comboId = hiddenId;
     }
     ImGui::SetNextItemWidth(comboWidth(names, count, preview));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-    bool open = ImGui::BeginCombo(comboId, preview);
-    ImGui::PopStyleVar();
-    if (open) {
-        skin::frameWindow();
+    if (skin::beginCombo(comboId, preview)) {
         for (int i = 0; i < count; i++) {
-            if (ImGui::Selectable(tr(names[i]), value == i)) {
+            if (skin::comboItem(tr(names[i]), value == i)) {
                 chosen = i;
             }
             if (value == i) {
                 ImGui::SetItemDefaultFocus();
             }
         }
-        ImGui::EndCombo();
+        skin::endCombo();
     }
     return chosen;
 }
@@ -699,13 +660,9 @@ void displaySection() {
         for (int i = 0; i < ASPECT_COUNT; i++) aspectNames[i] = aspects[i].name;
         aspectNames[ASPECT_COUNT] = customName;
         ImGui::SetNextItemWidth(comboWidth(aspectNames, ASPECT_COUNT + 1, preview));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-        bool listOpen = ImGui::BeginCombo("##aspect", preview);
-        ImGui::PopStyleVar();
-        if (listOpen) {
-            skin::frameWindow();
+        if (skin::beginCombo("##aspect", preview)) {
             for (int i = 0; i < ASPECT_COUNT; i++) {
-                if (ImGui::Selectable(tr(aspects[i].name), current == i)) {
+                if (skin::comboItem(tr(aspects[i].name), current == i)) {
                     presentSetAspectText(aspects[i].value);
                     customOpen = false;
                     aspectMsg.text[0] = '\0';
@@ -714,10 +671,10 @@ void displaySection() {
                     ImGui::SetItemDefaultFocus();
                 }
             }
-            if (ImGui::Selectable(customName, current == ASPECT_COUNT)) {
+            if (skin::comboItem(customName, current == ASPECT_COUNT)) {
                 customOpen = true;
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         if (current < ASPECT_COUNT) {
             hint("%s", tr(aspects[current].about));
@@ -814,13 +771,9 @@ void displaySection() {
         snprintf(curText, sizeof curText, "%dx%d", windowW, windowH);
         ImGui::BeginDisabled(full);
         ImGui::SetNextItemWidth(comboWidth(winNames, (int)IM_COUNTOF(winNames), curText));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-        bool open = ImGui::BeginCombo("##winsize", curText);
-        ImGui::PopStyleVar();
-        if (open) {
-            skin::frameWindow();
+        if (skin::beginCombo("##winsize", curText)) {
             for (int i = 0; i < (int)IM_COUNTOF(winPresets); i++) {
-                if (ImGui::Selectable(winNames[i], cur == i)) {
+                if (skin::comboItem(winNames[i], cur == i)) {
                     windowW = winPresets[i][0];
                     windowH = winPresets[i][1];
                     presentSetWindowSize(windowW, windowH);
@@ -828,10 +781,10 @@ void displaySection() {
                 }
                 if (cur == i) ImGui::SetItemDefaultFocus();
             }
-            if (ImGui::Selectable(tr("Custom..."), customWindowOpen)) {
+            if (skin::comboItem(tr("Custom..."), customWindowOpen)) {
                 customWindowOpen = true;
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         ImGui::EndDisabled();
         int pw = 0, ph = 0, lw = 0, lh = 0;
@@ -876,20 +829,16 @@ void displaySection() {
         int up = hiresUpscale();
         int index = up == 1 ? 0 : up == 0 ? 1 : up;
         ImGui::SetNextItemWidth(comboWidth(names, (int)IM_COUNTOF(names), tr(names[index])));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-        bool open = ImGui::BeginCombo("##upscale", tr(names[index]));
-        ImGui::PopStyleVar();
-        if (open) {
-            skin::frameWindow();
+        if (skin::beginCombo("##upscale", tr(names[index]))) {
             for (int i = 0; i < (int)IM_COUNTOF(names); i++) {
-                if (ImGui::Selectable(tr(names[i]), index == i)) {
+                if (skin::comboItem(tr(names[i]), index == i)) {
                     hiresSetUpscale(i == 0 ? 1 : i == 1 ? 0 : i);
                 }
                 if (index == i) {
                     ImGui::SetItemDefaultFocus();
                 }
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         if (up == 1) {
             hint(hiresPrecision() ? "PS1 resolution, with subpixel geometry in the displayed picture."
@@ -977,11 +926,10 @@ void displaySection() {
                 if(!strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK))currentName=tr("Texture pack");
             }
             ImGui::SetNextItemWidth(comboWidth(names, 10, currentName));
-            if(ImGui::BeginCombo("##appearance",currentName)) {
-                skin::frameWindow();
+            if(skin::beginCombo("##appearance",currentName)) {
                 auto option=[&](int value) {
                     bool selected=!artwork && mode==value;
-                    if(ImGui::Selectable(tr(names[value]),selected)) {
+                    if(skin::comboItem(tr(names[value]),selected)) {
                         if(portrait>=0) {selectSet("original");textureSetFilter(kind,value);}
                         else textureSetAppearance(kind,value);
                     }
@@ -997,15 +945,15 @@ void displaySection() {
                     for(int i=1;i<portraitPackCount();i++) {
                         const PortraitSet* set=portraitPackSet(i);
                         bool selected=artwork && !strcmp(set->id,selectedSet());
-                        if(ImGui::Selectable(set->name,selected)) {selectSet(set->id);textureSetFilter(kind,0);}
+                        if(skin::comboItem(set->name,selected)) {selectSet(set->id);textureSetFilter(kind,0);}
                         if(selected)ImGui::SetItemDefaultFocus();
                     }
                     /* the texture pack's pictures of the faces (a Beetle PSX HW pack's, or the user's pack) */
                     bool packSelected=artwork && !strcmp(selectedSet(),PORTRAIT_TEXTURE_PACK);
-                    if(ImGui::Selectable(tr("Texture pack"),packSelected)) {selectSet(PORTRAIT_TEXTURE_PACK);textureSetFilter(kind,0);}
+                    if(skin::comboItem(tr("Texture pack"),packSelected)) {selectSet(PORTRAIT_TEXTURE_PACK);textureSetFilter(kind,0);}
                     if(packSelected)ImGui::SetItemDefaultFocus();
                 }
-                ImGui::EndCombo();
+                skin::endCombo();
             }
             ImGui::PopID();
             overrideNote(textureFilterKey(kind));
@@ -2235,8 +2183,8 @@ void controlsSection() {
         int profile = padProfilePort();
         const char* preview = profile < 0 ? tr(padProfileName(profile)) : padProfileName(profile);
         ImGui::SetNextItemWidth(comboWidth(nullptr, 0, preview));
-        if (ImGui::BeginCombo("##profile", preview)) {
-            if (ImGui::Selectable(tr("Default mapping"), profile < 0)) {
+        if (skin::beginCombo("##profile", preview)) {
+            if (skin::comboItem(tr("Default mapping"), profile < 0)) {
                 padSelectProfile(-1);
             }
             for (int p = 0; p < 2; p++) {
@@ -2244,13 +2192,13 @@ void controlsSection() {
                     ImGui::PushID(p);
                     char label[256];
                     snprintf(label, sizeof(label), tr("Pad %d: %s"), p + 1, padProfileName(p));
-                    if (ImGui::Selectable(label, profile == p)) {
+                    if (skin::comboItem(label, profile == p)) {
                         padSelectProfile(p);
                     }
                     ImGui::PopID();
                 }
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         hint("Profiles follow your controller. Some identical controllers share a profile. Keyboard settings apply "
              "to all profiles.");
@@ -3445,28 +3393,29 @@ bool acceptSetup() {
 // The menu's and the extras' language (l10n.h), each name in its own
 // language (never translated).
 void languageRow() {
-    if (!row("Interface language", "ui_language")) return;
-    int count = l10nLanguageCount(), now = l10nLanguage();
-    ImGui::PushID("ui_language");
-    for (int i = 0; i < count; i++) {
-        const char* name = l10nLanguageName(i);
-        if (i > 0) {
-            ImGui::SameLine(0, 14 * scale());
-            if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(name).x) ImGui::NewLine();
+    if (row("Interface language", "ui_language")) {
+        int count = l10nLanguageCount(), now = l10nLanguage();
+        const char* preview = now >= 0 && now < count ? l10nLanguageName(now) : "";
+        if (skin::beginCombo("##ui_language", preview)) {
+            for (int i = 0; i < count; i++) {
+                const char* name = l10nLanguageName(i);
+                ImGui::PushID(i);
+                if (skin::comboItem(name, now == i) && i != now) l10nSetLanguage(i);
+                if (now == i) ImGui::SetItemDefaultFocus();
+                ImGui::PopID();
+            }
+            skin::endCombo();
         }
-        ImGui::AlignTextToFramePadding();
-        ImGui::PushID(i);
-        if (skin::selectable(name, now == i, 0, ImGui::CalcTextSize(name)) && i != now) l10nSetLanguage(i);
-        ImGui::PopID();
+        hint("This menu and the extras. The game's own text stays as the disc has it. Text not yet translated shows in "
+             "English.");
+        if (now > 0) hint("%s: %d texts translated.", l10nLanguageName(now), l10nEntries(now));
+        overrideNote("ui_language");
     }
-    ImGui::PopID();
-    hint("This menu and the extras. The game's own text stays as the disc has it. Text not yet translated shows in "
-         "English.");
-    if (now > 0) hint("%s: %d texts translated.", l10nLanguageName(now), l10nEntries(now));
-    if (ImGui::Button(tr("Reload translations"))) l10nReload();
-    hint("Your own translations: a gettext .po file in the save folder's lang folder (tools/l10n.py makes one). "
-         "Reload reads them again after an edit.");
-    overrideNote("ui_language");
+    if (row("Translations")) {
+        if (ImGui::Button(tr("Reload translations"))) l10nReload();
+        hint("Your own translations: a gettext .po file in the save folder's lang folder (tools/l10n.py makes one). "
+             "Reload reads them again after an edit.");
+    }
 }
 
 // This menu's own look (skin.h; they were Display's).
@@ -3500,19 +3449,15 @@ void menuLookRows() {
         static const char* const scaleNames[] = {"50%",  "60%",  "70%",  "80%",  "90%",  "100%", "110%", "120%",
                                                  "130%", "140%", "150%", "160%", "170%", "180%", "190%", "200%"};
         ImGui::SetNextItemWidth(comboWidth(scaleNames, (int)IM_COUNTOF(scaleNames), now));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-        bool open = ImGui::BeginCombo("##menuscale", now);
-        ImGui::PopStyleVar();
         int chosen = percent;
-        if (open) {
-            skin::frameWindow();
+        if (skin::beginCombo("##menuscale", now)) {
             for (int p = skin::SCALE_MIN; p <= skin::SCALE_MAX; p += 10) {
                 char name[16];
                 snprintf(name, sizeof(name), "%d%%", p);
-                if (ImGui::Selectable(name, p == percent)) chosen = p;
+                if (skin::comboItem(name, p == percent)) chosen = p;
                 if (p == percent) ImGui::SetItemDefaultFocus();
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         if (rescaled) {
             ImGui::SetScrollHereY(0.5f);
@@ -3547,17 +3492,13 @@ void menuLookRows() {
         char now[16];
         snprintf(now, sizeof(now), "%d%%", percent);
         ImGui::SetNextItemWidth(comboWidth(fontNames, (int)IM_COUNTOF(fontNames), now));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-        bool open = ImGui::BeginCombo("##menufontscale", now);
-        ImGui::PopStyleVar();
         int chosen = percent;
-        if (open) {
-            skin::frameWindow();
+        if (skin::beginCombo("##menufontscale", now)) {
             for (int i = 0; i < (int)IM_COUNTOF(fontSteps); i++) {
-                if (ImGui::Selectable(fontNames[i], fontSteps[i] == percent)) chosen = fontSteps[i];
+                if (skin::comboItem(fontNames[i], fontSteps[i] == percent)) chosen = fontSteps[i];
                 if (fontSteps[i] == percent) ImGui::SetItemDefaultFocus();
             }
-            ImGui::EndCombo();
+            skin::endCombo();
         }
         if (chosen != percent) {
             skin::setFontScalePercent(chosen);
@@ -3721,14 +3662,17 @@ void systemSection() {
             }
             ImGui::EndDisabled();
             discMsg.draw();
-            bool automatic = cdSwapAutomatic();
-            if (checkbox("Swap when the game asks for the other disc", &automatic)) {
-                cdSwapSetAutomatic(automatic);
-            }
             hint("Swapping works while the game asks for a disc (\"insert disc\"); F2 does the same. The game asks for disc 2 "
                  "at the end of disc 1, and for the other disc when a save from it is loaded. A swap at any other time would "
                  "break the game, as opening the lid mid-game does on a PS1.");
             overrideNote("disc2");
+        }
+        if (row("Automatic disc swap", "disc_swap")) {
+            bool automatic = cdSwapAutomatic();
+            if (offOnList("##disc_swap", &automatic)) {
+                cdSwapSetAutomatic(automatic);
+            }
+            hint("Swap automatically when the game asks for the other disc.");
             overrideNote("disc_swap");
         }
         opt::endSubmenu();

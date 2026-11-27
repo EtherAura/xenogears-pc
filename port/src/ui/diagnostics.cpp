@@ -414,17 +414,12 @@ void stopLog() {
 
 int dropdown(const char* id, const char* const* names, int count, int value) {
     int chosen = value;
-    ImGui::SetNextItemWidth(-1);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * scale(), 6 * scale()));
-    bool open = ImGui::BeginCombo(id, value >= 0 && value < count ? tr(names[value]) : "");
-    ImGui::PopStyleVar();
-    if (open) {
-        skin::frameWindow();
+    if (skin::beginCombo(id, value >= 0 && value < count ? tr(names[value]) : "")) {
         for (int i = 0; i < count; i++) {
-            if (ImGui::Selectable(tr(names[i]), value == i)) chosen = i;
+            if (skin::comboItem(tr(names[i]), value == i)) chosen = i;
             if (value == i) ImGui::SetItemDefaultFocus();
         }
-        ImGui::EndCombo();
+        skin::endCombo();
     }
     return chosen;
 }
