@@ -315,9 +315,6 @@ std::vector<Spec>& table() {
                 shaderChainSetPath(v);
             },
             "");
-    static const char* const sizes[] = {N_("Game size"), N_("Compact")};
-    add("menu_text", N_("Menu text"), [](int) { return skin::textSize() == skin::TEXT_GAME ? 0 : 1; },
-        [](int, int v) { skin::setTextSize(v == 0 ? skin::TEXT_GAME : skin::TEXT_COMPACT); }, 1, sizes);
     add("menu_scale", N_("Menu size"), [](int) { return skin::scalePercent(); },
         [](int, int v) { skin::setScalePercent(v); }, skin::SCALE_DEFAULT, nullptr)
         .unit = "%";
@@ -1458,7 +1455,6 @@ const std::vector<Preset>& presets() {
                 {"battle_portrait_set", 0, "original"},
                 {"text_smooth", 0, nullptr},
                 {"present_shader", 0, ""},
-                {"menu_text", 1, nullptr},
                 {"menu_scale", 100, nullptr},
                 {"menu_font_scale", 85, nullptr},
                 {"menu_dark", 1, nullptr},

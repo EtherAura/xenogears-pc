@@ -1266,8 +1266,8 @@ void drawShell() {
     ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 8, 200));
 
     const int edge = 12, bar = 17, gap = 12;
-    int cw = std::min((int)(io.DisplaySize.x / u), skin::textSize() == skin::TEXT_GAME ? 400 : 560);
-    int ch = std::min((int)(io.DisplaySize.y / u), skin::textSize() == skin::TEXT_GAME ? 284 : 360);
+    int cw = std::min((int)(io.DisplaySize.x / u), 560);
+    int ch = std::min((int)(io.DisplaySize.y / u), 360);
     ImVec2 o(floorf((io.DisplaySize.x - cw * u) / 2), floorf((io.DisplaySize.y - ch * u) / 2));
     ImVec2 headMin = at(o, edge + 8, edge), headMax = at(o, cw - edge, edge + bar);
     ImVec2 footMin = at(o, edge, ch - edge - bar), footMax = at(o, cw - edge, ch - edge);

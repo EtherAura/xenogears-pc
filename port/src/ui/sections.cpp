@@ -426,18 +426,10 @@ void drawBrowser() {
         browser.open = true;
     }
     if (!browser.open) return;
-    // Game size: the game's large list box (the item list's, box 3 at 0xC,
-    // 0xA, 0x124 x 0x84) grown down over the message box; compact: most
-    // of the panel.
     float u = scale();
     ImVec2 display = ImGui::GetIO().DisplaySize;
-    ImVec2 size, at;
-    if (skin::textSize() == skin::TEXT_GAME) {
-        size = ImVec2(std::min(0x124 * u, display.x - 16 * u), std::min(0xCC * u, display.y - 16 * u));
-    } else {
-        size = ImVec2(std::min(480 * u, display.x - 32 * u), std::min(300 * u, display.y - 32 * u));
-    }
-    at = ImVec2(floorf((display.x - size.x) / 2), floorf((display.y - size.y) / 2));
+    ImVec2 size(std::min(480 * u, display.x - 32 * u), std::min(300 * u, display.y - 32 * u));
+    ImVec2 at(floorf((display.x - size.x) / 2), floorf((display.y - size.y) / 2));
     ImGui::SetNextWindowPos(at, ImGuiCond_Always);
     ImGui::SetNextWindowSize(size, ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10 * u, 10 * u));
@@ -3500,25 +3492,6 @@ void languageRow() {
 
 // This menu's own look (skin.h; they were Display's).
 void menuLookRows() {
-    if (row("Menu text", "menu_text")) {
-        static const char* const sizes[] = {"Game size", "Compact"};
-        static bool resized; // the menu changed size last frame: this row back in view
-        int size = skin::textSize() == skin::TEXT_GAME ? 0 : 1;
-        int v = choice("menutext", sizes, 2, size);
-        if (resized) {
-            ImGui::SetScrollHereY(0.5f);
-            resized = false;
-        }
-        if (v != size) {
-            skin::setTextSize(v == 0 ? skin::TEXT_GAME : skin::TEXT_COMPACT);
-            resized = true;
-        }
-        hint(v == 0 ? "This menu's letters as large as the game's own menus: less at once, more to scroll."
-                    : "This menu's letters smaller than the game's menus, to show more at once.");
-        hint("In whole pixels from the window's size, so they stay sharp (Menu size can make it larger or smaller).");
-        overrideNote("menu_text");
-    }
-
     if (row("Menu size", "menu_scale")) {
         // In steps of 10 (a value set in settings.ini shows as it is).
         // A choice made from a list, so the menu does not change size under the mouse while it drags.
@@ -3550,8 +3523,7 @@ void menuLookRows() {
         int pw = 0, ph = 0;
         SDL_GetWindowSizeInPixels(window(), &pw, &ph);
         float base = (float)skin::unitFor(pw, ph), unit = skin::menuUnitFor(pw, ph);
-        hint("The whole menu, its letters, windows and gaps, at %d%% of the size its text size gives "
-             "(100%%: whole pixels, the sharpest).", percent);
+        hint("Scales the whole menu to %d%% of its base size (100%% uses whole pixels for the sharpest image).", percent);
         if (fabsf(unit - base * percent / 100.0f) > 0.01f) {
             if (unit > base * percent / 100.0f) {
                 hint("In this window it goes no smaller than %d%% (a window pixel for each of the game's).",

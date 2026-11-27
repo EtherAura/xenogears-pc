@@ -456,22 +456,6 @@ float unit() {
     return st.unit;
 }
 
-TextSize textSize() {
-    static bool described;
-    if (!described) {
-        described = true;
-        settingsDescribe("menu_text", "menu_text: the settings menu's letters, game (as large as the game's own menus) or "
-                                  "compact (smaller, more at once)");
-    }
-    const char* v = settingsGet("menu_text");
-    return v != nullptr && strcmp(v, "game") == 0 ? TEXT_GAME : TEXT_COMPACT;
-}
-
-void setTextSize(TextSize size) {
-    settingsSet("menu_text", size == TEXT_GAME ? "game" : "compact");
-    settingsSave();
-}
-
 bool darkWindows() {
     static bool described;
     if (!described) {
@@ -540,18 +524,14 @@ bool menuPointerVisible(bool mouseEnabled) {
 }
 
 int unitFor(int w, int h) {
-    // Game: the game's 320 x 216 picture as large as the window holds it in
-    // whole pixels (4 at 1868 x 965, 10 at 3840 x 2160). Compact: room for
-    // 480 x 300 game pixels (3 and 7 there).
-    int s = textSize() == TEXT_GAME ? (w / 320 < h / 216 ? w / 320 : h / 216) : (w / 480 < h / 300 ? w / 480 : h / 300);
-    return s < 1 ? 1 : s;
+    return std::max(1, std::min(w / 480, h / 300));
 }
 
 int scalePercent() {
     static bool described;
     if (!described) {
         described = true;
-        settingsDescribe("menu_scale", "menu_scale: the settings menu's size in percent of its text size's (50 to 200, "
+        settingsDescribe("menu_scale", "menu_scale: the settings menu's size in percent of its base size (50 to 200, "
                                        "default 100)");
     }
     int p = settingsInt("menu_scale", SCALE_DEFAULT);
@@ -590,12 +570,8 @@ float rowHeight() {
 }
 
 float menuUnitFor(int w, int h) {
-    // The text size's whole pixels times the percentage: game size, the
-    // game's screen that much larger or smaller (still the game's layout,
-    // centred); compact, the panel's letters, boxes and gaps. At least one
-    // window pixel per game pixel, and never more than the window holds the
-    // game's 320 x 216 screen (both layouts need that much); 100% (or a
-    // percentage that comes to a whole number) stays in whole pixels.
+    // Scale the panel's letters, boxes and gaps together. Keep at least one
+    // window pixel per game pixel and room for a 320 x 216 game-pixel area.
     float u = (float)unitFor(w, h) * (float)scalePercent() / 100.0f;
     float most = std::min((float)w / 320.0f, (float)h / 216.0f);
     u = std::min(u, most);

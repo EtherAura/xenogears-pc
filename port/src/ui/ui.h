@@ -22,15 +22,12 @@
  *     the game's sound and its audio dump are untouched.
  * ImGui keeps the input, the layout and the widgets (menu.cpp, sections.cpp).
  *
- * Its own settings (Display section; settings.ini, XG_<KEY> overrides):
- *   menu_text   game: the game's own menu screen: letters as large as its
- *               (its 320 x 216 picture filling the window, in whole
- *               pixels), the commands, boxes and lines at its places;
- *               compact (default): smaller, at least 480 x 300 game
- *               pixels, the port's panel with the keys' legend
+ * Its own settings (System section; settings.ini, XG_<KEY> overrides):
+ *   menu_scale       the whole panel's size in percent (50 to 200)
+ *   menu_font_scale  the font size in percent (75 to 150)
  *   menu_dark   1: its windows a darker half-clear grey; 0 (default): the
  *               game's own grey
- * Both apply at once.
+ * These apply at once.
  *
  * Opening and closing:
  *   F1                      opens it; F1 or Esc closes it (Esc when nothing in

@@ -54,19 +54,12 @@ ImFont* dialogueFont();
 void setUnit(float unit);
 float unit();
 
-// The menu's text size (settings.ini menu_text): TEXT_GAME, letters as large
-// as the game's own menus (the game's 320 x 216 picture filling the window),
-// or TEXT_COMPACT, smaller to show more (at least 480 x 300 game pixels).
-// unitFor: the whole number of window pixels per game pixel that size gives
-// a window of w x h pixels (at least 1). menu.cpp uses it each frame, so a
-// change applies at once.
-enum TextSize { TEXT_GAME, TEXT_COMPACT };
-TextSize textSize();
-void setTextSize(TextSize size); // also written to settings.ini
+// The largest whole number of window pixels per game pixel that leaves room
+// for a 480 x 300 game-pixel panel, with a minimum of 1.
 int unitFor(int w, int h);
 
 // The menu's size (settings.ini menu_scale, percent, default 100): the
-// text size's unit times this (menuUnitFor: what menu.cpp uses; unitFor
+// base unit times this (menuUnitFor: what menu.cpp uses; unitFor
 // stays the whole-pixel unit, as the extras use it). Read each frame.
 enum { SCALE_MIN = 50, SCALE_MAX = 200, SCALE_DEFAULT = 100 };
 int scalePercent();

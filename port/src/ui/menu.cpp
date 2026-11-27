@@ -137,7 +137,7 @@ struct State {
     bool leaving;
     bool resetWanted, quitWanted; // a Reset or Quit chosen on the arc and confirmed: act on it once the menu closes
     bool resetAsk, quitAsk;       // their confirmation is open (##reset-ask, ##quit-ask)
-    ImVec2 centre;           // the opening's projection centre (game mode: the game screen's)
+    ImVec2 centre;           // the opening's projection centre
     int modalStyles;         // nextModal's pushed style variables
     unsigned playsSeen;      // sfx::plays() after the last frame's sounds
     unsigned long quietUntil; // no cursor sound for a move before this frame (something else sounded)
@@ -878,6 +878,33 @@ void scrollToBlock(ImGuiWindow* w, float endY) {
     }
 }
 
+void scrollPastControls(ImGuiWindow* w) {
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    if (g.NavWindow != w || w->ScrollMax.y <= 0.0f || smooth.snap || st.resetScroll ||
+        (g.NavMoveDir != ImGuiDir_Up && g.NavMoveDir != ImGuiDir_Down) ||
+        g.NavMoveFlags != ImGuiNavMoveFlags_None || !ImGui::NavMoveRequestButNoResultYet() ||
+        ImGui::IsAnyItemActive() || popupOpen() || capturing()) {
+        return;
+    }
+    // No control to move to. Reveal any disabled rows or text beyond the cursor,
+    // keeping a row of overlap when there is more than a page to read.
+    bool down = g.NavMoveDir == ImGuiDir_Down;
+    if (g.NavInitRequestFromMove && g.NavInitResult.ID != 0) {
+        // Gamepad navigation can lose its cursor when it scrolls out of view.
+        // Keep a fallback focus on an offscreen control from jumping us back.
+        ImRect item = ImGui::WindowRectRelToAbs(w, g.NavInitResult.RectRel);
+        if (down ? item.Max.y <= w->InnerRect.Min.y : item.Min.y >= w->InnerRect.Max.y) {
+            g.NavInitResult.Clear();
+        }
+    }
+    float view = w->InnerRect.GetHeight() - 2.0f * w->WindowPadding.y;
+    float row = skin::rowHeight();
+    float step = std::max(row, view - row);
+    float target = smooth.target + (down ? step : -step);
+    target = std::clamp(target, 0.0f, w->ScrollMax.y);
+    if (target != smooth.target) ImGui::SetScrollY(w, target);
+}
+
 // ---- the game's screen ----------------------------------------------------------------
 
 // The section list is the game's main menu: a ball for each command (red for
@@ -923,22 +950,9 @@ int arcVisibleSlots(int total, float colH) {
 const ImVec2 kBall(-7, -5), kLabel(2, -4);
 const char* const kSetupNames[SETUP_SECTIONS] = {N_("Discs"), "BIOS", N_("Presets")};
 
-// The game's boxes (iniMenuContext364And380: x, y, width, height of the
-// inside), game pixels.
-struct Box {
-    int x, y, w, h;
-};
-// The message box (processLoadSaveMenuSub5: 0x7A, 0x96, 0xBC x 0x40; three
-// lines at x 0x84, y 0xA0 + 16 i): the description window and the modals.
-const Box kMessageBox = {0x7A, 0x96, 0xBC, 0x40};
+// The message box's height and padding, in game pixels (processLoadSaveMenuSub5).
+const int kMessageHeight = 64;
 const int kMessageText = 10; // its lines' left and top inside it
-// The section's sheet: the message box's width and left edge, the item
-// list's top and height (openItemMenu: box 3 at 0xC, 0xA, 0x124 x 0x84), so
-// it stands right of the commands and 8 above the message box.
-const Box kSheet = {0x7A, 0x0A, 0xBC, 0x84};
-// An open section on the game's screen: the item list's box itself, across
-// the screen as the game shows it once a command is chosen (the commands gone).
-const Box kItemBox = {0x0C, 0x0A, 0x124, 0x84};
 // Inside a list box (setupItemMenuPage, updateMenuPointerGlyph): the names 28
 // right of the box, the first row 4 down, the pointer 12 right (menu.h's
 // pointer: skin::endFrame); the scroll bar on the box's inner left edge
@@ -947,19 +961,15 @@ const int kListText = 28, kListTop = 4;
 
 // Where the menu's things go this frame, in window pixels.
 struct Layout {
-    bool game;      // menu_text=game: on the game's screen, at the game's places
     float u;        // window pixels per game pixel
-    ImVec2 origin;  // game mode: the game menu picture's (0, 0); compact: the commands' frame
+    ImVec2 origin;  // the commands' frame
     float colH = 216.0f; // the commands' column height, in game pixels
     int visibleCommands = SECTION_COUNT + 1;
     ImRect sheet, help, foot;
-    ImVec2 at(float x, float y) const { return ImVec2(origin.x + x * u, origin.y + y * u); }
-    ImRect box(const Box& b) const { return ImRect(at(b.x, b.y), at(b.x + b.w, b.y + b.h)); }
     ImVec2 command(int slot) const {
         ImVec2 p = arcPoint(slot, visibleCommands, colH);
-        return ImVec2(origin.x + p.x * u, origin.y + (game ? 10.0f + p.y : p.y) * u);
+        return ImVec2(origin.x + p.x * u, origin.y + p.y * u);
     }
-    ImVec2 centre() const { return game ? at(160, 112) : ImVec2(); } // the menu's projection centre
 };
 
 // The touch pad drawn over the menu (frame()) has its Select and Start in the
@@ -977,30 +987,17 @@ float touchPadFloor() {
     return std::max(bottom, 0.0f);
 }
 
-// opened: when false, only the commands' arc is shown; when true, the arc is
-// hidden and the active section or submenu opens as a full-width screen.
-Layout layout(bool opened, int totalEntries = SECTION_COUNT + 1) {
+Layout layout(int totalEntries) {
     ImGuiIO& io = ImGui::GetIO();
     Layout L;
     L.u = skin::unit();
     float u = L.u;
-    L.game = skin::textSize() == skin::TEXT_GAME;
-    if (L.game) {
-        L.origin = ImVec2(floorf(io.DisplaySize.x * 0.5f - 160 * u), floorf(io.DisplaySize.y * 0.5f - 110 * u));
-        L.origin.y = std::max(0.0f, std::min(L.origin.y, floorf(io.DisplaySize.y - 216 * u)));
-        L.origin.x = std::max(0.0f, L.origin.x);
-        L.colH = 192.0f; // leave 10+ game pixels top/bottom for the Xenogears scroll arrows
-        L.visibleCommands = arcVisibleSlots(totalEntries, L.colH);
-        L.sheet = L.box(opened ? kItemBox : kSheet);
-        L.help = L.box(kMessageBox);
-        return L;
-    }
-    // Compact: up to 580 x 340 game pixels. Root shows only the commands' arc;
+    // Up to 580 x 340 game pixels. Root shows only the commands' arc;
     // entering any section or submenu switches to a full-width screen.
     const int footH = 17, edge = 8, gap = 8;
     int cw = (int)(io.DisplaySize.x / u), ch = (int)(touchPadFloor() / u);
     int pw = cw - 2 * edge < 580 ? cw - 2 * edge : 580, ph = ch - 2 * edge < 340 ? ch - 2 * edge : 340;
-    const int helpH = ph < 280 ? kMessageBox.h - 16 : kMessageBox.h;
+    const int helpH = ph < 280 ? kMessageHeight - 16 : kMessageHeight;
     ImVec2 o(floorf((cw - pw) / 2.0f) * u, floorf((ch - ph) / 2.0f) * u);
     auto at = [&](int x, int y) { return ImVec2(o.x + x * u, o.y + y * u); };
     L.sheet = ImRect(at(edge, edge), at(pw - edge, ph - edge - footH - gap - helpH - gap));
@@ -1192,24 +1189,6 @@ const char* resetText() {
         const char* k = buttonKeyName("square");
         snprintf(text, sizeof text, "%s%sDelete", k != nullptr ? k : "", k != nullptr ? tr(" or ") : "");
     }
-    return text;
-}
-
-// The legend as lines (the help popup's, where no legend is shown).
-std::string legendText() {
-    Legend l = legend();
-    std::string text;
-    auto line = [&](const char* keys, const char* what) {
-        if (keys[0] == '\0') return;
-        if (!text.empty()) text += "\n";
-        text += keys;
-        text += ": ";
-        text += what;
-    };
-    line(l.choose, tr("choose"));
-    line(l.back, tr("back"));
-    line(l.move, tr("move"));
-    line(l.section, tr("section"));
     return text;
 }
 
@@ -1411,10 +1390,9 @@ void drawFrame() {
     const bool inSubmenu = !inSetup && opt::inSubmenu(st.section);
     const bool showPane = inWizard || st.opened || inSubmenu;
     const bool showArc = !showPane;
-    Layout L = layout(showPane, entries);
+    Layout L = layout(entries);
     ImRect pane = L.sheet, help = L.help, foot = L.foot;
     st.pane = pane;
-    st.centre = L.centre();
 
     ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
     ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
@@ -1731,6 +1709,7 @@ void drawFrame() {
     }
     ImGui::Dummy(ImVec2(0, 2 * u));
     scrollToBlock(content, ImGui::GetCursorScreenPos().y);
+    scrollPastControls(content);
     st.inContent = ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows);
     ImGui::EndChild();
     st.contentId = ImGui::GetItemID();
@@ -1780,12 +1759,6 @@ void drawFrame() {
     if (helpOpen) {
         skin::frameWindow(true);
         textLines(helpText.c_str());
-        if (L.game) {
-            // The keys, as the game's legend would say them (no legend in game mode).
-            ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-            textLines(legendText().c_str());
-            ImGui::PopStyleColor();
-        }
         if (ImGui::Button(tr("Back")) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
             (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
@@ -1844,11 +1817,6 @@ void drawFrame() {
     }
     if (inSetup) drawSetupModals();
     noteSettingsClick();
-    if (L.game) {
-        ImGui::End();
-        ImGui::PopStyleColor();
-        return;
-    }
 
     // The controls of the menu itself for the way of playing in use
     // (legend()); shorter where the window is narrow.
@@ -2013,10 +1981,8 @@ void frame() {
         io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
     }
     // The menu comes in and goes as the game's sub-menus do (motion.h),
-    // turned about the game screen's middle in game mode (the projection's
-    // centre), else the window's.
-    Layout L = layout(st.opened);
-    st.centre = L.game ? L.centre() : ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2);
+    // turned about the window's centre.
+    st.centre = ImVec2(io.DisplaySize.x / 2, io.DisplaySize.y / 2);
     unsigned age = unsigned(st.frames - st.openedAt);
     bool moving = !st.setup && !st.backlog && !st.ask && (age < menuMotion::OPENING_FRAMES || st.leaving);
     menuMotion::View view = st.leaving ? menuMotion::leaving(st.centre, skin::unit(), unsigned(st.frames - st.closedAt))
@@ -2362,23 +2328,13 @@ void textLines(const char* text) {
 }
 
 void nextModal() {
-    // Game mode: the message box's width and left edge (processLoadSaveMenuSub5,
-    // as askYesNoQuestion's prompts), its text 10 in; its bottom on the message
-    // box's, growing up if it holds more. Compact: as wide as its text wants up
-    // to 360 game pixels, in the middle of the window.
-    Layout L = layout(st.opened);
-    float u = L.u;
+    // The message box in the middle of the window, up to 360 game pixels wide.
+    float u = skin::unit();
     ImGuiIO& io = ImGui::GetIO();
-    if (L.game) {
-        float w = kMessageBox.w * u;
-        ImGui::SetNextWindowPos(L.at(kMessageBox.x, kMessageBox.y + kMessageBox.h), ImGuiCond_Always, ImVec2(0, 1));
-        ImGui::SetNextWindowSizeConstraints(ImVec2(w, kMessageBox.h * u), ImVec2(w, io.DisplaySize.y - 16 * u));
-    } else {
-        float w = std::min(360 * u, io.DisplaySize.x - 40 * u);
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
-                                ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSizeConstraints(ImVec2(w, 0), ImVec2(w, io.DisplaySize.y - 16 * u));
-    }
+    float w = std::min(360 * u, io.DisplaySize.x - 40 * u);
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
+                            ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(w, 0), ImVec2(w, io.DisplaySize.y - 16 * u));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(kMessageText * u, kMessageText * u));
     st.modalStyles++;
 }

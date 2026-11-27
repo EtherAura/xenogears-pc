@@ -1881,35 +1881,6 @@ msgid "Now %dx%d. A tiling desktop may size the window itself."
 msgstr "現在 %dx%d。タイル型のデスクトップではウィンドウの大きさを決められることがあります。"
 
 #: port/src/ui/sections.cpp
-msgid "Menu text"
-msgstr "メニューの文字"
-
-#: port/src/ui/sections.cpp
-msgid "Game size"
-msgstr "ゲームと同じ"
-
-#: port/src/ui/sections.cpp
-msgid "Compact"
-msgstr "コンパクト"
-
-#: port/src/ui/sections.cpp
-msgid ""
-"This menu's letters as large as the game's own menus: less at once, more to "
-"scroll."
-msgstr "このメニューの文字をゲームのメニューと同じ大きさに: 一度に見える量が減り、スクロールが増えます。"
-
-#: port/src/ui/sections.cpp
-msgid ""
-"This menu's letters smaller than the game's menus, to show more at once."
-msgstr "このメニューの文字をゲームのメニューより小さく、一度に多く見せます。"
-
-#: port/src/ui/sections.cpp
-msgid ""
-"In whole pixels from the window's size, so they stay sharp (Menu size can "
-"make it larger or smaller)."
-msgstr "ウィンドウの大きさから整数ピクセルで決めるので、くっきりしたままです(「メニューの大きさ」で大きくも小さくもできます)。"
-
-#: port/src/ui/sections.cpp
 msgid "Menu size"
 msgstr "メニューの大きさ"
 
@@ -1919,12 +1890,8 @@ msgstr "リセット"
 
 #: port/src/ui/sections.cpp
 #, c-format
-msgid ""
-"The whole menu, its letters, windows and gaps, at %d%% of the size its text "
-"size gives (100%%: whole pixels, the sharpest). Reset goes back to 100%%."
-msgstr ""
-"メニュー全体(文字、ウィンドウ、すき間)を、文字の大きさで決まる大きさの %d%% で表示します(100%%: "
-"整数ピクセルで最もくっきり)。「リセット」で 100%% にもどります。"
+msgid "Scales the whole menu to %d%% of its base size (100%% uses whole pixels for the sharpest image)."
+msgstr "メニュー全体を基準の大きさの %d%% で表示します(100%% では整数ピクセルで最もくっきり表示されます)。"
 
 #: port/src/ui/sections.cpp
 #, c-format
