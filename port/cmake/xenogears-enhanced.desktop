@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Xenogears (Enhanced)
+Comment=Xenogears PC port, Enhanced engine (reads the player's own disc)
+Exec=xenogears-enhanced
+Icon=xenogears
+Terminal=false
+Categories=Game;RolePlaying;
+StartupWMClass=xenogears

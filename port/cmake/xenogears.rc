@@ -1,2 +1,3 @@
-/* Windows resources for xenogears.exe (port/CMakeLists.txt): the manifest. */
+/* Windows resources for xenogears.exe (port/CMakeLists.txt): the program icon and manifest. */
+1 ICON "xenogears.ico"
 1 24 "xenogears.manifest" /* CREATEPROCESS_MANIFEST_RESOURCE_ID, RT_MANIFEST */

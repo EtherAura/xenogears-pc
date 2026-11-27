@@ -1079,11 +1079,12 @@ if(WIN32)
         target_link_libraries(xenogears PRIVATE winhttp) # the update check's HTTPS (update/update_fetch.c)
         target_link_libraries(xenogears PRIVATE ole32) # COM on the thread that starts the setup (update_install.c)
     endif()
-    # The manifest: UTF-8 process code page (paths outside ASCII), long paths.
+    # The program icon and manifest (UTF-8 process code page, long paths).
     enable_language(RC)
     target_sources(xenogears PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.rc")
     set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.rc" APPEND PROPERTY
-        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.manifest")
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.manifest"
+                       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.ico")
     install(TARGETS xenogears RUNTIME DESTINATION .)
     install(FILES $<TARGET_RUNTIME_DLLS:xenogears> DESTINATION .)
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/third_party/jukebox-font/LICENSE.txt"

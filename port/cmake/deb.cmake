@@ -47,6 +47,16 @@ if(XG_PACKAGE_VERSION MATCHES "^20[0-9][0-9]\\.(0[1-9]|1[0-2])\\.(0|[1-9][0-9]*)
 endif()
 
 install(TARGETS xenogears RUNTIME DESTINATION bin)
+# Desktop launcher entry and icon (matches SDL_SetAppMetadata app_id "xenogears").
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.svg"
+    DESTINATION share/icons/hicolor/scalable/apps)
+if(XG_ENGINE STREQUAL "enhanced")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears-enhanced.desktop"
+        DESTINATION share/applications)
+else()
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/xenogears.desktop"
+        DESTINATION share/applications)
+endif()
 # The executable's state schema (port/CMakeLists.txt XG_STATE_SCHEMA): <prefix>/bin's executable
 # reads it from <prefix>/share/xenogears-pc (port/src/system/stateportable.c), one file per engine.
 if(XG_STATE_SCHEMA)

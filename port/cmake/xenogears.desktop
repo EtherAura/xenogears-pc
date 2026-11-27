@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Xenogears
+Comment=Xenogears PC port (reads the player's own disc)
+Exec=xenogears
+Icon=xenogears
+Terminal=false
+Categories=Game;RolePlaying;
+StartupWMClass=xenogears

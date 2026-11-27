@@ -1069,6 +1069,81 @@ SDL_Window* presentWindow(void) {
 
 /* ---- the window ------------------------------------------------------------------------ */
 
+#ifndef __ANDROID__
+/* The project mark (port/cmake/xenogears.svg): the red menu cursor on a rounded
+ * black square, rasterised directly for SDL_SetWindowIcon (X11 _NET_WM_ICON,
+ * Wayland xdg_toplevel_icon_v1, Windows WM_SETICON). */
+static float iconEdge(float ax, float ay, float bx, float by, float px, float py) {
+    return (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+}
+
+static SDL_Surface* renderWindowIcon(int size) {
+    SDL_Surface* s = SDL_CreateSurface(size, size, SDL_PIXELFORMAT_RGBA32);
+    if (s == NULL) {
+        return NULL;
+    }
+    int ss = size <= 64 ? 4 : 2;
+    int total = ss * ss;
+    float invSize = 32.0f / (float)size;
+    float invSs = 1.0f / (float)ss;
+    for (int py = 0; py < size; py++) {
+        uint8_t* row = (uint8_t*)s->pixels + (size_t)py * (size_t)s->pitch;
+        for (int px = 0; px < size; px++) {
+            int r = 0, g = 0, b = 0, inside = 0;
+            for (int sy = 0; sy < ss; sy++) {
+                float v = ((float)py + ((float)sy + 0.5f) * invSs) * invSize;
+                for (int sx = 0; sx < ss; sx++) {
+                    float u = ((float)px + ((float)sx + 0.5f) * invSs) * invSize;
+                    float dx = u < 6.0f ? 6.0f - u : (u > 26.0f ? u - 26.0f : 0.0f);
+                    float dy = v < 6.0f ? 6.0f - v : (v > 26.0f ? v - 26.0f : 0.0f);
+                    if (dx * dx + dy * dy > 36.0f) {
+                        continue;
+                    }
+                    if (iconEdge(5.0f, 28.0f, 21.0f, 3.0f, u, v) >= 0.0f &&
+                        iconEdge(21.0f, 3.0f, 21.0f, 14.0f, u, v) >= 0.0f &&
+                        iconEdge(21.0f, 14.0f, 5.0f, 28.0f, u, v) >= 0.0f) {
+                        r += 0xFF; g += 0x2A; b += 0x22;
+                    } else if (iconEdge(5.0f, 28.0f, 21.0f, 14.0f, u, v) >= 0.0f &&
+                               iconEdge(21.0f, 14.0f, 30.0f, 14.0f, u, v) >= 0.0f &&
+                               iconEdge(30.0f, 14.0f, 5.0f, 28.0f, u, v) >= 0.0f) {
+                        r += 0xC7; g += 0x0B; b += 0x0B;
+                    }
+                    inside++;
+                }
+            }
+            uint8_t* dst = row + (size_t)px * 4;
+            if (inside > 0) {
+                dst[0] = (uint8_t)((r + inside / 2) / inside);
+                dst[1] = (uint8_t)((g + inside / 2) / inside);
+                dst[2] = (uint8_t)((b + inside / 2) / inside);
+                dst[3] = (uint8_t)((inside * 255 + total / 2) / total);
+            } else {
+                dst[0] = dst[1] = dst[2] = dst[3] = 0;
+            }
+        }
+    }
+    return s;
+}
+
+static void setWindowIcon(SDL_Window* window) {
+    /* 32x32 base (100% scale) with alternate sizes for HiDPI, titlebars and docks. */
+    SDL_Surface* icon = renderWindowIcon(32);
+    if (icon == NULL) {
+        return;
+    }
+    static const int altSizes[] = {16, 24, 48, 64, 128, 256};
+    for (size_t i = 0; i < sizeof(altSizes) / sizeof(altSizes[0]); i++) {
+        SDL_Surface* alt = renderWindowIcon(altSizes[i]);
+        if (alt != NULL) {
+            SDL_AddSurfaceAlternateImage(icon, alt);
+            SDL_DestroySurface(alt);
+        }
+    }
+    SDL_SetWindowIcon(window, icon);
+    SDL_DestroySurface(icon);
+}
+#endif
+
 SDL_Window* presentCreateWindow(const char* title) {
     loadOptions();
     int w = clampInt(settingsInt("window_width", 960), 64, 16384);
@@ -1094,6 +1169,11 @@ SDL_Window* presentCreateWindow(const char* title) {
     SDL_SetBooleanProperty(p, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
     pr.window = SDL_CreateWindowWithProperties(p);
     SDL_DestroyProperties(p);
+#ifndef __ANDROID__
+    if (pr.window != NULL) {
+        setWindowIcon(pr.window);
+    }
+#endif
     pr.createdW = w; pr.createdH = h; pr.createdNs = SDL_GetTicksNS(); pr.sizeAsserted = 0;
     if (pr.window != NULL && settingsBool("fullscreen", PRESENT_FULLSCREEN_DEFAULT)) {
         /* After creation, as F11 does: a window created fullscreen came up

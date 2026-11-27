@@ -89,6 +89,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ASSETS = HERE / "deb_assets.py"
 DOC = "usr/share/doc/xenogears-pc"
+ICON = "usr/share/icons/hicolor/scalable/apps/xenogears.svg"
+DESKTOP_DIR = "usr/share/applications"
 LICENCES = ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt")
 RELEASE = "usr/share/xenogears-pc/release.txt"  # port/cmake/deb.cmake: what the in-app updater reads
 SCHEMA_DIR = "usr/share/xenogears-pc"  # port/cmake/deb.cmake: the executable's state schema, <name>.xgschema
@@ -156,7 +158,8 @@ def schema_of(exe: str) -> str:
 def expected_files(cache: dict[str, str]) -> tuple[str, set[str]]:
     """The executable's path and every file the package must hold (port/cmake/deb.cmake's install rules)."""
     exe = "usr/bin/xenogears-enhanced" if cache.get("XG_ENGINE") == "enhanced" else "usr/bin/xenogears"
-    need = {exe, RELEASE, schema_of(exe)} | {f"{DOC}/{name}" for name in LICENCES}
+    desktop = f"{DESKTOP_DIR}/{Path(exe).name}.desktop"
+    need = {exe, ICON, desktop, RELEASE, schema_of(exe)} | {f"{DOC}/{name}" for name in LICENCES}
     if not cache.get("glslang_DIR", "NOTFOUND").endswith("NOTFOUND") and cache.get("XG_GLSLANG", "ON") == "ON":
         need.add(f"{DOC}/LICENSE-glslang.txt")
     if not cache.get("XG_DAV1D_LIBRARY", "NOTFOUND").endswith("NOTFOUND") and cache.get("XG_DAV1D", "ON") == "ON":

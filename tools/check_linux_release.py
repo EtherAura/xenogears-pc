@@ -71,6 +71,8 @@ ROOT = Path(__file__).resolve().parent.parent
 HELPER = ROOT / "tools/publish/repo-port/packaging/linux_release.py"
 AUDITOR_FILES = ("payloadcheck.py", "payload_pe.py", "payload_elf.py", "payload_allow.txt")
 DOC = "share/doc/xenogears-pc"
+ICON = "share/icons/hicolor/scalable/apps/xenogears.svg"
+DESKTOP_DIR = "share/applications"
 RELEASE = "share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
 SCHEMA_DIR = "share/xenogears-pc"  # each executable's state schema, <name>.xgschema (port/cmake/deb.cmake)
 SCHEMA_FILES = ("state_schema.py", "statecheck.py", "statecanon.py")  # the schema check and the modules it imports
@@ -205,11 +207,18 @@ def make_stage(path: Path, enhanced: bool = True, optional: bool = True, release
         os.chmod(path / RELEASE, 0o644)
     exes = ["xenogears"] + (["xenogears-enhanced"] if enhanced else [])
     (path / SCHEMA_DIR).mkdir(parents=True, exist_ok=True)
+    (path / DESKTOP_DIR).mkdir(parents=True, exist_ok=True)
+    (path / ICON).parent.mkdir(parents=True, exist_ok=True)
+    (path / ICON).write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>\n', encoding="utf-8")
+    os.chmod(path / ICON, 0o644)
     for exe in exes:
         (path / "bin" / exe).write_bytes(fake_elf(exe.encode()))
         os.chmod(path / "bin" / exe, 0o755)
         (path / SCHEMA_DIR / f"{exe}.xgschema").write_bytes(fixture_schema(exe))
         os.chmod(path / SCHEMA_DIR / f"{exe}.xgschema", 0o644)
+        (path / DESKTOP_DIR / f"{exe}.desktop").write_text(
+            f"[Desktop Entry]\nType=Application\nName=Xenogears\nExec={exe}\nIcon=xenogears\n", encoding="utf-8")
+        os.chmod(path / DESKTOP_DIR / f"{exe}.desktop", 0o644)
     for name in LICENCES if optional else LICENCES[:3]:
         (path / DOC / name).write_text(f"SYNTHETIC FIXTURE licence text: {name}\n", encoding="utf-8")
         os.chmod(path / DOC / name, 0o644)

@@ -41,6 +41,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "xenogears-pc"
 DOC = "usr/share/doc/xenogears-pc"
+ICON = "usr/share/icons/hicolor/scalable/apps/xenogears.svg"
+DESKTOP_DIR = "usr/share/applications"
 RELEASE = "usr/share/xenogears-pc/release.txt"
 SCHEMA_DIR = "usr/share/xenogears-pc"  # the executable's state schema, <name>.xgschema (port/cmake/deb.cmake)
 RELEASE_VERSION = re.compile(r"20[0-9][0-9]\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)")  # a release's (port/cmake/deb.cmake)
@@ -105,7 +107,8 @@ def expected_files(build: Path) -> tuple[str, set[str]]:
     """The executable's path and the files the package must hold (and nothing else)."""
     cache = cmake_sets(build / "CMakeCache.txt")
     exe = "usr/bin/xenogears-enhanced" if cache.get("XG_ENGINE") == "enhanced" else "usr/bin/xenogears"
-    need = {exe} | {f"{DOC}/{name}" for name in LICENCES}
+    desktop = f"{DESKTOP_DIR}/{Path(exe).name}.desktop"
+    need = {exe, ICON, desktop} | {f"{DOC}/{name}" for name in LICENCES}
     if cache.get("XG_STATE_SCHEMA", "ON") == "ON":
         need.add(f"{SCHEMA_DIR}/{Path(exe).name}.xgschema")  # (XG_STATE_SCHEMA: on unless turned off)
     if RELEASE_VERSION.fullmatch(cache.get("XG_PACKAGE_VERSION", "")):

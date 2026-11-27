@@ -155,6 +155,9 @@ TAG = re.compile(r"v(20[0-9][0-9])\.(0[1-9]|1[0-2])\.(0|[1-9][0-9]*)")  # ASCII 
 NAME_MAX = 255  # bytes in one file name
 
 DOC = "share/doc/xenogears-pc"
+ICON = "share/icons/hicolor/scalable/apps/xenogears.svg"
+DESKTOPS = {"share/applications/xenogears.desktop": "bin/xenogears",
+            "share/applications/xenogears-enhanced.desktop": "bin/xenogears-enhanced"}
 EXECUTABLES = {"bin/xenogears": True, "bin/xenogears-enhanced": False}  # name: required
 LICENCES = {f"{DOC}/COPYING": True, f"{DOC}/LICENSE-Jukebox-font.txt": True, f"{DOC}/LICENSE-imgui.txt": True,
             f"{DOC}/LICENSE-glslang.txt": False, f"{DOC}/LICENSE-dav1d.txt": False}
@@ -165,7 +168,8 @@ SCHEMAS = {"share/xenogears-pc/xenogears.xgschema": "bin/xenogears",
            "share/xenogears-pc/xenogears-enhanced.xgschema": "bin/xenogears-enhanced"}
 SCHEMA_MAGIC = b"XGSCHEMA"
 RELEASE_MAX = 4096  # bytes: the port reads no longer file
-FOLDERS = ("bin", "share", "share/doc", DOC, "share/xenogears-pc")
+FOLDERS = ("bin", "share", "share/applications", "share/doc", DOC, "share/icons", "share/icons/hicolor",
+           "share/icons/hicolor/scalable", "share/icons/hicolor/scalable/apps", "share/xenogears-pc")
 EXE_MODE, FILE_MODE, DIR_MODE = 0o755, 0o644, 0o755
 
 # The game's data and a player's own files: never in a release.
@@ -296,9 +300,11 @@ def read_stage(stage: Path) -> list[dict]:
                 continue
             if not stat.S_ISREG(mode):
                 raise ReleaseError(f"stage: {rel} is not a regular file")
-            if rel not in EXECUTABLES and rel not in LICENCES and rel != RELEASE and rel not in SCHEMAS:
+            if (rel not in EXECUTABLES and rel not in LICENCES and rel != RELEASE and rel not in SCHEMAS
+                    and rel != ICON and rel not in DESKTOPS):
                 raise ReleaseError(f"stage: {rel} is not a file the port's install makes (only {', '.join(EXECUTABLES)}, "
-                                   f"the licences in {DOC}, {RELEASE} and the executables' state schemas)")
+                                   f"the licences in {DOC}, {ICON}, the desktop entries, {RELEASE} and the executables' "
+                                   "state schemas)")
             data = path.read_bytes()
             check_game_data(data, rel)
             if rel in EXECUTABLES:
@@ -315,12 +321,14 @@ def read_stage(stage: Path) -> list[dict]:
             files.append({"rel": rel, "data": data, "sha256": hashlib.sha256(data).hexdigest(),
                           "mode": EXE_MODE if rel in EXECUTABLES else FILE_MODE})
     present = {f["rel"] for f in files}
-    missing = [n for n, need in {**EXECUTABLES, **LICENCES}.items() if need and n not in present]
+    missing = [n for n, need in {**EXECUTABLES, **LICENCES, ICON: True}.items() if need and n not in present]
     missing += [schema for schema, exe in SCHEMAS.items() if exe in present and schema not in present]
+    missing += [desktop for desktop, exe in DESKTOPS.items() if exe in present and desktop not in present]
     if missing:
         raise ReleaseError(f"stage: no {', '.join(missing)} (not a cmake --install of the port's Linux build"
                            f"{' with its state schema' if any(n in SCHEMAS for n in missing) else ''})")
     alone = [schema for schema, exe in SCHEMAS.items() if schema in present and exe not in present]
+    alone += [desktop for desktop, exe in DESKTOPS.items() if desktop in present and exe not in present]
     if alone:
         raise ReleaseError(f"stage: {', '.join(alone)} without its executable")
     return sorted(files, key=lambda f: f["rel"])

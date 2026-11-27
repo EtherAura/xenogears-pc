@@ -59,6 +59,8 @@ VERSION = TAG[1:]
 DEB = f"xenogears-pc_{VERSION}_amd64.deb"
 SET = [DEB, f"{DEB}.sha256", f"{DEB}.cdx.json"]
 DOC = "usr/share/doc/xenogears-pc"
+ICON = "usr/share/icons/hicolor/scalable/apps/xenogears.svg"
+DESKTOP = "usr/share/applications/xenogears.desktop"
 RELEASE = "usr/share/xenogears-pc/release.txt"  # what the in-app updater reads (port/src/system/release.h)
 SCHEMA = "usr/share/xenogears-pc/xenogears.xgschema"  # the executable's state schema (port/cmake/deb.cmake)
 FV = "1.0~fixture"  # fixture Depends versions: arbitrary, not any distribution's
@@ -195,6 +197,8 @@ def fixture_deb(work: Path, label: str, files: dict[str, tuple[str, int]], depen
 
 def good_files(**changes) -> dict[str, tuple[str, int]]:
     files = {"usr/bin/xenogears": ("#!/bin/sh\necho fixture executable, not the game\n", 0o755)}
+    files[ICON] = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>\n', 0o644)
+    files[DESKTOP] = ("[Desktop Entry]\nType=Application\nName=Xenogears\nExec=xenogears\nIcon=xenogears\n", 0o644)
     for name in ("COPYING", "LICENSE-Jukebox-font.txt", "LICENSE-imgui.txt"):
         files[f"{DOC}/{name}"] = (f"fixture licence text ({name})\n", 0o644)
     files[RELEASE] = (f"version={VERSION}\nkind=deb\n", 0o644)
