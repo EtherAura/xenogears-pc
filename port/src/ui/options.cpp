@@ -963,6 +963,7 @@ bool beginSubmenu(const char* id, const char* label, const char* summary, const 
     }
     if (!pg.activeSubmenu.empty()) {
         if (pg.activeSubmenu != id) return false;
+        sectionSubmenuLabel[pg.section] = label;
         closeTable();
         pg.submenu = id;
         pg.submenuLabel = label;

@@ -58,6 +58,7 @@
 #include "ui/sfx.h"
 #include "ui/menu.h"
 #include "ui/l10n.h"
+#include "ui/options.h"
 #include "ui/pointer.h"
 #include "ui/skin.h"
 #include "view.h"
@@ -173,7 +174,8 @@ struct State {
     float menuUnit;
     float scriptStickX = 0, scriptStickY = 0;
     bool scriptStick = false;
-    int homeCursor = 0;
+    menu::OptionHelp homeHelp;
+    bool homeFocus = false;
     const Viewer* viewer; // the open one, null: home
     char status[256];
     char statusLog[256]; // the same in English, for the logs (ui/l10n.h)
@@ -191,7 +193,6 @@ struct State {
     ImGuiID focusPane; // a horizontal move with no item in the adjacent pane's direction
     std::vector<PaneNav> paneNav;
     std::vector<PaneFrame> paneFrames;
-    ImGuiID commandWindow = 0;
     bool intoGame;    // left into the game (leaveIntoGame)
     ViewerNavigation navigation;
     std::unique_ptr<Bookmarks> bookmarks;
@@ -335,7 +336,9 @@ ShellNavigationHost navigationHost;
 
 void closeViewer() {
     st.navigation.clear(navigationHost);
-    st.homeCursor = 0;
+    menu::opt::clearSubmenu(menu::EXTRAS);
+    st.homeHelp = {};
+    st.homeFocus = true;
 }
 
 bool openViewer(const char* id) {
@@ -453,7 +456,15 @@ void bookmarkScript(const char* arg) {
 
 void viewerBack() {
     if (st.navigation.pending()) return;
-    if (st.viewer == nullptr) { st.leaving = true; return; }
+    if (st.viewer == nullptr) {
+        if (menu::opt::popSubmenu(menu::EXTRAS)) {
+            st.homeHelp = {};
+            st.homeFocus = true;
+        } else {
+            st.leaving = true;
+        }
+        return;
+    }
     if (st.viewer->back != nullptr && st.viewer->back()) return;
     if (!st.navigation.back()) closeViewer();
 }
@@ -962,139 +973,139 @@ ImVec2 at(ImVec2 o, float x, float y) {
     return ImVec2(o.x + x * st.unit, o.y + y * st.unit);
 }
 
-void drawHome(ImVec2 min, ImVec2 max) {
-    float u = (float)st.unit;
-    int& cursor = st.homeCursor;
-    std::vector<HomeEntry> list = homeEntries();
+void drawBookmark(size_t index) {
     auto& store = bookmarks();
-    const float listW = fminf(150 * u, (max.x - min.x) * .44f);
-    ImVec2 listMax(min.x + listW, max.y);
-    ImVec2 paneMin(listMax.x + 12 * u, min.y);
-    if (beginPane("##home", min, listMax)) {
-        st.commandWindow = ImGui::GetCurrentWindow()->ID;
-        for (int i = 0; i < (int)list.size(); i++) {
-            const HomeEntry& e = list[i];
-            HomeGroup group = homeGroup(e);
-            if (i == 0 || group != homeGroup(list[i - 1])) {
-                if (i > 0) ImGui::Dummy(ImVec2(0, 3 * u));
-                ImGui::TextUnformatted(tr(homeGroupName(group)));
-            }
-            ImGui::PushID(e.id);
-            const char* command = !strcmp(e.id, "browser") ? N_("Assets") : !strcmp(e.id, "visuals") ? N_("Visuals") :
-                                  !strcmp(e.id, "tables") ? N_("Tables") : !strcmp(e.id, "scripts") ? N_("Scripts") : e.name;
-            if (commandItem(command, cursor == i, ImGui::GetContentRegionAvail().x)) {
-                cursor = i;
-                if (e.viewer != nullptr) {
-                    sound(2);
-                    openViewer(e.id);
-                } else {
-                    sound(4);
-                    status("%s: coming in a later phase", tr(e.name));
-                }
-            }
-            if (ImGui::IsItemFocused()) {
-                cursor = i;
-            }
+    const Bookmark b = store.items()[index]; // editing can replace the store's vector
+    const std::string key = b.key();
+    static char name[161] = "";
+    static std::string nameKey;
+    if (nameKey != key) {
+        nameKey = key;
+        snprintf(name, sizeof name, "%s", b.label.c_str());
+    }
+
+    menu::opt::row(N_("Open bookmark"));
+    if (ImGui::Button(tr("Open"))) queueBookmark(index);
+    menu::hint("%s  %s disc %d", b.target.viewer.c_str(), b.region.c_str(), b.disc);
+    menu::hint("%s", b.boot.c_str());
+
+    menu::opt::row(N_("Name"));
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputText("##bookmark-name", name, sizeof name);
+    std::string why;
+    menu::opt::row(N_("Rename"));
+    if (ImGui::Button(tr("Apply"))) {
+        if (!store.rename(index, name, why)) error("%s", why.c_str());
+        else status("Bookmark renamed");
+    }
+
+    menu::opt::row(N_("Source"));
+    if (ImGui::Button(tr("Locate image..."))) {
+        openPicker("bookmark-image", tr("Locate the original disc image"), b.image.c_str(), ".cue;.bin", false);
+    }
+    menu::hint("Source: %s", b.image.c_str());
+    std::string path;
+    if (picker("bookmark-image", &path) && sourceAvailable(b, path)) {
+        if (!store.relocate(index, path, why)) error("%s", why.c_str());
+        else status("Bookmark source updated");
+    }
+
+    menu::opt::row(N_("Bookmark"));
+    if (ImGui::Button(tr("Delete"))) {
+        if (!store.erase(index, why)) error("%s", why.c_str());
+        else {
+            viewerBack();
+            nameKey.clear();
+            st.pictureKey.clear();
+            status("Bookmark deleted");
+            return;
+        }
+    }
+
+    if (st.pictureKey != key) {
+        st.bookmarkPicture.reset();
+        st.pictureKey = key;
+        std::vector<uint32_t> pixels;
+        if (store.picture(index, pixels)) {
+            st.bookmarkPicture.reset(new View);
+            st.bookmarkPicture->setPixels(pixels, bookmarkWidth, bookmarkHeight);
+        }
+    }
+    if (st.bookmarkPicture) {
+        menu::opt::row(N_("Picture"));
+        float w = fminf(160 * st.unit, ImGui::GetContentRegionAvail().x);
+        st.bookmarkPicture->draw(ImVec2(w, w * bookmarkHeight / bookmarkWidth));
+    }
+}
+
+void drawHomeRows() {
+    const char* chosen = nullptr;
+    menu::opt::beginPage("extras-home", menu::EXTRAS);
+    if (menu::opt::atRoot()) {
+        const auto list = homeEntries();
+        for (size_t i = 0; i < list.size(); ++i) {
+            const HomeEntry& entry = list[i];
+            HomeGroup group = homeGroup(entry);
+            if (i == 0 || group != homeGroup(list[i - 1])) menu::opt::group(homeGroupName(group));
+            if (!menu::opt::row(entry.name)) continue;
+            ImGui::BeginDisabled(entry.viewer == nullptr);
+            ImGui::PushID(entry.id);
+            std::string action = std::string(tr("Open")) + "  >";
+            if (skin::selectable(action.c_str(), false, 0, ImGui::CalcTextSize(action.c_str()))) chosen = entry.id;
             ImGui::PopID();
-        }
-        ImGui::Dummy(ImVec2(0, 6 * u));
-        if (!store.items().empty()) ImGui::TextUnformatted(tr("Bookmarks"));
-        for (size_t i = 0; i < store.items().size(); ++i) {
-            ImGui::PushID((int)(list.size() + i));
-            if (listItem(store.items()[i].label.c_str(), cursor == (int)(list.size() + i)) || ImGui::IsItemFocused())
-                cursor = (int)(list.size() + i);
-            ImGui::PopID();
-        }
-        ImGui::Dummy(ImVec2(0, 4 * u));
-        if (commandItem(st.fromMenu ? N_("Back") : N_("Quit"), false, ImGui::GetContentRegionAvail().x)) {
-            st.leaving = true;
+            ImGui::EndDisabled();
+            menu::hint("%s", tr(entry.blurb));
+            if (entry.viewer == nullptr) menu::hint("Coming in a later phase.");
         }
     }
-    endPane();
-    if (st.viewer != nullptr) {
-        return; // opened just now: it draws from the next frame
-    }
-    cursor = cursor >= 0 && cursor < (int)(list.size() + store.items().size()) ? cursor : 0;
-    if (cursor >= (int)list.size()) {
-        size_t index = (size_t)cursor - list.size();
-        // Copy: Rename/Delete can replace the store's vector in this frame.
-        Bookmark b = store.items()[index];
-        static char name[161] = ""; static std::string nameKey;
-        if (nameKey != b.key()) { nameKey = b.key(); snprintf(name, sizeof(name), "%s", b.label.c_str()); }
-        if (beginPane("##bookmark", paneMin, max, b.label.c_str(), true)) {
-            ImGui::Text(tr("%s  %s disc %d"), b.target.viewer.c_str(), b.region.c_str(), b.disc);
-            wrappedText("%s", b.boot.c_str());
-            if (st.pictureKey != b.key()) {
-                st.bookmarkPicture.reset(); st.pictureKey = b.key();
-                std::vector<uint32_t> pixels;
-                if (store.picture(index, pixels)) {
-                    st.bookmarkPicture.reset(new View);
-                    st.bookmarkPicture->setPixels(pixels, bookmarkWidth, bookmarkHeight);
-                }
-            }
-            if (st.bookmarkPicture) {
-                float w = fminf(160 * u, ImGui::GetContentRegionAvail().x);
-                st.bookmarkPicture->draw(ImVec2(w, w * bookmarkHeight / bookmarkWidth));
-            } else wrappedText(tr("No cached picture. The saved asset location is ready to open."));
-            if (ImGui::Button(tr("Open bookmark"))) queueBookmark(index);
-            ImGui::InputText(tr("Name"), name, sizeof(name));
-            std::string why;
-            if (ImGui::Button(tr("Rename"))) {
-                if (!store.rename(index, name, why)) error("%s", why.c_str()); else status("Bookmark renamed");
-            }
-            ImGui::SameLine();
-            if (ImGui::Button(tr("Delete"))) {
-                if (!store.erase(index, why)) error("%s", why.c_str());
-                else { cursor = 0; nameKey.clear(); st.pictureKey.clear(); status("Bookmark deleted"); }
-            }
-            wrappedText(tr("Source: %s"), b.image.c_str());
-            if (ImGui::Button(tr("Locate image..."))) openPicker("bookmark-image", tr("Locate the original disc image"), b.image.c_str(), ".cue;.bin", false);
-            std::string path;
-            if (picker("bookmark-image", &path) && sourceAvailable(b, path)) {
-                if (!store.relocate(index, path, why)) error("%s", why.c_str()); else status("Bookmark source updated");
-            }
-        }
-        endPane(); return;
-    }
-    const HomeEntry& e = list[cursor];
-    ImVec2 aboutMax(max.x, fminf(max.y, paneMin.y + 66 * u));
-    if (beginPane("##about", paneMin, aboutMax, e.name, true)) {
-        const char* about = !strcmp(e.id, "browser") ? N_("Browse and export the disc's files.") :
-                            !strcmp(e.id, "visuals") ? N_("Sprites, Gears and animations.") :
-                            !strcmp(e.id, "jukebox") ? N_("Music and sound effects.") :
-                            !strcmp(e.id, "tables") ? N_("Names and data from the game.") :
-                            !strcmp(e.id, "scripts") ? N_("Dialogue and actor routines.") : e.blurb;
-        wrappedText("%s", tr(about));
-        if (e.viewer == nullptr) {
-            ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-            wrappedText(tr("Coming in a later phase."));
-            ImGui::PopStyleColor();
+    const auto& items = bookmarks().items();
+    if (!items.empty() && menu::opt::atRoot()) menu::opt::group(N_("Bookmarks"));
+    for (size_t i = 0; i < items.size(); ++i) {
+        const std::string key = items[i].key();
+        if (menu::opt::beginSubmenu(key.c_str(), items[i].label.c_str())) {
+            drawBookmark(i);
+            menu::opt::endSubmenu();
+            break;
         }
     }
-    endPane();
+    menu::opt::endPage();
+    if (chosen) {
+        sound(2);
+        openViewer(chosen);
+    }
+}
+
+void drawHome(const Area& area) {
+    const bool focus = st.homeFocus;
+    st.homeFocus = false;
+    drawOptions(area, "##home", st.homeHelp, drawHomeRows, menu::opt::submenuTitle(menu::EXTRAS), focus);
+    if (menu::opt::takeSubmenuEnter()) {
+        st.homeHelp = {};
+        st.homeFocus = true;
+    }
 }
 
 void drawExports(const Area& area) {
-    if (beginPane("##exports", area.min, area.max)) {
-        ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        wrappedText("%s", exportDir());
-        ImGui::PopStyleColor();
+    static menu::OptionHelp help;
+    drawOptions(area, "##exports", help, [] {
+        menu::opt::beginPage("export-options", menu::EXTRAS);
+        menu::opt::row(N_("Export folder"));
         if (ImGui::Button(tr("Change..."))) {
             openPicker("export", tr("The export folder"), exportDir(), "", true);
         }
-        ImGui::SameLine();
-        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(tr("Default")).x + 8 * area.unit) ImGui::NewLine();
-        if (ImGui::Button(tr("Default"))) {
+        menu::hint("Exports go to %s", exportDir());
+        menu::opt::row(N_("Default"));
+        if (ImGui::Button(tr("Reset"))) {
             setExportDir("");
             status("Exports go to %s", exportDir());
         }
-        ImGui::SameLine();
-        if (ImGui::GetContentRegionAvail().x < ImGui::CalcTextSize(tr("Open folder")).x + 8 * area.unit) ImGui::NewLine();
-        if (ImGui::Button(tr("Open folder")) && !openExportDir()) {
+        menu::opt::row(N_("Open folder"));
+        if (ImGui::Button(tr("Open")) && !openExportDir()) {
             error("Cannot open %s", exportDir());
         }
-    }
-    endPane();
+        menu::hint("Exports go to %s", exportDir());
+        menu::opt::endPage();
+    });
     std::string folder;
     if (picker("export", &folder)) {
         setExportDir(folder.c_str());
@@ -1323,8 +1334,8 @@ void drawShell() {
         buttonX -= width;
         ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
         if (ImGui::Button(label.c_str(), ImVec2(width, 15 * u))) { sound(3); returnToSource(); }
-    } else if (st.viewer && st.viewer->gameOnly) {
-        const char* label = tr("Back");
+    } else if (st.viewer == nullptr || st.viewer->gameOnly) {
+        const char* label = tr(!st.viewer && !st.fromMenu && !menu::opt::inSubmenu(menu::EXTRAS) ? "Quit" : "Back");
         float width = ImGui::CalcTextSize(label).x + 12 * u;
         buttonX -= width;
         ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
@@ -1348,7 +1359,7 @@ void drawShell() {
         st.viewer->draw(area);
         ImGui::PopID();
     } else {
-        drawHome(areaMin, areaMax);
+        drawHome({areaMin, areaMax, u});
     }
     moveBetweenPanes();
     static bool helpRequested = false;
@@ -1406,7 +1417,7 @@ void frame() {
     if (st.focusReturn > 0) st.focusReturn--;
     // The pointer at the cursor, unless its window is gone (a screen left).
     ImGuiWindow* nav = ImGui::GetCurrentContext()->NavWindow;
-    skin::endFrame(nav != nullptr && !nav->Active ? nav->ID : st.commandWindow);
+    skin::endFrame(nav != nullptr && !nav->Active ? nav->ID : 0);
     ImGui::Render();
     viewsEndFrame();
     saveBookmark();
@@ -1433,7 +1444,9 @@ bool run(bool fromMenu) {
     st.leaving = st.quitAfter = false;
     st.escapeFree = false;
     st.lastNav = 0;
-    st.homeCursor = 0;
+    menu::opt::clearSubmenu(menu::EXTRAS);
+    st.homeHelp = {};
+    st.homeFocus = true;
     resetViewerNav();
     if (!fromMenu) {
         hwPause(1); // no game: no clock either (the sandbox's safe points stay still)
@@ -1700,6 +1713,41 @@ void endPane(bool scrollNested) {
         ImGui::SetCursorScreenPos(cursor);
         ImGui::Dummy(ImVec2(0, 0));
     }
+}
+
+void drawOptions(const Area& area, const char* id, menu::OptionHelp& help, void (*drawRows)(),
+                 const char* title, bool focus) {
+    const float rightStick = ImGui::GetKeyData(ImGuiKey_GamepadRStickDown)->AnalogValue -
+                             ImGui::GetKeyData(ImGuiKey_GamepadRStickUp)->AnalogValue;
+    const float helpHeight = fminf(61 * area.unit, area.size().y * 0.42f);
+    const ImVec2 helpMin(area.min.x, area.max.y - helpHeight);
+    const ImVec2 paneMax(area.max.x, helpMin.y - 6 * area.unit);
+    std::string description;
+    if (beginPane(id, area.min, paneMax, title)) {
+        ImGuiWindow* pane = ImGui::GetCurrentWindow();
+        if (focus) {
+            ImGui::SetScrollY(0);
+            ImGui::FocusWindow(pane);
+            ImGui::NavInitWindow(pane, true);
+            ImGui::SetNavCursorVisible(true);
+        }
+        if (help.overflow() <= 0 && fabsf(rightStick) > 0.2f && viewerShortcuts()) {
+            ImGui::SetScrollY(ImGui::GetScrollY() + rightStick * 6 * area.unit);
+        }
+        skin::focusWindow();
+        ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 7 * area.unit);
+        help.begin();
+        drawRows();
+        description = help.finish();
+        ImGuiContext& g = *ImGui::GetCurrentContext();
+        float y = g.NavWindow == pane && g.NavId && g.NavCursorVisible
+                      ? ImGui::WindowRectRelToAbs(pane, pane->NavRectRel[g.NavLayer]).GetCenter().y
+                      : -FLT_MAX;
+        menu::opt::finishPage(y, false);
+        ImGui::PopStyleVar();
+    }
+    endPane(false);
+    help.draw(description, helpMin, area.max, area.unit, rightStick);
 }
 
 bool fromGame() {

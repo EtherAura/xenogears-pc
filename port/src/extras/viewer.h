@@ -39,6 +39,8 @@
 #include <vector>
 #include "navigation.h"
 
+namespace menu { class OptionHelp; }
+
 namespace extras {
 struct Bookmark;
 class View;
@@ -111,6 +113,10 @@ void bookmarkSelection();
 // region (scrolls if asked); a title is drawn in its top line. endPane after.
 bool beginPane(const char* id, ImVec2 min, ImVec2 max, const char* title = nullptr, bool scroll = true);
 void endPane(bool scrollNested = true);
+
+// A settings page using menu::opt rows and the same message box below the rows.
+void drawOptions(const Area& area, const char* id, menu::OptionHelp& help, void (*drawRows)(),
+                 const char* title = nullptr, bool focus = false);
 
 // A list entry as the game's menus draw them (a Selectable with the pointer
 // at the cursor); hint: dimmed (unavailable). True when chosen.
