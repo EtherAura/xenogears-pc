@@ -1,4 +1,4 @@
-// F1 > Gameplay > Gauntlet (port/src/system/gauntlet.h): the bosses from the
+// F1 > Extras > Boss gauntlet (port/src/system/gauntlet.h): the bosses from the
 // discs (the extras' reader), the preset or custom list, the party of each
 // fight, the recovery, Start, the run's progress and the records.
 
@@ -128,10 +128,10 @@ void partyPickers(const PcGauntletBoss& b, const PcGauntletRoster& r, int row) {
         if (party[slot] != 0xFF && !canFight(b, r, party[slot])) party[slot] = 0xFF; /* as it will fight */
     }
     bool changed = false;
-    float width = (ImGui::GetContentRegionAvail().x - 12 * scale()) / 3;
+    float width = (ImGui::GetContentRegionAvail().x - 12 * skin::unit()) / 3;
     for (int slot = 0; slot < 3; slot++) {
         ImGui::PushID(row * 4 + slot);
-        if (slot) ImGui::SameLine(0, 6 * scale());
+        if (slot) ImGui::SameLine(0, 6 * skin::unit());
         std::string shown = party[slot] == 0xFF ? "-" : memberName(r, party[slot]);
         if (skin::beginCombo("##member", shown.c_str(), 0, width)) {
             if (skin::comboItem("-", party[slot] == 0xFF)) {
@@ -163,7 +163,7 @@ void fightList(int preset, const PcGauntletRoster& roster) {
     if (n == 0) {
         hint(custom ? "No boss yet: add them below." : "No boss of this kind on the discs.");
     } else {
-        float height = std::min(n, 4) * 2 * 20.0f * scale() + 8 * scale();
+        float height = std::min(n, 4) * 2 * 20.0f * skin::unit() + 8 * skin::unit();
         ImGui::BeginChild("##gauntlet_fights", ImVec2(0, height), ImGuiChildFlags_Borders);
         int move = -1, moveBy = 0, remove = -1;
         for (int i = 0; i < n; i++) {
@@ -206,7 +206,7 @@ void fightList(int preset, const PcGauntletRoster& roster) {
     }
     if (custom && !G.bosses.empty()) {
         if (G.addChoice >= (int)G.bosses.size()) G.addChoice = 0;
-        float addW = std::max(60.0f * scale(), ImGui::GetContentRegionAvail().x - 60.0f * scale());
+        float addW = std::max(60.0f * skin::unit(), ImGui::GetContentRegionAvail().x - 60.0f * skin::unit());
         const PcGauntletBoss& shown = G.bosses[G.addChoice];
         if (skin::beginCombo("##gauntlet_add", shown.name, 0, addW)) {
             for (int i = 0; i < (int)G.bosses.size(); i++) {
@@ -228,7 +228,6 @@ void fightList(int preset, const PcGauntletRoster& roster) {
 
 } // namespace
 
-// The Gauntlet block at the end of the Gameplay section.
 namespace {
 
 /* gauntlet.c's preset labels, for the catalogs */
@@ -245,7 +244,7 @@ void records() {
     PcGauntletRecord list[6];
     int r = pcGauntletRecords(list, 6);
     if (r > 0) {
-        ImGui::Dummy(ImVec2(0, 4 * scale()));
+        ImGui::Dummy(ImVec2(0, 4 * skin::unit()));
         ImGui::TextUnformatted(tr("Cleared"));
         for (int i = 0; i < r; i++) {
             char line[256];
@@ -263,11 +262,7 @@ void records() {
 
 } // namespace
 
-// The Gauntlet block at the end of the Gameplay section.
 void gauntletSection() {
-    markBlock();
-    ImGui::Dummy(ImVec2(0, 6 * scale()));
-    ImGui::SeparatorText(tr("Gauntlet"));
     textLines("The story's bosses one after another, each with the party you pick. Afterwards the game is as it "
               "was before: no EXP, items or gold are kept, and no save is touched.");
     int current = 0, count = 0, retries = 0, skipped = 0, quitting = 0;

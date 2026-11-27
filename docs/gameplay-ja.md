@@ -67,9 +67,9 @@ xenogears --card format 1
 
 ## ボス連戦
 
-![F1 > ゲームプレイ > ボス連戦](img/gameplay-gauntlet.png)
+![ボス連戦の設定](img/gameplay-gauntlet.png)
 
-ストーリーのボスと次々に戦います。パーティは戦いごとに選べます。終わるとゲームは元の状態に戻ります。F1 > ゲームプレイ > ボス連戦（Gauntlet）。
+ストーリーのボスと次々に戦います。パーティは戦いごとに選べます。終わるとゲームは元の状態に戻ります。F1 > おまけ > ボス連戦（Boss gauntlet）。
 
 ![ギアのボス連戦の最初の戦い](img/gameplay-gauntlet-fight.webp)
 

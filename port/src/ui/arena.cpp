@@ -1,4 +1,4 @@
-// F1 > Extras > Battle arena (port/src/system/arena.h; xg-htn.35.16): Battling's own
+// PvP pages in F1 > Extras (port/src/system/arena.h; xg-htn.35.16): Battling's own
 // two-player bouts from wherever the game is, who plays on what, and where
 // the match is; the battle music; versus battles (a formation, or a mirror
 // match: a copy of the party, or party vs party: each player's party from a
@@ -69,7 +69,18 @@ void players() {
                  pad1 != nullptr ? tr(" and ") : "", pad1 != nullptr ? pad1 : "",
                  pad2 != nullptr ? pad2 : tr("a second gamepad (none connected)"));
     }
-    textLines(line);
+    markBlock();
+    auto showDevices = [](const char* player, const char* gamepad, bool keyboard) {
+        if (gamepad && keyboard) {
+            ImGui::Text("%s: %s + %s", player, gamepad, tr("Keyboard"));
+        } else {
+            const char* device = gamepad ? gamepad : tr(keyboard ? "Keyboard" : "No gamepad is connected.");
+            ImGui::Text("%s: %s", player, device);
+        }
+    };
+    showDevices(tr("Player 1"), pad1, !keyboard2);
+    showDevices(tr("Player 2"), pad2, keyboard2);
+    hint("%s", line);
     if (pcArenaKeyboardOffered()) {
         bool on = keyboard2;
         if (ImGui::Checkbox(tr("Player 2 on the keyboard"), &on)) {
@@ -94,6 +105,8 @@ struct {
 
 void musicPicker() {
     if (extrasJukeboxSongCount == nullptr) return; // a build without the extras: no list
+    markBlock();
+    ImGui::TextUnformatted(tr("Battle music"));
     int value = pcArenaMusicSetting();
     if (value == 0) {
         BM.label = tr("Game's default");
@@ -114,7 +127,9 @@ void musicPicker() {
         BM.labelFor = value;
     }
     ImGui::BeginDisabled(settingsPinned("arena_music") != 0);
-    bool open = skin::beginCombo("##arenamusic", BM.label.c_str());
+    ImGui::SameLine();
+    float width = fminf(skin::valueWidth(), ImGui::GetContentRegionAvail().x);
+    bool open = skin::beginCombo("##arenamusic", BM.label.c_str(), 0, width);
     if (open) {
         int n = extrasJukeboxSongCount();
         int highlighted = -2;
@@ -183,6 +198,7 @@ const StageName* stageName(int id) {
 }
 
 void stagePicker() {
+    markBlock();
     int value = pcArenaStageSetting(); // always one of the list's (Blackmoon Forest by default)
     char label[160];
     const StageName* shown = stageName(value - 1);
@@ -214,13 +230,14 @@ enum { PARTY_CURRENT, PARTY_NEW, PARTY_PICK };
 const char* const memberNames[11] = {N_("Fei"),  N_("Elly"),     N_("Citan"),   N_("Bart"),  N_("Billy"),
                                      N_("Rico"), N_("Emeralda"), N_("Chu-Chu"), N_("Maria"), N_("Citan (sword)"),
                                      N_("Emeralda (adult)")};
-struct {
+struct PartyChoice {
     int mode = PARTY_CURRENT;
     int picked[3] = {0, 2, 255}; // in order, the first the leader
-} P;
+} parties[2];
 
 // The party the picker gives now: ids (255 none); fromSave: as the save has them.
 bool pickedParty(int party[3], bool online, bool* fromSave) {
+    const PartyChoice& P = parties[online];
     bool loaded = pcArenaGameLoaded() != 0;
     *fromSave = loaded && !online;
     int mode = P.mode == PARTY_CURRENT && !loaded ? PARTY_NEW : P.mode;
@@ -239,6 +256,8 @@ bool pickedParty(int party[3], bool online, bool* fromSave) {
 }
 
 void partyPicker(bool online) {
+    markBlock();
+    PartyChoice& P = parties[online];
     bool loaded = pcArenaGameLoaded() != 0;
     if (!loaded && P.mode == PARTY_CURRENT) P.mode = PARTY_NEW;
     ImGui::TextUnformatted(tr("Your party"));
@@ -298,16 +317,44 @@ void partyPicker(bool online) {
     }
 }
 
+struct FormationChoice {
+    int selected = -1;
+    char filter[48] = "";
+};
 struct {
     XgVersusScan* scan = nullptr;
     bool scanned = false;
-    std::string disc;  // the image the list is of
+    std::string disc;
     std::vector<XgVersusFormation> list;
-    int selected = -1; // in list
-    char filter[48] = "";
-    bool mirror = false; // a mirror match rather than a formation
-    bool party = false;  // party vs party (xg-htn.35.143) rather than a formation
-} V;
+    FormationChoice local, online;
+} formations;
+
+int matchChoice(const char* const* labels, int count, int selected) {
+    markBlock();
+    ImGui::TextUnformatted(tr("Match type"));
+    ImGui::SameLine();
+    float width = fminf(skin::valueWidth(), ImGui::GetContentRegionAvail().x);
+    if (skin::beginCombo("##match-type", tr(labels[selected]), 0, width)) {
+        for (int i = 0; i < count; ++i) {
+            if (skin::comboItem(tr(labels[i]), selected == i) && selected != i) {
+                sfx::play(sfx::CHOOSE);
+                selected = i;
+            }
+        }
+        skin::endCombo();
+    }
+    return selected;
+}
+
+void allGearsOption() {
+    markBlock();
+    bool all = pcArenaAllGearsSetting() != 0;
+    if (ImGui::Checkbox(tr("Every Gear"), &all)) {
+        sfx::play(sfx::CHOOSE);
+        pcArenaSetAllGears(all);
+    }
+    hint("All 49 Gears to choose from, Argento too, not only those the story has reached.");
+}
 
 bool matches(const XgVersusFormation& f, const char* filter) {
     if (filter[0] == '\0') return true;
@@ -331,7 +378,7 @@ void availability(bool available, const char* why) {
 }
 
 // A match from the menu (system/arena.c): where it is, and the way back.
-void matchState(int phase) {
+void matchState(int phase, void (*resumeGame)()) {
     switch (phase) {
     case ARENA_PHASE_PENDING:
         ImGui::TextUnformatted(tr("Starting the match..."));
@@ -340,12 +387,13 @@ void matchState(int phase) {
         ImGui::TextUnformatted(tr("Back to your game..."));
         break;
     default:
-        textLines("In a match: at its end both players choose Rematch or Leave. Leave brings your game back as it "
+        markBlock();
+        hint("In a match: at its end both players choose Rematch or Leave. Leave brings your game back as it "
                   "was.");
         if (ImGui::Button(tr("Leave the match"))) {
             sfx::play(sfx::BACK);
             pcArenaMatchQuit();
-            closeMenu();
+            resumeGame();
         }
         break;
     }
@@ -353,23 +401,19 @@ void matchState(int phase) {
 
 // A mirror match (versusBlock): player 2 commands a copy of the party
 // (include/pc_arena.h, port/src/game/battle/mirror.c); no formation to choose.
-void mirrorBlock() {
-    textLines("Player 2 commands a copy of your party, on foot: on each of its members' turns pad 2 has that "
-              "member's own command ring, with everything the member has (attacks and combos within its AP, the "
-              "deathblows it knows, its Ether, Defend, Items from its own copy of your inventory). Its Escape "
-              "gives up the battle. Its members look like yours: their name with (P2) shows whose turn it is. "
-              "At its end both players choose Rematch or Leave, and Leave brings your game back as it was.");
+void mirrorBlock(void (*resumeGame)()) {
     partyPicker(false);
     const char* why = nullptr;
     bool available = pcArenaMatchAvailable(&why) != 0;
     int party[3];
     bool fromSave = false;
     bool partyOk = pickedParty(party, false, &fromSave);
+    markBlock();
     ImGui::BeginDisabled(!available || !partyOk);
     if (ImGui::Button(tr("Fight##mirror"))) {
         if (pcArenaMatchStart(ARENA_MATCH_MIRROR, 0, 0, party, fromSave)) {
             sfx::play(sfx::CHOOSE);
-            closeMenu();
+            resumeGame();
         } else {
             sfx::play(sfx::BUZZ);
         }
@@ -382,17 +426,12 @@ void mirrorBlock() {
 // (arena_saves.cpp), player 1's against player 2's on one machine; the match
 // as a mirror match's (system/arena.c pcArenaMatchStartParty,
 // port/src/game/battle/mirror.c).
-void partyBlock() {
+void partyBlock(void (*resumeGame)()) {
     static XgPartyRecord record[2], logged[2];
     static bool haveLogged[2] = {false, false};
     bool ok[2] = {false, false};
-    textLines("Each player brings a party from a memory-card save, on foot: player 1 commands theirs on pad 1, "
-              "player 2 theirs on pad 2, each member with everything it has in that save (attacks and combos within "
-              "its AP, the deathblows it knows, its Ether, Defend, Items from its own save's items). Both may "
-              "come from the same save, with the same members. Escape gives up the battle. At its end both players "
-              "choose Rematch or Leave, and Leave brings your game back as it was.");
     for (int p = 0; p < 2; p++) {
-        ImGui::Dummy(ImVec2(0, 4 * scale()));
+        ImGui::Dummy(ImVec2(0, 4 * skin::unit()));
         ok[p] = arenaSavesPanel(p + 1, &record[p]);
         if (!ok[p]) {
             haveLogged[p] = false;
@@ -422,14 +461,15 @@ void partyBlock() {
             haveLogged[p] = true;
         }
     }
-    ImGui::Dummy(ImVec2(0, 4 * scale()));
+    ImGui::Dummy(ImVec2(0, 4 * skin::unit()));
     const char* why = nullptr;
     bool available = pcArenaMatchAvailable(&why) != 0;
+    markBlock();
     ImGui::BeginDisabled(!available || !ok[0] || !ok[1]);
     if (ImGui::Button(tr("Fight##party"))) {
         if (pcArenaMatchStartParty(&record[0], &record[1], nullptr)) {
             sfx::play(sfx::CHOOSE);
-            closeMenu();
+            resumeGame();
         } else {
             sfx::play(sfx::BUZZ);
         }
@@ -442,6 +482,7 @@ void partyBlock() {
 // Each player sees their own side's HP and EP; the opponent's only with this
 // (system/arena.c; the Enemy info window, port/src/game/battle/enemyinfo.c).
 void opponentHpOption() {
+    markBlock();
     bool opponentHp = pcVersusOpponentHpSetting() != 0;
     ImGui::BeginDisabled(settingsPinned("arena_opponent_hp") != 0);
     if (ImGui::Checkbox(tr("Opponent's HP and EP"), &opponentHp)) {
@@ -453,16 +494,78 @@ void opponentHpOption() {
          "neither player sees the other's. Online, the host's choice holds for both players.");
 }
 
+const XgVersusFormation* formationPicker(FormationChoice& choice) {
+    markBlock();
+    if (xgVersusScanBegin == nullptr) {
+        hint("Not in this build (it reads the battles with the extras).");
+        return nullptr;
+    }
+    const char* path = cdSwapPath(0);
+    if (formations.disc != (path ? path : "")) { // another disc in the drive: its tables
+        if (formations.scan != nullptr) xgVersusScanFree(formations.scan);
+        formations = {};
+        formations.disc = path ? path : "";
+    }
+    if (!formations.scanned) {
+        if (formations.scan == nullptr) formations.scan = xgVersusScanBegin();
+        if (formations.scan == nullptr || xgVersusScanStep(formations.scan, 12)) {
+            if (formations.scan != nullptr) {
+                XgVersusFormation* l = nullptr;
+                int n = xgVersusScanResult(formations.scan, &l);
+                if (n > 0) formations.list.assign(l, l + n);
+                free(l);
+                xgVersusScanFree(formations.scan);
+                formations.scan = nullptr;
+            }
+            formations.scanned = true;
+        } else {
+            ImGui::ProgressBar((float)xgVersusScanProgress(formations.scan), ImVec2(-1, 0), tr("Reading the battles"));
+            return nullptr;
+        }
+    }
+    if (formations.list.empty()) {
+        hint("No battles found on the disc in the drive.");
+        return nullptr;
+    }
+    ImGui::TextUnformatted(tr("Enemy formation"));
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##versusfilter", tr("Filter by enemy"), choice.filter, sizeof choice.filter);
+    // The keyboard and gamepad enter the list (confirm on it) and move in it; a
+    // formation chosen there takes the cursor on to the controls below, as a
+    // list box's own child would keep it in the list (xg-htn.35.148).
+    bool chosenByNav = false;
+    if (ImGui::BeginListBox("##versuslist", ImVec2(-1, 6 * ROW * skin::unit()))) {
+        for (int i = 0; i < (int)formations.list.size(); i++) {
+            const XgVersusFormation& f = formations.list[i];
+            if (!matches(f, choice.filter)) continue;
+            char label[160];
+            snprintf(label, sizeof label, "%s##f%d", f.label, i);
+            if (ImGui::Selectable(label, choice.selected == i)) {
+                if (choice.selected != i) sfx::play(sfx::MOVE);
+                choice.selected = i;
+                chosenByNav = ImGui::GetCurrentContext()->NavActivateId != 0;
+            }
+        }
+        ImGui::EndListBox();
+    }
+    if (chosenByNav) ImGui::SetKeyboardFocusHere();
+    if (choice.selected < 0) {
+        hint("Choose an enemy formation.");
+        return nullptr;
+    }
+    const auto& selected = formations.list[choice.selected];
+    hint("Battle table %d, config %d.", selected.table, selected.config);
+    return &selected;
+}
+
 // Versus battles: player 2 commands an enemy formation, or a copy of the
 // party (a mirror match) (include/pc_arena.h), or party vs party.
-void versusBlock() {
-    ImGui::Dummy(ImVec2(0, 6 * scale()));
-    ImGui::SeparatorText(tr("Versus battle"));
+void versusBlock(void (*resumeGame)()) {
     int kind = 0;
     int match = pcArenaMatchPhase(&kind);
     if (match != ARENA_PHASE_IDLE &&
         (kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_MIRROR || kind == ARENA_MATCH_PARTY)) {
-        matchState(match);
+        matchState(match, resumeGame);
         return;
     }
     int table = 0, config = 0;
@@ -479,94 +582,34 @@ void versusBlock() {
         ImGui::TextUnformatted(tr("In a versus battle."));
         return;
     }
-    if (ImGui::RadioButton(tr("An enemy formation##versus"), !V.mirror && !V.party)) {
-        if (V.mirror || V.party) sfx::play(sfx::CHOOSE);
-        V.mirror = V.party = false;
+    enum { Formation, Mirror, Party };
+    static const char* const modes[] = {N_("An enemy formation"), N_("Mirror match"), N_("Party vs party")};
+    static int mode = Formation;
+    mode = matchChoice(modes, IM_COUNTOF(modes), mode);
+    switch (mode) {
+    case Mirror:
+        hint("Player 2 commands a copy of your party on foot, with its own command ring and copy of your items.");
+        break;
+    case Party:
+        hint("Each player controls a party from a memory-card save. Both parties fight on foot.");
+        break;
+    default:
+        hint("Player 2 uses the second controller to choose attacks and targets for an enemy formation.");
+        break;
     }
-    ImGui::SameLine();
-    if (ImGui::RadioButton(tr("Mirror match"), V.mirror)) {
-        if (!V.mirror) sfx::play(sfx::CHOOSE);
-        V.mirror = true;
-        V.party = false;
-    }
-    // on the same line when it fits (the Japanese labels do), else below
-    const char* partyLabel = tr("Party vs party");
-    const ImGuiStyle& style = ImGui::GetStyle();
-    float need = style.ItemSpacing.x + ImGui::GetFrameHeight() + style.ItemInnerSpacing.x +
-                 ImGui::CalcTextSize(partyLabel, nullptr, true).x;
-    if (ImGui::GetItemRectMax().x + need <= ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x) {
-        ImGui::SameLine();
-    }
-    if (ImGui::RadioButton(partyLabel, V.party)) {
-        if (!V.party) sfx::play(sfx::CHOOSE);
-        V.party = true;
-        V.mirror = false;
-    }
+    musicPicker();
     opponentHpOption();
-    if (V.mirror || V.party) stagePicker();
-    if (V.mirror) {
-        mirrorBlock();
+    if (mode == Mirror || mode == Party) stagePicker();
+    if (mode == Mirror) {
+        mirrorBlock(resumeGame);
         return;
     }
-    if (V.party) {
-        partyBlock();
+    if (mode == Party) {
+        partyBlock(resumeGame);
         return;
     }
-    textLines("Player 2 commands an enemy formation in a normal battle: on each enemy's turn, pad 2 picks what "
-              "that enemy can do now, then its target. It starts from wherever you are; at its end both players "
-              "choose Rematch or Leave, and Leave brings your game back as it was: nothing won, nothing lost.");
-    if (xgVersusScanBegin == nullptr) {
-        hint("Not in this build (it reads the battles with the extras).");
-        return;
-    }
-    const char* path = cdSwapPath(0);
-    if (path != nullptr && V.disc != path) { // another disc in the drive: its tables
-        if (V.scan != nullptr) xgVersusScanFree(V.scan);
-        V = {};
-        V.disc = path;
-    }
-    if (!V.scanned) {
-        if (V.scan == nullptr) V.scan = xgVersusScanBegin();
-        if (V.scan == nullptr || xgVersusScanStep(V.scan, 12)) {
-            if (V.scan != nullptr) {
-                XgVersusFormation* l = nullptr;
-                int n = xgVersusScanResult(V.scan, &l);
-                V.list.assign(l, l + (n > 0 ? n : 0));
-                free(l);
-                xgVersusScanFree(V.scan);
-                V.scan = nullptr;
-            }
-            V.scanned = true;
-        } else {
-            ImGui::ProgressBar((float)xgVersusScanProgress(V.scan), ImVec2(-1, 0), tr("Reading the battles"));
-            return;
-        }
-    }
-    if (V.list.empty()) {
-        hint("No battles found on the disc in the drive.");
-        return;
-    }
-    ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##versusfilter", tr("Filter by enemy"), V.filter, sizeof V.filter);
-    // The keyboard and gamepad enter the list (confirm on it) and move in it; a
-    // formation chosen there takes the cursor on to the controls below, as a
-    // list box's own child would keep it in the list (xg-htn.35.148).
-    bool chosenByNav = false;
-    if (ImGui::BeginListBox("##versuslist", ImVec2(-1, 6 * ROW * scale()))) {
-        for (int i = 0; i < (int)V.list.size(); i++) {
-            const XgVersusFormation& f = V.list[i];
-            if (!matches(f, V.filter)) continue;
-            char label[160];
-            snprintf(label, sizeof label, "%s##f%d", f.label, i);
-            if (ImGui::Selectable(label, V.selected == i)) {
-                if (V.selected != i) sfx::play(sfx::MOVE);
-                V.selected = i;
-                chosenByNav = ImGui::GetCurrentContext()->NavActivateId != 0;
-            }
-        }
-        ImGui::EndListBox();
-    }
-    if (chosenByNav) ImGui::SetKeyboardFocusHere(); // the next control: Party in its Gears
+    const XgVersusFormation* formation = formationPicker(formations.local);
+    markBlock();
     bool gears = pcVersusGearsSetting() != 0;
     if (ImGui::Checkbox(tr("Party in its Gears"), &gears)) {
         sfx::play(sfx::CHOOSE);
@@ -576,26 +619,24 @@ void versusBlock() {
     partyPicker(false);
     const char* why = nullptr;
     bool available = pcArenaMatchAvailable(&why) != 0;
-    bool chosen = V.selected >= 0 && V.selected < (int)V.list.size();
     int party[3];
     bool fromSave = false;
     bool partyOk = pickedParty(party, false, &fromSave);
-    ImGui::BeginDisabled(!available || !chosen || !partyOk);
+    markBlock();
+    ImGui::BeginDisabled(!available || formation == nullptr || !partyOk);
     if (ImGui::Button(tr("Fight"))) {
-        const XgVersusFormation& f = V.list[V.selected];
-        if (pcArenaMatchStart(ARENA_MATCH_VERSUS, f.table, f.config, party, fromSave)) {
+        if (pcArenaMatchStart(ARENA_MATCH_VERSUS, formation->table, formation->config, party, fromSave)) {
             sfx::play(sfx::CHOOSE);
-            closeMenu();
+            resumeGame();
         } else {
             sfx::play(sfx::BUZZ);
         }
     }
     ImGui::EndDisabled();
-    if (chosen) {
-        hint("Battle table %d, config %d.", V.list[V.selected].table, V.list[V.selected].config);
-    }
     availability(available, why);
 }
+
+enum OnlineMatch { OnlineBattling, OnlineVersus, OnlineParty };
 
 struct {
     bool loaded = false;
@@ -604,10 +645,8 @@ struct {
     char address[256] = "";
     int port = 7461;
     int delay = 3;
-    bool versus = false;
+    int mode = OnlineBattling;
     bool joinerPicks = true;
-    bool party = false;      // host: party vs party (each player's party from their own save)
-    bool bringParty = false; // join: a party from a save, for a host's party vs party
     XgPartyRecord record;    // this machine's party (the online browser's)
 } O;
 
@@ -632,10 +671,9 @@ void endText(const char* d, char* out, size_t size) {
         {"build", N_("The host runs another version of the game: both players need the same one.")},
         {"region", N_("The host plays the other region's game (US/JP).")},
         {"busy", N_("The host is busy.")},
-        {"pick", N_("The host lets you choose the formation: choose one in the Versus battle list above, then join "
-                    "again.")},
+        {"pick", N_("Select Versus battle and choose an enemy formation, then join again.")},
         {"disc", N_("The other player's disc is not the same as yours.")},
-        {"noparty", N_("The host plays party vs party: bring a party from a save (below), then join again.")},
+        {"noparty", N_("Select Party vs party and choose a save, then join again.")},
         {"stage", N_("The host's battle stage is not one of this game's.")},
         {"address", N_("The address is not host:port, or that host is unknown.")},
         {"error", N_("The network could not be used (is the port in use?).")},
@@ -677,18 +715,12 @@ void endText(const char* d, char* out, size_t size) {
 
 // Online: Battling with a player elsewhere, in a process of its own.
 void onlineBlock() {
-    ImGui::Dummy(ImVec2(0, 6 * scale()));
-    ImGui::SeparatorText(tr("Online"));
     if (netplayActive()) {
-        textLines("This window is an online session. At a match's end both players choose Rematch or Leave; it "
-                  "ends when one chooses Leave, when Battling is left (EXIT), or when either player closes their "
-                  "window.");
+        markBlock();
+        ImGui::TextUnformatted(tr("Online match in progress."));
+        hint("At the end of a match, choose Rematch or Leave. EXIT in Battling closes the session.");
         return;
     }
-    textLines("Battling's PLAYER1 VS PLAYER2, or a versus battle, with a player elsewhere: on your network, at an "
-              "address you share, or over a VPN you both use. The session plays in a window of its own, from "
-              "power-on; this game waits until it ends. Both players need the same version of the game (a Linux "
-              "and a Windows build of one version play together) and the same disc.");
     if (!O.loaded) {
         O.loaded = true;
         O.port = settingsInt("netplay_port", 7461);
@@ -732,10 +764,12 @@ void onlineBlock() {
             textLines("The connection is lost: the session waits for it to come back (up to a minute), then "
                       "goes on where it stopped.");
         }
+        markBlock();
         if (ImGui::Button(tr("End the session"))) {
             sfx::play(sfx::BACK);
             netplaySessionStop();
         }
+        hint("End the match for both players and return to the paused game.");
         return;
     }
     if (state == NETPLAY_OVER) {
@@ -744,97 +778,70 @@ void onlineBlock() {
         snprintf(line, sizeof line, tr("The last session: %s"), why);
         textLines(line);
     }
-    bool partyOk = false; // this machine's party, where one is brought: the browser's says it passes
+    markBlock();
     if (ImGui::RadioButton(tr("Host (player 1)"), O.host)) O.host = true;
     ImGui::SameLine();
     if (ImGui::RadioButton(tr("Join (player 2)"), !O.host)) O.host = false;
+    hint("Use the same game version, disc and session code. A session opens in its own window.");
+    markBlock();
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##netplaycode", tr("Session code"), O.code, sizeof O.code);
     hint("The same word for both players. It keeps others out of the session; it does not encrypt it.");
     if (O.host) {
-        ImGui::SetNextItemWidth(12 * ROW * scale() / 2);
-        if (ImGui::InputInt(tr("UDP port"), &O.port)) O.port = O.port < 1024 ? 1024 : O.port > 65535 ? 65535 : O.port;
-        ImGui::SetNextItemWidth(12 * ROW * scale() / 2);
+        markBlock();
+        ImGui::SetNextItemWidth(6 * ROW * skin::unit());
+        if (ImGui::InputInt(tr("UDP port"), &O.port)) O.port = std::clamp(O.port, 1024, 65535);
+        hint("Use a reachable UDP port. Play on the same network, over a VPN, or forward the port on the host's router.");
+        markBlock();
+        ImGui::SetNextItemWidth(6 * ROW * skin::unit());
         ImGui::SliderInt(tr("Input delay"), &O.delay, 1, 8, "%d", ImGuiSliderFlags_AlwaysClamp);
         hint("Vblanks between a press and what it does, the same on both screens: 2 on a home network, 3 to 6 over "
              "the internet.");
-        if (ImGui::RadioButton(tr("Battling"), !O.versus && !O.party)) O.versus = O.party = false;
-        ImGui::SameLine();
-        if (ImGui::RadioButton(tr("Versus battle##online"), O.versus)) {
-            O.versus = true;
-            O.party = false;
-        }
-        // on the same line when it fits, else below (as the Versus battle screen's)
-        const char* partyLabel = tr("Party vs party##online");
-        const ImGuiStyle& style = ImGui::GetStyle();
-        float need = style.ItemSpacing.x + ImGui::GetFrameHeight() + style.ItemInnerSpacing.x +
-                     ImGui::CalcTextSize(partyLabel, nullptr, true).x;
-        if (ImGui::GetItemRectMax().x + need <= ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x) {
-            ImGui::SameLine();
-        }
-        if (ImGui::RadioButton(partyLabel, O.party)) {
-            O.party = true;
-            O.versus = false;
-        }
-        if (O.party) {
-            textLines("Each player brings a party from a memory-card save on their own machine, on foot: yours "
-                      "(player 1) against theirs, each member with everything it has in that save. The battle "
-                      "music, the stage and whether each sees the other's HP and EP are yours, for both players.");
-            ImGui::PushID("online");
-            stagePicker();
-            opponentHpOption();
-            partyOk = arenaSavesPanel(0, &O.record);
-            ImGui::PopID();
-            hint("The other player's party comes from their own save, on their machine: it is not verified. Edited "
-                 "saves are accepted; only values outside the game's ranges are refused, and both players see why.");
-        } else if (O.versus) {
-            bool chosen = V.selected >= 0 && V.selected < (int)V.list.size();
-            ImGui::Checkbox(tr("Player 2 chooses the formation"), &O.joinerPicks);
-            if (O.joinerPicks) {
-                hint("Each player picks their own side: player 2 the formation they command, you your party.");
-            } else if (chosen) {
-                snprintf(line, sizeof line, tr("Player 2 commands %s (the formation chosen above)."),
-                         V.list[V.selected].label);
-                textLines(line);
-            } else {
-                hint("Choose a formation in the Versus battle list above.");
-            }
-            partyPicker(true);
-        } else {
-            hint("Your Gear list (as far as your story has reached, or Every Gear above) is both players'.");
-        }
-        hint("Your gameplay settings (difficulty, text speed...) are both players' for the session.");
     } else {
+        markBlock();
         ImGui::SetNextItemWidth(-1);
         ImGui::InputTextWithHint("##netplayaddress", tr("The host's address:port"), O.address, sizeof O.address);
-        if (V.selected >= 0 && V.selected < (int)V.list.size()) {
-            snprintf(line, sizeof line, tr("For a versus battle where you choose: %s (from the Versus battle list "
-                                           "above)."), V.list[V.selected].label);
-            textLines(line);
-        } else {
-            hint("For a versus battle where you choose the formation, pick one in the Versus battle list above.");
-        }
         hint("A name or an IPv4 address, then the port (192.168.1.20:7461); an IPv6 address goes in brackets "
              "([2001:db8::20]:7461).");
-        if (ImGui::Checkbox(tr("Bring a party from a save (party vs party)"), &O.bringParty)) sfx::play(sfx::CHOOSE);
-        if (O.bringParty) {
-            ImGui::PushID("online");
-            partyOk = arenaSavesPanel(0, &O.record);
-            ImGui::PopID();
-            hint("For a host who plays party vs party: your party against theirs (you are player 2). Their party "
-                 "comes from their own save, on their machine: it is not verified. Edited saves are accepted; only "
-                 "values outside the game's ranges are refused, and both players see why.");
-        }
     }
-    hint("The other player sees your IP address, as you see theirs: play with people you trust. Hosting needs the "
-         "UDP port reachable: the same network, a VPN you both use (Tailscale, ZeroTier...), or the port forwarded "
-         "on your router.");
-    bool formation = V.selected >= 0 && V.selected < (int)V.list.size();
-    bool bringing = O.host ? O.party : O.bringParty;
+    static const char* const modes[] = {N_("Battling"), N_("Versus battle"), N_("Party vs party")};
+    O.mode = matchChoice(modes, IM_COUNTOF(modes), O.mode);
+    hint("Choose the same match type on both sides.");
+    const bool bringing = O.mode == OnlineParty;
+    bool partyOk = false;
+    const XgVersusFormation* formation = nullptr;
+    switch (O.mode) {
+    case OnlineBattling:
+        if (O.host) allGearsOption();
+        break;
+    case OnlineVersus:
+        if (O.host) {
+            markBlock();
+            ImGui::Checkbox(tr("Player 2 chooses the formation"), &O.joinerPicks);
+            hint("On, Player 2 chooses the enemy formation when joining. Off, the host chooses it here.");
+        }
+        if (!O.host || !O.joinerPicks) formation = formationPicker(formations.online);
+        if (O.host) {
+            opponentHpOption();
+            partyPicker(true);
+        }
+        break;
+    case OnlineParty:
+        if (O.host) {
+            stagePicker();
+            opponentHpOption();
+        }
+        partyOk = arenaSavesPanel(0, &O.record);
+        hint("Both players bring a party from their own save. Edited saves are accepted within the game's ranges.");
+        break;
+    }
+    if (O.host) musicPicker();
+    markBlock();
     bool ready = O.code[0] != '\0' && (!bringing || partyOk) &&
-                 (O.host ? !O.versus || O.joinerPicks || formation : strchr(O.address, ':') != nullptr);
+                 (O.host ? O.mode != OnlineVersus || O.joinerPicks || formation : strchr(O.address, ':') != nullptr);
     ImGui::BeginDisabled(!ready);
-    if (ImGui::Button(O.host ? tr("Host##netplay") : tr("Join##netplay"))) {
+    const char* start = O.host ? tr("Host##netplay") : tr("Join##netplay");
+    if (ImGui::Button(start)) {
         NetplayStart s = {};
         s.host = O.host;
         snprintf(s.code, sizeof s.code, "%s", O.code);
@@ -842,21 +849,21 @@ void onlineBlock() {
         snprintf(s.address, sizeof s.address, "%s", O.address);
         s.delay = O.delay;
         s.progress = pcArenaAllGearsSetting() ? 1000 : netplaySessionStory();
-        s.versus = O.host && O.versus && (O.joinerPicks || formation);
-        s.partyVsParty = O.host && O.party;
+        s.versus = O.host && O.mode == OnlineVersus;
+        s.partyVsParty = O.host && bringing;
         s.hasParty = bringing && partyOk;
         if (s.hasParty) s.record = O.record;
-        s.joinerPicks = O.joinerPicks;
+        s.joinerPicks = s.versus && O.joinerPicks;
         s.pick = !O.host && formation;
         if (formation) {
-            s.table = V.list[V.selected].table;
-            s.config = V.list[V.selected].config;
+            s.table = formation->table;
+            s.config = formation->config;
         }
         if (s.versus) {
             bool fromSave = false;
             if (!pickedParty(s.party, true, &fromSave)) netplaySessionParty(s.party);
         }
-        settingsDescribe("netplay_port", "Online (F1 > Extras > Battle arena): the UDP port to host on (default 7461)");
+        settingsDescribe("netplay_port", "Online play (F1 > Extras): the UDP port to host on (default 7461)");
         settingsDescribe("netplay_delay", "Online: the input delay to host with, in vblanks (1..8; default 3)");
         settingsDescribe("netplay_address", "Online: the last host joined, host:port");
         settingsSetInt("netplay_port", O.port);
@@ -866,33 +873,24 @@ void onlineBlock() {
         sfx::play(netplayLaunch(&s) ? sfx::CHOOSE : sfx::BUZZ);
     }
     ImGui::EndDisabled();
+    if (O.code[0] == '\0') hint("Enter the session code.");
+    else if (!O.host && strchr(O.address, ':') == nullptr) hint("Enter the host's address and port.");
+    else if (bringing && !partyOk) hint("Choose a party from a memory-card save.");
+    else if (!ready) hint("Choose an enemy formation or let Player 2 choose.");
+    else hint("Both players see each other's IP address. The host's gameplay settings apply to both players.");
 }
 
-} // namespace
-
-// The block at the end of the Extras section.
-void arenaSection() {
-    markBlock();
-    ImGui::Dummy(ImVec2(0, 6 * scale()));
-    ImGui::SeparatorText(tr("Battle arena"));
-    textLines("Battling's two-player bouts from wherever you are: BONUS BATTLING, PLAYER1 VS PLAYER2. At a bout's "
-              "end both players choose Rematch (the same two Gears again) or Leave; Leave, or EXIT in its menu, "
-              "brings your game back as it was.");
+void battlingBlock(void (*resumeGame)()) {
     players();
-    bool all = pcArenaAllGearsSetting() != 0;
-    if (ImGui::Checkbox(tr("Every Gear"), &all)) {
-        sfx::play(sfx::CHOOSE);
-        pcArenaSetAllGears(all);
-    }
-    hint("All 49 Gears to choose from, Argento too, not only those the story has reached.");
-    ImGui::TextUnformatted(tr("Battle music"));
+    allGearsOption();
     musicPicker();
+    markBlock();
     int kind = 0;
     int match = pcArenaMatchPhase(&kind);
     switch (match != ARENA_PHASE_IDLE ? -1 : pcArenaPhase()) {
     case -1:
         if (kind == ARENA_MATCH_BATTLING) {
-            matchState(match);
+            matchState(match, resumeGame);
         } else {
             ImGui::TextUnformatted(tr("In a versus battle."));
         }
@@ -904,13 +902,14 @@ void arenaSection() {
         if (ImGui::Button(tr("Go to the arena"))) {
             if (pcArenaMatchStart(ARENA_MATCH_BATTLING, 0, 0, nullptr, 0)) {
                 sfx::play(sfx::CHOOSE);
-                closeMenu();
+                resumeGame();
             } else {
                 sfx::play(sfx::BUZZ);
             }
         }
         ImGui::EndDisabled();
         availability(available, why);
+        if (available) hint("Choose PLAYER1 VS PLAYER2 in Battling. Both players can rematch or leave after a bout.");
         break;
     }
     case ARENA_PHASE_PENDING:
@@ -928,8 +927,29 @@ void arenaSection() {
         ImGui::TextUnformatted(tr("In the arena: EXIT in its main menu brings you back."));
         break;
     }
-    versusBlock();
-    onlineBlock();
+}
+
+} // namespace
+
+void arenaSection(ArenaPart part, void (*resumeGame)()) {
+    ImGui::PushID(static_cast<int>(part));
+    switch (part) {
+    case ArenaPart::Battling: battlingBlock(resumeGame); break;
+    case ArenaPart::Versus: versusBlock(resumeGame); break;
+    case ArenaPart::Online: onlineBlock(); break;
+    }
+    ImGui::PopID();
+}
+
+void arenaFallback(void (*resumeGame)()) {
+    if (!netplayActive()) {
+        ImGui::SeparatorText(tr("Battle arena"));
+        arenaSection(ArenaPart::Battling, resumeGame);
+        ImGui::SeparatorText(tr("Versus battle"));
+        arenaSection(ArenaPart::Versus, resumeGame);
+    }
+    ImGui::SeparatorText(tr("Online"));
+    arenaSection(ArenaPart::Online, resumeGame);
 }
 
 } // namespace menu

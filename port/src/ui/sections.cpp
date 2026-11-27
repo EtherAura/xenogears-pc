@@ -72,9 +72,6 @@ extern "C" {
 
 namespace menu {
 
-void gauntletSection(); // gauntlet.cpp: the Gameplay section's Gauntlet block
-void arenaSection();    // arena.cpp: the Extras section's Battle arena block
-
 namespace {
 
 // ---- layout helpers ---------------------------------------------------------------------
@@ -3204,12 +3201,6 @@ void battlesSection() {
         opt::endSubmenu();
     }
 
-    if (opt::beginSubmenu("gauntlet", N_("Boss gauntlet"), nullptr,
-                          N_("Fight bosses back to back from your current party state."))) {
-        opt::group("");
-        if (opt::plain()) gauntletSection(); // gauntlet.cpp
-        opt::endSubmenu();
-    }
     opt::endPage();
 }
 
@@ -4325,34 +4316,6 @@ bool setupStart() {
     return false;
 }
 
-// The extras (port/src/extras/extras.h; weak: a build may leave them out).
-extern "C" void extrasOpenFromMenu(void) __attribute__((weak));
-extern "C" int extrasLeftIntoGame(void) __attribute__((weak));
-extern "C" int netplayActive(void) __attribute__((weak)); // system/netplay.c
-
-void extrasSection() {
-    markBlock();
-    wrappedText(tr("The asset browser and the viewers: the game's files, pictures, models and sounds, from your "
-                       "own disc."));
-    if (extrasOpenFromMenu == nullptr) {
-        hint("Not in this build.");
-        return;
-    }
-    bool session = netplayActive != nullptr && netplayActive(); // an online session's window: one side alone
-    ImGui::BeginDisabled(session);
-    bool open = ImGui::Button(tr("Open the extras"));
-    ImGui::EndDisabled();
-    if (session) hint("Not during an online session: they could change this side's game alone.");
-    if (open) {
-        sfx::play(sfx::CHOOSE);
-        extrasOpenFromMenu(); // runs until they are left; the game stays paused
-        if (extrasLeftIntoGame != nullptr && extrasLeftIntoGame()) {
-            closeMenu(); // the gallery's cutscene replay: the game goes on into it
-        }
-    }
-    hint("The game stays paused while they are open. Leaving them comes back here.");
-}
-
 namespace {
 
 // A section's page (the Search page draws them all, filtered: no Extras, no
@@ -4420,12 +4383,13 @@ void drawPage(int section) {
 
 void drawSection(int section) {
     if (section == EXTRAS) {
+        // The menu normally opens the Extras hub directly. This pane covers
+        // setup without a disc, online sessions and builds without viewers.
+        markBlock();
         if (setup.noDisc) {
-            markBlock();
             textLines("Extras become available once a disc image is selected.");
         } else {
-            extrasSection();
-            arenaSection(); // arena.cpp: the Battle arena block
+            arenaFallback(closeMenu);
         }
     } else if (section == SEARCH) {
         opt::searchPage(drawPage, SECTION_COUNT);

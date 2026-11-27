@@ -119,6 +119,25 @@ struct HomeEntry {
     const Viewer* viewer; // null: coming
 };
 
+enum class HomeGroup { Battle, Media, Reference, Tools };
+
+HomeGroup homeGroup(const HomeEntry& entry) {
+    if (entry.viewer && entry.viewer->gameOnly) return HomeGroup::Battle;
+    if (!strcmp(entry.id, "visuals") || !strcmp(entry.id, "jukebox")) return HomeGroup::Media;
+    if (!strcmp(entry.id, "browser") || !strcmp(entry.id, "scripts")) return HomeGroup::Tools;
+    return HomeGroup::Reference;
+}
+
+const char* homeGroupName(HomeGroup group) {
+    switch (group) {
+    case HomeGroup::Battle: return N_("Battle modes");
+    case HomeGroup::Media: return N_("Media");
+    case HomeGroup::Reference: return N_("Reference");
+    case HomeGroup::Tools: return N_("Tools");
+    }
+    return "";
+}
+
 struct Step {
     unsigned long at;
     char cmd[16];
@@ -239,7 +258,7 @@ std::vector<HomeEntry> homeEntries() {
         list.push_back({p.id, p.name, p.blurb, p.order, nullptr});
     }
     for (const Viewer* v : registry()) {
-        if (visualTarget({v->id, {}}).viewer != v->id) continue;
+        if ((v->gameOnly && !st.fromMenu) || visualTarget({v->id, {}}).viewer != v->id) continue;
         bool replaced = false;
         for (HomeEntry& e : list) {
             if (strcmp(e.id, v->id) == 0) {
@@ -251,7 +270,10 @@ std::vector<HomeEntry> homeEntries() {
             list.push_back({v->id, v->name, v->blurb, v->order, v});
         }
     }
-    std::stable_sort(list.begin(), list.end(), [](const HomeEntry& a, const HomeEntry& b) { return a.order < b.order; });
+    std::stable_sort(list.begin(), list.end(), [](const HomeEntry& a, const HomeEntry& b) {
+        HomeGroup left = homeGroup(a), right = homeGroup(b);
+        return left == right ? a.order < b.order : left < right;
+    });
     return list;
 }
 
@@ -318,6 +340,10 @@ bool openViewer(const char* id) {
     ViewerTarget target = visualTarget({id, {}});
     for (const Viewer* v : registry()) {
         if (v->id == target.viewer) {
+            if (v->gameOnly && !st.fromMenu) {
+                error("Open this mode from the F1 menu.");
+                return false;
+            }
             closeViewer();
             navigationHost.open(target.viewer);
             st.navigation.root(target.viewer);
@@ -788,12 +814,17 @@ void pump() {
             break;
         case SDL_EVENT_KEY_UP:
             keyHeld[e.key.scancode] = false;
-            ImGui_ImplSDL3_ProcessEvent(&e);
+            if (e.key.scancode == SDL_SCANCODE_AC_BACK) ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, false);
+            else ImGui_ImplSDL3_ProcessEvent(&e);
             break;
         case SDL_EVENT_KEY_DOWN:
             keyHeld[e.key.scancode] = true;
             if (e.key.scancode == SDL_SCANCODE_F1) {
                 st.leaving |= !e.key.repeat;
+                break;
+            }
+            if (e.key.scancode == SDL_SCANCODE_AC_BACK) {
+                ImGui::GetIO().AddKeyEvent(ImGuiKey_Escape, true);
                 break;
             }
             // The replacements' A/B key (F12, replacements_ab_key): the open viewer's Stock /
@@ -933,24 +964,19 @@ void drawHome(ImVec2 min, ImVec2 max) {
     int& cursor = st.homeCursor;
     std::vector<HomeEntry> list = homeEntries();
     auto& store = bookmarks();
-    const float listW = fminf(150 * u, (max.x - min.x) * .4f);
+    const float listW = fminf(150 * u, (max.x - min.x) * .44f);
     ImVec2 listMax(min.x + listW, max.y);
-    ImVec2 paneMin(min.x + listW + 16 * u, min.y);
-    // The short command arc remains unboxed, as on the native Main screen.
-    // Bookmarks share its scrolling region when the user's list grows.
-    float commandTop = store.items().empty()
-        ? fmaxf(32 * u, (max.y - min.y - (list.size() + 2) * 16 * u) * .75f) : 32 * u;
-    ImGui::SetCursorScreenPos(ImVec2(min.x, min.y + commandTop));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(2 * u, 2 * u));
-    if (ImGui::BeginChild("##home", ImVec2(listMax.x - min.x, listMax.y - min.y - commandTop),
-                          ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened,
-                          ImGuiWindowFlags_NoScrollbar)) {
+    ImVec2 paneMin(listMax.x + 12 * u, min.y);
+    if (beginPane("##home", min, listMax)) {
         st.commandWindow = ImGui::GetCurrentWindow()->ID;
         for (int i = 0; i < (int)list.size(); i++) {
             const HomeEntry& e = list[i];
-            ImGui::PushID(i);
-            float x = ImGui::GetCursorPosX();
-            ImGui::SetCursorPosX(x + sinf(i * .55f) * 8 * u);
+            HomeGroup group = homeGroup(e);
+            if (i == 0 || group != homeGroup(list[i - 1])) {
+                if (i > 0) ImGui::Dummy(ImVec2(0, 3 * u));
+                ImGui::TextUnformatted(tr(homeGroupName(group)));
+            }
+            ImGui::PushID(e.id);
             const char* command = !strcmp(e.id, "browser") ? N_("Assets") : !strcmp(e.id, "visuals") ? N_("Visuals") :
                                   !strcmp(e.id, "tables") ? N_("Tables") : !strcmp(e.id, "scripts") ? N_("Scripts") : e.name;
             if (commandItem(command, cursor == i, ImGui::GetContentRegionAvail().x)) {
@@ -963,7 +989,6 @@ void drawHome(ImVec2 min, ImVec2 max) {
                     status("%s: coming in a later phase", tr(e.name));
                 }
             }
-            ImGui::SetCursorPosX(x);
             if (ImGui::IsItemFocused()) {
                 cursor = i;
             }
@@ -982,8 +1007,7 @@ void drawHome(ImVec2 min, ImVec2 max) {
             st.leaving = true;
         }
     }
-    ImGui::EndChild();
-    ImGui::PopStyleVar();
+    endPane();
     if (st.viewer != nullptr) {
         return; // opened just now: it draws from the next frame
     }
@@ -1291,6 +1315,12 @@ void drawShell() {
         buttonX -= width;
         ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
         if (ImGui::Button(label.c_str(), ImVec2(width, 15 * u))) { sound(3); returnToSource(); }
+    } else if (st.viewer && st.viewer->gameOnly) {
+        const char* label = tr("Back");
+        float width = ImGui::CalcTextSize(label).x + 12 * u;
+        buttonX -= width;
+        ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
+        if (ImGui::Button(label, ImVec2(width, 15 * u))) { sound(3); viewerBack(); }
     }
     ImGui::PopItemFlag();
     // The shop's heading is a small label window, independent of its list.
@@ -1376,9 +1406,9 @@ void frame() {
     st.rendered = true;
 }
 
-void run(bool fromMenu) {
+bool run(bool fromMenu) {
     if (st.open || !begin()) {
-        return;
+        return false;
     }
     st.menuCtx = ImGui::GetCurrentContext();
     st.menuUnit = skin::unit();
@@ -1478,6 +1508,7 @@ void run(bool fromMenu) {
     if (st.quitAfter) {
         quitNow();
     }
+    return true;
 }
 
 } // namespace
@@ -1613,7 +1644,7 @@ bool beginPane(const char* id, ImVec2 min, ImVec2 max, const char* title, bool s
     return open;
 }
 
-void endPane() {
+void endPane(bool scrollNested) {
     ImGuiWindow* pane = ImGui::GetCurrentWindow();
     ImGuiWindow* nav = ImGui::GetCurrentContext()->NavWindow;
     if (outerPane(nav) == pane) {
@@ -1628,9 +1659,11 @@ void endPane() {
     // A list can live in a nested child (NPCs, songs, tables). Its native
     // track belongs to the surrounding frame, rather than its text region.
     ImGuiWindow* scrolling = pane->ScrollMax.y > 0 ? pane : nullptr;
-    for (ImGuiWindow* child : ImGui::GetCurrentContext()->Windows) {
-        if (child->Active && child->ScrollMax.y > 0 && ImGui::IsWindowChildOf(child, pane, false, false))
-            if (!scrolling || child->ScrollMax.y > scrolling->ScrollMax.y) scrolling = child;
+    if (scrollNested) {
+        for (ImGuiWindow* child : ImGui::GetCurrentContext()->Windows) {
+            if (child->Active && child->ScrollMax.y > 0 && ImGui::IsWindowChildOf(child, pane, false, false))
+                if (!scrolling || child->ScrollMax.y > scrolling->ScrollMax.y) scrolling = child;
+        }
     }
     PaneFrame frame = st.paneFrames.back();
     st.paneFrames.pop_back();
@@ -2039,14 +2072,11 @@ extern "C" int extrasMain(void) {
     return game ? 1 : 0;
 }
 
-extern "C" int extrasLeftIntoGame(void) {
+extern "C" int extrasOpenFromMenu(void) {
+    if (!run(true)) return -1;
     int game = st.intoGame;
     st.intoGame = false;
     return game;
-}
-
-extern "C" void extrasOpenFromMenu(void) {
-    run(true);
 }
 
 extern "C" int extrasIsOpen(void) {

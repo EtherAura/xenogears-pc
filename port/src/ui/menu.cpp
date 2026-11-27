@@ -34,12 +34,14 @@ extern "C" {
 #include "cd/regional.h"
 #include "spu/output.h"
 #include "system/mouse.h"
+#include "system/netplay.h"
 #include "system/pad.h"
 #include "system/rumble.h"
 #include "system/settings.h"
 #include "system/touch.h"
 #include "system/system.h"
 #include "ui/ui.h"
+int extrasOpenFromMenu(void) __attribute__((weak));
 void extrasJukeboxTick(void) __attribute__((weak));
 void extrasJukeboxEnd(void) __attribute__((weak));
 void portRequestSoftReset(void); /* options.c: the game's checkSoftReboot does the soft reset at its safe point */
@@ -98,6 +100,7 @@ struct State {
     int setupSection;    // the setup screen's page to open at
     int initialEntry = -1; // initial arc entry to focus (-1: st.section)
     bool preGameSettings; // true while browsing full Settings from the pre-game / setup screen
+    bool extrasFailed;    // the Extras hub could not initialize this time
     bool startupMenu;    // opened via UI_SETUP_STARTUP (menu_on_startup / --menu)
     bool wizard;         // first-launch step-by-step setup wizard (when !startupMenu)
     const char* setupConfirmButton;
@@ -126,10 +129,6 @@ struct State {
     int arrowEntry;     // the list entry the red arrow is on (-1: none)
     int arcTop;         // the first entry shown on the commands' arc when the window holds fewer than all
     int shownSection;   // the section the pane showed last frame
-    float descScroll;    // the description message box's vertical scroll
-    float descMaxScroll; // ... and its ceiling last frame (> 0 when lines overflow)
-    int descAutoWait;    // > 0: frames waiting at the top before auto-scroll; < 0: waiting at the bottom
-    bool descManual;     // right stick or mouse scrolled this option's description
     bool currentBlockTall; // the cursor's block in the pane is taller than the pane (an open licence)
     unsigned long openedAt; // st.frames when the menu last opened
     ImGuiID lastContentNav;  // the pane's cursor item last frame (scrollToBlock)
@@ -156,6 +155,12 @@ struct State {
 };
 
 State st;
+
+bool canOpenExtras() {
+    return (!st.setup || st.preGameSettings) && !discSetupNoDisc() && !netplayActive() &&
+           !st.extrasFailed && extrasOpenFromMenu != nullptr;
+}
+
 // Transform copies for the renderer. ImGui retains private write pointers
 // and table channels in its original lists between frames.
 std::vector<ImDrawList*> projectedLists;
@@ -772,11 +777,9 @@ bool popupOpen() {
 // up to the section's top, the last down to its end, so the first option
 // shows the section from its top and the last scrolls to the very bottom. A
 // block taller than the pane: its option at the top, as much as fits below.
-struct HelpBlock { float y; std::string text; };
-std::vector<HelpBlock> helpBlocks;
-ImGuiWindow* helpWindow;
+OptionHelp settingsHelp;
+OptionHelp* activeHelp = nullptr;
 std::string helpText;
-int helpIndex;
 ImVector<float> blocks; // screen y of each block's top, this frame
 
 // Smooth scrolling of the settings pane: whatever asks it to scroll (the
@@ -1421,11 +1424,6 @@ void drawFrame() {
     ImGui::PopStyleVar();
     st.listWindow = ImGui::GetCurrentWindow()->ID;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (showPane) {
-        dl->PushClipRectFullScreen();
-        skin::box(dl, help.Min, help.Max);
-        dl->PopClipRect();
-    }
 
     // The section list on the commands' arc: no scroll bar; uses the animated
     // Xenogears dialog arrow above/below whenever entries are off-screen.
@@ -1577,7 +1575,7 @@ void drawFrame() {
         st.inContent = false;
         st.contentId = 0;
         st.shownSection = -1;
-        st.descMaxScroll = 0.0f;
+        settingsHelp.reset();
         st.currentBlockTall = false;
         helpText = tr("Choose a section to open it.");
     } else {
@@ -1664,7 +1662,7 @@ void drawFrame() {
     st.paneDrawList->PopClipRect();
     skin::focusWindow(); // the JP game's cursor band (none in the US game)
     if (st.shownSection != st.section || st.resetScroll) {
-        helpIndex = 0;
+        settingsHelp.reset();
         st.currentBlockTall = false;
         ImGui::SetScrollY(0.0f); // each section/submenu from its top (one child shows them all)
         smooth.snap = true;
@@ -1672,7 +1670,7 @@ void drawFrame() {
         st.resetScroll = false;
     }
     // When the description fits (or a long licence block is open), the right stick scrolls the pane.
-    if (st.inContent && (st.descMaxScroll <= 0.0f || st.currentBlockTall) && fabsf(rightStick) > 0.2f) {
+    if (st.inContent && (settingsHelp.overflow() <= 0.0f || st.currentBlockTall) && fabsf(rightStick) > 0.2f) {
         ImGui::SetScrollY(ImGui::GetScrollY() + rightStick * 6.0f * u);
         smooth.snap = true; // already smooth: the stick's own motion
     }
@@ -1692,14 +1690,13 @@ void drawFrame() {
         st.enterContent = false;
     }
     blocks.resize(0);
-    helpBlocks.clear();
-    helpWindow = inSetup || st.section != EXTRAS ? content : nullptr;
+    settingsHelp.begin();
     if (inSetup) {
         drawSetupSection(st.section, st.wizard);
-    } else {
+    } else if (st.section != EXTRAS || !canOpenExtras()) {
         drawSection(st.section);
     }
-    helpWindow = nullptr;
+    helpText = settingsHelp.finish();
     if (!inSetup && opt::takeSubmenuEnter()) {
         st.resetScroll = true;
         st.enterContent = true;
@@ -1717,34 +1714,12 @@ void drawFrame() {
                      (st.squarePressed || ImGui::IsKeyPressed(ImGuiKey_Delete, false));
         opt::finishPage(y, reset);
     }
-    if (!helpBlocks.empty()) {
-        // Keyboard/gamepad focus and mouse hover use the same row bounds.
-        float y = -FLT_MAX;
-        if (ImGui::IsWindowHovered() && ImGui::IsMousePosValid() &&
-            (io.MouseDelta.x != 0 || io.MouseDelta.y != 0)) y = io.MousePos.y;
-        else if (g.NavWindow == content && g.NavId && g.NavCursorVisible) {
-            ImRect nav = ImGui::WindowRectRelToAbs(content, content->NavRectRel[g.NavLayer]);
-            y = nav.GetCenter().y;
-        }
-        if (y != -FLT_MAX) {
-            helpIndex = 0;
-            for (int i = 1; i < int(helpBlocks.size()); i++) {
-                if (helpBlocks[i].y > y) break;
-                helpIndex = i;
-            }
-        }
-        helpIndex = std::clamp(helpIndex, 0, int(helpBlocks.size()) - 1);
-        int described = helpIndex;
-        while (described > 0 && helpBlocks[described].text.empty()) --described;
-        helpText = helpBlocks[described].text;
-    } else {
+    if (helpText.empty()) {
         Legend keys = legend();
         char text[256];
         if (inSetup) {
             snprintf(text, sizeof(text), "%s", tr("Choose Presets, Settings, Discs or BIOS, then Start. Quit leaves "
                                                   "without starting the game."));
-        } else if (st.section == EXTRAS) {
-            snprintf(text, sizeof(text), "%s", tr("Choose an extra to open it. The game stays paused. Back returns to Settings."));
         } else {
             snprintf(text, sizeof(text), tr("Choose a setting, then use Left and Right to change it. %s returns to the commands."),
                      keys.back[0] != '\0' ? keys.back : tr("Back"));
@@ -1788,80 +1763,8 @@ void drawFrame() {
         }
     }
 
-    // The description in the message box: its lines where the game's are
-    // (12 in so the 8-wide scroll bar fits cleanly on the left, 10 down, 16 apart);
-    // longer descriptions show the game's scroll bar, scroll with the right stick
-    // or mouse wheel, and optionally scroll gently on their own (the help popup has it all).
-    bool helpClicked = false;
-    if (showPane) {
-        static std::string previousHelp;
-        if (previousHelp != helpText) {
-            previousHelp = helpText;
-            st.descScroll = 0.0f;
-            st.descAutoWait = 90;
-            st.descManual = false;
-        }
-        const float descLeft = 12 * u, descRight = kMessageText * u;
-        const float lines = floorf((help.GetHeight() / u - kMessageText - 3) / 16 + 0.01f);
-        const float viewH = fmaxf(13.0f, lines * 16.0f - 3.0f) * u;
-        ImGui::SetCursorScreenPos(ImVec2(help.Min.x + descLeft, help.Min.y + kMessageText * u));
-        ImGui::SetNextWindowScroll(ImVec2(0.0f, st.descScroll));
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-        ImGui::BeginChild("description", ImVec2(help.GetWidth() - descLeft - descRight, viewH),
-                          ImGuiChildFlags_None,
-                          ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-        ImGui::PopStyleVar();
-        textLines(helpText.empty() ? tr("Choose an option for its description.") : helpText.c_str());
-        ImGuiWindow* dw = ImGui::GetCurrentWindow();
-        float contentH = dw->DC.CursorPos.y - dw->DC.CursorStartPos.y - ImGui::GetStyle().ItemSpacing.y;
-        float maxScroll = fmaxf(0.0f, contentH - viewH);
-        bool hovered = ImGui::IsWindowHovered();
-        helpClicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-        ImGui::EndChild();
-        if (maxScroll > 0.0f) {
-            if (hovered && io.MouseWheel != 0.0f && !popupOpen()) {
-                st.descScroll -= io.MouseWheel * 16.0f * u;
-                st.descManual = true;
-            } else if (!st.currentBlockTall && fabsf(rightStick) > 0.2f && !popupOpen()) {
-                st.descScroll += rightStick * 4.0f * u;
-                st.descManual = true;
-            } else if (!st.descManual && skin::descAutoScroll() && !popupOpen()) {
-                if (st.descAutoWait > 0) {
-                    --st.descAutoWait;
-                } else if (st.descScroll < maxScroll) {
-                    st.descScroll = fminf(maxScroll, st.descScroll + 0.35f * u);
-                    if (st.descScroll >= maxScroll) st.descAutoWait = -120;
-                } else if (++st.descAutoWait >= 0) {
-                    st.descScroll = 0.0f;
-                    st.descAutoWait = 90;
-                }
-            }
-            st.descScroll = std::clamp(st.descScroll, 0.0f, maxScroll);
-            float trackH = help.GetHeight(), inner = trackH - 16 * u;
-            float shown = viewH / (viewH + maxScroll);
-            float thumbH = floorf(fmaxf(6 * u, inner * shown) / u) * u;
-            float thumbY = floorf((inner - thumbH) * (st.descScroll / maxScroll) / u) * u;
-            dl->PushClipRectFullScreen();
-            skin::scrollBar(dl, help.Min, trackH, thumbY, thumbH);
-            if (st.descScroll < maxScroll - 0.5f * u) {
-                skin::scrollArrow(dl, ImVec2(help.Max.x - 10 * u, help.Max.y - 7 * u), false);
-            }
-            dl->PopClipRect();
-            ImGui::SetCursorScreenPos(help.Min);
-            ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
-            ImGui::InvisibleButton("##desc_scroll", ImVec2(8 * u, trackH));
-            ImGui::PopItemFlag();
-            if (ImGui::IsItemActive()) {
-                float at = (io.MousePos.y - help.Min.y - 8 * u - thumbH / 2) / fmaxf(1.0f, inner - thumbH);
-                st.descScroll = std::clamp(at * maxScroll, 0.0f, maxScroll);
-                st.descManual = true;
-                helpClicked = false;
-            }
-        } else {
-            st.descScroll = 0.0f;
-        }
-        st.descMaxScroll = maxScroll;
-    } // st.opened: the description
+    bool helpClicked = showPane && settingsHelp.draw(helpText, help.Min, help.Max, u,
+                                                    st.currentBlockTall ? 0.0f : rightStick);
     if (!capturing() && !io.WantTextInput && !popupOpen() && (helpClicked || st.helpWanted ||
         ImGui::IsKeyPressed(ImGuiKey_H, false) || (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))) {
         ImGui::OpenPopup("Option help");
@@ -2273,6 +2176,7 @@ void run() {
     st.closing = false;
     st.leaving = false;
     st.preGameSettings = false;
+    st.extrasFailed = false;
     st.resetWanted = st.quitWanted = false;
     st.resetAsk = st.quitAsk = false;
     st.resetScroll = false;
@@ -2328,6 +2232,33 @@ void run() {
             next = SDL_GetTicksNS();
         }
         frame();
+        if (!st.closing && !st.backlog && !st.ask && st.opened && st.section == EXTRAS && canOpenExtras()) {
+            // Switch contexts after Render, before presenting the settings pane.
+            st.rendered = false;
+            int result = extrasOpenFromMenu();
+            if (result < 0) {
+                st.extrasFailed = true;
+            } else {
+                // Extras handled events while Settings was paused. Restore the
+                // arc and forget input that was released in the other context.
+                ImGuiIO& io = ImGui::GetIO();
+                io.ClearEventsQueue();
+                io.ClearInputKeys();
+                io.ClearInputMouse();
+                int count = 0;
+                const bool* keys = SDL_GetKeyboardState(&count);
+                std::fill_n(keyHeld, SDL_SCANCODE_COUNT, false);
+                std::copy_n(keys, std::min(count, (int)SDL_SCANCODE_COUNT), keyHeld);
+                feedButtons(true);
+                st.padQuiet = true;
+                st.leftFrom = 0;
+                st.enterContent = st.restoreContent = st.inContent = st.opened = false;
+                st.focusSections = true;
+                if (result > 0) st.closing = true;
+            }
+            next = SDL_GetTicksNS();
+            continue;
+        }
         gpuPresentMenu(st.shot);
         st.shot = NULL;
         st.rendered = false;
@@ -2460,10 +2391,115 @@ float scale() {
     return st.unit > 0 ? st.unit : 1.0f;
 }
 
+void OptionHelp::begin() {
+    rows.clear();
+    window = ImGui::GetCurrentWindow();
+    activeHelp = this;
+}
+
+std::string OptionHelp::finish() {
+    activeHelp = nullptr;
+    if (rows.empty()) return {};
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    const ImGuiIO& io = g.IO;
+    float y = -FLT_MAX;
+    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::IsMousePosValid() &&
+        (io.MouseDelta.x != 0 || io.MouseDelta.y != 0)) {
+        y = io.MousePos.y;
+    } else if (g.NavWindow && g.NavId && g.NavCursorVisible &&
+               ImGui::IsWindowChildOf(g.NavWindow, window, false, false)) {
+        y = ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]).GetCenter().y;
+    }
+    if (y != -FLT_MAX) {
+        selected = 0;
+        while (selected + 1 < rows.size() && rows[selected + 1].y <= y) ++selected;
+    }
+    selected = std::min(selected, rows.size() - 1);
+    size_t described = selected;
+    while (described > 0 && rows[described].text.empty()) --described;
+    return rows[described].text;
+}
+
+bool OptionHelp::draw(const std::string& text, ImVec2 min, ImVec2 max, float u, float rightStick) {
+    if (previousText != text) {
+        previousText = text;
+        scroll = 0.0f;
+        autoWait = 90;
+        manual = false;
+    }
+    ImRect help(min, max);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->PushClipRectFullScreen();
+    skin::box(dl, min, max);
+    dl->PopClipRect();
+    const ImGuiIO& io = ImGui::GetIO();
+    const float descLeft = 12 * u, descRight = kMessageText * u;
+    const float lines = floorf((help.GetHeight() / u - kMessageText - 3) / 16 + 0.01f);
+    const float viewH = fmaxf(13.0f, lines * 16.0f - 3.0f) * u;
+    ImGui::SetCursorScreenPos(ImVec2(help.Min.x + descLeft, help.Min.y + kMessageText * u));
+    ImGui::SetNextWindowScroll(ImVec2(0.0f, scroll));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::BeginChild("description", ImVec2(help.GetWidth() - descLeft - descRight, viewH),
+                      ImGuiChildFlags_None,
+                      ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar();
+    textLines(text.empty() ? tr("Choose an option for its description.") : text.c_str());
+    ImGuiWindow* dw = ImGui::GetCurrentWindow();
+    float contentH = dw->DC.CursorPos.y - dw->DC.CursorStartPos.y - ImGui::GetStyle().ItemSpacing.y;
+    maxScroll = fmaxf(0.0f, contentH - viewH);
+    bool hovered = ImGui::IsWindowHovered();
+    bool helpClicked = hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+    ImGui::EndChild();
+    if (maxScroll > 0.0f) {
+        if (hovered && io.MouseWheel != 0.0f && !popupOpen()) {
+            scroll -= io.MouseWheel * 16.0f * u;
+            manual = true;
+        } else if (fabsf(rightStick) > 0.2f && !popupOpen()) {
+            scroll += rightStick * 4.0f * u;
+            manual = true;
+        } else if (!manual && skin::descAutoScroll() && !popupOpen()) {
+            if (autoWait > 0) {
+                --autoWait;
+            } else if (scroll < maxScroll) {
+                scroll = fminf(maxScroll, scroll + 0.35f * u);
+                if (scroll >= maxScroll) autoWait = -120;
+            } else if (++autoWait >= 0) {
+                scroll = 0.0f;
+                autoWait = 90;
+            }
+        }
+        scroll = std::clamp(scroll, 0.0f, maxScroll);
+        float trackH = help.GetHeight(), inner = trackH - 16 * u;
+        float shown = viewH / (viewH + maxScroll);
+        float thumbH = floorf(fmaxf(6 * u, inner * shown) / u) * u;
+        float thumbY = floorf((inner - thumbH) * (scroll / maxScroll) / u) * u;
+        dl->PushClipRectFullScreen();
+        skin::scrollBar(dl, help.Min, trackH, thumbY, thumbH);
+        if (scroll < maxScroll - 0.5f * u) {
+            skin::scrollArrow(dl, ImVec2(help.Max.x - 10 * u, help.Max.y - 7 * u), false);
+        }
+        dl->PopClipRect();
+        ImGui::SetCursorScreenPos(help.Min);
+        ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
+        ImGui::InvisibleButton("##desc_scroll", ImVec2(8 * u, trackH));
+        ImGui::PopItemFlag();
+        if (ImGui::IsItemActive()) {
+            float at = (io.MousePos.y - help.Min.y - 8 * u - thumbH / 2) / fmaxf(1.0f, inner - thumbH);
+            scroll = std::clamp(at * maxScroll, 0.0f, maxScroll);
+            manual = true;
+            helpClicked = false;
+        }
+    } else {
+        scroll = 0.0f;
+    }
+    return helpClicked;
+}
+
 void markBlock() {
     if (opt::indexing()) return; // (the Search page's invisible pass)
-    blocks.push_back(ImGui::GetCursorScreenPos().y);
-    if (helpWindow == ImGui::GetCurrentWindow()) helpBlocks.push_back({ImGui::GetCursorScreenPos().y, {}});
+    float y = ImGui::GetCursorScreenPos().y;
+    if (!activeHelp || activeHelp == &settingsHelp) blocks.push_back(y);
+    if (activeHelp && activeHelp->window == ImGui::GetCurrentWindow()) activeHelp->rows.push_back({y, {}});
 }
 
 SDL_Window* window() {
@@ -2507,9 +2543,11 @@ void hint(const char* fmt, ...) {
     vsnprintf(text, sizeof(text), tr(fmt), ap); // l10n.h: the format in the menu's language
     va_end(ap);
     opt::noteHint(text); // the Search page's index
-    if (helpWindow == ImGui::GetCurrentWindow() && !helpBlocks.empty()) {
-        if (!helpBlocks.back().text.empty()) helpBlocks.back().text += "\n";
-        helpBlocks.back().text += text;
+    if (activeHelp && activeHelp->window == ImGui::GetCurrentWindow()) {
+        if (activeHelp->rows.empty()) markBlock();
+        std::string& description = activeHelp->rows.back().text;
+        if (!description.empty()) description += "\n";
+        description += text;
         return;
     }
     ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);

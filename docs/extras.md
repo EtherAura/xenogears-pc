@@ -3,9 +3,10 @@ English | [日本語](extras-ja.md)
 # Extras
 
 The extras read your disc images and use the game's own code to load,
-animate and draw what they show. Open them from F1 > Extras > Open the extras
-(the game stays paused), or start `xenogears --extras`. Builds made with
-`-DXG_EXTRAS=ON` have them.
+animate and draw what they show. F1 > Extras opens the hub while the game is
+paused. It groups Battle modes, Media, Reference and Tools. Start
+`xenogears --extras` to browse the disc without starting a game. Builds made
+with `-DXG_EXTRAS=ON` have the hub.
 
 ![The extras](img/extras-home.png)
 
@@ -103,9 +104,11 @@ Scripts: a room's actor routines, variables, a trace and the dialogue history.
 
 ![F1 > Extras](img/extras-f1.png)
 
-Battling's two-player bouts and versus battles, from anywhere in the game, the
-title screen too. When a match ends both players choose **Rematch** or
-**Leave**, and Leave goes back to where you were. F1 > Extras.
+Choose **Battle arena** for local Gear Battling, **Versus battle** for local
+battles, or **Online play** to host or join. Each has its own page under
+Battle modes in F1 > Extras. The bottom box describes the selected control.
+When a match ends both players choose **Rematch** or **Leave**. Leave goes
+back to where you were.
 
 In a **Versus battle** player 2 fights your party with the second controller:
 an enemy formation, commanded through the party's command ring (each attack

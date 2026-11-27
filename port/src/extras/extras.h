@@ -58,8 +58,9 @@ void extrasInit(void); /* after portModulesInit: keeps the modules' data as load
 int extrasMain(void);
 
 /* port/src/ui (the F1 menu's Extras section): runs them over the paused game
- * until they are left; the menu's ImGui context is current again after. */
-void extrasOpenFromMenu(void);
+ * until they are left; the menu's ImGui context is current again after.
+ * Returns 0 for Back, 1 to resume the game, or -1 if opening failed. */
+int extrasOpenFromMenu(void);
 int extrasIsOpen(void);
 /* Private jukebox player, pumped by whichever paused menu owns the loop.
  * End before resuming the game's SPU, or shutting down the audio device. */
@@ -74,10 +75,6 @@ void extrasJukeboxEnd(void);
 int extrasJukeboxSongCount(void);
 const char* extrasJukeboxSongTitle(int i, int* musicId);
 void extrasJukeboxPreview(int musicId);
-/* After extrasOpenFromMenu: 1 once when they were left into the game (the
- * menu then closes too). */
-int extrasLeftIntoGame(void);
-
 /* port/src/gpu/vk.c, as for the settings menu (ui/ui.h): the device, the
  * extras' part of the present pass, and their end before the device's. */
 void extrasVulkanReady(const UiVulkan* dev);

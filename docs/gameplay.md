@@ -91,10 +91,11 @@ to play on. F1 > Saves > Rewind (Off by default).
 
 ## Gauntlet
 
-![F1 > Gameplay > Gauntlet](img/gameplay-gauntlet.png)
+![Boss gauntlet setup](img/gameplay-gauntlet.png)
 
 The story's bosses one after another, with the party you pick for each fight.
-Afterwards the game is put back as it was. F1 > Gameplay > Gauntlet.
+Afterwards the game is put back as it was. Choose Boss gauntlet from Battle
+modes in F1 > Extras.
 
 ![A Gear gauntlet's first fight](img/gameplay-gauntlet-fight.webp)
 

@@ -149,7 +149,7 @@ std::string placeOf(const CardGameSave& s) {
 }
 
 void saveList(bool* chosenByNav) {
-    if (ImGui::BeginListBox("##arenasavelist", ImVec2(-1, 6 * ROW * scale()))) {
+    if (ImGui::BeginListBox("##arenasavelist", ImVec2(-1, 6 * ROW * skin::unit()))) {
         for (int i = 0; i < (int)B->saves.size(); i++) {
             const CardGameSave& s = B->saves[i].info;
             std::string place = placeOf(s);
@@ -250,6 +250,7 @@ bool arenaSavesPanel(int player, XgPartyRecord* out) {
     B->lastFrame = frame;
     ImGui::PushID("arenasaves");
     ImGui::PushID(player);
+    markBlock();
     ImGui::TextUnformatted(tr(player == 2   ? "Player 2's party, from a save"
                               : player == 0 ? "Your party, from a save"
                                             : "Player 1's party, from a save"));
@@ -285,10 +286,12 @@ bool arenaSavesPanel(int player, XgPartyRecord* out) {
         }
         if (ok) *out = B->record;
     }
+    markBlock();
     if (ImGui::Button(tr("Read the memory cards again"))) {
         sfx::play(sfx::CHOOSE);
         readCards();
     }
+    hint("Refresh the save list from both memory cards.");
     ImGui::PopID();
     ImGui::PopID();
     return ok;

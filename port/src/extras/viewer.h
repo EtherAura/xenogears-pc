@@ -11,10 +11,8 @@
 //   }
 //   XG_EXTRAS_VIEWER(viewer);
 //
-// The home screen lists the viewers by `order`; the planned ones that are not
-// built yet (shell.cpp's list: browser 10, sprites 20, models 30, animations
-// 40, maps 50, gallery 60, jukebox 70, tables 80) show as coming until a
-// viewer registers their id.
+// The home screen groups the viewers and lists them by `order` within each
+// group. Entries for gameplay modes are available from the F1 menu.
 //
 // Each frame the shell begins the ImGui frame, draws its header and footer
 // (the game's windows), and calls the open viewer's draw with the area left
@@ -75,6 +73,7 @@ struct Viewer {
     View* (*picture)() = nullptr;
     // Optional decoded RGBA cache for viewers without a primitive View.
     bool (*thumbnail)(std::vector<uint32_t>&) = nullptr;
+    bool gameOnly = false;
 };
 
 struct ViewerRegistration {
@@ -110,7 +109,7 @@ void bookmarkSelection();
 // A game window over [min, max] (ImGui screen coordinates) holding a child
 // region (scrolls if asked); a title is drawn in its top line. endPane after.
 bool beginPane(const char* id, ImVec2 min, ImVec2 max, const char* title = nullptr, bool scroll = true);
-void endPane();
+void endPane(bool scrollNested = true);
 
 // A list entry as the game's menus draw them (a Selectable with the pointer
 // at the cursor); hint: dimmed (unavailable). True when chosen.

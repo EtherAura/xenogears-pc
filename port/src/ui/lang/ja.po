@@ -3574,23 +3574,8 @@ msgid "Choose a BIOS"
 msgstr "BIOS を選ぶ"
 
 #: port/src/ui/sections.cpp
-msgid ""
-"The asset browser and the viewers: the game's files, pictures, models and "
-"sounds, from your own disc."
-msgstr "アセットブラウザーとビューアー: ゲームのファイル、絵、モデル、音を、あなた自身のディスクから。"
-
-#: port/src/ui/sections.cpp
 msgid "Not in this build."
 msgstr "このビルドにはありません。"
-
-#: port/src/ui/sections.cpp
-msgid "Open the extras"
-msgstr "おまけを開く"
-
-#: port/src/ui/sections.cpp
-msgid ""
-"The game stays paused while they are open. Leaving them comes back here."
-msgstr "開いている間ゲームは一時停止したままです。閉じるとここにもどります。"
 
 #: port/src/ui/sections.cpp
 msgid "1x (PS1 resolution)"
@@ -3733,7 +3718,7 @@ msgstr "2 台目のゲームパッド(つながっていません)"
 msgid "Player 2 on the keyboard"
 msgstr "プレイヤー 2 はキーボード"
 
-#: port/src/ui/arena.cpp
+#: port/src/extras/modes.cpp
 msgid "Battle arena"
 msgstr "バトル闘技場"
 
@@ -4448,9 +4433,33 @@ msgstr "クリア"
 msgid "%s: %d fights in %s, %d retries, recovery %s, %s (%s)"
 msgstr "%s: %d 戦を %s で、リトライ %d 回、回復 %s、%s(%s)"
 
-#: port/src/ui/gauntlet.cpp
-msgid "Gauntlet"
+#: port/src/extras/modes.cpp
+msgid "Boss gauntlet"
 msgstr "ボス連戦"
+
+#: port/src/extras/modes.cpp
+msgid "Fight story bosses back to back."
+msgstr "ストーリーのボスと次々に戦います。"
+
+#: port/src/extras/shell.cpp
+msgid "Battle modes"
+msgstr "バトルモード"
+
+#: port/src/extras/shell.cpp
+msgid "Media"
+msgstr "映像と音楽"
+
+#: port/src/extras/shell.cpp
+msgid "Reference"
+msgstr "資料"
+
+#: port/src/extras/shell.cpp
+msgid "Tools"
+msgstr "ツール"
+
+#: port/src/extras/shell.cpp
+msgid "Open this mode from the F1 menu."
+msgstr "このモードは F1 メニューから開いてください。"
 
 #: port/src/ui/gauntlet.cpp
 #, c-format
@@ -4563,8 +4572,8 @@ msgid "A save state is the whole game at a moment: loading it goes back there ex
 msgstr "ステートセーブはある瞬間のゲーム全体です: ロードするとそのときへそのままもどります。ロードでメモリーカードは変わりません: その後のセーブはカードに残り、ゲームはカードを読み直します。ステートはセーブしたポートのビルドでだけロードできます: ポートを更新またはビルドし直すと、前のステートは使えません。長く残す進み具合はメモリーカードにセーブしてください。"
 
 #: port/src/ui/states.cpp
-msgid "A save state is the whole game at a moment: loading it goes back there exactly. Loading never changes the memory cards: saves made since stay on them, and the game reads the cards again. Other builds of the port that can convert states load these too, except those marked \"This version only\": saved during a movie, a prompt or a memory card access. Keep long-term progress on memory cards."
-msgstr "ステートセーブはある瞬間のゲーム全体です: ロードするとそのときへそのままもどります。ロードでメモリーカードは変わりません: その後のセーブはカードに残り、ゲームはカードを読み直します。ステートを変換できるポートの別のビルドでもロードできます。ただし「このバージョンのみ」と出ているもの(ムービー、確認の表示、メモリーカードの読み書きの最中にセーブしたもの)は別です。長く残す進み具合はメモリーカードにセーブしてください。"
+msgid "A save state is the whole game at a moment: loading it goes back there exactly. Loading never changes the memory cards: saves made since stay on them, and the game reads the cards again. Slot saves wait for a point that other compatible versions can resume. Older saves marked \"This version only\" load in the build that saved them. Keep long-term progress on memory cards."
+msgstr "ステートセーブはある瞬間のゲーム全体です: ロードするとそのときへそのままもどります。ロードでメモリーカードは変わりません: その後のセーブはカードに残り、ゲームはカードを読み直します。スロットへのセーブは、互換性のある別のバージョンでも再開できる地点まで待ちます。「このバージョンのみ」と表示される古いステートは、セーブしたビルドでロードできます。長く残す進み具合はメモリーカードにセーブしてください。"
 
 #: port/src/ui/states.cpp
 #, c-format
@@ -9802,3 +9811,119 @@ msgid ""
 msgstr ""
 "バトル開始時に画面が割れるときの白いフラッシュと、攻撃時の画面全体のフラッシュをなくします。"
 "黒へのフェードアウト・フェードインはそのままです。オフで原作どおりです。"
+
+#: port/src/extras/modes.cpp
+msgid "Local two-player Gear Battling."
+msgstr "ギアのローカル 2 人対戦。"
+
+#: port/src/extras/modes.cpp
+msgid "Local battles"
+msgstr "ローカル対戦"
+
+#: port/src/extras/modes.cpp
+msgid "Online play"
+msgstr "オンライン対戦"
+
+#: port/src/extras/modes.cpp
+msgid "Host or join an online match."
+msgstr "オンライン対戦を開催、または参加します。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 1"
+msgstr "プレイヤー 1"
+
+#: port/src/ui/arena.cpp
+msgid "Player 2"
+msgstr "プレイヤー 2"
+
+#: port/src/ui/arena.cpp
+msgid "Match type"
+msgstr "対戦形式"
+
+#: port/src/ui/arena.cpp
+msgid "Enemy formation"
+msgstr "敵の編成"
+
+#: port/src/ui/arena.cpp
+msgid "Choose an enemy formation."
+msgstr "敵の編成を選んでください。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 2 commands a copy of your party on foot, with its own command ring and copy of your items."
+msgstr "プレイヤー 2 はパーティの分身を操作します。自分のコマンドリングと複製したアイテムを使います。"
+
+#: port/src/ui/arena.cpp
+msgid "Each player controls a party from a memory-card save. Both parties fight on foot."
+msgstr "各プレイヤーがメモリーカードのセーブからパーティを選び、徒歩で戦います。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 2 uses the second controller to choose attacks and targets for an enemy formation."
+msgstr "プレイヤー 2 は 2 つ目のコントローラーで敵の技とターゲットを選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "Select Versus battle and choose an enemy formation, then join again."
+msgstr "対戦バトルで敵の編成を選んでから、もう一度参加してください。"
+
+#: port/src/ui/arena.cpp
+msgid "Select Party vs party and choose a save, then join again."
+msgstr "パーティ対パーティでセーブを選んでから、もう一度参加してください。"
+
+#: port/src/ui/arena.cpp
+msgid "Online match in progress."
+msgstr "オンライン対戦中。"
+
+#: port/src/ui/arena.cpp
+msgid "At the end of a match, choose Rematch or Leave. EXIT in Battling closes the session."
+msgstr "試合のあとに再戦するか抜けるかを選びます。バトリングでは EXIT で終了します。"
+
+#: port/src/ui/arena.cpp
+msgid "End the match for both players and return to the paused game."
+msgstr "二人の対戦を終了し、一時停止中のゲームに戻ります。"
+
+#: port/src/ui/arena.cpp
+msgid "Use the same game version, disc and session code. A session opens in its own window."
+msgstr "同じバージョン、ディスク、セッションコードを使います。対戦は別のウィンドウで開きます。"
+
+#: port/src/ui/arena.cpp
+msgid "Use a reachable UDP port. Play on the same network, over a VPN, or forward the port on the host's router."
+msgstr "接続できる UDP ポートを使ってください。同じネットワークか VPN を使うか、ホスト側のルーターでポートを転送します。"
+
+#: port/src/ui/arena.cpp
+msgid "Choose the same match type on both sides."
+msgstr "両方で同じ対戦形式を選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "On, Player 2 chooses the enemy formation when joining. Off, the host chooses it here."
+msgstr "オンでは参加時にプレイヤー 2 が敵の編成を選びます。オフではここでホストが選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "Both players bring a party from their own save. Edited saves are accepted within the game's ranges."
+msgstr "各自のセーブからパーティを選びます。ゲームの範囲内であれば編集したセーブも使えます。"
+
+#: port/src/ui/arena.cpp
+msgid "Enter the session code."
+msgstr "セッションコードを入力してください。"
+
+#: port/src/ui/arena.cpp
+msgid "Enter the host's address and port."
+msgstr "ホストのアドレスとポートを入力してください。"
+
+#: port/src/ui/arena.cpp
+msgid "Choose a party from a memory-card save."
+msgstr "メモリーカードのセーブからパーティを選んでください。"
+
+#: port/src/ui/arena.cpp
+msgid "Choose an enemy formation or let Player 2 choose."
+msgstr "敵の編成を選ぶか、プレイヤー 2 に選ばせてください。"
+
+#: port/src/ui/arena.cpp
+msgid "Both players see each other's IP address. The host's gameplay settings apply to both players."
+msgstr "両プレイヤーに相手の IP アドレスが見えます。ゲームプレイの設定はホストのものを使います。"
+
+#: port/src/ui/arena.cpp
+msgid "Choose PLAYER1 VS PLAYER2 in Battling. Both players can rematch or leave after a bout."
+msgstr "バトリングで PLAYER1 VS PLAYER2 を選びます。試合後は再戦するか抜けるかを選べます。"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Refresh the save list from both memory cards."
+msgstr "両方のメモリーカードからセーブ一覧を読み直します。"

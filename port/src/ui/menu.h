@@ -7,8 +7,12 @@
 #define PORT_UI_MENU_H
 
 #include <SDL3/SDL.h>
+#include <string>
+#include <vector>
 
 #include "imgui.h"
+
+struct ImGuiWindow;
 
 namespace menu {
 
@@ -37,6 +41,10 @@ extern const char* const sectionNames[SECTION_COUNT];
 // sections.cpp
 void sectionsOpened();           // the menu opened: read what may have changed since
 void drawSection(int section);   // inside the content pane
+enum class ArenaPart { Battling, Versus, Online };
+void arenaSection(ArenaPart part, void (*resumeGame)());
+void arenaFallback(void (*resumeGame)());
+void gauntletSection();
 // The pre-game / setup screen (ui.h uiDiscSetup): pages on the commands' arc,
 // plus Settings (opens the full menu before launch), Start and Quit.
 enum SetupSection { SETUP_DISCS, SETUP_BIOS, SETUP_PRESETS, SETUP_SECTIONS };
@@ -76,6 +84,28 @@ void hint(const char* fmt, ...) IM_FMTARGS(1);
 // Text wrapped to the space left, its lines 16 game pixels apart as the
 // game's (ImGui's own wrapped text has them a font height, 13, apart).
 void textLines(const char* text);
+// Collect markBlock()/hint() calls from a settings pane, then draw the help
+// for the row under the cursor using the game's scrolling message box.
+class OptionHelp {
+public:
+    void begin();
+    std::string finish();
+    void reset() { selected = 0; maxScroll = 0; }
+    bool draw(const std::string& text, ImVec2 min, ImVec2 max, float unit, float rightStick);
+    float overflow() const { return maxScroll; }
+
+private:
+    friend void markBlock();
+    friend void hint(const char*, ...);
+    struct Block { float y; std::string text; };
+    std::vector<Block> rows;
+    ImGuiWindow* window = nullptr;
+    size_t selected = 0;
+    std::string previousText;
+    float scroll = 0, maxScroll = 0;
+    int autoWait = 0;
+    bool manual = false;
+};
 // What resets the row the cursor is on, for the way of playing in use (the
 // PS1 Square button's glyph or key, and Delete): the descriptions say it.
 const char* resetKeysText();
