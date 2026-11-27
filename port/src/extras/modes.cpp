@@ -49,7 +49,7 @@ void drawGauntlet(const Area& area) {
 }
 
 const Viewer arena = {
-    "battle-arena", N_("Battle arena"), N_("Local two-player Gear Battling."), 1,
+    "battle-arena", N_("Battle arena"), N_("Two-player Gear Battling, local or online."), 1,
     openArenaMode, closeArena, drawArenaMode<menu::ArenaPart::Battling>, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, true,
 };

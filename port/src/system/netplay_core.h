@@ -49,6 +49,7 @@ enum {
     NP_REFUSE_PICK,
     NP_REFUSE_NO_PARTY, /* party vs party, and the HELLO brought no party */
     NP_REFUSE_PARTY,    /* ... its party failed the check (WELCOME 36: the reason, 37: the member's place) */
+    NP_REFUSE_MODE,     /* the joiner requested Gear Battling and the host chose another mode */
 };
 
 /* What the host decides and the joiner takes (range-checked on arrival). */
@@ -84,11 +85,12 @@ enum {
     NP_END_NO_PARTY,       /* joiner: the host plays party vs party, and this side brought no party */
     NP_END_PARTY_REFUSED,  /* the other side refused this side's party (partyReason, partyMember) */
     NP_END_PEER_PARTY,     /* joiner: this side refused the host's party (partyReason, partyMember) */
+    NP_END_REFUSED_MODE,   /* joiner: the host chose a mode other than Gear Battling */
 };
 
 /* What happens, for the program's messages (NpSession.note). */
 enum {
-    NP_NOTE_REFUSED,   /* host: a player of another build or region (text: the address) */
+    NP_NOTE_REFUSED,   /* host: a joiner did not meet the session's terms (text: the address) */
     NP_NOTE_WAITING,   /* a vblank waited a second for the other side */
     NP_NOTE_PAUSED,    /* the other side paused (its menu, the background) */
     NP_NOTE_BACK,      /* ... and goes on */
@@ -119,6 +121,7 @@ struct NpSession {
     uint64_t compatId; /* which builds play together (netplay.c: tools/netplay_compat.py's id) */
     uint64_t nonce;
     int hasPick, pickTable, pickConfig; /* joiner: its choice of formation, in its HELLO */
+    int battlingOnly; /* joiner: connect only to a Gear Battling session */
     NetSocket* s;
     NetAddr peer;
     NpTerms terms;

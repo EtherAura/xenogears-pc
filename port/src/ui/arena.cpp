@@ -951,6 +951,7 @@ void endText(const char* d, char* out, size_t size) {
         {"region", N_("The host plays the other region's game (US/JP).")},
         {"busy", N_("The host is busy.")},
         {"pick", N_("Select Versus battle and choose an enemy formation, then join again.")},
+        {"mode", N_("The host is playing a different match type. Ask them to host Gear Battling.")},
         {"disc", N_("The other player's disc is not the same as yours.")},
         {"loadout", N_("Both players need to approve the same valid custom loadout.")},
         {"noparty", N_("Select Party vs party and choose a save, then join again.")},
@@ -994,7 +995,7 @@ void endText(const char* d, char* out, size_t size) {
 }
 
 // Online: Battling with a player elsewhere, in a process of its own.
-void onlineBlock() {
+void onlineBlock(bool battlingOnly = false) {
     if (netplayActive()) {
         markBlock();
         ImGui::TextUnformatted(tr("Online match in progress."));
@@ -1061,6 +1062,7 @@ void onlineBlock() {
         snprintf(line, sizeof line, tr("The last session: %s"), why);
         textLines(line);
     }
+    if (battlingOnly) textLines("After connecting, choose BONUS BATTLING, then PLAYER1 VS PLAYER2.");
     markBlock();
     if (ImGui::RadioButton(tr("Host (player 1)"), O.host)) O.host = true;
     ImGui::SameLine();
@@ -1087,15 +1089,18 @@ void onlineBlock() {
         hint("A name or an IPv4 address, then the port (192.168.1.20:7461); an IPv6 address goes in brackets "
              "([2001:db8::20]:7461).");
     }
-    static const char* const modes[] = {N_("Battling"), N_("Versus battle"), N_("Party vs party"),
-                                        N_("Custom enemy teams")};
-    O.mode = matchChoice(modes, IM_COUNTOF(modes), O.mode);
-    hint("Choose the same match type on both sides.");
-    const bool custom = O.mode == OnlineCustom;
-    const bool bringing = O.mode == OnlineParty;
+    if (!battlingOnly) {
+        static const char* const modes[] = {N_("Battling"), N_("Versus battle"), N_("Party vs party"),
+                                            N_("Custom enemy teams")};
+        O.mode = matchChoice(modes, IM_COUNTOF(modes), O.mode);
+        hint("Choose the same match type on both sides.");
+    }
+    const int mode = battlingOnly ? OnlineBattling : O.mode;
+    const bool custom = mode == OnlineCustom;
+    const bool bringing = mode == OnlineParty;
     bool partyOk = false;
     const XgVersusFormation* formation = nullptr;
-    switch (O.mode) {
+    switch (mode) {
     case OnlineBattling:
         if (O.host) allGearsOption();
         break;
@@ -1126,7 +1131,7 @@ void onlineBlock() {
     if (O.host) musicPicker();
     markBlock();
     bool ready = O.code[0] != '\0' && (!bringing || partyOk) && (!custom || rosterCode[0]) &&
-                 (O.host ? O.mode != OnlineVersus || O.joinerPicks || formation : strchr(O.address, ':') != nullptr);
+                 (O.host ? mode != OnlineVersus || O.joinerPicks || formation : strchr(O.address, ':') != nullptr);
     ImGui::BeginDisabled(!ready);
     const char* start = custom ? (O.host ? tr("Approve and host") : tr("Approve and join"))
                                : (O.host ? tr("Host##netplay") : tr("Join##netplay"));
@@ -1138,8 +1143,9 @@ void onlineBlock() {
         snprintf(s.address, sizeof s.address, "%s", O.address);
         s.delay = O.delay;
         s.progress = pcArenaAllGearsSetting() ? 1000 : netplaySessionStory();
-        s.versus = O.host && O.mode == OnlineVersus;
+        s.versus = O.host && mode == OnlineVersus;
         s.partyVsParty = O.host && bringing;
+        s.battlingOnly = !O.host && mode == OnlineBattling;
         s.hasParty = bringing && partyOk;
         if (s.hasParty) s.record = O.record;
         s.joinerPicks = s.versus && O.joinerPicks;
@@ -1221,12 +1227,25 @@ void battlingBlock(void (*resumeGame)()) {
     }
 }
 
+void battleArena(void (*resumeGame)()) {
+    static bool online = false;
+    markBlock();
+    if (ImGui::RadioButton(tr("Local play"), !online)) online = false;
+    ImGui::SameLine();
+    if (ImGui::RadioButton(tr("Online play"), online)) online = true;
+    if (online) {
+        onlineBlock(true);
+    } else {
+        battlingBlock(resumeGame);
+    }
+}
+
 } // namespace
 
 void arenaSection(ArenaPart part, void (*resumeGame)()) {
     ImGui::PushID(static_cast<int>(part));
     switch (part) {
-    case ArenaPart::Battling: battlingBlock(resumeGame); break;
+    case ArenaPart::Battling: battleArena(resumeGame); break;
     case ArenaPart::Versus: versusBlock(resumeGame); break;
     case ArenaPart::Online: onlineBlock(); break;
     }
@@ -1236,7 +1255,9 @@ void arenaSection(ArenaPart part, void (*resumeGame)()) {
 void arenaFallback(void (*resumeGame)()) {
     if (!netplayActive()) {
         ImGui::SeparatorText(tr("Battle arena"));
-        arenaSection(ArenaPart::Battling, resumeGame);
+        ImGui::PushID(static_cast<int>(ArenaPart::Battling));
+        battlingBlock(resumeGame);
+        ImGui::PopID();
         ImGui::SeparatorText(tr("Versus battle"));
         arenaSection(ArenaPart::Versus, resumeGame);
     }

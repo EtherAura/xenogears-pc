@@ -492,6 +492,22 @@ static int picks(void) {
     J.s.pickConfig = 3;
     CHECK(pair(&H, &J));
     CHECK(H.connected && J.connected && J.s.terms.table == 2 && J.s.terms.config == 1);
+
+    side(&H, 1, "orange", 42);
+    side(&J, 0, "orange", 42);
+    versusHost(&H, 0);
+    J.s.battlingOnly = 1;
+    H.waitNs = J.waitNs = 600000000ull;
+    CHECK(pair(&H, &J));
+    CHECK(!J.connected && J.s.reason == NP_END_REFUSED_MODE);
+    CHECK(!H.connected && H.s.reason == NP_END_NOBODY);
+
+    side(&H, 1, "orange", 42);
+    side(&J, 0, "orange", 42);
+    J.s.battlingOnly = 1;
+    H.frames = J.frames = 20;
+    CHECK(pair(&H, &J));
+    CHECK(H.connected && J.connected && J.s.terms.mode == NP_MODE_BATTLING);
     return 0;
 }
 

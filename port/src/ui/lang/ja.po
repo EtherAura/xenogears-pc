@@ -9849,8 +9849,8 @@ msgstr ""
 "黒へのフェードアウト・フェードインはそのままです。オフで原作どおりです。"
 
 #: port/src/extras/modes.cpp
-msgid "Local two-player Gear Battling."
-msgstr "ギアのローカル 2 人対戦。"
+msgid "Two-player Gear Battling, local or online."
+msgstr "ギアの 2 人対戦。ローカルでもオンラインでも遊べます。"
 
 #: port/src/extras/modes.cpp
 msgid "Local battles"
@@ -9859,6 +9859,18 @@ msgstr "ローカル対戦"
 #: port/src/extras/modes.cpp
 msgid "Online play"
 msgstr "オンライン対戦"
+
+#: port/src/ui/arena.cpp
+msgid "Local play"
+msgstr "ローカル対戦"
+
+#: port/src/ui/arena.cpp
+msgid "After connecting, choose BONUS BATTLING, then PLAYER1 VS PLAYER2."
+msgstr "接続したら BONUS BATTLING、次に PLAYER1 VS PLAYER2 を選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "The host is playing a different match type. Ask them to host Gear Battling."
+msgstr "ホストが別の対戦形式を選んでいます。ギアのバトリングで対戦を開いてもらってください。"
 
 #: port/src/extras/modes.cpp
 msgid "Host or join an online match."

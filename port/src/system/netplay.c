@@ -5,7 +5,7 @@
  *   xenogears --netplay host --code WORD [--port P] [--delay N]
  *             [--progress N | --all-gears] [--versus TABLE,CONFIG|joiner [--party A,B,C]]
  *             [--party-vs-party --save CARD.NUMBER[.ID...]] [disc.cue]
- *   xenogears --netplay join HOST:PORT --code WORD [--formation TABLE,CONFIG]
+ *   xenogears --netplay join HOST:PORT --code WORD [--battling | --formation TABLE,CONFIG]
  *             [--save CARD.NUMBER[.ID...]] [disc.cue]
  *   (the code also from XG_NETPLAY_CODE; the party record also from
  *   XG_NETPLAY_PARTY, its bytes in hex: the menu's)
@@ -223,6 +223,7 @@ static struct {
     int port;
     char joinTo[256];
     int hasPick, pickTable, pickConfig; /* joiner: --formation */
+    int battlingOnly; /* joiner: --battling */
     NpTerms terms; /* the host's (from the arguments) */
     NpSession np;
     /* pacing */
@@ -371,7 +372,7 @@ static void status(const char* fmt, ...) {
 static const char* endWord(const NpSession* s) {
     static const char* const words[] = {"error",  "error",   "nobody",       "noanswer", "build",
                                         "region", "busy",    "pick",         "desync",   "disc",
-                                        "left",   "silent",  "noparty",      "partyrefused", "peerparty"};
+                                        "left",   "silent",  "noparty",      "partyrefused", "peerparty", "mode"};
     return s->reason >= 0 && s->reason < (int)(sizeof words / sizeof words[0]) ? words[s->reason] : "error";
 }
 
@@ -471,7 +472,7 @@ void netplaySoftReset(void) {
 static void note(NpSession* s, int what, const char* text) {
     (void)s;
     switch (what) {
-    case NP_NOTE_REFUSED: say("%s was refused (another build or region, no formation or no party)", text); break;
+    case NP_NOTE_REFUSED: say("%s was refused (build, region, match type, formation, or party)", text); break;
     case NP_NOTE_REFUSED_PARTY:
         say("%s's party cannot be used (reason %d, member %d): refused; waiting on", text, N.np.partyReason,
             memberId(N.checkedIds, N.np.partyMember));
@@ -549,7 +550,7 @@ static void usage(void) {
     fprintf(stderr, "usage: xenogears --netplay host --code WORD [--port P] [--delay N] [--progress N | --all-gears]\n"
                     "                 [--versus TABLE,CONFIG|joiner [--party A,B,C]]\n"
                     "                 [--party-vs-party --save CARD.NUMBER[.ID...]] [disc.cue]\n"
-                    "       xenogears --netplay join HOST:PORT --code WORD [--formation TABLE,CONFIG]\n"
+                    "       xenogears --netplay join HOST:PORT --code WORD [--battling | --formation TABLE,CONFIG]\n"
                     "                 [--save CARD.NUMBER[.ID...]] [disc.cue]\n");
 }
 
@@ -600,6 +601,8 @@ int netplayArgs(int* argc, char*** argv) {
             if (N.terms.pick) N.terms.table = N.terms.config = 0;
             else if (SDL_sscanf(v, "%d,%d", &N.terms.table, &N.terms.config) != 2) N.terms.table = -1;
             i++;
+        } else if (SDL_strcmp(a[i], "--battling") == 0 && !N.host) {
+            N.battlingOnly = 1;
         } else if (SDL_strcmp(a[i], "--formation") == 0 && v != NULL && !N.host) {
             N.hasPick = SDL_sscanf(v, "%d,%d", &N.pickTable, &N.pickConfig) == 2 && N.pickTable >= 0 &&
                         N.pickTable < NP_TABLES && N.pickConfig >= 0 && N.pickConfig <= 15;
@@ -782,6 +785,7 @@ int netplayConnect(const char* disc) {
     s->note = note;
     s->poll = NULL; /* no window yet */
     s->terms = N.terms;
+    s->battlingOnly = N.battlingOnly;
     s->hasPick = N.hasPick;
     s->pickTable = N.pickTable;
     s->pickConfig = N.pickConfig;

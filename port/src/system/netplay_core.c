@@ -7,8 +7,8 @@
  *   HELLO    8 the build's compatibility id, 16 a nonce, 24 the region ('U'/'J'),
  *            25 a formation chosen (1), 26 its table (16 bits), 28 its config,
  *            29 a party brought (1), 30 its record's bytes (16 bits), 32 its
- *            hash (FNV-1a 64 of the bytes), 64 the sender's own version (0
- *            before 6: below)
+ *            hash (FNV-1a 64 of the bytes), 40 Gear Battling only (1),
+ *            64 the sender's own version (0 before 6: below)
  *   WELCOME  8 the build's compatibility id, 16 the joiner's nonce, 24 the input delay,
  *            25 a refusal (NP_REFUSE_*), 26 the story progress (16 bits),
  *            28 the mode, 29 the party (3 ids), 32 the table (16 bits),
@@ -387,6 +387,7 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
     int reason = 0, place = 255;
     NpTerms t = s->terms;
     *wait = 0;
+    if (!refuse && p[40] == 1 && t.mode != NP_MODE_BATTLING) refuse = NP_REFUSE_MODE;
     if (!refuse && t.mode == NP_MODE_VERSUS && t.pick) { /* player 2's formation */
         if (p[25] != 1 || get16(p + 26) >= NP_TABLES || p[28] > 15) {
             refuse = NP_REFUSE_PICK;
@@ -517,6 +518,7 @@ static void sendHello(NpSession* s) {
             p[29] = (uint8_t)(s->partyBytes > 0);
             put16(p + 30, (uint16_t)s->partyBytes);
             put64(p + 32, s->partyHash);
+            p[40] = (uint8_t)(s->battlingOnly != 0);
         }
         p[SENDER_VERSION] = NP_VERSION;
         npSealVersion(s, p, NP_HELLO, version);
@@ -532,6 +534,7 @@ static int refused(NpSession* s, const uint8_t* p) {
             : p[25] == NP_REFUSE_PICK     ? NP_END_PICK
             : p[25] == NP_REFUSE_NO_PARTY ? NP_END_NO_PARTY
             : p[25] == NP_REFUSE_PARTY    ? NP_END_PARTY_REFUSED
+            : p[25] == NP_REFUSE_MODE     ? NP_END_REFUSED_MODE
                                           : NP_END_BUSY;
     if (r == NP_END_PARTY_REFUSED) {
         s->partyReason = p[36];
@@ -543,6 +546,7 @@ static int refused(NpSession* s, const uint8_t* p) {
                : r == NP_END_PICK           ? "it lets player 2 choose the formation: choose one"
                : r == NP_END_NO_PARTY       ? "it plays party vs party: bring a party"
                : r == NP_END_PARTY_REFUSED  ? "this side's party cannot be used"
+               : r == NP_END_REFUSED_MODE   ? "it is not hosting Gear Battling"
                                             : "busy");
 }
 
@@ -587,6 +591,9 @@ int npJoin(NpSession* s, const NetAddr* host, uint64_t waitNs) {
             if (p[25] != NP_REFUSE_NONE) return refused(s, p);
             NpTerms w = t;
             if (npGetTerms(p, &w)) { /* out of range: not ours */
+                if (s->battlingOnly && w.mode != NP_MODE_BATTLING) {
+                    return end(s, NP_END_REFUSED_MODE, "the host is not playing Gear Battling");
+                }
                 if (!hasMatchRecord(w.mode)) {
                     welcomed = 1;
                     t = w;

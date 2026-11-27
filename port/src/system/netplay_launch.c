@@ -214,6 +214,7 @@ int netplayLaunch(const NetplayStart* o) {
     } else {
         args[n++] = "join";
         args[n++] = o->address;
+        if (o->battlingOnly) args[n++] = "--battling";
         if (o->pick) {
             SDL_snprintf(versus, sizeof versus, "%d,%d", o->table, o->config);
             args[n++] = "--formation";

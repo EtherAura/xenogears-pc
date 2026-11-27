@@ -48,6 +48,7 @@ typedef struct {
     int joinerPicks;   /* ... the formation player 2's choice, or ... */
     int table, config; /* ... this one (host); join: the formation chosen, if pick */
     int pick;          /* join: a formation chosen (for a host that lets player 2 choose) */
+    int battlingOnly;  /* join: accept only a Gear Battling session */
     int party[3];      /* host: the party (character ids, 255 none) */
     int partyVsParty;  /* host: party vs party (each player's party from their own save) */
     int hasParty;      /* this side's party record below (party vs party; the joiner's for such a host) */

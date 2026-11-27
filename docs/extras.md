@@ -104,9 +104,12 @@ Scripts: a room's actor routines, variables, a trace and the dialogue history.
 
 ![F1 > Extras](img/extras-f1.png)
 
-Choose **Battle arena** for local Gear Battling, **Versus battle** for local
-battles, or **Online play** to host or join. Each has its own page under
-Battle modes in F1 > Extras. The bottom box describes the selected control.
+In **F1 → Extras → Battle modes → Battle arena**, choose **Local play** or
+**Online play** for Gear Battling. For online matches, one player hosts and
+the other joins using the host's address, port and session code. Once
+connected, choose **BONUS BATTLING → PLAYER1 VS PLAYER2**. The Battle modes
+menu also offers **Versus battle** and a general **Online play** page.
+The bottom box describes the selected control.
 When a match ends both players choose **Rematch** or **Leave**. Leave goes
 back to where you were.
 
