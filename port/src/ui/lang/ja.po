@@ -8989,8 +8989,8 @@ msgstr "詳細を隠す"
 
 #: port/src/ui/diagnostics.cpp
 #, c-format
-msgid "%d frames now, %.1f ms on average%s; the bar's end is the ceiling."
-msgstr "今は %d フレーム、平均で %.1f ミリ秒%s。バーがいっぱいになると上限です。"
+msgid "%d frames now, %.1f ms on average%s; ceiling %.0f ms."
+msgstr "今は %d フレーム、平均で %.1f ミリ秒%s。上限は %.0f ミリ秒です。"
 
 #: port/src/ui/diagnostics.cpp
 msgid "Audio queue"

@@ -438,16 +438,14 @@ void audioRows() {
     SpuOutputLevels a;
     spuOutputLevels(&a);
     if (opt::row(N_("Audio queue"))) {
-    if (!a.open) {
-        hint("No sound output yet.");
-    } else {
-        char text[96];
-        snprintf(text, sizeof(text), "%.1f ms", framesMs(a.queued));
-        float fraction = a.max > 0 ? std::min(1.0f, (float)a.queued / (float)a.max) : 0.0f;
-        ImGui::ProgressBar(fraction, ImVec2(-1, 0), text);
-        hint("%d frames now, %.1f ms on average%s; the bar's end is the ceiling.", a.queued, framesMs(a.average),
-             a.prefilling ? " (filling its reserve)" : "");
-    }
+        if (!a.open) {
+            hint("No sound output yet.");
+        } else {
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("%.1f ms", framesMs(a.queued));
+            hint("%d frames now, %.1f ms on average%s; ceiling %.0f ms.", a.queued, framesMs(a.average),
+                 a.prefilling ? " (filling its reserve)" : "", framesMs(a.max));
+        }
     }
     if (opt::row(N_("Audio target"), "audio_latency audio_latency_max") && a.open) {
         ImGui::AlignTextToFramePadding();

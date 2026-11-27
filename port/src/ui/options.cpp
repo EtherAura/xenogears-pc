@@ -681,6 +681,7 @@ struct Page {
     bool aligned;     // the row's controls are in a group: right-aligned to the pane's edge
     ImGuiID alignId;
     float alignAvail; // full right-column width for this row (invalidates stale rowWidths on resize)
+    float alignShift; // x shift applied this frame (0 on an unshifted measurement pass)
     std::string rowLabel;
     std::vector<const Spec*> rowSpecs;
     int changedInGroup;
@@ -790,7 +791,11 @@ void emitTail() {
         ImVec2 size = ImGui::GetItemRectSize();
         rowWidths[pg.alignId] = size.x;
         rowColAvail[pg.alignId] = pg.alignAvail;
-        if (size.y > skin::rowHeight() * 1.5f) rowNoAlign[pg.alignId] = true;
+        // Multi-line or full-width rows stay unshifted (shifting an avail-relative
+        // widget like -1 or -buttons would shrink it by the shift every frame).
+        if (size.y > skin::rowHeight() * 1.5f || (pg.alignShift == 0.0f && size.x >= pg.alignAvail - 1.5f)) {
+            rowNoAlign[pg.alignId] = true;
+        }
     }
     if (mode == MODE_INDEX) return;
     if (pg.tailFlags & RESTART) hint("Takes effect the next time the game starts.");
@@ -876,6 +881,7 @@ void beginPage(const char* id, int section, bool stacked) {
     pg.tail = false;
     pg.rowChanged = false;
     pg.aligned = false;
+    pg.alignShift = 0.0f;
     pg.rowLabel.clear();
     pg.rowSpecs.clear();
     pg.changedInGroup = 0;
@@ -1120,6 +1126,7 @@ bool row(const char* label, const char* keys, int flags) {
     ImGui::TextUnformatted(tr(label));
     skin::popOptionText();
     pg.aligned = false;
+    pg.alignShift = 0.0f;
     if (!pg.stacked) {
         ImGui::TableSetColumnIndex(1);
         if (mode != MODE_INDEX) {
@@ -1132,9 +1139,11 @@ bool row(const char* label, const char* keys, int flags) {
             auto w = rowWidths.find(pg.alignId);
             auto ca = rowColAvail.find(pg.alignId);
             bool sameAvail = ca != rowColAvail.end() && fabsf(ca->second - avail) < 1.0f;
+            if (!sameAvail) rowNoAlign.erase(pg.alignId);
             if (!rowNoAlign[pg.alignId] && sameAvail && w != rowWidths.end() && w->second > 0.0f && w->second < avail) {
                 // Whole pixels, rounded down: the controls get at least last frame's width back.
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + floorf(avail - w->second));
+                pg.alignShift = floorf(avail - w->second);
+                if (pg.alignShift > 0.0f) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + pg.alignShift);
             }
             ImGui::BeginGroup();
             pg.aligned = true;
@@ -1388,32 +1397,158 @@ const std::vector<Preset>& presets() {
                   {"color_grade", 0, nullptr},
                   {"vignette", 0, nullptr},
                   {"particles", 0, nullptr}}});
-    p.push_back({N_("Enhanced HD-2D"),
-                 N_("The modern showcase setup: the Enhanced engine, 16:9 widescreen with expanded vertical framing, "
-                    "Auto resolution, 60 Hz fields, world map and battles, Speedup, free camera, and HD-2D scene "
-                    "effects (lighting, shadows, depth of field, glow, shafts, fog, colour grade and particles)."),
-                 {{"engine", ENGINE_ENHANCED, nullptr},
-                  {"aspect", 0, "16:9"},
-                  {"expanded_vertical", 1, nullptr},
-                  {"upscale", 0, nullptr},
-                  {"field60", 1, nullptr},
-                  {"field60slow", 1, nullptr},
-                  {"worldmap60", 1, nullptr},
-                  {"battle60", 1, nullptr},
-                  {"speedup", 1, nullptr},
-                  {"free_camera", 1, nullptr},
-                  {"depth_of_field", 2, nullptr},
-                  {"tilt_shift", 0, nullptr},
-                  {"lighting", 2, nullptr},
-                  {"glow", 2, nullptr},
-                  {"shadows", 2, nullptr},
-                  {"cloud_shadows", 2, nullptr},
-                  {"light_shafts", 2, nullptr},
-                  {"sun_glare", 2, nullptr},
-                  {"fog", 2, nullptr},
-                  {"color_grade", 2, nullptr},
-                  {"vignette", 1, nullptr},
-                  {"particles", 2, nullptr}}});
+    auto enhancedValues = [](bool hard, bool undub) -> std::vector<PresetValue> {
+        int reward = hard ? 300 : 100;
+        return {{"engine", ENGINE_ENHANCED, nullptr},
+                {"aspect", 0, "16:9"},
+                {"expanded_vertical", 1, nullptr},
+                {"scale", 0, nullptr},
+                {"widefill", 1, nullptr},
+                {"upscale", 0, nullptr},
+                {"gpu_ordered_batches", 1, nullptr},
+                {"vsync_wait", 1, nullptr},
+                {"display_lock", 1, nullptr},
+                {"display_lock_tolerance", 20, nullptr},
+                {"upscale_color", 1, nullptr},
+                {"depth_of_field", 2, nullptr},
+                {"depth_of_field_focus", 0, nullptr},
+                {"depth_of_field_dialogue", 1, nullptr},
+                {"tilt_shift", 2, nullptr},
+                {"lighting", 2, nullptr},
+                {"lighting_firelight", 1, nullptr},
+                {"lighting_characters", 1, nullptr},
+                {"glow", 2, nullptr},
+                {"shadows", 2, nullptr},
+                {"fog", 2, nullptr},
+                {"color_grade", 2, nullptr},
+                {"color_grade_area", 1, nullptr},
+                {"particles", 2, nullptr},
+                {"particle_size", 0, nullptr},
+                {"sun_glare", 2, nullptr},
+                {"particles_footsteps", 1, nullptr},
+                {"vignette", 2, nullptr},
+                {"light_shafts", 2, nullptr},
+                {"cloud_shadows", 2, nullptr},
+                {"present_filter", 0, nullptr},
+                {"present_movie_filter", 4, nullptr},
+                {"upscale_cpu_effects", 1, nullptr},
+                {"upscale_large", 1, nullptr},
+                {"geometry_precision", 1, nullptr},
+                {"perspective_textures", 1, nullptr},
+                {"geometry_slivers", 1, nullptr},
+                {"geometry_seam_guard", 1, nullptr},
+                {"texture_style_3d", 9, nullptr},
+                {"texture_style_sprite", 9, nullptr},
+                {"texture_style_hud", 9, nullptr},
+                {"texture_style_battle_hud", 9, nullptr},
+                {"texture_style_text", 6, nullptr},
+                {"texture_style_icon", 9, nullptr},
+                {"texture_filter_portrait", 0, nullptr},
+                {"texture_filter_menu_portrait", 0, nullptr},
+                {"texture_filter_battle_portrait", 0, nullptr},
+                {"portrait_set", 0, "cel-8x"},
+                {"menu_portrait_set", 0, "cel-8x"},
+                {"battle_portrait_set", 0, "cel-8x"},
+                {"text_smooth", 0, nullptr},
+                {"present_shader", 0, ""},
+                {"menu_text", 1, nullptr},
+                {"menu_scale", 100, nullptr},
+                {"menu_font_scale", 85, nullptr},
+                {"menu_dark", 1, nullptr},
+                {"menu_desc_autoscroll", 1, nullptr},
+                {"menu_on_startup", 0, nullptr},
+                {"movie_replacements", 1, nullptr},
+                {"sprite_preload", 1, nullptr},
+                {"volume", 100, nullptr},
+                {"binaural_headphones", 0, nullptr},
+                {"audio_latency", 60, nullptr},
+                {"audio_latency_max", 150, nullptr},
+                {"japanese_battle_voices", undub ? 1 : 0, nullptr},
+                {"japanese_cutscene_audio", undub ? 1 : 0, nullptr},
+                {"cutscene_subtitles", undub ? 2 : 0, nullptr},
+                {"cutscene_sound_captions", 0, nullptr},
+                {"cutscene_lyrics", 0, nullptr},
+                {"cutscene_invented_language", 0, nullptr},
+                {"jp_controls_us", 1, nullptr},
+                {"us_controls_jp", 0, nullptr},
+                {"pad_background", 0, nullptr},
+                {"pad_stick_dpad", 1, nullptr},
+                {"pad_stick_deadzone", 50, nullptr},
+                {"mouse_game", 0, nullptr},
+                {"mouse_point", 0, nullptr},
+                {"mouse_target", 0, nullptr},
+                {"mouse_camera", 0, nullptr},
+                {"free_camera", 1, nullptr},
+                {"first_person_look", 1, nullptr},
+                {"first_person_navigation", 1, nullptr},
+                {"camera_invert_x", 0, nullptr},
+                {"camera_invert_y", 0, nullptr},
+                {"camera_turn_speed", 100, nullptr},
+                {"camera_tilt_speed", 100, nullptr},
+                {"camera_stick_deadzone", 20, nullptr},
+                {"vibration", 2, nullptr},
+                {"vibration_strength", 100, nullptr},
+                {"speedup", 1, nullptr},
+                {"ps1_frame_rate", 0, nullptr},
+                {"battle_speed", 0, nullptr},
+                {"field_speed", 0, nullptr},
+                {"speedup_transitions", 0, nullptr},
+                {"dialogue_backlog", 0, nullptr},
+                {"field60", 1, nullptr},
+                {"worldmap60", 1, nullptr},
+                {"battle60", 1, nullptr},
+                {"field60slow", 1, nullptr},
+                {"interpolation", 1, nullptr},
+                {"interpolation_hz", 60, nullptr},
+                {"original_bug_fixes", 1, nullptr},
+                {"deus_camera_fix", 1, nullptr},
+                {"uninterrupted_combos", 0, nullptr},
+                {"disable_battle_flashes", 0, nullptr},
+                {"difficulty", hard ? 1 : 0, nullptr},
+                {"enemy_hp", 100, nullptr},
+                {"enemy_attack", 100, nullptr},
+                {"enemy_ether", 100, nullptr},
+                {"enemy_defence", 100, nullptr},
+                {"enemy_ether_defence", 100, nullptr},
+                {"enemy_agility", 100, nullptr},
+                {"encounter_rate", hard ? 26 : 100, nullptr},
+                {"exp_multiplier", reward, nullptr},
+                {"gold_multiplier", reward, nullptr},
+                {"scripted_exp_multiplier", reward, nullptr},
+                {"scripted_gold_multiplier", reward, nullptr},
+                {"deathblow_learning", reward, nullptr},
+                {"enemy_info", 1, nullptr},
+                {"battle_retry", 1, nullptr},
+                {"text_speed", 1, nullptr},
+                {"text_hold_fast", 0, nullptr},
+                {"text_auto_advance", 0, nullptr},
+                {"rewind", 0, nullptr},
+                {"rewind_seconds", 120, nullptr},
+                {"rewind_interval", 2, nullptr},
+                {"rewind_budget", 1024, nullptr},
+                {"disc_swap", 1, nullptr},
+                {"pause_minimized", 0, nullptr}};
+    };
+    p.push_back({N_("Enhanced (Normal Mode)"),
+                 N_("The Enhanced setup on Normal difficulty: 16:9 widescreen with expanded vertical framing, "
+                    "Auto resolution, Cel 8x artwork and portraits, Enhanced text, 60 Hz modes, full HD-2D scene "
+                    "effects, free and first-person camera, Speedup, bug fixes, enemy info and battle retry, with "
+                    "vanilla 100% encounter rate and rewards."),
+                 enhancedValues(false, false)});
+    p.push_back({N_("Enhanced (Hard Mode)"),
+                 N_("The Enhanced setup on Hard difficulty: 16:9 widescreen with expanded vertical framing, "
+                    "Auto resolution, Cel 8x artwork and portraits, Enhanced text, 60 Hz modes, full HD-2D scene "
+                    "effects, free and first-person camera, Speedup, bug fixes, enemy info and battle retry, with "
+                    "Hard difficulty, 26% encounter rate and 300% EXP, gold and deathblow learning."),
+                 enhancedValues(true, false)});
+    p.push_back({N_("Enhanced (Normal Mode, Undub)"),
+                 N_("Enhanced (Normal Mode) with Japanese battle voices, Japanese cutscene audio and "
+                    "Japanese-translation subtitles."),
+                 enhancedValues(false, true)});
+    p.push_back({N_("Enhanced (Hard Mode, Undub)"),
+                 N_("Enhanced (Hard Mode) with Japanese battle voices, Japanese cutscene audio and "
+                    "Japanese-translation subtitles."),
+                 enhancedValues(true, true)});
     p.push_back({N_("Crisp Widescreen"),
                  N_("Clean modern presentation without post-processing: the Enhanced engine, 16:9 widescreen with "
                     "expanded vertical framing, Auto resolution, Nearest filter, 60 Hz modes, Speedup, and all "
