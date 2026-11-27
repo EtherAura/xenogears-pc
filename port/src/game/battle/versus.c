@@ -1567,6 +1567,8 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
 
 /* ---- battleMain: the formation, the end ---- */
 
+int pcArenaApplyMatchParty(void);
+
 /* battleMain, before it copies its config: a versus battle's checkpoint and
  * formation (as battleDebugSelector loads a table). */
 void pcVersusBattleSetup(void) {
@@ -1593,6 +1595,10 @@ void pcVersusBattleSetup(void) {
     freeHeap(buf);
     setCurrentDirectory(dir, sub);
     requestedBattleConfig = pcVersusConfig();
+    if (pcArenaApplyMatchParty()) {
+        /* A story formation can force a substitute Gear party. */
+        battleConfigs[requestedBattleConfig * 0x20 + 1] &= ~0x10;
+    }
     if (pcArenaRosterConfig(battleConfigs + requestedBattleConfig * 0x20)) {
         __builtin_memset(enemyGear, 0, sizeof enemyGear);
         int ready = pcArenaRosterStartInGear();

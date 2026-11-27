@@ -283,7 +283,7 @@ static int packets(void) {
 }
 
 /* Both sides' pads every vblank: the same, and the inputs `delay` before. */
-static int lockstep(int delay, unsigned drop, int overV6) {
+static int lockstep(int delay, unsigned drop, int overV6, int hostSave) {
     v6 = overV6;
     side(&H, 1, "orange", 42);
     side(&J, 0, "orange", 42);
@@ -295,6 +295,11 @@ static int lockstep(int delay, unsigned drop, int overV6) {
     H.s.terms.party[0] = 0;
     H.s.terms.party[1] = 2;
     H.s.terms.party[2] = 255;
+    uint8_t record[1000];
+    if (hostSave) {
+        for (int i = 0; i < (int)sizeof record; i++) record[i] = i;
+        CHECK(npSetParty(&H.s, record, sizeof record));
+    }
     H.s.testDrop = J.s.testDrop = drop;
     settings(&H.s, 1);
     settings(&J.s, 0);
@@ -305,6 +310,9 @@ static int lockstep(int delay, unsigned drop, int overV6) {
     CHECK(J.s.terms.delay == delay && J.s.terms.progress == 123);
     CHECK(J.s.terms.mode == NP_MODE_VERSUS && J.s.terms.table == 2 && J.s.terms.config == 1 &&
           J.s.terms.party[0] == 0 && J.s.terms.party[1] == 2 && J.s.terms.party[2] == 255);
+    CHECK(H.s.peerPartyBytes == 0);
+    CHECK(J.s.peerPartyBytes == (hostSave ? (int)sizeof record : 0));
+    if (hostSave) CHECK(memcmp(J.s.peerParty, record, sizeof record) == 0);
     for (int i = 0; i < 20; i++) CHECK(J.s.terms.settings[i] == i * 7); /* the host's, through the handshake */
     if (H.endedAt != -1 || J.endedAt != -1)
         fprintf(stderr, "host ended %d (%s), joiner %d (%s)\n", H.endedAt, H.s.why, J.endedAt, J.s.why);
@@ -858,7 +866,7 @@ int main(void) {
     makeRecord(partyB, 2);
     makeRecord(partyBad, 3);
     partyBad[0] = 0xEE;
-    if (pins() || packets() || addresses() || lockstep(3, 0, 0) || lockstep(1, 0, haveV6()) || lockstep(6, 4, 0) ||
+    if (pins() || packets() || addresses() || lockstep(3, 0, 0, 1) || lockstep(1, 0, haveV6(), 0) || lockstep(6, 4, 0, 1) ||
         handshake() || picks() || ends() || drops() || partyPages() || party() || olderBuilds()) {
         fprintf(stderr, "netplaytest: failed after %d checks\n", checks);
         return 1;

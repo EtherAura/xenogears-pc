@@ -191,7 +191,7 @@ void saveList(bool* chosenByNav) {
 void memberPicker(const CardGameSave& s, bool focus) {
     int count = pickedCount();
     for (int c = 0; c < CARD_SAVE_MEMBERS; c++) {
-        if (!(s.joined & 1 << c)) continue;
+        bool joined = (s.joined & (1 << c)) != 0;
         int at = -1;
         for (int i = 0; i < 3; i++) {
             if (B->picked[i] == c) at = i;
@@ -200,11 +200,11 @@ void memberPicker(const CardGameSave& s, bool focus) {
         const CardSaveMember& m = s.members[c];
         opt::row(memberNames[c]);
         ImGui::PushID(c);
-        if (focus) {
+        if (focus && joined) {
             ImGui::SetKeyboardFocusHere(); // the list's choice moves the cursor on to its members
             focus = false;
         }
-        ImGui::BeginDisabled(!on && count >= 3);
+        ImGui::BeginDisabled(!joined || (!on && count >= 3));
         if (skin::checkbox("##member", &on)) {
             sfx::play(sfx::CHOOSE);
             if (on) {
@@ -222,7 +222,8 @@ void memberPicker(const CardGameSave& s, bool focus) {
         }
         ImGui::EndDisabled();
         ImGui::PopID();
-        hint("%s: level %d, HP %d/%d", tr(memberNames[c]), m.level, m.hp, m.maxHp);
+        if (joined) hint("%s: level %d, HP %d/%d", tr(memberNames[c]), m.level, m.hp, m.maxHp);
+        else hint("%s has not joined in this save.", tr(memberNames[c]));
     }
     count = pickedCount();
     if (count == 0) {

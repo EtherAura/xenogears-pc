@@ -1,6 +1,8 @@
 #ifndef XG_ARENA_ROSTER_H
 #define XG_ARENA_ROSTER_H
 
+#include "../card/party_record.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -9,6 +11,7 @@ extern "C" {
 #define ARENA_ROSTER_STATS 6
 #define ARENA_ROSTER_ITEMS 0x30 /* battle item IDs 1–0x30, indexed by ID minus one */
 #define ARENA_LOADOUT_CODE 328 /* versioned hexadecimal data including both sides */
+#define ARENA_ROSTER_PACKET (ARENA_LOADOUT_CODE + XG_PARTY_BYTES)
 
 typedef struct {
     unsigned char bank, type;
@@ -33,6 +36,7 @@ typedef struct {
     ArenaLoadout loadout;
     int party[3];
     int fromSave;
+    XgPartyRecord record;
 } ArenaLoadoutChoice;
 
 typedef struct {
@@ -45,6 +49,9 @@ int pcArenaLoadoutReady(const ArenaLoadoutReview* review);
 int pcArenaLoadoutApprove(ArenaLoadoutReview* review, int player, int approve);
 int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char code[ARENA_LOADOUT_CODE]);
 int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]);
+int pcArenaRosterPack(const char* code, const XgPartyRecord* party, unsigned char packet[ARENA_ROSTER_PACKET]);
+int pcArenaRosterUnpack(const unsigned char* packet, int bytes, const unsigned char* codes,
+                        char code[ARENA_LOADOUT_CODE], XgPartyRecord* record);
 int pcArenaRosterOnline(const ArenaLoadout* loadout, const char* disc, const char** why);
 int pcArenaRosterStart(const ArenaLoadoutReview* review, const char** why);
 const unsigned char* pcArenaRosterItemCounts(int side);

@@ -390,6 +390,39 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
     return 1;
 }
 
+int pcArenaRosterPack(const char* code, const XgPartyRecord* party, unsigned char packet[ARENA_ROSTER_PACKET]) {
+    size_t bytes = strlen(code) + 1;
+    if (bytes > ARENA_LOADOUT_CODE) return 0;
+    memcpy(packet, code, bytes);
+    if (party != NULL) {
+        memcpy(packet + bytes, party, sizeof *party);
+        bytes += sizeof *party;
+    }
+    return (int)bytes;
+}
+
+int pcArenaRosterUnpack(const unsigned char* packet, int bytes, const unsigned char* codes,
+                        char code[ARENA_LOADOUT_CODE], XgPartyRecord* record) {
+    if (bytes <= 0 || bytes > ARENA_ROSTER_PACKET) return 0;
+    const unsigned char* end = memchr(packet, 0, (size_t)bytes);
+    if (end == NULL || end - packet >= ARENA_LOADOUT_CODE) return 0;
+    int textBytes = (int)(end - packet) + 1;
+    int recordBytes = bytes - textBytes;
+    ArenaLoadout roster;
+    int party[3];
+    memcpy(code, packet, (size_t)textBytes);
+    if (!pcArenaLoadoutDecode(code, &roster, party)) return 0;
+    memset(record, 0, sizeof *record);
+    if (roster.side[0].count != 0) return recordBytes == 0;
+    if (recordBytes != sizeof *record) return 0;
+    memcpy(record, end + 1, sizeof *record);
+    if (xgPartyCheck(record, codes, NULL) != XG_PARTY_OK) return 0;
+    for (int i = 0; i < 3; i++) {
+        if (party[i] != record->m4_members[i]) return 0;
+    }
+    return 1;
+}
+
 int pcArenaRosterOnline(const ArenaLoadout* loadout, const char* disc, const char** why) {
     RosterAssets next = {0};
     if (!prepare(&next, loadout, disc, why)) {
@@ -413,7 +446,10 @@ int pcArenaRosterStart(const ArenaLoadoutReview* review, const char** why) {
     }
     freeAssets(&roster);
     roster = next;
-    if (!pcArenaMatchStart(ARENA_MATCH_ROSTER, 2, 13, chosen->party, chosen->fromSave)) {
+    int started = chosen->record.m3_count != 0
+                      ? pcArenaMatchStartSaved(ARENA_MATCH_ROSTER, 2, 13, &chosen->record)
+                      : pcArenaMatchStart(ARENA_MATCH_ROSTER, 2, 13, chosen->party, chosen->fromSave);
+    if (!started) {
         pcArenaRosterClear();
         return refused(why, "The match could not start.");
     }

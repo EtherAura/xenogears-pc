@@ -10,6 +10,7 @@
 #include "card.h"
 #include "common.h"
 #include "main/game_state.h"
+#include "menu/menu.h"
 #include "saves.h"
 
 /* The record holds the PS1's records as bytes: their sizes and the fields
@@ -18,12 +19,13 @@ _Static_assert(sizeof(GameStateCharacter) == XG_PARTY_RECORD, "a character recor
 _Static_assert(sizeof(GameStateSize20) == XG_PARTY_ABILITY, "an ability row is 0x20 bytes on the PS1");
 _Static_assert(sizeof(gameState.m0_names[0]) == XG_PARTY_NAME, "a name is 0x14 bytes");
 _Static_assert(sizeof(gameState.m22B8_ammoCounts) == XG_PARTY_AMMO_TABLE, "the ammo-count table");
+_Static_assert(sizeof(MenuSaveGearEquip) == XG_PARTY_GEAR_EQUIP, "the Gear equipment record");
 _Static_assert(offsetof(XgPartyRecord, m10_characters) == 0x10 && offsetof(XgPartyRecord, m1FC_abilities) == 0x1FC &&
                    offsetof(XgPartyRecord, m25C_names) == 0x25C && offsetof(XgPartyRecord, m298_itemIds) == 0x298 &&
                    offsetof(XgPartyRecord, m2C8_itemCounts) == 0x2C8 &&
                    offsetof(XgPartyRecord, m2F8_ammoIds) == 0x2F8 &&
                    offsetof(XgPartyRecord, m328_ammoCounts) == 0x328 &&
-                   offsetof(XgPartyRecord, m358_ammoTable) == 0x358,
+                   offsetof(XgPartyRecord, m358_ammoTable) == 0x358 && offsetof(XgPartyRecord, m3B8_gearEquip) == 0x3B8,
                "the party record's offsets");
 #if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
 #error "the party record is the PS1's layout, little-endian"
@@ -202,7 +204,8 @@ int xgPartyCheck(const XgPartyRecord* r, const uint8_t* codes, XgPartyWhy* why) 
         int id = r->m4_members[k];
         if (k >= count) {
             if (id != XG_PARTY_NONE || !allZero(r->m10_characters[k], XG_PARTY_RECORD) ||
-                !allZero(r->m1FC_abilities[k], XG_PARTY_ABILITY) || !allZero(r->m25C_names[k], XG_PARTY_NAME)) {
+                !allZero(r->m1FC_abilities[k], XG_PARTY_ABILITY) || !allZero(r->m25C_names[k], XG_PARTY_NAME) ||
+                !allZero(r->m3B8_gearEquip[k], XG_PARTY_GEAR_EQUIP)) {
                 return fail(why, XG_PARTY_BAD_MEMBERS, k, "place %d is past the %d members but not empty", k + 1, count);
             }
             continue;
@@ -374,6 +377,11 @@ int xgPartyPack(XgPartyRecord* out, const uint8_t* b, const int members[XG_PARTY
         out->m4_members[k] = (uint8_t)id;
         memcpy(out->m10_characters[k], b + CARD_SAVE_PARTY + id * XG_PARTY_RECORD, XG_PARTY_RECORD);
         memcpy(out->m1FC_abilities[k], b + CARD_SAVE_ABILITIES + id * XG_PARTY_ABILITY, XG_PARTY_ABILITY);
+        unsigned gear = out->m10_characters[k][offsetof(GameStateCharacter, mA0_gearNum)];
+        if (gear < GEAR_COUNT) {
+            const uint8_t* savedGear = b + CARD_SAVE_DATA + offsetof(MenuSaveGame, m99C_gears) + gear * sizeof(MenuSaveGear);
+            memcpy(out->m3B8_gearEquip[k], savedGear, XG_PARTY_GEAR_EQUIP);
+        }
         if (!decodeName(b + CARD_SAVE_NAMES + id * XG_PARTY_NAME, codes, out->m25C_names[k])) {
             return fail(why, XG_PARTY_BAD_NAME, k, "member %d (id %d): a name the code table cannot decode", k + 1, id);
         }

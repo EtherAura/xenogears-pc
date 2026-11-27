@@ -53,7 +53,7 @@ typedef struct {
     int battlingOnly;  /* join: accept only a Gear Battling session */
     int party[3];      /* host: the party (character ids, 255 none) */
     int partyVsParty;  /* host: party vs party (each player's party from their own save) */
-    int hasParty;      /* this side's party record below (party vs party; the joiner's for such a host) */
+    int hasParty;      /* a checked save record is attached */
     char roster[ARENA_LOADOUT_CODE]; /* both players approve the same roster before launching */
     XgPartyRecord record; /* ... (checked) */
 } NetplayStart;
@@ -63,7 +63,7 @@ enum { NETPLAY_ROSTER_IDLE, NETPLAY_ROSTER_WAITING, NETPLAY_ROSTER_REVIEW, NETPL
 uint64_t netplayCompatibilityId(void);
 int netplayRosterLobbyStart(const NetplayStart* start);
 int netplayRosterLobbyState(NetplayStart* start, char* proposal, char* detail, size_t detailSize);
-void netplayRosterLobbyConfirm(const char* proposal);
+void netplayRosterLobbyConfirm(const char* proposal, const XgPartyRecord* party);
 void netplayRosterLobbyStop(void);
 
 /* The session's process started: 1. */
@@ -85,7 +85,6 @@ void netplaySessionStop(void);
 /* The running game's story progress (field variable 0), for the host's Gears;
  * its party (a versus battle's: Fei and Citan when none). */
 int netplaySessionStory(void);
-void netplaySessionParty(int party[3]);
 /* netplayPace without a session of its own: the game waits while one runs. */
 void netplayLaunchWait(void);
 

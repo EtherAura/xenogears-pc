@@ -16,6 +16,7 @@
 #include "card/saves.h"
 #include "common.h"
 #include "main/game_state.h"
+#include "menu/menu.h"
 
 int cardBusy(int slot) { return 0; } /* image.c's: no game here */
 
@@ -301,7 +302,7 @@ static void testPack(void) {
     /* the same bytes everywhere (Linux, Windows): a fixed save packs to a fixed record */
     uint32_t h = fnv(&good, sizeof(good));
     printf("card_savestest: record %u bytes, fnv1a %08x\n", (unsigned)sizeof(good), h);
-    CHECK(h == (cardGameRegion() == 'J' ? 0x1a792886u : 0x87aba63bu));
+    CHECK(h == (cardGameRegion() == 'J' ? 0xc7e17ae1u : 0xf6e9e1b0u));
 
     /* a member's numbers */
     XgPartyMember m;
@@ -366,10 +367,19 @@ static void testPack(void) {
     seal(broken);
     CHECK(xgPartyPack(&r, broken, members, codes, NULL) == XG_PARTY_OK && r.m298_itemIds[0x2F] == 0x30);
 
+    /* The Gear parts belong to the selected member's Gear, not their slot. */
+    memcpy(broken, save, CARD_BLOCK);
+    uint8_t* gear = broken + CARD_SAVE_DATA + offsetof(MenuSaveGame, m99C_gears) + 5 * sizeof(MenuSaveGear);
+    gear[offsetof(GameStateGear, m2_frame)] = 7;
+    gear[offsetof(GameStateGear, m3_engine)] = 13;
+    seal(broken);
+    CHECK(xgPartyPack(&r, broken, members, codes, NULL) == XG_PARTY_OK);
+    CHECK(!memcmp(r.m3B8_gearEquip[0], gear, XG_PARTY_GEAR_EQUIP));
+
     /* ---- every bound of the check, just in and just out ---- */
     CHECK(checkOf(&good) == XG_PARTY_OK);
     r = good;
-    r.m0_format = 2;
+    r.m0_format = XG_PARTY_FORMAT + 1;
     CHECK(checkOf(&r) == XG_PARTY_BAD_HEADER);
     r = good;
     r.m2_flags = XG_PARTY_GEARS;

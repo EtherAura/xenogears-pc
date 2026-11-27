@@ -386,6 +386,7 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
     int refuse = p[24] != s->region ? NP_REFUSE_REGION : rd64(p + 8) != s->compatId ? NP_REFUSE_BUILD : 0;
     int reason = 0, place = 255;
     NpTerms t = s->terms;
+    int sendRecord = hasMatchRecord(t.mode) || (t.mode == NP_MODE_VERSUS && s->partyBytes != 0);
     *wait = 0;
     if (!refuse && p[40] == 1 && t.mode != NP_MODE_BATTLING) refuse = NP_REFUSE_MODE;
     if (!refuse && t.mode == NP_MODE_VERSUS && t.pick) { /* player 2's formation */
@@ -427,10 +428,10 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
     s->welcome[25] = (uint8_t)refuse;
     s->welcome[36] = (uint8_t)reason;
     s->welcome[37] = (uint8_t)place;
-    if (hasMatchRecord(t.mode)) {
+    if (sendRecord) {
         put16(s->welcome + 38, (uint16_t)s->partyBytes);
         put64(s->welcome + 40, s->partyHash);
-        put64(s->welcome + 48, a->hash);
+        if (hasMatchRecord(t.mode)) put64(s->welcome + 48, a->hash);
     }
     npSeal(s, s->welcome, NP_WELCOME);
     send(s, from, s->welcome);
@@ -451,12 +452,14 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
         npSeal(s, s->pages[s->pageCount], NP_SETTINGS);
         send(s, from, s->pages[s->pageCount++]);
     }
-    if (hasMatchRecord(t.mode)) {
+    if (sendRecord) {
         for (int i = 0; i < npPartyPages(s->partyBytes); i++) {
             npPutParty(s->pages[s->pageCount], rd64(p + 16), s->party, s->partyBytes, s->partyHash, i);
             npSeal(s, s->pages[s->pageCount], NP_PARTY);
             send(s, from, s->pages[s->pageCount++]);
         }
+    }
+    if (hasMatchRecord(t.mode)) {
         memcpy(s->peerParty, a->data, (size_t)a->bytes);
         s->peerPartyBytes = a->bytes;
         s->peerPartyHash = a->hash;
@@ -559,7 +562,7 @@ int npJoin(NpSession* s, const NetAddr* host, uint64_t waitNs) {
     uint8_t p[NP_PACKET];
     NetAddr from;
     uint64_t until = SDL_GetTicksNS() + waitNs, last = 0;
-    int welcomed = 0, partyDone = 0;
+    int welcomed = 0, partyDone = 0, receiveRecord = 0;
     unsigned pages = 0, all = (1u << npPages(s)) - 1;
     NpTerms t = s->terms;
     NpAssembly a; /* the host's party */
@@ -600,22 +603,25 @@ int npJoin(NpSession* s, const NetAddr* host, uint64_t waitNs) {
                 if (s->battlingOnly && w.mode != NP_MODE_BATTLING) {
                     return end(s, NP_END_REFUSED_MODE, "the host is not playing Gear Battling");
                 }
-                if (!hasMatchRecord(w.mode)) {
+                int bytes = get16(p + 38);
+                if (hasMatchRecord(w.mode) && (s->partyBytes == 0 || rd64(p + 48) != s->partyHash)) continue;
+                receiveRecord = hasMatchRecord(w.mode) || (w.mode == NP_MODE_VERSUS && bytes != 0);
+                if (!receiveRecord) {
                     welcomed = 1;
                     t = w;
-                } else if (s->partyBytes > 0 && rd64(p + 48) == s->partyHash && npPartyPages(get16(p + 38)) > 0) {
-                    welcomed = 1; /* party vs party, with this side's party (as the host took it) */
+                } else if (npPartyPages(bytes) > 0) {
+                    welcomed = 1;
                     t = w;
-                    npAssemblyStart(&a, s->nonce, rd64(p + 40), get16(p + 38));
+                    npAssemblyStart(&a, s->nonce, rd64(p + 40), bytes);
                     partyDone = a.got == a.pages && npPartyHash(a.data, a.bytes) == a.hash;
                 }
             }
         }
-        if (welcomed && pages == all && (!hasMatchRecord(t.mode) || partyDone)) {
+        if (welcomed && pages == all && (!receiveRecord || partyDone)) {
             s->terms = t;
             s->token = s->nonce;
             s->lastHeard = SDL_GetTicksNS();
-            if (hasMatchRecord(t.mode)) {
+            if (receiveRecord) {
                 int member = -1;
                 int reason = s->partyCheck != NULL ? s->partyCheck(s, a.data, a.bytes, &member) : 0;
                 if (reason != 0) { /* the host's party: refused here, and the host told */

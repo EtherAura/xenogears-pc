@@ -685,7 +685,6 @@ static void setEnv(const char* name, const char* value) {
 static int checkParty(NpSession* s, const uint8_t* record, int bytes, int* member) {
     XgPartyRecord r;
     XgPartyWhy why;
-    (void)s;
     *member = -1;
     for (int i = 0; i < 3; i++) N.checkedIds[i] = 255;
     if (bytes != (int)sizeof r) {
@@ -698,6 +697,13 @@ static int checkParty(NpSession* s, const uint8_t* record, int bytes, int* membe
     if (reason != XG_PARTY_OK) {
         *member = why.member;
         say("a party refused: %s", why.text);
+    } else if (!s->host && s->terms.mode == NP_MODE_VERSUS) {
+        for (int i = 0; i < 3; i++) {
+            if (s->terms.party[i] != r.m4_members[i]) {
+                *member = i;
+                return XG_PARTY_BAD_MEMBERS;
+            }
+        }
     }
     return reason;
 }
@@ -722,12 +728,10 @@ static int partyFromHex(const char* hex, XgPartyRecord* out) {
  * machine's cards, read now, put away again once the session holds its
  * settings: *cardsRead), checked as the other side's will be. 0 (said, and
  * the status line) where there is one but it cannot be used. */
-static int ownParty(const char* disc, int* cardsRead) {
+static int ownParty(int* cardsRead) {
     const char* hex = SDL_getenv("XG_NETPLAY_PARTY");
     *cardsRead = 0;
     if ((hex == NULL || hex[0] == '\0') && N.save[0] == '\0') return 1; /* none brought */
-    N.haveCodes = xgPartyImageCodes(disc, N.codes);
-    if (!N.haveCodes) say("the disc's character-code table could not be read (%s)", disc != NULL ? disc : "no disc");
     if (hex != NULL && hex[0] != '\0') {
         if (!partyFromHex(hex, &N.party)) {
             say("XG_NETPLAY_PARTY is not a party record's %d bytes in hex", (int)sizeof N.party);
@@ -761,9 +765,8 @@ static int ownParty(const char* disc, int* cardsRead) {
 }
 
 static int checkRosterAgreement(NpSession* session, const uint8_t* data, int bytes, int* member) {
-    (void)session;
     *member = -1;
-    return bytes == (int)strlen(N.roster) && memcmp(data, N.roster, (size_t)bytes) == 0 ? 0 : 1;
+    return bytes != session->partyBytes || memcmp(data, session->party, (size_t)bytes) != 0;
 }
 
 int netplayConnect(const char* disc) {
@@ -808,14 +811,31 @@ int netplayConnect(const char* disc) {
     s->pickTable = N.pickTable;
     s->pickConfig = N.pickConfig;
     s->partyCheck = N.roster[0] ? checkRosterAgreement : checkParty;
-    if (N.roster[0]) npSetParty(s, (const uint8_t*)N.roster, (int)strlen(N.roster));
-    else if (!ownParty(disc, &cardsRead)) return 0;
+    N.haveCodes = xgPartyImageCodes(disc, N.codes);
+    if (!ownParty(&cardsRead)) return 0;
     if (N.host && N.terms.mode == NP_MODE_PARTY && !N.hasParty) {
         say("party vs party needs this side's party: --save CARD.NUMBER[.ID...] (or the menu's)");
         status("over ownparty %d 255", XG_PARTY_BAD_MEMBERS);
         return 0;
     }
-    if (N.hasParty) npSetParty(s, (const uint8_t*)&N.party, (int)sizeof N.party);
+    if (N.roster[0]) {
+        uint8_t packet[ARENA_ROSTER_PACKET];
+        int bytes = pcArenaRosterPack(N.roster, N.hasParty ? &N.party : NULL, packet);
+        if (N.hasParty) {
+            char code[ARENA_LOADOUT_CODE];
+            XgPartyRecord record;
+            if (!pcArenaRosterUnpack(packet, bytes, N.haveCodes ? N.codes : NULL, code, &record)) {
+                status("over loadout");
+                return 0;
+            }
+        }
+        npSetParty(s, packet, bytes);
+    } else if (N.hasParty) {
+        npSetParty(s, (const uint8_t*)&N.party, (int)sizeof N.party);
+        if (N.host && s->terms.mode == NP_MODE_VERSUS) {
+            for (int i = 0; i < 3; i++) s->terms.party[i] = N.party.m4_members[i];
+        }
+    }
     logicList(s);
     if (!npOpen(s, N.host ? N.port : 0)) {
         say("%s", s->why);
@@ -883,6 +903,12 @@ int netplayConnect(const char* disc) {
             (unsigned long long)npPartyHash((const uint8_t*)&N.sides[0], (int)sizeof N.sides[0]),
             N.sides[1].m4_members[0], N.sides[1].m4_members[1], N.sides[1].m4_members[2],
             (unsigned long long)npPartyHash((const uint8_t*)&N.sides[1], (int)sizeof N.sides[1]));
+    } else if (s->terms.mode == NP_MODE_ROSTER && N.hasParty) {
+        pcArenaSessionVersus(ARENA_MATCH_ROSTER, s->terms.table, s->terms.config, &N.party);
+    } else if (s->terms.mode == NP_MODE_VERSUS && (N.host ? N.hasParty : s->peerPartyBytes != 0)) {
+        XgPartyRecord record = N.party;
+        if (!N.host) memcpy(&record, s->peerParty, sizeof record);
+        pcArenaSessionVersus(ARENA_MATCH_VERSUS, s->terms.table, s->terms.config, &record);
     }
     {
         char peer[64];

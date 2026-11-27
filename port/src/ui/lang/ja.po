@@ -9893,8 +9893,8 @@ msgid "Custom enemy teams"
 msgstr "カスタム敵チーム"
 
 #: port/src/ui/arena.cpp
-msgid "Starting form"
-msgstr "開始時の状態"
+msgid "Enable Gear"
+msgstr "ギアを有効にする"
 
 #: port/src/ui/arena.cpp
 msgid "Start in Gear"

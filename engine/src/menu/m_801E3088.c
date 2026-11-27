@@ -694,6 +694,18 @@ void applyGearWeaponStats(MenuContext_330* ctx, u8 gearId) {
     }
 }
 
+#ifdef PLATFORM_PC
+/* Use the selected pilot's abilities when rebuilding a Versus Gear. */
+void pcVersusRebuildGearStats(MenuContext_330* ctx, u8 gearId, u8 pilot) {
+    u8 previousPilot = gearPilotIds[gearId];
+    gearPilotIds[gearId] = pilot;
+    applyGearPartStats(ctx, gearId);
+    applyGearWeaponStats(ctx, gearId);
+    applyGearAccessoryBonuses(ctx, gearId);
+    gearPilotIds[gearId] = previousPilot;
+}
+#endif
+
 /* gear value from accessory weight: max(0, (m44/120 - m75) / 2) */
 u8 computeGearAgilityPenalty(u8 gearId) {
     GameStateGear* gear;

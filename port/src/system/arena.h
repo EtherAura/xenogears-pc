@@ -116,6 +116,7 @@ enum {
 };
 int pcArenaMatchAvailable(const char** why); /* 0 with why (a sentence) where a match cannot start now */
 int pcArenaMatchStart(int kind, int table, int config, const int party[3], int fromSave); /* not ARENA_MATCH_PARTY */
+int pcArenaMatchStartSaved(int kind, int table, int config, const XgPartyRecord* party);
 /* Party vs party (system/arena.c's header): player 1's party against player
  * 2's, each a checked party record (card/party.h; they may be the same save,
  * the same members). 1 when asked; 0 with why where not (a match cannot
@@ -129,12 +130,10 @@ int pcArenaPackSave(const char* spec, const unsigned char* codes, XgPartyRecord*
  * (the host's) and player 2's, checked; each of the session's boots starts
  * the match with them (system/arena.c's header). NULL, NULL: none. */
 void pcArenaSessionParties(const XgPartyRecord* player1, const XgPartyRecord* player2);
+void pcArenaSessionVersus(int kind, int table, int config, const XgPartyRecord* party);
 int pcArenaMatchPhase(int* kind);
 int pcArenaMatchKind(void); /* the match's kind while one is asked or runs, else 0 */
 void pcArenaMatchQuit(void); /* the menu's Leave the match: the kept game back */
-int pcArenaGameLoaded(void); /* a game is being played (not the title before one) */
-int pcArenaPartyNow(int party[3]); /* the current party (ids 0..10, 255 none, the first someone if any): how many */
-int pcArenaMembersJoined(void);    /* the members who have joined: bit n for character n (0..10) */
 void pcArenaVBlank(void);    /* every vblank (netplay.c netplayPace) */
 
 #ifdef __cplusplus

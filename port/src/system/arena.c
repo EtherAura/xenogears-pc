@@ -120,9 +120,9 @@ _Static_assert((int)ARENA_PHASE_LEAVING == (int)PC_VERSUS_LEAVING && (int)ARENA_
 
 void padSetKeyboardPort(int port) __attribute__((weak));
 
-/* Party vs party: the record's bytes as the game's C reads them (pc_arena.h),
- * and the game's records they hold */
-_Static_assert(sizeof(XgPartyRecord) == PC_PARTY_BYTES && offsetof(XgPartyRecord, m3_count) == PC_PARTY_COUNT &&
+/* Party vs party reads the on-foot part of the record (pc_arena.h). */
+_Static_assert(offsetof(XgPartyRecord, m3B8_gearEquip) == PC_PARTY_BYTES &&
+                   offsetof(XgPartyRecord, m3_count) == PC_PARTY_COUNT &&
                    offsetof(XgPartyRecord, m4_members) == PC_PARTY_MEMBERS &&
                    offsetof(XgPartyRecord, m10_characters) == PC_PARTY_CHARACTERS &&
                    offsetof(XgPartyRecord, m1FC_abilities) == PC_PARTY_ABILITIES &&
@@ -535,6 +535,7 @@ int portGameMode(void);          /* memory.c: the mode bootGame started last (ke
 int netplayActive(void) __attribute__((weak));
 void netplayLeave(void) __attribute__((weak));
 void netplaySoftReset(void) __attribute__((weak));
+void pcVersusApplySavedGears(const XgPartyRecord* party);
 
 static struct {
     int phase;        /* MATCH_* */
@@ -542,6 +543,7 @@ static struct {
     int table, config; /* versus: the formation */
     int party[3];     /* versus: character ids, 255 none */
     int fromSave;     /* versus: the members as the kept game has them */
+    int hasRecord;    /* versus: an explicitly selected memory-card party */
     int armed;        /* 1: the next kernel boot starts the match; 2: this boot did */
     int rematch;      /* Battling: the game set its entry bytes for the rematch */
     int seen;         /* the match's mode reached since the start (Battling; the versus battle) */
@@ -549,10 +551,9 @@ static struct {
     XgPartyRecord records[2]; /* party vs party: player 1's and player 2's parties (checked) */
     int stage;        /* mirror match, party vs party: the stage as arena_stage gives it (0 the match's own) */
 } M;
-/* An online party vs party's records (netplay.c, pcArenaSessionParties):
- * player 1's (the host's) and player 2's (the joiner's), checked. */
+/* The checked online match records, reapplied on every session boot. */
 static struct {
-    int on;
+    int kind, table, config;
     XgPartyRecord records[2];
     int party[3]; /* player 1's members (character ids, 255 none) */
 } S;
@@ -630,7 +631,7 @@ int pcArenaUploadMenuShatter(void) {
 int pcArenaHoldBattleIntro(void) {
     const char* versus = getenv("XG_VERSUS");
     holdMenuIntro = (M.armed && M.kind != ARENA_MATCH_BATTLING) || pcGauntletMenuIntroActive() ||
-                    (matchOnline() && (S.on || (versus != NULL && *versus != '\0')));
+                    (matchOnline() && (S.kind || (versus != NULL && *versus != '\0')));
     if (holdMenuIntro && !haveMenuPicture && matchOnline()) readMenuPicture();
     if (holdMenuIntro) pcArenaLog("arena intro: holding the picture during battle setup");
     return holdMenuIntro;
@@ -646,22 +647,8 @@ void pcArenaGlassShatterStarted(void) {
     pcArenaLog("arena intro: showing the glass shatter at vblank %u", hwVSyncCount());
 }
 
-int pcArenaGameLoaded(void) {
+static int gameLoaded(void) {
     return gameSeen && !(portGameMode() == 1 && gameState.m231A_fieldID == TITLE_FIELD);
-}
-
-int pcArenaPartyNow(int party[3]) {
-    int n = 0;
-    party[0] = party[1] = party[2] = 255;
-    for (int i = 0; i < 3; i++) {
-        int c = gameState.m1D34_currentParty[i];
-        if (c <= 10) party[n++] = c; /* in order, the first slot someone (the field's player) */
-    }
-    return n;
-}
-
-int pcArenaMembersJoined(void) {
-    return gameState.m1D30_partyMemberBitField & 0x7FF;
 }
 
 int pcArenaMatchKind(void) {
@@ -691,7 +678,8 @@ int pcArenaMatchAvailable(const char** why) {
     return stateRestartAvailable(why);
 }
 
-static int matchStart(int kind, int table, int config, const int party[3], int fromSave, int stage) {
+static int matchStart(int kind, int table, int config, const int party[3], int fromSave, int stage,
+                      const XgPartyRecord* record) {
     if (!pcArenaMatchAvailable(NULL) || (kind != ARENA_MATCH_BATTLING && kind != ARENA_MATCH_VERSUS &&
                                          kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_PARTY && kind != ARENA_MATCH_ROSTER)) {
         return 0;
@@ -713,9 +701,11 @@ static int matchStart(int kind, int table, int config, const int party[3], int f
         for (int i = 0; i < 3; i++) M.party[i] = party[i];
     }
     M.kind = kind;
+    M.hasRecord = record != NULL;
+    if (M.hasRecord) M.records[0] = *record;
     M.table = table;
     M.config = config;
-    M.fromSave = fromSave && pcArenaGameLoaded() && kind != ARENA_MATCH_PARTY;
+    M.fromSave = fromSave && gameLoaded() && kind != ARENA_MATCH_PARTY;
     M.stage = kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_PARTY ? 0 : stageEntry(stage) >= 0 ? stage : STAGE_DEFAULT;
     M.rematch = 0;
     M.seen = 0;
@@ -732,7 +722,7 @@ static int matchStart(int kind, int table, int config, const int party[3], int f
         pcArenaLog("match asked at vblank %u in mode %d (a game %s): %s table %d config %d, party %d,%d,%d%s",
                    M.askedAt, portGameMode(), gameSeen ? "loaded" : "not loaded",
                    kind == ARENA_MATCH_MIRROR ? "mirror match" : "versus battle", table, config, M.party[0],
-                   M.party[1], M.party[2], M.fromSave ? " (from the save)" : " (a new game's)");
+                   M.party[1], M.party[2], M.hasRecord || M.fromSave ? " (from a save)" : " (a new game's)");
     } else {
         pcArenaLog("match asked at vblank %u in mode %d, field %d (a game %s): Battling, story progress %d", M.askedAt,
                    portGameMode(), keptState.m231A_fieldID, gameSeen ? "loaded" : "not loaded",
@@ -746,7 +736,20 @@ static int matchStart(int kind, int table, int config, const int party[3], int f
 /* A mirror match's or party vs party's stage: the setting's (arena_stage), as
  * the menu shows it when the match is asked; kept for its rematches. */
 int pcArenaMatchStart(int kind, int table, int config, const int party[3], int fromSave) {
-    return kind != ARENA_MATCH_PARTY && matchStart(kind, table, config, party, fromSave, pcArenaStageSetting());
+    return kind != ARENA_MATCH_PARTY && matchStart(kind, table, config, party, fromSave, pcArenaStageSetting(), NULL);
+}
+
+static void recordMembers(const XgPartyRecord* record, int party[3]) {
+    for (int i = 0; i < 3; i++) party[i] = record->m4_members[i];
+}
+
+int pcArenaMatchStartSaved(int kind, int table, int config, const XgPartyRecord* record) {
+    uint8_t codes[XG_PARTY_CODE_TABLE];
+    int party[3];
+    if (kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_VERSUS && kind != ARENA_MATCH_ROSTER) return 0;
+    if (record == NULL || !xgPartyGameCodes(codes) || xgPartyCheck(record, codes, NULL) != XG_PARTY_OK) return 0;
+    recordMembers(record, party);
+    return matchStart(kind, table, config, party, 0, pcArenaStageSetting(), record);
 }
 
 /* The FNV-1a of a record's bytes, for the log: the same on every machine. */
@@ -776,7 +779,7 @@ static int matchStartParty(const XgPartyRecord* p1, const XgPartyRecord* p2, int
     M.records[1] = *p2;
     pcArenaLog("party vs party: player 1's record fnv1a %08x, player 2's %08x", (unsigned)recordHash(p1),
                (unsigned)recordHash(p2));
-    return matchStart(ARENA_MATCH_PARTY, 0, 0, party, 0, stage);
+    return matchStart(ARENA_MATCH_PARTY, 0, 0, party, 0, stage, NULL);
 }
 
 int pcArenaMatchStartParty(const XgPartyRecord* p1, const XgPartyRecord* p2, const char** why) {
@@ -799,7 +802,7 @@ int pcVersusStage(unsigned char party[3], unsigned char places[3]) {
 
 const unsigned char* pcVersusPartyRecord(int player) {
     if (player != 1 && player != 2) return NULL;
-    if (S.on && matchOnline()) return (const unsigned char*)&S.records[player - 1]; /* online: the session's */
+    if (S.kind == ARENA_MATCH_PARTY && matchOnline()) return (const unsigned char*)&S.records[player - 1];
     if (M.phase != MATCH_ON || M.kind != ARENA_MATCH_PARTY) return NULL;
     return (const unsigned char*)&M.records[player - 1];
 }
@@ -811,10 +814,20 @@ void pcArenaSessionParties(const XgPartyRecord* player1, const XgPartyRecord* pl
     }
     S.records[0] = *player1;
     S.records[1] = *player2;
-    for (int i = 0; i < 3; i++) S.party[i] = i < player1->m3_count ? player1->m4_members[i] : 255;
-    S.on = 1;
+    recordMembers(player1, S.party);
+    S.kind = ARENA_MATCH_PARTY;
+    S.table = VERSUS_MIRROR_TABLE;
+    S.config = VERSUS_MIRROR_CONFIG;
     pcArenaLog("party vs party online: player 1's record fnv1a %08x, player 2's %08x", (unsigned)recordHash(player1),
                (unsigned)recordHash(player2));
+}
+
+void pcArenaSessionVersus(int kind, int table, int config, const XgPartyRecord* party) {
+    S.kind = kind;
+    S.table = table;
+    S.config = config;
+    S.records[0] = *party;
+    recordMembers(party, S.party);
 }
 
 /* Back to the kept game (at the next vblank). */
@@ -901,24 +914,21 @@ static void memberFromSave(int c) {
     }
 }
 
-/* Party vs party: player 1's party into the fresh game from its record (the
- * header): its members' records, abilities and names, HP and EP full, the
- * Gear number 0xFF (on foot: no Gear to call) and the command loadout the
- * member's own (as the game keeps it); inventory 0 its items and inventory 1
- * its rounds, nothing else, and the rounds' ammo-count table. Nothing else
- * of the save: the game stays a new game's (story 0). Player 2's, the same
- * way, in the battle: port/src/game/battle/mirror.c partyRecordRows. */
-static void partyFromRecord(const XgPartyRecord* r) {
+/* Copy Player 1's battle data into the fresh game. Party vs party applies
+ * Player 2's record separately in mirror.c. */
+static void partyFromRecord(const XgPartyRecord* r, int allowGears) {
+    memcpy(gameState.m1D34_currentParty, r->m4_members, XG_PARTY_MEMBERS);
     for (int k = 0; k < r->m3_count && k < XG_PARTY_MEMBERS; k++) {
         int c = r->m4_members[k];
         GameStateCharacter* m = &gameState.m26C_party[c];
         memcpy(m, r->m10_characters[k], sizeof *m);
         m->m4C_HP = m->m4E_MaxHP;
         m->m50_MP = m->m52_MaxMP;
-        m->mA0_gearNum = 0xFF;
+        if (!allowGears) m->mA0_gearNum = 0xFF;
         m->m56_battleCommandLoadout = (u8)c;
         memcpy(&gameState.m16C0_abilities[c], r->m1FC_abilities[k], sizeof gameState.m16C0_abilities[c]);
         memcpy(gameState.m0_names[c], r->m25C_names[k], sizeof gameState.m0_names[c]);
+        gameState.m1D30_partyMemberBitField |= 1 << c;
         gameState.m1D32_partyFrameMask |= 1 << c; /* as the field's join op */
     }
     memset(gameState.m2026_inventory0Ids, 0, sizeof gameState.m2026_inventory0Ids);
@@ -935,24 +945,36 @@ static void partyFromRecord(const XgPartyRecord* r) {
     }
     memcpy(gameState.m22B8_ammoCounts, r->m358_ammoTable, sizeof gameState.m22B8_ammoCounts);
     for (int i = 0; i < 3; i++) gameState.m22B1_isOnGear[i] = 0;
+    if (allowGears) pcVersusApplySavedGears(r);
 }
 
-/* A versus battle's start (a local match's, an online party vs party's):
- * field 22 at the story's start, the party, player 1's record for party vs
- * party (else the members from the kept save, or a new game's), and the
- * versus battle asked for at once. */
-static void versusStart(int kind, const int party[3], int table, int config, const XgPartyRecord* player1, int fromSave) {
-    for (int i = 0; i < 3; i++) {
-        gameState.m1D34_currentParty[i] = (u8)party[i];
-        if (party[i] != 255) gameState.m1D30_partyMemberBitField |= 1 << party[i];
+/* The staging field may fill vacant slots during initialization. Apply the
+ * checked record immediately before the battle loads its party. */
+int pcArenaApplyMatchParty(void) {
+    const XgPartyRecord* record;
+    int kind;
+    if (S.kind && matchOnline()) {
+        record = &S.records[0];
+        kind = S.kind;
+    } else if (M.phase == MATCH_ON && (M.hasRecord || M.kind == ARENA_MATCH_PARTY)) {
+        record = &M.records[0];
+        kind = M.kind;
+    } else {
+        return 0;
     }
+    partyFromRecord(record, kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_ROSTER);
+    return 1;
+}
+
+static void versusStart(int kind, const int party[3], int table, int config, int hasRecord, int fromSave) {
     gameState.m1930_fieldVarsBackup[0] = 0;
     gameState.m231A_fieldID = VERSUS_FIELD;
-    if (kind == ARENA_MATCH_PARTY) {
-        partyFromRecord(player1);
-    } else if (fromSave) {
+    if (!hasRecord) {
         for (int i = 0; i < 3; i++) {
-            if (party[i] != 255) memberFromSave(party[i]);
+            gameState.m1D34_currentParty[i] = (u8)party[i];
+            if (party[i] == 255) continue;
+            gameState.m1D30_partyMemberBitField |= 1 << party[i];
+            if (fromSave) memberFromSave(party[i]);
         }
     }
     versusTable = table;
@@ -967,8 +989,8 @@ static void versusStart(int kind, const int party[3], int table, int config, con
 
 /* options.c portStartState: the match's start, applied to the fresh game. */
 int pcArenaStartState(void) {
-    if (S.on && matchOnline()) { /* an online party vs party: each of the session's boots (the header) */
-        versusStart(ARENA_MATCH_PARTY, S.party, VERSUS_MIRROR_TABLE, VERSUS_MIRROR_CONFIG, &S.records[0], 0);
+    if (S.kind && matchOnline()) {
+        versusStart(S.kind, S.party, S.table, S.config, 1, 0);
         return 1;
     }
     if (!M.armed) return 0;
@@ -986,7 +1008,7 @@ int pcArenaStartState(void) {
                    battlingEntryGear2, battlingEntryWinsNeeded);
         M.rematch = 0;
     } else {
-        versusStart(M.kind, M.party, M.table, M.config, &M.records[0], M.fromSave);
+        versusStart(M.kind, M.party, M.table, M.config, M.hasRecord || M.kind == ARENA_MATCH_PARTY, M.fromSave);
     }
     M.armed = 2;
     M.phase = MATCH_ON;
@@ -1150,7 +1172,7 @@ static void envMatch(void) {
                             "<vblank>:mirror[,party][,arena=N] or <vblank>:party,<save>,<save>[,arena=N]\n");
         } else if (strcmp(how, "new") == 0) {
             fromSave = 0;
-            matchStart(kind, t, c, party, fromSave, stage);
+            matchStart(kind, t, c, party, fromSave, stage, NULL);
         } else {
             if (strcmp(how, "current") == 0) {
                 for (int i = 0; i < 3; i++) party[i] = gameState.m1D34_currentParty[i] > 10 ? 255 : gameState.m1D34_currentParty[i];
@@ -1159,7 +1181,7 @@ static void envMatch(void) {
                 party[1] = party[2] = 255;
                 sscanf(how, "%d.%d.%d", &party[0], &party[1], &party[2]);
             }
-            matchStart(kind, t, c, party, fromSave, stage);
+            matchStart(kind, t, c, party, fromSave, stage, NULL);
         }
     }
     what[0] = '\0'; /* once */

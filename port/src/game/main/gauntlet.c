@@ -48,7 +48,7 @@ void pcGauntletCarry(GameState* g, const GameState* now, s32 recovery, u32 knock
 /* port/src/system/gauntlet.h's recoveries */
 enum { RECOVER_FULL, RECOVER_NONE, RECOVER_25, RECOVER_50, RECOVER_REVIVE };
 enum { AFTER_NONE, AFTER_CHAIN, AFTER_END };
-enum { BATTLE_FORCED_GEAR_PARTY = 0x10, BATTLE_STORY_EVENT = 0x20 };
+enum { BATTLE_SKIP_RESULTS = 0x08, BATTLE_FORCED_GEAR_PARTY = 0x10, BATTLE_STORY_EVENT = 0x20 };
 enum { TRANSITION_SHATTER = 0, TRANSITION_WAVE = 2 };
 
 static GameState origin;
@@ -121,6 +121,8 @@ void pcGauntletBattleSetup(void) {
     /* Load the selected party through its usual on-foot/Gear flags, without
      * the story's substitute Gear party or its opening and ending scenes. */
     encounter->m1_flags &= ~(BATTLE_FORCED_GEAR_PARTY | BATTLE_STORY_EVENT);
+    /* Skip the rewards window and its fade while keeping the party updates. */
+    encounter->m1_flags |= BATTLE_SKIP_RESULTS;
     /* Shatter the opening menu; between battles, Gear fights use the wave. */
     battleTransitionEffect = fight > 0 && gear ? TRANSITION_WAVE : TRANSITION_SHATTER;
     for (i = 0; i < 3; i++) {
