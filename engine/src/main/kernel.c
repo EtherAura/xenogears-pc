@@ -50,7 +50,7 @@ u8* portHeapEnd(void);
 void portResetGameMode(s32 mode);
 s32 portBootMode(void); /* port/src/system/options.c: XG_BOOT_MODE (or 1 for XG_FIELD), or -1 */
 s32 pcGauntletBootMode(void); /* an isolated battle requested from Extras */
-s32 pcArenaHoldVersusIntro(void);
+s32 pcArenaHoldBattleIntro(void);
 void portStartState(void); /* options.c: XG_PRESET, XG_PARTY, XG_GAMESTATE, XG_FIELD */
 void gameStackScrub(void); /* port/src/system/gamestack.c: the dead stack below here to zeros */
 s32 portStartPending(void); /* options.c: the extras ask for a start (a scene to replay) */
@@ -314,7 +314,7 @@ void kernelMain(void) {
             PORT_YIELD(); /* after a soft reset: until the vsync callback sees the buttons released */
         }
     }
-    int arenaIntro = pcArenaHoldVersusIntro();
+    int arenaIntro = pcArenaHoldBattleIntro();
     (void)arenaIntro;
 #if !VERSION_JP
     if (!arenaIntro && pcGauntletBootMode() < 0) {

@@ -604,6 +604,10 @@ int pcGauntletLaunchActive(void) {
     return launch.phase != LAUNCH_IDLE;
 }
 
+int pcGauntletMenuIntroActive(void) {
+    return (launch.phase == LAUNCH_PENDING || launch.phase == LAUNCH_PLAYING) && stateKept();
+}
+
 int pcGauntletBootMode(void) {
     return launch.phase != LAUNCH_IDLE && stateKept() ? 2 : -1;
 }

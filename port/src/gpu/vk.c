@@ -124,7 +124,7 @@ extern void extrasVulkanShutdown(void) __attribute__((weak));
 /* port/src/system/battlespeed.c: this vblank's picture is withheld (a game
  * frame between two shown ones at 2x/4x battle speed; weak: GPU tests). */
 extern int battleSpeedHidden(void) __attribute__((weak));
-extern int pcArenaVersusIntroHidden(void) __attribute__((weak));
+extern int pcArenaBattleIntroHidden(void) __attribute__((weak));
 
 static const uint32_t drawVertSpv[] =
 #include "draw.vert.spv.inc"
@@ -8874,7 +8874,7 @@ void gvkPresent(const GpuDisplay* d, uint32_t vblank) {
      * acquired or presented for them, so the game thread never waits on the
      * display for them; native dumps keep their vblanks (kind 2). The
      * corner note ages with the shown pictures (it stays up as long). */
-    int arenaIntro = pcArenaVersusIntroHidden != NULL && pcArenaVersusIntroHidden();
+    int arenaIntro = pcArenaBattleIntroHidden != NULL && pcArenaBattleIntroHidden();
     int hidden = arenaIntro || (battleSpeedHidden != NULL && battleSpeedHidden());
     if (!hidden) presentVBlank();
     gtVBlank(vblank);

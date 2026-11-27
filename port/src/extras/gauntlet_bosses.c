@@ -375,11 +375,20 @@ int xgGauntletScanResult(XgGauntletScan* s, PcGauntletBoss** out) {
 
         char name[160] = "";
         if (set == 0) continue;
+        unsigned char cfg[sizeof sc->cfg];
+        memcpy(cfg, sc->cfg, sizeof cfg);
         for (int k = 0; k < 8; k++) {
-            int t = sc->cfg[8 + k];
+            int t = cfg[8 + k];
             if ((t & 0x7F) == 0x7F) continue;
-            gear |= (t & 0x80) != 0;
             const XgBeast* b = beastOf(s, sc->disc, set, t & 0x7F);
+            /* Story actors with no HP can stay counted as live targets. Set
+             * 68's unnamed 99999-HP record also only runs scripted scenes. */
+            if (b != NULL && (cfg[1] & 0x20) &&
+                (b->hp == 0 || (set == 68 && (t & 0x7F) == 0 && b->hp == 99999))) {
+                cfg[8 + k] = 0xFF;
+                continue;
+            }
+            gear |= (t & 0x80) != 0;
             if (b == NULL || b->hp == 0) continue;
             boss |= !inRandom(s, b);
             if (b->name[0] && strstr(name, b->name) == NULL && strlen(name) + strlen(b->name) + 3 < sizeof name) {
@@ -412,7 +421,7 @@ int xgGauntletScanResult(XgGauntletScan* s, PcGauntletBoss** out) {
         int exact = tier;
         int dup = -1;
         for (int k = 0; k < n && dup < 0; k++) {
-            if (memcmp(list[k].table + 0x20 * list[k].config, sc->cfg, sizeof sc->cfg) == 0) dup = k;
+            if (memcmp(list[k].table + 0x20 * list[k].config, cfg, sizeof cfg) == 0) dup = k;
         }
         if (dup >= 0) {
             /* its earliest place: one its own scripts date first, then the lowest estimate */
@@ -430,6 +439,7 @@ int xgGauntletScanResult(XgGauntletScan* s, PcGauntletBoss** out) {
         b->set = set;
         b->music = sc->music;
         memcpy(b->table, sc->table, PC_GAUNTLET_TABLE);
+        memcpy(b->table + 0x20 * b->config, cfg, sizeof cfg);
         if (name[0]) {
             snprintf(b->name, sizeof b->name, "%s", name);
         } else { /* no spelling of its names here (a JP disc's kana and kanji) */

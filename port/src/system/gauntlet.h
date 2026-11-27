@@ -115,6 +115,7 @@ int pcGauntletLaunchAvailable(const char** why);
 int pcGauntletSavedFights(const PcGauntletBoss* bosses, int count, const unsigned char* block);
 int pcGauntletLaunch(const PcGauntletBoss* bosses, int count, const unsigned char* block);
 int pcGauntletLaunchActive(void);
+int pcGauntletMenuIntroActive(void);
 void pcGauntletLeave(void);
 void pcGauntletVBlank(void);
 void pcGauntletCancel(void); /* waiting: no run; running: quit after this fight */

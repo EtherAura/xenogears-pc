@@ -103,6 +103,7 @@
 #include "card/party.h"
 #include "card/saves.h"
 #include "cd/cd.h"
+#include "gauntlet.h"
 #include "hw.h"
 #include "gpu/gpu.h"
 #include "pc_arena.h"
@@ -557,7 +558,7 @@ static struct {
 } S;
 static GameState keptState; /* the kept game's gameState, as the match was asked for */
 static int gameSeen;        /* a field past the title, the world map or a battle since the boot: a game is loaded */
-static int holdVersusIntro;
+static int holdMenuIntro;
 enum { MENU_PICTURE_W = 512, MENU_PICTURE_H = 288 };
 static uint16_t menuPicture[MENU_PICTURE_W * MENU_PICTURE_H];
 static int haveMenuPicture;
@@ -603,7 +604,7 @@ static void readMenuPicture(void) {
 /* Upload the menu as the same texture the retail shatter would sample,
  * including the side columns when the battle uses widescreen. */
 int pcArenaUploadMenuShatter(void) {
-    if (!holdVersusIntro) return -1;
+    if (!holdMenuIntro) return -1;
     enum { W = 320, H = 224, MAX_MARGIN = 384 };
     static uint16_t picture[(2 * W + 2 * MAX_MARGIN) * H];
     int margin = pcWideView;
@@ -621,28 +622,27 @@ int pcArenaUploadMenuShatter(void) {
     LoadImage(&texture, center);
     pcWideCaptureLoad(&texture, picture, margin, 0);
     DrawSync(0);
-    pcArenaLog("arena intro: glass shatter uses %s", haveMenuPicture ? "the approval menu" : "a blank backdrop");
+    pcArenaLog("arena intro: glass shatter uses %s", haveMenuPicture ? "the menu" : "a blank backdrop");
     return margin;
 }
 
-/* The field still prepares the battle's music and the shatter texture, but it
- * never becomes a separate shot in a match launched from the arena. */
-int pcArenaHoldVersusIntro(void) {
+/* Hold the settings page on screen until the new battle can draw its shatter. */
+int pcArenaHoldBattleIntro(void) {
     const char* versus = getenv("XG_VERSUS");
-    holdVersusIntro = (M.armed && M.kind != ARENA_MATCH_BATTLING) ||
-                      (matchOnline() && (S.on || (versus != NULL && *versus != '\0')));
-    if (holdVersusIntro && !haveMenuPicture && matchOnline()) readMenuPicture();
-    if (holdVersusIntro) pcArenaLog("arena intro: holding the picture during battle setup");
-    return holdVersusIntro;
+    holdMenuIntro = (M.armed && M.kind != ARENA_MATCH_BATTLING) || pcGauntletMenuIntroActive() ||
+                    (matchOnline() && (S.on || (versus != NULL && *versus != '\0')));
+    if (holdMenuIntro && !haveMenuPicture && matchOnline()) readMenuPicture();
+    if (holdMenuIntro) pcArenaLog("arena intro: holding the picture during battle setup");
+    return holdMenuIntro;
 }
 
-int pcArenaVersusIntroHidden(void) {
-    return holdVersusIntro && (M.armed || matchOnline());
+int pcArenaBattleIntroHidden(void) {
+    return holdMenuIntro && (M.armed || matchOnline() || pcGauntletMenuIntroActive());
 }
 
 void pcArenaGlassShatterStarted(void) {
-    if (!holdVersusIntro) return;
-    holdVersusIntro = 0;
+    if (!holdMenuIntro) return;
+    holdMenuIntro = 0;
     pcArenaLog("arena intro: showing the glass shatter at vblank %u", hwVSyncCount());
 }
 
@@ -856,7 +856,7 @@ void pcArenaMatchLeave(void) {
  * again; one without a match ends the loaded game. Online the session's own
  * start comes again (its options are still set: netplay.c). */
 void pcArenaSoftReset(void) {
-    holdVersusIntro = 0;
+    holdMenuIntro = 0;
     if (M.phase == MATCH_ASKED || M.phase == MATCH_ON) {
         M.armed = 1;
         M.seen = 0;

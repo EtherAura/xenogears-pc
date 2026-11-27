@@ -57,7 +57,7 @@ const Viewer versus = {
 const Viewer gauntlet = {
     "boss-gauntlet", N_("Boss gauntlet"), N_("Fight story bosses back to back."), 4,
     nullptr, nullptr, drawGauntlet, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, true,
+    nullptr, nullptr, nullptr, nullptr, nullptr, true, true,
 };
 
 XG_EXTRAS_VIEWER(arena);

@@ -60,7 +60,7 @@ enum {
 
 /* Platform, for the game. */
 void pcArenaLog(const char* fmt, ...); /* XG_ARENA_LOG=1 */
-int pcArenaHoldVersusIntro(void);
+int pcArenaHoldBattleIntro(void);
 void pcArenaGlassShatterStarted(void);
 int pcArenaUploadMenuShatter(void); /* texture at 0x2c0,0x100 and its wide margin, or -1 */
 int pcArenaPending(void);       /* asked (or XG_ARENA), not taken yet */

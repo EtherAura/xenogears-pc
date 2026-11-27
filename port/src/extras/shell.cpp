@@ -1135,7 +1135,8 @@ void drawFooter(ImVec2 min, ImVec2 max) {
         return;
     }
     // The game's pad pictures keep the footer readable at its 320-pixel size.
-    auto action = [&](const char* button, const char* label) {
+    auto action = [&](const char* button, const char* label, bool clickable = false) {
+        float left = x;
         const char* glyph = skin::native() ? skin::actionGlyph(button) : padActionLabel(button);
         if (!glyph) glyph=button;
         else if (!skin::native()) glyph = tr(glyph); // pad.c's label in the menu's language (a runtime entry)
@@ -1143,12 +1144,18 @@ void drawFooter(ImVec2 min, ImVec2 max) {
         x += ImGui::CalcTextSize(glyph).x + 4*u;
         label = tr(label);
         dl->AddText(ImVec2(x, y), ImGui::GetColorU32(ImGuiCol_Text), label);
+        ImRect hit(ImVec2(left - 2 * u, min.y), ImVec2(x + ImGui::CalcTextSize(label).x + 2 * u, max.y));
+        if (clickable && st.escapeFree && !pickerOpen() && !popupOpen() && hit.Contains(ImGui::GetIO().MousePos) &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            sound(3);
+            viewerBack();
+        }
         x += ImGui::CalcTextSize(label).x + 12 * u;
     };
     // A focused view (viewer.h): Back returns to its list; in a list,
     // confirm opens the asset there.
     if (!focusShown()) action(padConfirmButton(), assetBrowser() ? N_("View") : N_("Choose"));
-    action(padCancelButton(), focusShown() ? N_("List") : N_("Back"));
+    action(padCancelButton(), focusShown() ? N_("List") : N_("Back"), st.viewer == nullptr);
     if (st.viewer && !strcmp(st.viewer->id, "visuals") && *visualFamily()) {
         const char* family = visualFamily();
         if (!strcmp(family, "maps")) {
@@ -1233,6 +1240,51 @@ void moveBetweenPanes() {
     }
 }
 
+void drawViewerHeader(ImVec2 headMin, ImVec2 headMax, float u) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    bool visual = !strcmp(st.viewer->id, "visuals");
+    const char* title = tr(visual ? visualTitle() : st.viewer->name);
+    float buttonX = headMax.x - 4 * u;
+    // The header's buttons are never where the cursor starts on a new screen
+    // (resetViewerNav): that is the viewer's first item, else these.
+    ImGui::PushItemFlag(ImGuiItemFlags_NoNavDefaultFocus, true);
+    if (visual && *visualFamily()) {
+        if (assetBrowser()) {
+            float width = ImGui::CalcTextSize(tr("Options")).x + 8 * u;
+            buttonX -= width;
+            ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
+            if (ImGui::Button(tr("Options"), ImVec2(width, 15 * u))) st.viewer->command("options", "");
+        }
+        float width = ImGui::CalcTextSize(tr("Library")).x + 8 * u;
+        buttonX -= width + 8 * u;
+        ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
+        if (ImGui::Button(tr("Library"), ImVec2(width, 15 * u))) { sound(3); st.viewer->command("index", ""); }
+    }
+    if (findViewer(st.navigation.source())) {
+        std::string label = tr("Return");
+        float width = ImGui::CalcTextSize(label.c_str()).x + 12 * u;
+        buttonX -= width;
+        ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
+        if (ImGui::Button(label.c_str(), ImVec2(width, 15 * u))) { sound(3); returnToSource(); }
+    } else if (st.viewer->gameOnly) {
+        const char* label = tr("Back");
+        float width = ImGui::CalcTextSize(label).x + 12 * u;
+        buttonX -= width;
+        ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
+        if (ImGui::Button(label, ImVec2(width, 15 * u))) { sound(3); viewerBack(); }
+    }
+    ImGui::PopItemFlag();
+    // The shop's heading is a small label window, independent of its list.
+    ImVec2 titleMax(fminf(buttonX - 8 * u, headMin.x + ImGui::CalcTextSize(title).x + 12 * u), headMax.y);
+    dl->PushClipRectFullScreen();
+    skin::box(dl, headMin, titleMax);
+    dl->PopClipRect();
+    dl->PushClipRect(headMin, ImVec2(buttonX - 4 * u, headMax.y), false);
+    ImGui::RenderTextEllipsis(dl, ImVec2(headMin.x + 6 * u, headMin.y + 2 * u),
+                              ImVec2(titleMax.x - 4 * u, headMax.y), titleMax.x - 4 * u, title, nullptr, nullptr);
+    dl->PopClipRect();
+}
+
 void drawShell() {
     ImGuiIO& io = ImGui::GetIO();
     float u = (float)st.unit;
@@ -1290,7 +1342,8 @@ void drawShell() {
     ImVec2 o(floorf((io.DisplaySize.x - cw * u) / 2), floorf((io.DisplaySize.y - ch * u) / 2));
     ImVec2 headMin = at(o, edge + 8, edge), headMax = at(o, cw - edge, edge + bar);
     ImVec2 footMin = at(o, edge, ch - edge - bar), footMax = at(o, cw - edge, ch - edge);
-    ImVec2 areaMin = at(o, edge, edge + bar + gap), areaMax = at(o, cw - edge, ch - edge - bar - gap);
+    ImVec2 areaMin = at(o, edge, st.viewer ? edge + bar + gap : edge);
+    ImVec2 areaMax = at(o, cw - edge, ch - edge - bar - gap);
 
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(io.DisplaySize);
@@ -1306,51 +1359,7 @@ void drawShell() {
         ImGui::FocusWindow(ImGui::GetCurrentWindow());
         ImGui::NavInitWindow(ImGui::GetCurrentWindow(), true);
     }
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->PushClipRectFullScreen();
-    char title[160];
-    bool visual = st.viewer && !strcmp(st.viewer->id, "visuals");
-    snprintf(title, sizeof(title), "%s", tr(visual ? visualTitle() : st.viewer ? st.viewer->name : N_("Extras")));
-    dl->PopClipRect();
-    float buttonX = headMax.x - 4 * u;
-    // The header's buttons are never where the cursor starts on a new screen
-    // (resetViewerNav): that is the viewer's first item, else these.
-    ImGui::PushItemFlag(ImGuiItemFlags_NoNavDefaultFocus, true);
-    if (visual && *visualFamily()) {
-        if (assetBrowser()) {
-            float width = ImGui::CalcTextSize(tr("Options")).x + 8 * u;
-            buttonX -= width;
-            ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
-            if (ImGui::Button(tr("Options"), ImVec2(width, 15 * u))) st.viewer->command("options", "");
-        }
-        float width = ImGui::CalcTextSize(tr("Library")).x + 8 * u;
-        buttonX -= width + 8 * u;
-        ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
-        if (ImGui::Button(tr("Library"), ImVec2(width, 15 * u))) { sound(3); st.viewer->command("index", ""); }
-    }
-    if (findViewer(st.navigation.source())) {
-        std::string label = tr("Return");
-        float width = ImGui::CalcTextSize(label.c_str()).x + 12 * u;
-        buttonX -= width;
-        ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
-        if (ImGui::Button(label.c_str(), ImVec2(width, 15 * u))) { sound(3); returnToSource(); }
-    } else if (st.viewer == nullptr || st.viewer->gameOnly) {
-        const char* label = tr(!st.viewer && !st.fromMenu && !menu::opt::inSubmenu(menu::EXTRAS) ? "Quit" : "Back");
-        float width = ImGui::CalcTextSize(label).x + 12 * u;
-        buttonX -= width;
-        ImGui::SetCursorScreenPos(ImVec2(buttonX, headMin.y + u));
-        if (ImGui::Button(label, ImVec2(width, 15 * u))) { sound(3); viewerBack(); }
-    }
-    ImGui::PopItemFlag();
-    // The shop's heading is a small label window, independent of its list.
-    ImVec2 titleMax(fminf(buttonX - 8 * u, headMin.x + ImGui::CalcTextSize(title).x + 12 * u), headMax.y);
-    dl->PushClipRectFullScreen();
-    skin::box(dl, headMin, titleMax);
-    dl->PopClipRect();
-    if (st.viewer) dl->PushClipRect(headMin, ImVec2(buttonX - 4 * u, headMax.y), false);
-    ImGui::RenderTextEllipsis(dl, ImVec2(headMin.x + 6 * u, headMin.y + 2 * u),
-                              ImVec2(titleMax.x - 4 * u, headMax.y), titleMax.x - 4 * u, title, nullptr, nullptr);
-    if (st.viewer) dl->PopClipRect();
+    if (st.viewer) drawViewerHeader(headMin, headMax, u);
     drawFooter(footMin, footMax);
 
     if (st.viewer != nullptr) {

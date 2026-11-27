@@ -207,7 +207,10 @@ void gauntletSection(void (*resumeGame)()) {
     if (ImGui::Button(tr("Start"))) {
         bool started = pcGauntletLaunch(G.bosses.data(), (int)G.bosses.size(), save) > 0;
         sfx::play(started ? sfx::CHOOSE : sfx::BUZZ);
-        if (started) resumeGame();
+        if (started) {
+            captureBattleMenuOnRender();
+            resumeGame();
+        }
     }
     ImGui::EndDisabled();
     if (why) hint("%s", tr(why));

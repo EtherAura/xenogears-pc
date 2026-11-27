@@ -13,13 +13,10 @@
  *     checkpoint does (port/src/game/main/retry.c: gameState, the field or
  *     world-map save block, savedPartyIsOnGear, the battle request); then the fight's
  *     table, party and Gears (gameState.m1D34_currentParty, m22B1_isOnGear,
- *     which loadPartyMembers reads).
+ *     which loadPartyMembers reads). Suppress the script event for the fight.
  *   - Its outcome (battleMain, before finishBattle: port/src/game/battle/
- *     gauntlet.c): cleared (won, or the story's own outcome of a battle
- *     event) with a fight to come: battleInitVar0 chains it as battle event
- *     op 0x24 chains a battle; a battle event's own chain (battleInitVar0
- *     already set) goes on as part of the fight; a wipe the game would end
- *     in its game over: the Retry / Game over choice (retry.c keeps a
+ *     gauntlet.c): after victory, battleInitVar0 chains to the next fight.
+ *     A wipe can offer the Retry / Game over choice (retry.c keeps a
  *     checkpoint of each gauntlet battle); Game over, an escape or "quit
  *     after this fight": the run ends, and the party of before goes back
  *     into gameState so finishBattle preloads the field's party files for it.
@@ -31,6 +28,7 @@
  *     won: EXP, gold, drops and learning go with the state they were added to.
  */
 #include "common.h"
+#include "battle_loader/battle_loader.h"
 #include "main/game_state.h"
 #include "pc_gameplay.h"
 
@@ -50,6 +48,8 @@ void pcGauntletCarry(GameState* g, const GameState* now, s32 recovery, u32 knock
 /* port/src/system/gauntlet.h's recoveries */
 enum { RECOVER_FULL, RECOVER_NONE, RECOVER_25, RECOVER_50, RECOVER_REVIVE };
 enum { AFTER_NONE, AFTER_CHAIN, AFTER_END };
+enum { BATTLE_FORCED_GEAR_PARTY = 0x10, BATTLE_STORY_EVENT = 0x20 };
+enum { TRANSITION_SHATTER = 0, TRANSITION_WAVE = 2 };
 
 static GameState origin;
 static u8 originBlock[sizeof(overlayStateSaveBlock)];
@@ -105,9 +105,24 @@ void pcGauntletBattleSetup(void) {
         originTransition = battleTransitionEffect;
         originInitVar1 = battleInitVar1;
     }
-    if (pcGauntletFight(pcGauntletCurrent(), battleConfigs, party, &gear) < 0) {
+    s32 fight = pcGauntletCurrent();
+    s32 config = pcGauntletFight(fight, battleConfigs, party, &gear);
+    if (config < 0) {
         return;
     }
+    sBattleConfig* encounter = (sBattleConfig*)(battleConfigs + config * sizeof(*encounter));
+    if (encounter->m0_battleId == 11 && (encounter->m1_flags & BATTLE_STORY_EVENT) &&
+        encounter->m3_eventDataIndex == 4 && encounter->m4_entityIds[4] == 0x80) {
+        /* The story's Rankar has 99999 HP and three scene actors, including
+         * Elly. Use the same set's 800-HP combat record for the standalone fight. */
+        encounter->m4_entityIds[4] = 0x84;
+        for (i = 5; i <= 7; ++i) encounter->m4_entityIds[i] = 0xFF;
+    }
+    /* Load the selected party through its usual on-foot/Gear flags, without
+     * the story's substitute Gear party or its opening and ending scenes. */
+    encounter->m1_flags &= ~(BATTLE_FORCED_GEAR_PARTY | BATTLE_STORY_EVENT);
+    /* Shatter the opening menu; between battles, Gear fights use the wave. */
+    battleTransitionEffect = fight > 0 && gear ? TRANSITION_WAVE : TRANSITION_SHATTER;
     for (i = 0; i < 3; i++) {
         gameState.m1D34_currentParty[i] = party[i];
         gameState.m22B1_isOnGear[i] = party[i] != 0xFF && gear;

@@ -1250,6 +1250,8 @@ void onlineBlock(OnlineMatch mode) {
     }
     int state = netplaySessionState();
     if (state == NETPLAY_OVER) {
+        opt::plain();
+        markBlock();
         char why[400], line[512];
         endText(netplaySessionDetail(), why, sizeof why);
         snprintf(line, sizeof line, tr("The last session: %s"), why);
@@ -1454,15 +1456,23 @@ void battlingBlock(void (*resumeGame)()) {
 }
 
 void battleArena(void (*resumeGame)()) {
-    if (opt::beginSubmenu("local-battling", N_("Local play"), nullptr,
-                          N_("Two-player Gear Battling on this device."))) {
-        battlingBlock(resumeGame);
-        opt::endSubmenu();
+    if (onlineStatus()) return;
+    static bool online = false;
+    opt::row(N_("Play mode"));
+    if (skin::beginCombo("##arena-play-mode", tr(online ? "Online play" : "Local play"))) {
+        if (skin::comboItem(tr("Local play"), !online) && online) {
+            online = false;
+            sfx::play(sfx::CHOOSE);
+        }
+        if (skin::comboItem(tr("Online play"), online) && !online) {
+            online = true;
+            sfx::play(sfx::CHOOSE);
+        }
+        skin::endCombo();
     }
-    if (opt::beginSubmenu("online-battling", N_("Online play"), nullptr, N_("Two-player Gear Battling online."))) {
-        if (!onlineStatus()) onlineBlock(OnlineBattling);
-        opt::endSubmenu();
-    }
+    hint(online ? "Two-player Gear Battling online." : "Two-player Gear Battling on this device.");
+    if (online) onlineBlock(OnlineBattling);
+    else battlingBlock(resumeGame);
 }
 
 } // namespace
@@ -1475,6 +1485,10 @@ void arenaFinishMenuFrame() {
         launchAfterArenaPicture = false;
         sfx::play(netplayLaunch(&nextOnlineMatch) ? sfx::CHOOSE : sfx::BUZZ);
     }
+}
+
+void captureBattleMenuOnRender() {
+    needsArenaPicture = true;
 }
 
 void arenaSection(ArenaPart part, void (*resumeGame)()) {
@@ -1494,10 +1508,9 @@ void arenaFallback(void (*resumeGame)()) {
     ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), ImGui::GetIO().DisplaySize, IM_COL32(0, 0, 8, 255));
     if (onlineStatus()) return;
     opt::beginPage("arena-fallback", EXTRAS);
-    if (opt::atRoot()) opt::group(N_("Battle arena"));
-    if (opt::beginSubmenu("local-battling", N_("Local play"), nullptr, N_("Two-player Gear Battling on this device."))) {
-        battlingBlock(resumeGame);
-        opt::endSubmenu();
+    if (opt::atRoot()) {
+        opt::group(N_("Battle arena"));
+        battleArena(resumeGame);
     }
     versusMenu(resumeGame);
     opt::endPage();

@@ -9981,6 +9981,10 @@ msgid "Local play"
 msgstr "ローカル対戦"
 
 #: port/src/ui/arena.cpp
+msgid "Play mode"
+msgstr "対戦モード"
+
+#: port/src/ui/arena.cpp
 msgid "After connecting, choose BONUS BATTLING, then PLAYER1 VS PLAYER2."
 msgstr "接続したら BONUS BATTLING、次に PLAYER1 VS PLAYER2 を選びます。"
 
