@@ -11,8 +11,8 @@ extern "C" {
 
 union SDL_Event;
 
-int mouseGameEnabled(void);              /* settings.ini mouse_game (default 1) */
-int mousePointEnabled(void);             /* mouse_point (default 1) */
+int mouseGameEnabled(void);              /* settings.ini mouse_game (default 0) */
+int mousePointEnabled(void);             /* mouse_point (default 0) */
 int mouseTargetEnabled(void);            /* mouse_target (default 0) */
 int mouseCameraEnabled(void);            /* mouse_camera (default 0) */
 void mouseEvent(const union SDL_Event* e); /* pad.c's pump: what the settings menu did not take */

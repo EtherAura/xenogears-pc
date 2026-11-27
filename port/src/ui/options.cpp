@@ -405,13 +405,15 @@ std::vector<Spec>& table() {
         [](int, int v) { padSetStickDeadzone(v); }, 50, nullptr)
         .unit = "%";
     add("mouse_game", N_("Mouse in the game"), [](int) { return mouseGameEnabled(); },
-        [](int, int v) { keySet("mouse_game", v); }, 1);
+        [](int, int v) { keySet("mouse_game", v); }, 0);
     add("mouse_point", N_("Click menu entries"), [](int) { return mousePointEnabled(); },
-        [](int, int v) { keySet("mouse_point", v); }, 1);
+        [](int, int v) { keySet("mouse_point", v); }, 0);
     add("mouse_target", N_("Click battle targets"), [](int) { return mouseTargetEnabled(); },
         [](int, int v) { keySet("mouse_target", v); }, 0);
     add("mouse_camera", N_("Drag to turn the camera"), [](int) { return mouseCameraEnabled(); },
         [](int, int v) { keySet("mouse_camera", v); }, 0);
+    add("menu_mouse", N_("Mouse in F1 menu"), [](int) { return skin::menuMouse() ? 1 : 0; },
+        [](int, int v) { skin::setMenuMouse(v != 0); }, 0);
     static const char* const touchModes[] = {N_("Off"), N_("On"), N_("Automatic")};
     static const char* const touchLayouts[] = {N_("Buttons"), N_("Buttons and sticks")};
 #ifdef __ANDROID__
@@ -1456,7 +1458,6 @@ const std::vector<Preset>& presets() {
                 {"menu_font_scale", 85, nullptr},
                 {"menu_dark", 1, nullptr},
                 {"menu_desc_autoscroll", 1, nullptr},
-                {"menu_on_startup", 0, nullptr},
                 {"movie_replacements", 1, nullptr},
                 {"sprite_preload", 1, nullptr},
                 {"volume", 100, nullptr},

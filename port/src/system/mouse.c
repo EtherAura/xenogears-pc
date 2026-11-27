@@ -13,9 +13,9 @@
  *                   page or character; a field's camera turn
  *
  * settings.ini (each read at the click; the settings menu's Controls section):
- *   mouse_game=1    (default) all of the above; 0: the mouse does nothing in
- *                   the game
- *   mouse_point=1   (default) a click on a main menu command or an item list
+ *   mouse_game=0    (default off) 1 enables all of the above; 0: the mouse
+ *                   does nothing in the game
+ *   mouse_point=0   (default off) 1: a click on a main menu command or an item list
  *                   entry moves the game's cursor there (D-pad presses) and
  *                   confirms (mouse_menu.c); beside them it does nothing;
  *                   in the menu's other screens a click confirms as above
@@ -116,13 +116,13 @@ static int setting(const char* key, int def, const char* about) {
 }
 
 int mouseGameEnabled(void) {
-    return setting("mouse_game", 1, "mouse_game: 1 (default): in the game, the left button confirms, the right "
-                                    "cancels, the wheel moves the cursor, the side buttons are L1 and R1; 0: off");
+    return setting("mouse_game", 0, "mouse_game: 1: in the game, the left button confirms, the right "
+                                    "cancels, the wheel moves the cursor, the side buttons are L1 and R1 (0, default: off)");
 }
 
 int mousePointEnabled(void) {
-    return setting("mouse_point", 1, "mouse_point: 1 (default): a click on a main menu command or an item list "
-                                     "entry moves the game's cursor there and confirms");
+    return setting("mouse_point", 0, "mouse_point: 1: a click on a main menu command or an item list "
+                                     "entry moves the game's cursor there and confirms (0, default: off)");
 }
 
 int mouseTargetEnabled(void) {

@@ -432,6 +432,21 @@ void setDescAutoScroll(bool on) {
     settingsSave();
 }
 
+bool menuMouse() {
+    static bool described;
+    if (!described) {
+        described = true;
+        settingsDescribe("menu_mouse",
+                         "menu_mouse: 1 enables mouse input in the F1/startup menu (0, default: off; touch still works)");
+    }
+    return settingsBool("menu_mouse", 0) != 0;
+}
+
+void setMenuMouse(bool on) {
+    settingsSetInt("menu_mouse", on ? 1 : 0);
+    settingsSave();
+}
+
 int unitFor(int w, int h) {
     // Game: the game's 320 x 216 picture as large as the window holds it in
     // whole pixels (4 at 1868 x 965, 10 at 3840 x 2160). Compact: room for

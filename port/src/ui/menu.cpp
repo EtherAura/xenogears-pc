@@ -32,6 +32,7 @@ extern "C" {
 #include "gpu/gpu.h"
 #include "cd/regional.h"
 #include "spu/output.h"
+#include "system/mouse.h"
 #include "system/pad.h"
 #include "system/rumble.h"
 #include "system/settings.h"
@@ -98,6 +99,7 @@ struct State {
     int initialEntry = -1; // initial arc entry to focus (-1: st.section)
     bool preGameSettings; // true while browsing full Settings from the pre-game / setup screen
     bool startupMenu;    // opened via UI_SETUP_STARTUP (menu_on_startup / --menu)
+    bool wizard;         // first-launch step-by-step setup wizard (when !startupMenu)
     bool helpWanted, backWanted; // the legend's help and back, clicked
     bool resetScroll;    // reset content pane scroll on submenu transition
     bool restoreContent;         // a click on nothing took the cursor out of the section: back to it
@@ -139,6 +141,7 @@ struct State {
     unsigned playsSeen;      // sfx::plays() after the last frame's sounds
     unsigned long quietUntil; // no cursor sound for a move before this frame (something else sounded)
     ImVec2 mouse = ImVec2(-FLT_MAX, -FLT_MAX);
+    bool touchMouse; // mouse events came from touch (SDL_TOUCH_MOUSEID)
     ImRect pane;
     ImDrawList* paneDrawList;
     unsigned long frames;
@@ -1061,16 +1064,16 @@ void noteInput(const SDL_Event* e) {
         if (!e->key.repeat && !modifierKey(e->key.scancode)) m = METHOD_KEYS;
         break;
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        if (e->button.which != SDL_TOUCH_MOUSEID) m = METHOD_KEYS;
+        if (e->button.which != SDL_TOUCH_MOUSEID && (st.open ? skin::menuMouse() : mouseGameEnabled() != 0)) m = METHOD_KEYS;
         break;
     case SDL_EVENT_MOUSE_WHEEL:
-        if (e->wheel.which != SDL_TOUCH_MOUSEID) m = METHOD_KEYS;
+        if (e->wheel.which != SDL_TOUCH_MOUSEID && (st.open ? skin::menuMouse() : mouseGameEnabled() != 0)) m = METHOD_KEYS;
         break;
     case SDL_EVENT_FINGER_DOWN:
         if (touchMode() != 0) m = METHOD_PAD;
         break;
     case SDL_EVENT_MOUSE_MOTION: {
-        if (e->motion.which == SDL_TOUCH_MOUSEID) break;
+        if (e->motion.which == SDL_TOUCH_MOUSEID || !(st.open ? skin::menuMouse() : mouseGameEnabled() != 0)) break;
         uint64_t now = e->motion.timestamp;
         if (now - inputUse.motionAt > 250000000ull) {
             inputUse.motion = 0;
@@ -1220,7 +1223,8 @@ void drawFrame() {
     // Browsing full Settings before boot keeps only Back to start; a running game's arc
     // adds Reset and Quit after Back.
     const bool inSetup = st.setup && !st.preGameSettings;
-    const int sections = inSetup ? (int)SETUP_SECTIONS : (int)SECTION_COUNT;
+    const bool inWizard = inSetup && st.wizard;
+    const int sections = inSetup ? (inWizard ? (int)WIZARD_STEPS : (int)SETUP_SECTIONS) : (int)SECTION_COUNT;
     const int extras = inSetup ? 3 : (st.preGameSettings ? 1 : 3);
     const int entries = sections + extras;
     st.section = std::clamp(st.section, 0, sections - 1);
@@ -1228,15 +1232,27 @@ void drawFrame() {
         if (st.preGameSettings) {
             st.preGameSettings = false;
             st.section = st.setupSection;
-            st.opened = false;
-            st.focusSections = true;
-            st.initialEntry = SETUP_SECTIONS; // focus back on Settings
+            st.opened = st.wizard;
+            st.focusSections = !st.wizard;
+            if (st.wizard) st.enterContent = true;
+            else st.initialEntry = SETUP_SECTIONS; // focus back on Settings
             sfx::play(sfx::BACK);
         } else {
             st.closing = true;
         }
     };
     auto stepBack = [&]() {
+        if (inWizard) {
+            if (st.section > 0) {
+                st.section--;
+                st.resetScroll = true;
+                st.enterContent = true;
+                sfx::play(sfx::BACK);
+            } else {
+                st.closing = true;
+            }
+            return;
+        }
         if (!inSetup && opt::popSubmenu(st.section)) {
             st.resetScroll = true;
             st.jumpFocus = true; // focus returns to the submenu row
@@ -1274,7 +1290,7 @@ void drawFrame() {
         }
         st.leftFrom = 0;
     }
-    if (st.inContent && g.NavId != 0 && g.NavCursorVisible && !popupOpen() && !ImGui::IsAnyItemActive() &&
+    if (!inWizard && st.inContent && g.NavId != 0 && g.NavCursorVisible && !popupOpen() && !ImGui::IsAnyItemActive() &&
         !capturing() &&
         (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || (padNav && ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft)))) {
         st.leftFrom = g.NavId;
@@ -1290,7 +1306,9 @@ void drawFrame() {
         // the commands arc, else leave the menu.
         st.backWanted = false;
         st.restoreContent = false;
-        if (!inSetup && opt::inSubmenu(st.section)) {
+        if (inWizard) {
+            stepBack();
+        } else if (!inSetup && opt::inSubmenu(st.section)) {
             opt::popSubmenu(st.section);
             st.resetScroll = true;
             st.jumpFocus = true;
@@ -1305,13 +1323,13 @@ void drawFrame() {
     }
     if (free && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
                  (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))) {
-        if (st.opened || (!inSetup && opt::inSubmenu(st.section))) stepBack();
+        if (inWizard || st.opened || (!inSetup && opt::inSubmenu(st.section))) stepBack();
         else leaveOrReturn();
     }
     if (pad && !capturing() && !popupOpen() && ImGui::IsKeyPressed(ImGuiKey_GamepadStart, false)) {
         leaveOrReturn();
     }
-    // L1/R1: the previous and next section (at root, not inside a submenu screen).
+    // L1/R1: the previous and next section (at root, not inside a submenu screen or wizard).
     auto changeSection = [&](int step) {
         if (!inSetup) opt::clearSubmenu(st.section);
         st.section = (st.section + step + sections) % sections;
@@ -1321,7 +1339,7 @@ void drawFrame() {
             st.focusSections = true;
         }
     };
-    if ((inSetup || !opt::inSubmenu(st.section)) && pad && !capturing() && !popupOpen() && !ImGui::IsAnyItemActive()) {
+    if (!inWizard && (inSetup || !opt::inSubmenu(st.section)) && pad && !capturing() && !popupOpen() && !ImGui::IsAnyItemActive()) {
         int step = ImGui::IsKeyPressed(ImGuiKey_GamepadL1, false) ? -1 : ImGui::IsKeyPressed(ImGuiKey_GamepadR1, false) ? 1 : 0;
         if (step != 0) {
             changeSection(step);
@@ -1372,7 +1390,7 @@ void drawFrame() {
     // Only the root commands' arc is visible when first opened; entering any
     // section or nested submenu hides the root tree and opens a full-width screen.
     const bool inSubmenu = !inSetup && opt::inSubmenu(st.section);
-    const bool showPane = st.opened || inSubmenu;
+    const bool showPane = inWizard || st.opened || inSubmenu;
     const bool showArc = !showPane;
     Layout L = layout(showPane, entries);
     ImRect pane = L.sheet, help = L.help, foot = L.foot;
@@ -1569,13 +1587,15 @@ void drawFrame() {
     st.paneDrawList->PushClipRectFullScreen();
     skin::box(st.paneDrawList, pane.Min, pane.Max);
     {
-        const char* secTitle = tr(inSetup ? setupSectionNames[st.section] : sectionNames[st.section]);
+        const char* secTitle = tr(inWizard ? wizardStepNames[st.section]
+                                           : inSetup ? setupSectionNames[st.section]
+                                                     : sectionNames[st.section]);
         const char* subTitle = !inSetup ? opt::submenuTitle(st.section) : nullptr;
         bool showBackBtn = true;
         float hy = pane.Min.y + kListTop * u;
         float hx = pane.Min.x + kListText * u;
         if (showBackBtn) {
-            const char* backTxt = tr("< Back");
+            const char* backTxt = (inWizard && st.section == 0) ? tr("< Quit") : tr("< Back");
             ImVec2 bsz = ImGui::CalcTextSize(backTxt);
             ImRect br(ImVec2(hx - 2 * u, hy - u), ImVec2(hx + bsz.x + 4 * u, hy + bsz.y + u));
             bool bHov = !popupOpen() && ImGui::IsMousePosValid() && br.Contains(io.MousePos);
@@ -1585,9 +1605,9 @@ void drawFrame() {
             hx += bsz.x + 10 * u;
         }
         // Clickable < and > prev/next section controls on root section screens
-        // (hidden on dedicated submenu screens where < Back returns to the section).
+        // (hidden on dedicated submenu screens and inside the first-run wizard).
         float titleMaxX = pane.Max.x - 10 * u;
-        if (subTitle == nullptr) {
+        if (subTitle == nullptr && !inWizard) {
             const char* prevTxt = "<";
             const char* nextTxt = ">";
             ImVec2 psz = ImGui::CalcTextSize(prevTxt), nsz = ImGui::CalcTextSize(nextTxt);
@@ -1607,7 +1627,9 @@ void drawFrame() {
         }
 
         char headerText[256];
-        if (subTitle != nullptr) {
+        if (inWizard) {
+            snprintf(headerText, sizeof headerText, tr("Step %d of %d: %s"), st.section + 1, (int)WIZARD_STEPS, secTitle);
+        } else if (subTitle != nullptr) {
             snprintf(headerText, sizeof headerText, "%s > %s", secTitle, subTitle);
             if (hx + ImGui::CalcTextSize(headerText).x > titleMaxX) {
                 snprintf(headerText, sizeof headerText, "%s", subTitle);
@@ -1655,7 +1677,7 @@ void drawFrame() {
     helpBlocks.clear();
     helpWindow = inSetup || st.section != EXTRAS ? content : nullptr;
     if (inSetup) {
-        drawSetupSection(st.section);
+        drawSetupSection(st.section, st.wizard);
     } else {
         drawSection(st.section);
     }
@@ -1896,6 +1918,7 @@ void drawFrame() {
         }
         ImGui::EndPopup();
     }
+    if (inSetup) drawSetupModals();
     noteSettingsClick();
     if (L.game) {
         ImGui::End();
@@ -1922,16 +1945,17 @@ void drawFrame() {
     Part variants[3][5];
     // On a changed setting the reset keys join the legend (no Reset button on the row).
     const char* reset = st.inContent && opt::cursorRowChanged() ? resetText() : "";
+    const char* section = inWizard ? "" : keys.section;
     part(variants[0][0], keys.choose, tr("choose"));
     part(variants[0][1], keys.back, tr("back"));
-    part(variants[0][2], keys.move, tr("move"));
-    part(variants[0][3], keys.section, tr("section"), reset[0] == '\0');
+    part(variants[0][2], keys.move, tr("move"), section[0] == '\0' && reset[0] == '\0');
+    part(variants[0][3], section, tr("section"), reset[0] == '\0');
     part(variants[0][4], reset, tr("reset"), true);
-    part(variants[1][0], keys.choose, nullptr);
-    part(variants[1][1], keys.back, nullptr);
-    part(variants[1][2], keys.move, nullptr);
-    part(variants[1][3], keys.section, nullptr, reset[0] == '\0');
-    part(variants[1][4], reset, tr("reset"), true);
+    part(variants[1][0], keys.choose, tr("choose"));
+    part(variants[1][1], keys.back, tr("back"));
+    part(variants[1][2], keys.move, tr("move"), reset[0] == '\0');
+    part(variants[1][3], reset, tr("reset"), true);
+    variants[1][4].text[0] = '\0';
     part(variants[2][0], keys.choose, tr("choose"));
     part(variants[2][1], keys.back, tr("back"), reset[0] == '\0');
     part(variants[2][2], reset, tr("reset"), true);
@@ -2055,6 +2079,14 @@ void frame() {
         io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     } else {
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+    }
+    bool allowMouse = skin::menuMouse() || st.touchMouse || st.stepCount > 0;
+    if (!allowMouse) {
+        st.mouse = ImVec2(-FLT_MAX, -FLT_MAX);
+        io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    } else {
+        io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
     }
     // The menu comes in and goes as the game's sub-menus do (motion.h),
     // turned about the game screen's middle in game mode (the projection's
@@ -2228,12 +2260,14 @@ void run() {
     st.arrowEntry = -1;
     st.arcTop = 0; // the cursor starts on the first section
     st.leftFrom = 0;
-    st.focusSections = true;
-    st.enterContent = false;
+    st.focusSections = !st.wizard;
+    st.enterContent = st.wizard;
     st.inContent = false;
-    st.opened = false;
+    st.opened = st.wizard;
     st.escapeFree = false;
     st.padQuiet = true;
+    st.touchMouse = false;
+    if (!skin::menuMouse()) st.mouse = ImVec2(-FLT_MAX, -FLT_MAX);
     st.lastNav = 0;
     st.openedAt = st.frames;
     sfx::opened();
@@ -2428,7 +2462,18 @@ void showSetupSection(int section) {
     st.preGameSettings = false;
     st.section = section;
     st.opened = true;
+    st.resetScroll = true;
     st.enterContent = true;
+}
+
+void openPreGameSettings() {
+    st.setupSection = st.section;
+    st.preGameSettings = true;
+    st.section = 0;
+    st.opened = false;
+    st.focusSections = true;
+    st.arcTop = 0;
+    sfx::play(sfx::CHOOSE);
 }
 
 void hint(const char* fmt, ...) {
@@ -2553,9 +2598,10 @@ extern "C" int uiEvent(const SDL_Event* e) {
                 if (st.preGameSettings) {
                     st.preGameSettings = false;
                     st.section = st.setupSection;
-                    st.opened = false;
-                    st.focusSections = true;
-                    st.initialEntry = SETUP_SECTIONS;
+                    st.opened = st.wizard;
+                    st.focusSections = !st.wizard;
+                    if (st.wizard) st.enterContent = true;
+                    else st.initialEntry = SETUP_SECTIONS;
                 } else {
                     st.closing = true;
                 }
@@ -2576,6 +2622,9 @@ extern "C" int uiEvent(const SDL_Event* e) {
         ImGui_ImplSDL3_ProcessEvent(e);
         return 1;
     case SDL_EVENT_MOUSE_MOTION: {
+        bool touch = e->motion.which == SDL_TOUCH_MOUSEID;
+        if (!touch && !skin::menuMouse() && st.stepCount == 0) return 1;
+        if (touch) st.touchMouse = true;
         // Into window pixels, as ImGui works (frame()).
         SDL_Event m = *e;
         m.motion.x *= st.pixelsPerUnit;
@@ -2585,7 +2634,10 @@ extern "C" int uiEvent(const SDL_Event* e) {
         return 1;
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_BUTTON_UP:
+    case SDL_EVENT_MOUSE_BUTTON_UP: {
+        bool touch = e->button.which == SDL_TOUCH_MOUSEID;
+        if (!touch && !skin::menuMouse() && st.stepCount == 0) return 1;
+        if (touch) st.touchMouse = true;
         if (e->button.button == SDL_BUTTON_RIGHT) {
             // The right button goes back, as Esc: out of a list or a field,
             // from an option to the commands, from the commands out.
@@ -2594,6 +2646,7 @@ extern "C" int uiEvent(const SDL_Event* e) {
         }
         ImGui_ImplSDL3_ProcessEvent(e);
         return 1;
+    }
     case SDL_EVENT_FINGER_MOTION: {
         // A finger dragged up or down scrolls what it is on, as a wheel
         // (SDL makes the finger a mouse too: taps are clicks).
@@ -2608,9 +2661,12 @@ extern "C" int uiEvent(const SDL_Event* e) {
     case SDL_EVENT_FINGER_UP:
     case SDL_EVENT_FINGER_CANCELED:
         return 1;
+    case SDL_EVENT_MOUSE_WHEEL:
+        if (e->wheel.which != SDL_TOUCH_MOUSEID && !skin::menuMouse() && st.stepCount == 0) return 1;
+        ImGui_ImplSDL3_ProcessEvent(e);
+        return 1;
     case SDL_EVENT_TEXT_INPUT:
     case SDL_EVENT_TEXT_EDITING:
-    case SDL_EVENT_MOUSE_WHEEL:
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
     case SDL_EVENT_GAMEPAD_BUTTON_UP:
     case SDL_EVENT_GAMEPAD_AXIS_MOTION:
@@ -2673,11 +2729,13 @@ extern "C" int uiDiscSetup(const char* region, int flags, char* chosen, unsigned
     discSetupOpened(region, (flags & UI_SETUP_NO_DISC) != 0, startup);
     st.setup = true;
     st.startupMenu = startup;
-    st.setupSection = (flags & UI_SETUP_BIOS) ? SETUP_BIOS : startup ? SETUP_PRESETS : SETUP_DISCS;
+    st.wizard = !startup;
+    st.setupSection = startup ? SETUP_PRESETS : (st.wizard ? 0 : (flags & UI_SETUP_BIOS) ? SETUP_BIOS : SETUP_DISCS);
     st.initialEntry = startup ? (int)SETUP_SECTIONS + 1 : -1; // startup: cursor ready on Start
     run();
     st.setup = false;
     st.startupMenu = false;
+    st.wizard = false;
     st.preGameSettings = false;
     st.initialEntry = -1;
     st.want = false;

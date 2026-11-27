@@ -94,6 +94,11 @@ void setDarkWindows(bool on); // also written to settings.ini
 bool descAutoScroll();
 void setDescAutoScroll(bool on);
 
+// Mouse input in the F1 / startup UI (settings.ini menu_mouse, off by default;
+// touch input still works regardless).
+bool menuMouse();
+void setMenuMouse(bool on);
+
 // Each frame, right after ImGui::NewFrame.
 void beginFrame();
 

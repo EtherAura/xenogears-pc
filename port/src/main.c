@@ -305,6 +305,7 @@ int main(int argc, char** argv) {
             return 0;
         }
         setup = 0;
+        SDL_setenv_unsafe("XG_STARTUP_DONE", "1", 1); /* do not reopen the startup menu on this same launch */
         engineRedirect(); /* the setup screen chose the other engine */
     }
     if (!cdOpenDisc(selected) || !loadGameData(window, selected, extras) ||
@@ -324,8 +325,8 @@ int main(int argc, char** argv) {
      * BIOS page, when someone is there to answer it. */
     const char* bios = settingsGet("bios");
     if (kromPath() == NULL && (bios == NULL || SDL_strcmp(bios, "none") != 0) && SDL_getenv("XG_HEADLESS") == NULL) {
+        if (!setup) setupFlags |= UI_SETUP_BIOS;
         setup = 1;
-        setupFlags |= UI_SETUP_BIOS;
     }
     /* Opt-in pre-game menu (menu_on_startup=1, off by default, or --menu): opens
      * before the game boots so presets, engine and settings apply immediately.

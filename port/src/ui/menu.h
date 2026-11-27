@@ -40,10 +40,14 @@ void drawSection(int section);   // inside the content pane
 // The pre-game / setup screen (ui.h uiDiscSetup): pages on the commands' arc,
 // plus Settings (opens the full menu before launch), Start and Quit.
 enum SetupSection { SETUP_DISCS, SETUP_BIOS, SETUP_PRESETS, SETUP_SECTIONS };
+enum { WIZARD_STEPS = 2 };
 extern const char* const setupSectionNames[SETUP_SECTIONS];
+extern const char* const wizardStepNames[WIZARD_STEPS];
 void discSetupOpened(const char* region, bool noDisc, bool startupMenu);
-void drawSetupSection(int section); // inside the content pane
+void drawSetupSection(int section, bool wizard); // inside the content pane
+void drawSetupModals();          // root-level setup modals (No BIOS)
 bool setupStart();               // Start: true when the images are valid and saved (and the BIOS settled)
+void openPreGameSettings();      // open full Settings from the setup wizard/menu
 bool discSetupNoDisc();          // true while no disc image is open yet
 bool discSetupCommand(const char* command, const char* argument);
 bool discSetupAccepted();

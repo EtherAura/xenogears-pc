@@ -2322,10 +2322,19 @@ void controlsSection() {
         opt::endSubmenu();
     }
 
-    const char* mouseSummary = mouseGameEnabled() ? tr("On") : tr("Off");
+    const char* mouseSummary = mouseGameEnabled() ? tr("On") : skin::menuMouse() ? tr("F1 menu") : tr("Off");
     if (opt::beginSubmenu("mouse", N_("Mouse controls"), mouseSummary,
-                          N_("Use the mouse for menus, battle targets and camera rotation."))) {
+                          N_("Use the mouse for menus, battle targets, camera rotation and the F1 menu."))) {
         opt::group(N_("Mouse"));
+        if (row("Mouse in F1 menu", "menu_mouse")) {
+            bool v = skin::menuMouse();
+            if (offOnList("##menu_mouse", &v)) {
+                skin::setMenuMouse(v);
+            }
+            hint("Allow mouse hover, clicks and scroll wheel in the F1 settings menu and startup screen "
+                 "(off by default; touch input still works).");
+            overrideNote("menu_mouse");
+        }
         bool mouse = mouseGameEnabled() != 0;
         if (row("Mouse in the game", "mouse_game")) {
             if (offOnList("##mouse_game", &mouse)) {
@@ -3933,6 +3942,7 @@ bool discSetupCommand(const char* command, const char* argument) {
 }
 
 const char* const setupSectionNames[SETUP_SECTIONS] = {N_("Disc images"), "BIOS", N_("Presets")};
+const char* const wizardStepNames[WIZARD_STEPS] = {N_("Setup"), N_("Presets & Settings")};
 
 // What a missing BIOS takes away: what the game draws with the BIOS's own
 // font (B(51h) Krom2RawAdd, port/src/system/krom.c): the save titles on the
@@ -3940,22 +3950,146 @@ const char* const setupSectionNames[SETUP_SECTIONS] = {N_("Disc images"), "BIOS"
 // some scenes (the field's EX BEh lines, getScrollingTextGlyph).
 const char* const biosFeatures[] = {N_("Save titles on the memory card screens"), N_("Text that scrolls over some scenes")};
 
-void setupPresets() {
-    opt::beginPage("setup-presets", -1);
-    opt::group(N_("Presets"));
-    opt::presetRows();
-    opt::group(N_("Startup"));
+void startupMenuRow(const char* id) {
     if (row("Startup menu", "menu_on_startup")) {
         bool on = settingsBool("menu_on_startup", 0) != 0;
-        if (offOnList("##setup_menu_on_startup", &on)) {
+        if (offOnList(id, &on)) {
             settingsDescribe("menu_on_startup",
                              "menu_on_startup: 1 opens the pre-game menu before the game starts (0, default: launch straight in)");
             settingsSetInt("menu_on_startup", on ? 1 : 0);
             settingsSave();
         }
-        hint("On: show this pre-game menu before launching the game. Off (default): start straight into the game "
-             "next time (you can always open Settings in-game with F1 or launch with --menu).");
+        hint("On: open the pre-game menu (Presets, Settings, Discs, BIOS, Start) on every launch. Off (default): "
+             "boot straight into the game next time. Change this anytime in Settings (F1 > System > This menu > "
+             "Startup menu), or pass --menu to open it once.");
     }
+}
+
+void setupWizardStep1() {
+    opt::beginPage("setup-wiz-1", -1, false);
+    opt::group(N_("Disc images"), opt::STACKED);
+    row("Image folder");
+    if (folderField("setup-folder", setup.imageDir, sizeof setup.imageDir, 42, "Search", true)) searchImages();
+    hint("The folder holding your Xenogears disc images (subfolders for each disc are searched too).");
+    if (setup.searched && setup.foundCount > 0) {
+        row("Found");
+        for (int i = 0; i < setup.foundCount; i++) {
+            const CdSetupImage& f = setup.found[i];
+            const char* name = strrchr(f.path, '/');
+            char label[600];
+            bool wrongRegion = setup.region[0] && strcmp(f.info.region, setup.region) != 0;
+            snprintf(label, sizeof label, "%s Disc %d: %s##found%d", f.info.region, f.info.disc, name ? name + 1 : f.path, i);
+            ImGui::BeginDisabled(wrongRegion);
+            if (skin::selectable(label, !strcmp(f.path, setup.first) || !strcmp(f.path, setup.other))) {
+                copyPath(setup.first, f.path);
+                setup.other[0] = '\0';
+                for (int j = 0; j < setup.foundCount; j++)
+                    if (!strcmp(setup.found[j].info.region, f.info.region) && setup.found[j].info.disc != f.info.disc)
+                        copyPath(setup.other, setup.found[j].path);
+                verifySetup();
+            }
+            ImGui::EndDisabled();
+        }
+        hint("Choose the disc to start on; the other disc of the same release goes with it.");
+    }
+    if (opt::plain()) {
+        setup.message.draw();
+        for (int i = 0; i < 2; i++) {
+            if (setup.info[i].disc) {
+                ImGui::Text(tr("%s Disc %d: %s"), setup.info[i].region, setup.info[i].disc, setup.info[i].boot);
+            }
+        }
+    }
+
+    opt::group("BIOS", opt::STACKED);
+    row("BIOS folder");
+    if (folderField("setup-biosdir", setup.biosDir, sizeof setup.biosDir, 43, "Search", true)) searchBios();
+    hint("Optional: a folder containing a 512 KB PS1 BIOS image (e.g. scph5501.bin). Read in place, never copied.");
+    if (opt::plain()) {
+        if (setup.biosOk) {
+            setup.biosMessage.draw();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
+            textLines("Optional: only needed for save titles on memory card screens and scrolling scene text. "
+                      "Leave empty to continue without one (can be set later in F1 > System > Discs and BIOS).");
+            ImGui::PopStyleColor();
+        }
+    }
+
+    opt::group(N_("Startup"));
+    startupMenuRow("##setup_wizard_menu_on_startup");
+    if (opt::plain()) {
+        bool on = settingsBool("menu_on_startup", 0) != 0;
+        ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
+        textLines(on ? "On: the pre-game menu will open on every launch. Change this anytime in Settings "
+                       "(F1 > System > This menu > Startup menu)."
+                     : "Off: future launches start straight into the game. Enable the startup menu anytime in "
+                       "Settings (F1 > System > This menu > Startup menu), or pass --menu once.");
+        ImGui::PopStyleColor();
+    }
+    opt::endPage();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    markBlock();
+    ImGui::BeginDisabled(!setup.valid);
+    if (ImGui::Button(tr("Next >##wiz_step1_next"))) {
+        if (!setup.biosOk) setup.withoutBios = true;
+        sfx::play(sfx::CHOOSE);
+        showSetupSection(1);
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    if (ImGui::Button(tr("Quit##wiz_step1_quit"))) {
+        sfx::play(sfx::BACK);
+        closeMenu();
+    }
+    hint(setup.valid ? "Continue to choose a preset or configure settings directly."
+                     : "Choose a folder with your Xenogears disc image(s) to continue.");
+}
+
+void setupWizardStep2() {
+    opt::beginPage("setup-wiz-2", -1);
+    if (opt::plain()) {
+        markBlock();
+        ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
+        textLines("Choose a preset below, click Configure settings to customise options yourself, or click Start Game to launch right away.");
+        ImGui::PopStyleColor();
+    }
+    opt::group(N_("Presets"));
+    opt::presetRows();
+    opt::endPage();
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::Spacing();
+    markBlock();
+    if (ImGui::Button(tr("< Back##wiz_step2_back"))) {
+        sfx::play(sfx::BACK);
+        showSetupSection(0);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(tr("Configure settings##wiz_settings"))) {
+        openPreGameSettings();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(tr("Start Game##wiz_start"))) {
+        if (!setup.biosOk) setup.withoutBios = true;
+        if (setupStart()) {
+            sfx::play(sfx::CHOOSE);
+            closeMenu();
+        }
+    }
+    hint("Configure settings opens the full menu before launching; Start Game saves your setup and plays.");
+}
+
+void setupPresets() {
+    opt::beginPage("setup-presets", -1);
+    opt::group(N_("Presets"));
+    opt::presetRows();
+    opt::group(N_("Startup"));
+    startupMenuRow("##setup_menu_on_startup");
     opt::endPage();
 }
 
@@ -4064,11 +4198,21 @@ void setupBios() {
     opt::endPage();
 }
 
-void drawSetupSection(int section) {
-    if (section == SETUP_DISCS) setupDiscs();
-    else if (section == SETUP_BIOS) setupBios();
-    else setupPresets();
-    // Start without a BIOS: asked once, explicitly.
+void drawSetupSection(int section, bool wizard) {
+    if (wizard) {
+        if (section == 0) setupWizardStep1();
+        else setupWizardStep2();
+    } else {
+        if (section == SETUP_DISCS) setupDiscs();
+        else if (section == SETUP_BIOS) setupBios();
+        else setupPresets();
+    }
+    drawBrowser();
+}
+
+void drawSetupModals() {
+    // Start without a BIOS: asked once, explicitly (rendered outside the pane so
+    // clicking Start from the root commands' arc opens it).
     if (setup.askBios) {
         ImGui::OpenPopup("No BIOS");
         setup.askBios = false;
@@ -4089,13 +4233,16 @@ void drawSetupSection(int section) {
         }
         ImGui::EndPopup();
     }
-    drawBrowser();
 }
 
 bool setupStart() {
     if (acceptSetup()) return true;
-    sfx::play(sfx::BUZZ); // the game's sound for a choice it refuses
-    if (!setup.valid) showSetupSection(SETUP_DISCS); // what is wrong, there (the BIOS: its question)
+    if (setup.askBios) {
+        sfx::play(sfx::CHOOSE);
+    } else {
+        sfx::play(sfx::BUZZ); // the game's sound for a choice it refuses
+        if (!setup.valid) showSetupSection(SETUP_DISCS); // what is wrong, there
+    }
     return false;
 }
 
