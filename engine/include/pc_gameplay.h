@@ -106,6 +106,7 @@ void pcGauntletBattleSetup(void);
 int pcGauntletOver(int running, int eventLoss, int nativeChain, unsigned int knockedOut);
 int pcGauntletBattleEnd(void);
 void pcGauntletBattleOverHook(void);
+void pcGauntletSpaceGears(void);
 void pcGauntletFieldTick(void);
 int pcGauntletGameRoster(unsigned char* ids, unsigned char* hasGear, unsigned char* names, unsigned char* party);
 

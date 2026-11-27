@@ -73,61 +73,18 @@ void softReboot(void); /* src/main/kernel.c */
 /* ---- the music ---- */
 
 #define ARENA_SONG 0x0B /* Battling's own (the reception loads it before op 0xBF) */
-#define MUSIC_DIR 0x1C
-#define MUSIC_SCORE(id) ((id) * 2 + 0x14)
-#define MUSIC_BANK(wave) ((wave) * 2 + 0x13)
-
-extern u8 battleMusic[0x3200]; /* main: the music's score (the field's and the world map's buffer) */
-extern s32 currentlyLoadedWave;
-extern s32 playMusicSubVar0;
-extern s32 playMusicSubVar2;
-extern s32 playWorldmapMusic;
-SoundInstance* createMusicInstance(void* data);
-void startMusicInstance(SoundInstance* inst, s32 volume, s32 arg);
+int pcStartIsolatedMusic(s32 id, s32 wave, s32 flags);
 
 void pcArenaBattlingMusic(void) {
-    s32 id;
-    s32 wave;
-    s32 flags;
-    s32 dir;
-    s32 sub;
-    Wds* wds;
+    s32 wave, flags;
 
     if (pcArenaMatchOn() == 0 || pcArenaSession() != PC_ARENA_IDLE) {
         return; /* no match, or a field's session: the field loaded the song */
     }
-    id = pcArenaMusic(ARENA_SONG);
-    if (!pcArenaMusicSelector(id, &wave, &flags)) {
-        return;
-    }
-    getCurrentDirectory(&dir, &sub);
-    setCurrentDirectory(MUSIC_DIR, 0);
-    if (flags == 1 && playMusicSubVar0 == 0 && wdsFile3 != NULL) {
-        /* playMusicSub: the large bank takes the second resident one's room */
-        playWorldmapMusic = 1;
-        unloadWds(wdsFile3);
-        playMusicSubVar0 = 1;
-        playMusicSubVar2 = 0;
-    }
-    if (wave != 0xFF && wave != currentlyLoadedWave) {
-        wds = allocateHeap(PC_HEAP_BYTES(getFileSizeAligned(MUSIC_BANK(wave))), 1);
-        if (wds != NULL) {
-            readFile(MUSIC_BANK(wave), wds, 0, 0x80);
-            waitReadCompletion(0);
-            loadWds(wds, 0);
-            waitForMusic(0x10);
-            freeHeap(wds);
-            currentlyLoadedWave = wave;
-        }
-    }
-    if (getFileSizeAligned(MUSIC_SCORE(id)) <= (s32)sizeof(battleMusic)) {
-        readFile(MUSIC_SCORE(id), battleMusic, 0, 0x80);
-        waitReadCompletion(0);
-        pMusic = createMusicInstance(battleMusic);
-        startMusicInstance(pMusic, 0x7F, 0);
+    s32 id = pcArenaMusic(ARENA_SONG);
+    if (pcArenaMusicSelector(id, &wave, &flags) && pcStartIsolatedMusic(id, wave, flags)) {
         pcArenaLog("Battling's music: %d (sample bank %d, flags %d)", id, wave, flags);
     }
-    setCurrentDirectory(dir, sub);
 }
 
 /* ---- the end's Rematch / Leave, drawn as the victory screen draws its result ---- */

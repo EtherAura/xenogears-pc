@@ -177,6 +177,7 @@
 #include "card/card.h"
 #include "card/party.h"
 #include "arena.h"
+#include "gauntlet.h"
 #include "gameplay.h"
 #include "hw.h"
 #include "net.h"
@@ -1033,6 +1034,7 @@ static void paceToRealTime(void) {
 
 void netplayPace(void) {
     pcArenaVBlank(); /* the Battle arena's matches (system/arena.c) */
+    pcGauntletVBlank();
     if (!N.active) {
         if (N.after) paceToRealTime(); /* a command-line session's game after it */
         netplayLaunchWait(); /* a session started from the menu: this game waits */

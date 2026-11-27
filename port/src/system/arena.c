@@ -780,7 +780,7 @@ void pcArenaSoftReset(void) {
         }
     } else {
         M.armed = 0;
-        gameSeen = 0;
+        if (!stateKept()) gameSeen = 0; /* a gauntlet also boots with the original game parked */
     }
     if (matchOnline()) {
         versusEnvRead = 0; /* XG_VERSUS asked again */
@@ -1082,7 +1082,7 @@ void pcArenaVBlank(void) {
     int booted = portGameMode();
     switch (M.phase) {
     case MATCH_IDLE:
-        if ((booted == 1 && gameState.m231A_fieldID != TITLE_FIELD) || booted == 2 || booted == 3) {
+        if (!stateKept() && ((booted == 1 && gameState.m231A_fieldID != TITLE_FIELD) || booted == 2 || booted == 3)) {
             gameSeen = 1; /* a field past the title, a battle or the world map (not during a match: its own) */
         }
         envMatch();

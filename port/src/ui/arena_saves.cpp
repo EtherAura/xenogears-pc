@@ -78,7 +78,7 @@ struct Browser {
     bool haveCodes = false;
     uint8_t codes[XG_PARTY_CODE_TABLE];
 };
-Browser browsers[3];      // player 1's, player 2's, this machine's for an online session
+Browser browsers[4];      // local players 1 and 2, online, and gauntlet
 Browser* B = &browsers[0]; // the one being drawn
 
 int pickedCount() {
@@ -99,7 +99,7 @@ void pickSaveParty(const CardGameSave& s) {
     }
 }
 
-void readCards() {
+void readCards(bool partyRecord = true) {
     int card = -1, block = -1;
     std::vector<uint8_t> was;
     if (B->selected >= 0 && B->selected < (int)B->saves.size()) {
@@ -123,7 +123,7 @@ void readCards() {
     if (B->selected < 0) {
         for (int i = 0; i < 3; i++) B->picked[i] = 255; // that save is gone or changed
     }
-    if (!B->haveCodes) B->haveCodes = xgPartyGameCodes(B->codes) != 0;
+    if (partyRecord && !B->haveCodes) B->haveCodes = xgPartyGameCodes(B->codes) != 0;
     B->dirty = true;
 }
 
@@ -148,23 +148,32 @@ std::string placeOf(const CardGameSave& s) {
     return chapter != nullptr && chapter[0] != '\0' ? chapter : s.location;
 }
 
+std::string saveLabel(const CardGameSave& s, bool showTime = false) {
+    char label[256];
+    std::string place = placeOf(s);
+    if (s.number > 0) {
+        snprintf(label, sizeof label, tr("Slot %d, No.%02d: %s"), s.card + 1, s.number, place.c_str());
+    } else {
+        snprintf(label, sizeof label, tr("Slot %d: %s"), s.card + 1, place.c_str());
+    }
+    if (!showTime) return label;
+    char time[32];
+    unsigned minutes = s.playTime / 3600;
+    snprintf(time, sizeof time, " (%u:%02u)", minutes / 60, minutes % 60);
+    return std::string(label) + time;
+}
+
 void saveList(bool* chosenByNav) {
     if (ImGui::BeginListBox("##arenasavelist", ImVec2(-1, 6 * ROW * skin::unit()))) {
         for (int i = 0; i < (int)B->saves.size(); i++) {
             const CardGameSave& s = B->saves[i].info;
-            std::string place = placeOf(s);
-            char label[256];
-            if (s.number > 0) {
-                snprintf(label, sizeof label, tr("Slot %d, No.%02d: %s"), s.card + 1, s.number, place.c_str());
-            } else {
-                snprintf(label, sizeof label, tr("Slot %d: %s"), s.card + 1, place.c_str());
-            }
+            std::string label = saveLabel(s);
             char time[32];
             unsigned minutes = s.playTime / 3600;
             snprintf(time, sizeof time, "%u:%02u", minutes / 60, minutes % 60);
             ImGui::PushID(i);
             float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-            if (ImGui::Selectable(label, B->selected == i)) {
+            if (ImGui::Selectable(label.c_str(), B->selected == i)) {
                 if (B->selected != i) {
                     sfx::play(sfx::MOVE);
                     B->selected = i;
@@ -233,6 +242,34 @@ void memberPicker(const CardGameSave& s, bool focus) {
 }
 
 } // namespace
+
+const uint8_t* gauntletSavePicker() {
+    B = &browsers[3];
+    int frame = ImGui::GetFrameCount();
+    if (frame != B->lastFrame + 1) readCards(false);
+    B->lastFrame = frame;
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(tr("Memory card save"));
+    ImGui::SameLine();
+    std::string current = B->selected < 0 ? tr("Choose a save") : saveLabel(B->saves[B->selected].info, true);
+    ImGui::BeginDisabled(B->saves.empty());
+    if (skin::beginCombo("##gauntlet_save", current.c_str(), 0, ImGui::GetContentRegionAvail().x)) {
+        for (int i = 0; i < (int)B->saves.size(); i++) {
+            ImGui::PushID(i);
+            bool selected = B->selected == i;
+            if (skin::comboItem(saveLabel(B->saves[i].info, true).c_str(), selected)) {
+                B->selected = i;
+                sfx::play(sfx::CHOOSE);
+            }
+            if (selected || (B->selected < 0 && i == 0)) ImGui::SetItemDefaultFocus();
+            ImGui::PopID();
+        }
+        skin::endCombo();
+    }
+    ImGui::EndDisabled();
+    if (B->saves.empty()) hint("No saves of this game on the memory cards (F1 > Saves > Memory cards).");
+    return B->selected < 0 ? nullptr : B->saves[B->selected].block.data();
+}
 
 void arenaPartyReason(int reason, int characterId, char* out, size_t size) {
     const char* who = characterId >= 0 && characterId < CARD_SAVE_MEMBERS ? tr(memberNames[characterId]) : tr("A member");

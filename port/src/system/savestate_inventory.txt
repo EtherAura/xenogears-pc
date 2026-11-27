@@ -446,6 +446,7 @@ system/gametext_pack.c * host text packs
 system/gametext_picture.c * host the discs' pictures with text (what the game gets is copied into its heap)
 system/gauntlet.c R state the run (autostarted stays the process's)
 system/gauntlet.c checked host records file path, autostart
+system/gauntlet.c launch host restart and return control, with the starting party and run for the extra mode
 system/gauntlet.c path host records file path, autostart
 system/gauntlet.c picks derived scratch
 system/gauntlet.c when host records file path, autostart

@@ -21,6 +21,7 @@ typedef struct {
 extern "C" {
 #endif
 int portRequestStart(const PortStartRequest* request);
+void portRequestSoftReset(void);
 /* Remains active across the replay's field changes, until the next reset. */
 int portSceneReplayActive(void);
 #ifdef __cplusplus

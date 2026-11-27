@@ -42,7 +42,7 @@ void closeArena() {
 void drawGauntlet(const Area& area) {
     if (beginPane("##gauntlet", area.min, area.max)) {
         ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 7 * area.unit);
-        menu::gauntletSection();
+        menu::gauntletSection(leaveIntoGame);
         ImGui::PopStyleVar();
     }
     endPane(false);

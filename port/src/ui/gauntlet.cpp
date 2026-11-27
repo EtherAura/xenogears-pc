@@ -1,19 +1,16 @@
-// F1 > Extras > Boss gauntlet (port/src/system/gauntlet.h): the bosses from the
-// discs (the extras' reader), the preset or custom list, the party of each
-// fight, the recovery, Start, the run's progress and the records.
+// Boss gauntlet setup, progress and records in F1 > Extras.
 
 #include <math.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <algorithm>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "imgui.h"
+#include "arena_saves.h"
 #include "wrapped.h"
 #include "l10n.h"
 #include "menu.h"
@@ -22,16 +19,15 @@
 
 extern "C" {
 #include "system/gauntlet.h"
+#include "cd/cd.h"
 }
 
-// The extras' boss list and text (absent from a build without them).
+// The disc scanner is available in builds with Extras.
 extern "C" XgGauntletScan* xgGauntletScanBegin(void) __attribute__((weak));
 extern "C" int xgGauntletScanStep(XgGauntletScan* s, int budget) __attribute__((weak));
-extern "C" double xgGauntletScanProgress(const XgGauntletScan* s) __attribute__((weak));
 extern "C" int xgGauntletScanDiscs(const XgGauntletScan* s) __attribute__((weak));
 extern "C" int xgGauntletScanResult(XgGauntletScan* s, PcGauntletBoss** out) __attribute__((weak));
 extern "C" void xgGauntletScanFree(XgGauntletScan* s) __attribute__((weak));
-extern "C" int xgGauntletName(const unsigned char* text, int size, char* out, int outSize) __attribute__((weak));
 
 namespace menu {
 
@@ -41,32 +37,39 @@ struct {
     XgGauntletScan* scan = nullptr;
     bool scanned = false;
     int discs = 0;
+    std::string paths[2];
     std::vector<PcGauntletBoss> bosses;
-    int addChoice = 0;
 } G;
 
-void finishScan() {
+void scanBosses() {
+    const char* first = cdSwapPath(0);
+    const char* second = cdSwapPath(1);
+    std::string paths[] = {first ? first : "", second ? second : ""};
+    if (paths[1] < paths[0]) std::swap(paths[0], paths[1]);
+    if (paths[0] != G.paths[0] || paths[1] != G.paths[1]) {
+        if (G.scan != nullptr) xgGauntletScanFree(G.scan);
+        G.scan = nullptr;
+        G.scanned = false;
+        G.discs = 0;
+        G.bosses.clear();
+        G.paths[0] = paths[0];
+        G.paths[1] = paths[1];
+    }
+    if (G.scanned) return;
+    if (G.scan == nullptr) G.scan = xgGauntletScanBegin();
+    if (G.scan == nullptr) {
+        G.scanned = true;
+        return;
+    }
+    if (!xgGauntletScanStep(G.scan, 64)) return;
     PcGauntletBoss* list = nullptr;
     int n = xgGauntletScanResult(G.scan, &list);
     G.discs = xgGauntletScanDiscs(G.scan);
-    G.bosses.assign(list, list + (n > 0 ? n : 0));
+    if (n > 0) G.bosses.assign(list, list + n);
     free(list);
     xgGauntletScanFree(G.scan);
     G.scan = nullptr;
     G.scanned = true;
-}
-
-std::string memberName(const PcGauntletRoster& r, int id) {
-    for (int k = 0; k < r.count; k++) {
-        if (r.ids[k] != id) continue;
-        char name[64] = "";
-        if (xgGauntletName != nullptr) xgGauntletName(r.rawNames[k], 20, name, sizeof name);
-        if (name[0]) return name;
-        break;
-    }
-    char fallback[16];
-    snprintf(fallback, sizeof fallback, tr("Member %d"), id);
-    return fallback;
 }
 
 std::string timeText(unsigned vblanks) {
@@ -100,141 +103,12 @@ int pick(const char* label, const char* id, const char* const* names, int count,
     return chosen;
 }
 
-void tooltip(const char* fmt, ...) IM_FMTARGS(1);
-void tooltip(const char* fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    ImGui::BeginTooltip();
-    ImGui::PushTextWrapPos(ImGui::GetMainViewport()->Size.x * 0.6f);
-    ImGui::TextV(tr(fmt), ap);
-    ImGui::PopTextWrapPos();
-    ImGui::EndTooltip();
-    va_end(ap);
-}
-
-// The party pickers of one fight: three lists of the members (a Gear fight:
-// those with a Gear) and "-".
-bool canFight(const PcGauntletBoss& b, const PcGauntletRoster& r, int id) {
-    for (int k = 0; k < r.count; k++) {
-        if (r.ids[k] == id) return !b.gear || r.hasGear[k];
-    }
-    return false;
-}
-
-void partyPickers(const PcGauntletBoss& b, const PcGauntletRoster& r, int row) {
-    unsigned char party[3];
-    if (!pcGauntletPartyFor(&b, party)) memcpy(party, r.party, 3);
-    for (int slot = 0; slot < 3; slot++) {
-        if (party[slot] != 0xFF && !canFight(b, r, party[slot])) party[slot] = 0xFF; /* as it will fight */
-    }
-    bool changed = false;
-    float width = (ImGui::GetContentRegionAvail().x - 12 * skin::unit()) / 3;
-    for (int slot = 0; slot < 3; slot++) {
-        ImGui::PushID(row * 4 + slot);
-        if (slot) ImGui::SameLine(0, 6 * skin::unit());
-        std::string shown = party[slot] == 0xFF ? "-" : memberName(r, party[slot]);
-        if (skin::beginCombo("##member", shown.c_str(), 0, width)) {
-            if (skin::comboItem("-", party[slot] == 0xFF)) {
-                party[slot] = 0xFF;
-                changed = true;
-            }
-            for (int k = 0; k < r.count; k++) {
-                if (b.gear && !r.hasGear[k]) continue;
-                if (skin::comboItem(memberName(r, r.ids[k]).c_str(), party[slot] == r.ids[k])) {
-                    party[slot] = r.ids[k];
-                    changed = true;
-                }
-            }
-            skin::endCombo();
-        }
-        ImGui::PopID();
-    }
-    if (changed) {
-        sfx::play(sfx::CHOOSE);
-        pcGauntletSetPartyFor(&b, party);
-    }
-}
-
-void fightList(int preset, const PcGauntletRoster& roster) {
-    std::vector<int> picks(PC_GAUNTLET_MAX);
-    int n = pcGauntletSelect(preset, G.bosses.data(), (int)G.bosses.size(), picks.data(), PC_GAUNTLET_MAX);
-    picks.resize(n);
-    bool custom = preset == PC_GAUNTLET_CUSTOM;
-    if (n == 0) {
-        hint(custom ? "No boss yet: add them below." : "No boss of this kind on the discs.");
-    } else {
-        float height = std::min(n, 4) * 2 * 20.0f * skin::unit() + 8 * skin::unit();
-        ImGui::BeginChild("##gauntlet_fights", ImVec2(0, height), ImGuiChildFlags_Borders);
-        int move = -1, moveBy = 0, remove = -1;
-        for (int i = 0; i < n; i++) {
-            const PcGauntletBoss& b = G.bosses[picks[i]];
-            unsigned char party[3];
-            bool none = pcGauntletFightParty(&b, &roster, party) == 0;
-            ImGui::PushID(i);
-            if (custom) {
-                ImGui::AlignTextToFramePadding();
-                ImGui::Text("%d. %s%s%s", i + 1, b.name, b.gear ? tr(" (Gear)") : "", none ? tr(" - skipped") : "");
-            } else {
-                wrappedText("%d. %s%s%s", i + 1, b.name, b.gear ? tr(" (Gear)") : "", none ? tr(" - skipped") : "");
-            }
-            if (ImGui::IsItemHovered()) {
-                tooltip("%s battle; disc %d, field %d, config %d; story %s%d%s", b.gear ? tr("Gear") : tr("Character"),
-                        b.disc, b.field, b.config, b.dated ? "" : tr("about "), b.story,
-                        none ? tr("; skipped: nobody picked can fight it") : "");
-            }
-            if (custom) {
-                ImGui::SameLine();
-                if (ImGui::SmallButton(tr("Up")) && i > 0) move = i, moveBy = -1;
-                ImGui::SameLine();
-                if (ImGui::SmallButton(tr("Down")) && i + 1 < n) move = i, moveBy = 1;
-                ImGui::SameLine();
-                if (ImGui::SmallButton(tr("Remove"))) remove = i;
-            }
-            partyPickers(b, roster, i);
-            ImGui::PopID();
-        }
-        ImGui::EndChild();
-        if (move >= 0) {
-            std::swap(picks[move], picks[move + moveBy]);
-            pcGauntletSetCustom(G.bosses.data(), picks.data(), n);
-            sfx::play(sfx::MOVE);
-        } else if (remove >= 0) {
-            picks.erase(picks.begin() + remove);
-            pcGauntletSetCustom(G.bosses.data(), picks.data(), (int)picks.size());
-            sfx::play(sfx::BACK);
-        }
-    }
-    if (custom && !G.bosses.empty()) {
-        if (G.addChoice >= (int)G.bosses.size()) G.addChoice = 0;
-        float addW = std::max(60.0f * skin::unit(), ImGui::GetContentRegionAvail().x - 60.0f * skin::unit());
-        const PcGauntletBoss& shown = G.bosses[G.addChoice];
-        if (skin::beginCombo("##gauntlet_add", shown.name, 0, addW)) {
-            for (int i = 0; i < (int)G.bosses.size(); i++) {
-                ImGui::PushID(i);
-                std::string label = std::string(G.bosses[i].name) + (G.bosses[i].gear ? "  (Gear)" : "");
-                if (skin::comboItem(label.c_str(), i == G.addChoice)) G.addChoice = i;
-                ImGui::PopID();
-            }
-            skin::endCombo();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(tr("Add")) && (int)picks.size() < PC_GAUNTLET_MAX) {
-            picks.push_back(G.addChoice);
-            pcGauntletSetCustom(G.bosses.data(), picks.data(), (int)picks.size());
-            sfx::play(sfx::CHOOSE);
-        }
-    }
-}
-
-} // namespace
-
-namespace {
-
 /* gauntlet.c's preset labels, for the catalogs */
 const char* const presetLabels[PC_GAUNTLET_PRESETS] = {N_("Every boss, story order"), N_("Character bosses"),
                                                        N_("Gear bosses"), N_("Custom")};
 
 const char* label(const char* gauntlet) {
+    if (strcmp(gauntlet, "saved-story") == 0) return tr("Bosses through the save");
     int preset = pcGauntletPresetOf(gauntlet);
     return preset >= 0 ? tr(presetLabels[preset]) : gauntlet;
 }
@@ -262,11 +136,20 @@ void records() {
 
 } // namespace
 
-void gauntletSection() {
-    textLines("The story's bosses one after another, each with the party you pick. Afterwards the game is as it "
-              "was before: no EXP, items or gold are kept, and no save is touched.");
+void gauntletSection(void (*resumeGame)()) {
+    textLines("Fight the bosses through the selected save's story progress using its party.");
     int current = 0, count = 0, retries = 0, skipped = 0, quitting = 0;
     int state = pcGauntletStatus(&current, &count, &retries, &skipped, &quitting);
+    bool fromAnywhere = pcGauntletLaunchActive() != 0;
+    if (fromAnywhere && state != PC_GAUNTLET_RUNNING) {
+        hint("Starting or leaving the gauntlet...");
+        if (state == PC_GAUNTLET_WAITING && ImGui::Button(tr("Leave gauntlet"))) {
+            sfx::play(sfx::BACK);
+            pcGauntletLeave();
+            resumeGame();
+        }
+        return;
+    }
     if (state == PC_GAUNTLET_WAITING) {
         ImGui::Text(tr("%s: %d fights, waiting to start."), label(pcGauntletName()), count);
         if (skipped) ImGui::Text(tr("%d skipped: nobody picked can fight them."), skipped);
@@ -288,6 +171,11 @@ void gauntletSection() {
             sfx::play(sfx::BACK);
             pcGauntletCancel();
         }
+        if (fromAnywhere && ImGui::Button(tr("Leave gauntlet"))) {
+            sfx::play(sfx::BACK);
+            pcGauntletLeave();
+            resumeGame();
+        }
         records();
         return;
     }
@@ -295,62 +183,41 @@ void gauntletSection() {
         hint("Not in this build (it reads the bosses with the extras).");
         return;
     }
+    scanBosses();
+    const uint8_t* save = gauntletSavePicker();
+    int fights = save != nullptr && G.scanned && !G.bosses.empty()
+                     ? pcGauntletSavedFights(G.bosses.data(), (int)G.bosses.size(), save) : 0;
     if (!G.scanned) {
-        if (G.scan == nullptr) {
-            if (ImGui::Button(tr("Find the bosses on the discs"))) {
-                sfx::play(sfx::CHOOSE);
-                G.scan = xgGauntletScanBegin();
-                if (G.scan == nullptr) G.scanned = true;
-            }
-            records();
-            return;
-        }
-        if (xgGauntletScanStep(G.scan, 24)) {
-            finishScan();
-        } else {
-            ImGui::ProgressBar((float)xgGauntletScanProgress(G.scan), ImVec2(-1, 0), tr("Reading the discs"));
-            return;
-        }
+        hint("Reading bosses from the discs...");
+    } else if (G.bosses.empty()) {
+        hint("No bosses found on the configured discs.");
+    } else if (save != nullptr) {
+        if (fights < 0) hint("The selected save has no usable party.");
+        else if (fights == 0) hint("No bosses are available at this save's story progress.");
     }
-    if (G.bosses.empty()) {
-        hint("No disc image to read the bosses from.");
-        return;
-    }
-    if ((G.discs & 3) != 3) {
-        hint("Only disc %d's image was found: the other disc's bosses are missing (System > disc2).",
-             G.discs & 1 ? 1 : 2);
-    }
-    PcGauntletRoster roster;
-    pcGauntletRoster(&roster);
 
-    static const char* presetNames[PC_GAUNTLET_PRESETS] = {N_("Story order"), N_("Character"), N_("Gear"), N_("Custom")};
-    int preset = pcGauntletPreset();
-    int presetPicked = pick("Bosses", "##gauntlet_preset", presetNames, PC_GAUNTLET_PRESETS, preset);
-    if (presetPicked != preset) pcGauntletSetPreset(preset = presetPicked);
-    hint("%s", label(pcGauntletPresetName(preset)));
     static const char* recoveryNames[PC_GAUNTLET_RECOVERIES] = {N_("Full"), N_("None"), N_("25%"), N_("50%"),
                                                                N_("Revive only")}; /* as gauntlet.c's */
     int recovery = pcGauntletRecoverySetting();
     int recoveryPicked = pick("Recovery", "##gauntlet_recovery", recoveryNames, PC_GAUNTLET_RECOVERIES, recovery);
     if (recoveryPicked != recovery) pcGauntletSetRecovery(recovery = recoveryPicked);
+    const char* why = nullptr;
+    bool available = pcGauntletLaunchAvailable(&why) != 0;
+    ImGui::BeginDisabled(!available || fights <= 0);
+    if (ImGui::Button(tr("Start"))) {
+        bool started = pcGauntletLaunch(G.bosses.data(), (int)G.bosses.size(), save) > 0;
+        sfx::play(started ? sfx::CHOOSE : sfx::BUZZ);
+        if (started) resumeGame();
+    }
+    ImGui::EndDisabled();
+    if (why) hint("%s", tr(why));
+    if (G.scanned && G.discs != 0 && G.discs != 3) {
+        hint("Only disc %d is configured. The boss list uses that disc.", G.discs == 1 ? 1 : 2);
+    }
+    hint("When you leave the gauntlet, play resumes where you were.");
     hint("Between fights: Full restores HP, EP, Gear HP and fuel; None keeps them as the fight left them; "
          "25%% or 50%% of each maximum; Revive only brings a knocked-out member back at 10%% HP. Items used "
          "stay used for the run.");
-
-    if (roster.count == 0) {
-        hint("Start a game first: the fights use the party you have.");
-        return;
-    }
-    fightList(preset, roster);
-    if (ImGui::Button(tr("Start"))) {
-        std::vector<int> picks(PC_GAUNTLET_MAX);
-        int n = pcGauntletSelect(preset, G.bosses.data(), (int)G.bosses.size(), picks.data(), PC_GAUNTLET_MAX);
-        sfx::play(pcGauntletBegin(pcGauntletPresetName(preset), G.bosses.data(), picks.data(), n, &roster) > 0
-                      ? sfx::CHOOSE
-                      : sfx::BUZZ);
-    }
-    hint("It starts when you are free to move in a field, or on foot or in Gears on the world map. A lost fight "
-         "offers Retry or Game over; Game over ends the run. The story order is the scripts' estimate.");
     int last = pcGauntletLastResult();
     if (last >= 0) hint(last ? "The last run was cleared." : "The last run ended before its last fight.");
     records();

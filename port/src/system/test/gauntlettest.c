@@ -10,6 +10,8 @@
 #include "pc_gameplay.h"
 #include "system/gauntlet.h"
 #include "system/settings.h"
+#include "system/stateimage.h"
+#include "card/saves.h"
 #include "test/env.h"
 
 static int checks;
@@ -36,6 +38,33 @@ u16 D_8006F94E;
 static int armed;
 s32 pcRetryArmed(void) { return armed; }
 void pcGauntletCarry(GameState* g, const GameState* now, s32 recovery, u32 knockedOut);
+int pcGauntletStartState(void);
+int pcGauntletBootMode(void);
+
+static int kept, restart, resume;
+int stateKept(void) { return kept; }
+int stateBusy(void) { return restart || resume; }
+int stateRestartAvailable(const char** why) {
+    if (why) *why = NULL;
+    return !stateBusy() && !kept;
+}
+void softReboot(void) {}
+void stateRequestRestart(int keep, void (*entry)(void)) { restart = keep && entry == softReboot; }
+void stateRequestReturn(void) { resume = kept; }
+int cardGameSaveRead(const uint8_t* block, CardGameSave* save) {
+    if (block[0] != 1) return 0;
+    save->disc = block[3];
+    save->progress = block[2];
+    save->joined = (1 << 4) | (1 << 2);
+    save->party[0] = 4;
+    save->party[1] = save->party[2] = 255;
+    return 1;
+}
+int pcGauntletRestoreSave(const unsigned char* block) {
+    gameState.m26C_party[4].m4C_HP = block[1];
+    return block[0] == 1;
+}
+void pcGauntletStartMusic(int id) { (void)id; }
 
 static PcGauntletBoss bosses[4];
 
@@ -265,6 +294,55 @@ static int records(const char* dir) {
     return 0;
 }
 
+static int launchFromMenu(void) {
+    unsigned char block[0x2000] = {1, 97, 40, 1};
+    unsigned char* gear = block + CARD_SAVE_PARTY + 4 * sizeof(GameStateCharacter) +
+                          offsetof(GameStateCharacter, mA0_gearNum);
+    *gear = 0xFF;
+    CHECK(!pcGauntletLaunch(bosses, 4, NULL));
+    CHECK(pcGauntletSavedFights(bosses, 4, block) == 2); /* two foot fights */
+    *gear = 4;
+    CHECK(pcGauntletSavedFights(bosses, 4, block) == 3); /* one more with a Gear */
+    block[3] = 2;
+    unsigned char party[3] = {4, 255, 255};
+    pcGauntletSetPartyFor(&bosses[3], party);
+    CHECK(pcGauntletSavedFights(bosses, 4, block) == 4); /* include disc 2 */
+    block[2] = 0;
+    CHECK(pcGauntletSavedFights(bosses, 4, block) == 1); /* only at this progress */
+
+    CHECK(pcGauntletLaunch(bosses, 4, block) == 1 && restart);
+    CHECK(pcGauntletState() == PC_GAUNTLET_IDLE && !pcGauntletLaunch(bosses, 4, block));
+    CHECK(!pcGauntletStartState()); /* the original game must be kept first */
+    block[1] = 0; /* the selected card was copied when Start was pressed */
+    kept = 1;
+    restart = 0;
+    world();
+    CHECK(pcGauntletBootMode() == 2 && pcGauntletStartState());
+    CHECK(pcGauntletState() == PC_GAUNTLET_RUNNING && battleTransitionEffect == 4);
+    CHECK(requestedBattleConfig == 2);
+    pcGauntletBattleSetup();
+    /* The legacy per-boss override for boss 0 included Citan. Only the
+     * active party in the selected save should fight. */
+    CHECK(gameState.m1D34_currentParty[0] == 4 && gameState.m1D34_currentParty[1] == 255 &&
+          gameState.m26C_party[4].m4C_HP == 97);
+    CHECK(pcGauntletOver(1, 0, 0, 0) && pcGauntletBattleEnd() == 1 && resume);
+    kept = resume = 0;
+    pcGauntletVBlank();
+    CHECK(!pcGauntletLaunchActive() && pcGauntletLastResult() == 1);
+
+    CHECK(pcGauntletLaunch(bosses, 4, block) == 1);
+    kept = 1;
+    restart = 0;
+    world();
+    CHECK(pcGauntletStartState());
+    pcGauntletLeave();
+    CHECK(resume && pcGauntletLaunchActive());
+    kept = resume = 0;
+    pcGauntletVBlank();
+    CHECK(!pcGauntletLaunchActive() && pcGauntletLastResult() == 0);
+    return 0;
+}
+
 /* A recovery of each kind on one member, the inventory rules alone. */
 static int carry(void) {
     static GameState g, now;
@@ -320,7 +398,7 @@ int main(int argc, char** argv) {
             if (run(k)) return 1;
         }
         if (ended(0x81) || ended(0x40)) return 1;
-        if (records(argv[1]) || carry()) return 1;
+        if (records(argv[1]) || carry() || launchFromMenu()) return 1;
 #endif
     }
     printf("gauntlets %s: %d checks passed\n", argv[2], checks);

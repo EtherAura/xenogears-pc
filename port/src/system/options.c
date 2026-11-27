@@ -163,10 +163,15 @@ void portStartPrepare(void) {
  * match's start, armed for this boot (its mode; then its game state). */
 int pcArenaBootMode(void) __attribute__((weak));
 int pcArenaStartState(void) __attribute__((weak));
+int pcGauntletBootMode(void) __attribute__((weak));
+int pcGauntletStartState(void) __attribute__((weak));
 
 int portBootMode(void) {
     if (start.pending || start.active) {
         return 1;
+    }
+    if (pcGauntletBootMode != NULL && pcGauntletBootMode() >= 0) {
+        return pcGauntletBootMode();
     }
     if (pcArenaBootMode != NULL && pcArenaBootMode() >= 0) {
         return pcArenaBootMode();
@@ -246,8 +251,9 @@ void portStartState(void) {
         return;
     }
     start.music = 0;
-    if (pcArenaStartState != NULL && pcArenaStartState()) {
-        return; /* a Battle arena match's own start: the environment's presets left out */
+    if ((pcGauntletStartState != NULL && pcGauntletStartState()) ||
+        (pcArenaStartState != NULL && pcArenaStartState())) {
+        return; /* the extra mode has its own start */
     }
     const char* s = getenv("XG_MUSIC");
     if (s != NULL && s[0] != '\0') {

@@ -2,19 +2,17 @@
 #define PORT_GAUNTLET_H
 
 /*
- * Gauntlets (xg-htn.35.17): F1 > Gameplay > Gauntlet runs the story's
+ * Gauntlets (xg-htn.35.17): F1 > Extras > Boss gauntlet runs the story's
  * bosses one after another, then puts the game back as it was.
  *
  *   - the bosses: the battles the field scripts start (ops 71, FE 84) with an
  *     enemy no random battle has, on both discs (port/src/extras/
  *     gauntlet_bosses.c, through the bestiary's readers); a Gear battle when
  *     an enemy is a Gear or the battle puts the party in Gears;
- *   - presets: every boss in story order (the bestiary's estimate: the
- *     lowest story progress the boss's field, or a field near it, sets),
- *     the character bosses, the Gear bosses; or a custom list and order;
- *   - the player picks the party (up to three of the members with them now)
- *     for each fight; a Gear fight takes only members with a Gear and is
- *     skipped when none is left;
+ *   - the selected memory-card save supplies the party, inventory and story
+ *     cutoff. The disc scan estimates each boss's story progress from its
+ *     field scripts. Gear fights use the saved party's pilots and are skipped
+ *     when the party has no Gears;
  *   - recovery between fights: full (HP, EP, Gear HP and fuel), none (as
  *     the battle left them), 25% or 50% of each maximum, or revive only (a
  *     member knocked out comes back at 10% HP); items used stay used for the
@@ -24,21 +22,19 @@
  *     retryprompt.c); Game over ends the run;
  *   - the end (all cleared, Game over, an escape, or "Quit after this
  *     fight"): everything is put back as before the first fight (the
- *     memory checkpoint of port/src/game/main/gauntlet.c) and the game goes
- *     back to the field or world map; nothing touches a memory card;
+ *     memory checkpoint) and play resumes on the original screen; nothing
+ *     touches a memory card;
  *   - records: each cleared gauntlet in gauntlets.json beside settings.ini
  *     (XG_GAUNTLET_RECORDS=file another file; none with XG_SETTINGS=none).
  *
- * Settings (settings.ini, XG_<KEY>):
+ * The gauntlet_recovery setting is full (default), none, 25, 50 or revive.
+ * XG_GAUNTLET_AUTOSTART=<vsync> is a headless test entry point. It accepts
+ * XG_GAUNTLET_MAX=n (run the first n fights) and these settings:
  *   gauntlet_preset    story (default), character, gear or custom
- *   gauntlet_recovery  full (default), none, 25, 50 or revive
  *   gauntlet_custom    the custom list: boss keys "D-FFF-C" (disc, field,
  *                      config) separated by commas
  *   gauntlet_parties   the parties picked: "D-FFF-C=a.b.c" separated by
  *                      semicolons (character ids, x for none)
- * For headless runs: XG_GAUNTLET_AUTOSTART=<vsync> starts the selected
- * gauntlet (XG_GAUNTLET_MAX=n: its first n fights) once that vsync has
- * passed, with the parties above.
  */
 
 #ifdef __cplusplus
@@ -109,11 +105,18 @@ void pcGauntletSetPartyFor(const PcGauntletBoss* b, const unsigned char party[3]
  * fight: only those with a Gear), in order; the count (0: skipped). */
 int pcGauntletFightParty(const PcGauntletBoss* b, const PcGauntletRoster* roster, unsigned char out[3]);
 
-/* Start a run of the bosses picked (indexes into bosses): it waits for the
- * field or the world map. Returns the fights it will run (skipped ones left
- * out), 0 when none can. */
+/* The legacy headless start waits for the field or world map. */
 int pcGauntletBegin(const char* name, const PcGauntletBoss* bosses, const int* picks, int count,
                     const PcGauntletRoster* roster);
+/* From the Extras hub: keep the game in memory and start the selected save's
+ * run. The scan is sorted by story progress. The count is -1 for an unusable
+ * save. Launch returns the number of fights, or 0 if it could not start. */
+int pcGauntletLaunchAvailable(const char** why);
+int pcGauntletSavedFights(const PcGauntletBoss* bosses, int count, const unsigned char* block);
+int pcGauntletLaunch(const PcGauntletBoss* bosses, int count, const unsigned char* block);
+int pcGauntletLaunchActive(void);
+void pcGauntletLeave(void);
+void pcGauntletVBlank(void);
 void pcGauntletCancel(void); /* waiting: no run; running: quit after this fight */
 int pcGauntletStatus(int* current, int* count, int* retries, int* skipped, int* quitting);
 const char* pcGauntletName(void);

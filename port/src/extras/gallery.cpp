@@ -60,6 +60,9 @@ extern "C" {
 #include "cd/cd.h"
 #include "cd/regional.h"
 #include "system/gametext.h"
+#include "system/gamestack.h"
+#include "system/savestate.h"
+#include "system/stateimage.h"
 #include "disc.h"
 #include "files.h"
 #include "gallery.h"
@@ -1033,6 +1036,10 @@ const XgScenePreset* selectedScenePreset() {
 }
 
 void startScene() {
+    if (stateKept() || stateBusy()) {
+        error("Return to your game before starting another extra mode.");
+        return;
+    }
     XgDisc* d = S->discs[S->start.disc - 1];
     if (d == nullptr) {
         error("No disc %d image", S->start.disc);
@@ -1048,6 +1055,7 @@ void startScene() {
         error("Invalid start: check party IDs and field variables");
         return;
     }
+    if (fromGame() && gameStackActive()) portRequestSoftReset();
     sound(2);
     status("Starting %s at entrance %d, story %d", fieldName(S->start.field, true).c_str(), S->start.entry, S->start.progress);
     leaveIntoGame();
@@ -1171,7 +1179,9 @@ void scenePane(ImVec2 min, ImVec2 max) {
         }
         ImGui::EndDisabled();
         const char* problem = xgSceneStartProtection(preset, &S->start, S->overrideStart);
-        bool canStart = problem == nullptr && xgScanFieldReal(S->scan, S->start.disc, S->start.field);
+        bool kept = stateKept();
+        bool canStart = !kept && problem == nullptr && xgScanFieldReal(S->scan, S->start.disc, S->start.field);
+        if (kept) hint("Return to your game before starting another extra mode.");
         if (problem != nullptr) {
             hint("%s", problem);
         }

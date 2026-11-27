@@ -25,6 +25,10 @@ namespace menu {
 // session (party vs party), a browser of its own.
 bool arenaSavesPanel(int player, XgPartyRecord* out);
 
+// The gauntlet's card picker. NULL until a save is selected.
+// The returned block is valid until this picker refreshes.
+const uint8_t* gauntletSavePicker();
+
 // What a refused party shows (card/party.h XG_PARTY_*, translated), with the
 // member's name where the reason names one (character id 0-10, else none).
 void arenaPartyReason(int reason, int characterId, char* out, size_t size);

@@ -3838,6 +3838,67 @@ msgid "Start a game first: the fights use the party you have."
 msgstr "先にゲームを始めてください: 戦いには今のパーティを使います。"
 
 #: port/src/ui/gauntlet.cpp
+msgid "Starting or leaving the gauntlet..."
+msgstr "ボス連戦に移動しています…"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Leave gauntlet"
+msgstr "ボス連戦をやめる"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Memory card save"
+msgstr "メモリーカードのセーブ"
+
+#: port/src/ui/arena_saves.cpp
+msgid "Choose a save"
+msgstr "セーブを選択"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Fight the bosses through the selected save's story progress using its party."
+msgstr "選んだセーブのパーティで、その時点までのボスと戦います。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Bosses through the save"
+msgstr "セーブ時点までのボス"
+
+#: port/src/ui/gauntlet.cpp
+msgid "Reading bosses from the discs..."
+msgstr "ディスクからボスのデータを読み込んでいます…"
+
+#: port/src/ui/gauntlet.cpp
+msgid "No bosses found on the configured discs."
+msgstr "設定したディスクにボスが見つかりません。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "No bosses are available at this save's story progress."
+msgstr "このセーブの進行度では戦えるボスがいません。"
+
+#: port/src/ui/gauntlet.cpp
+#, c-format
+msgid "Only disc %d is configured. The boss list uses that disc."
+msgstr "ディスク %d だけが設定されています。そのディスクのボスが対象です。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "The selected save has no usable party."
+msgstr "選んだセーブには使用できるパーティがありません。"
+
+#: port/src/ui/gauntlet.cpp
+msgid "When you leave the gauntlet, play resumes where you were."
+msgstr "ボス連戦を終えると、中断したところから再開します。"
+
+#: port/src/system/savestate.c port/src/extras/gallery.cpp
+msgid "Return to your game before starting another extra mode."
+msgstr "別のおまけモードを始めるには、元のゲームに戻ってください。"
+
+#: port/src/system/savestate.c
+msgid "Please wait for the current save, load or mode change."
+msgstr "セーブ、ロード、またはモードの切り替えが終わるまでお待ちください。"
+
+#: port/src/system/savestate.c
+msgid "Save states are off while your game is suspended for an extra mode"
+msgstr "おまけモードでゲームを中断している間は、ステートセーブを使用できません"
+
+#: port/src/ui/gauntlet.cpp
 msgid ""
 "It starts when you are free to move in a field, or on foot or in Gears on "
 "the world map. A lost fight offers Retry or Game over; Game over ends the "

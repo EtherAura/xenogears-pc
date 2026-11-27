@@ -11,10 +11,15 @@
 #include <string.h>
 #include <time.h>
 
+#include "common.h"
+#include "main/game_state.h"
 #include "pc_gameplay.h"
+#include "card/card.h"
+#include "card/saves.h"
 #include "system/gameplay.h"
 #include "system/hw.h"
 #include "system/savestate.h"
+#include "system/stateimage.h"
 #include "system/settings.h"
 
 /* The extras' boss list (absent from a build without them). */
@@ -31,7 +36,7 @@ typedef struct {
     char name[160];
 } Fight;
 
-static struct {
+typedef struct {
     int state;
     int count, current, retries, skipped, quitting, recovery;
     uint32_t started;
@@ -39,7 +44,17 @@ static struct {
     Fight fights[PC_GAUNTLET_MAX];
     int lastResult;
     int autostarted;
-} R = {.lastResult = -1};
+} GauntletRun;
+
+static GauntletRun R = {.lastResult = -1};
+
+/* The launch survives a soft reset and the restoration of the original R. */
+enum { LAUNCH_IDLE, LAUNCH_PENDING, LAUNCH_PLAYING, LAUNCH_RETURNING };
+static struct {
+    int phase;
+    GauntletRun run;
+    unsigned char save[CARD_BLOCK];
+} launch;
 
 static const char* const presetNames[PC_GAUNTLET_PRESETS] = {"story", "character", "gear", "custom"};
 static const char* const presetLabels[PC_GAUNTLET_PRESETS] = {"Every boss, story order", "Character bosses",
@@ -194,10 +209,9 @@ void pcGauntletSetPartyFor(const PcGauntletBoss* b, const unsigned char party[3]
     free(s);
 }
 
-int pcGauntletFightParty(const PcGauntletBoss* b, const PcGauntletRoster* roster, unsigned char out[3]) {
-    unsigned char want[3];
+static int eligibleParty(const PcGauntletBoss* b, const PcGauntletRoster* roster, const unsigned char want[3],
+                         unsigned char out[3]) {
     int n = 0;
-    if (!pcGauntletPartyFor(b, want)) memcpy(want, roster->party, 3);
     out[0] = out[1] = out[2] = 0xFF;
     for (int i = 0; i < 3; i++) {
         int at = -1;
@@ -212,34 +226,55 @@ int pcGauntletFightParty(const PcGauntletBoss* b, const PcGauntletRoster* roster
     return n;
 }
 
+int pcGauntletFightParty(const PcGauntletBoss* b, const PcGauntletRoster* roster, unsigned char out[3]) {
+    unsigned char want[3];
+    if (!pcGauntletPartyFor(b, want)) memcpy(want, roster->party, sizeof want);
+    return eligibleParty(b, roster, want, out);
+}
+
 /* system/netplay.c (weak: tests link this file without it). */
 int netplayRefuses(const char* what) __attribute__((weak)); /* system/netplay.c: not in an online session */
 
-int pcGauntletBegin(const char* name, const PcGauntletBoss* bosses, const int* picks, int count,
-                    const PcGauntletRoster* roster) {
-    if (netplayRefuses != NULL && netplayRefuses("a gauntlet")) return 0; /* one side alone: apart */
-    if (R.state != PC_GAUNTLET_IDLE || roster->count == 0) return 0;
-    R.count = R.skipped = 0;
-    for (int i = 0; i < count && R.count < PC_GAUNTLET_MAX; i++) {
+static void copyFight(Fight* f, const PcGauntletBoss* b, const unsigned char party[3]) {
+    memcpy(f->party, party, sizeof f->party);
+    memcpy(f->table, b->table, sizeof f->table);
+    f->config = b->config;
+    f->gear = b->gear;
+    f->music = b->music;
+    pcGauntletKey(b, f->key, sizeof f->key);
+    snprintf(f->name, sizeof f->name, "%s", b->name);
+}
+
+static int prepareRun(GauntletRun* run, const char* name) {
+    if (run->count == 0) return 0;
+    snprintf(run->name, sizeof run->name, "%s", name);
+    run->current = run->retries = run->quitting = 0;
+    run->recovery = pcGauntletRecoverySetting();
+    run->state = PC_GAUNTLET_WAITING;
+    return run->count;
+}
+
+static int planRun(GauntletRun* run, const char* name, const PcGauntletBoss* bosses, const int* picks, int count,
+                   const PcGauntletRoster* roster) {
+    run->count = run->skipped = 0;
+    for (int i = 0; i < count && run->count < PC_GAUNTLET_MAX; i++) {
         const PcGauntletBoss* b = &bosses[picks[i]];
-        Fight* f = &R.fights[R.count];
-        if (pcGauntletFightParty(b, roster, f->party) == 0) {
-            R.skipped++;
+        unsigned char party[3];
+        if (pcGauntletFightParty(b, roster, party) == 0) {
+            run->skipped++;
             continue;
         }
-        memcpy(f->table, b->table, sizeof f->table);
-        f->config = b->config;
-        f->gear = b->gear;
-        f->music = b->music;
-        pcGauntletKey(b, f->key, sizeof f->key);
-        snprintf(f->name, sizeof f->name, "%s", b->name);
-        R.count++;
+        copyFight(&run->fights[run->count++], b, party);
     }
-    if (R.count == 0) return 0;
-    snprintf(R.name, sizeof R.name, "%s", name);
-    R.current = R.retries = R.quitting = 0;
-    R.recovery = pcGauntletRecoverySetting();
-    R.state = PC_GAUNTLET_WAITING;
+    return prepareRun(run, name);
+}
+
+int pcGauntletBegin(const char* name, const PcGauntletBoss* bosses, const int* picks, int count,
+                    const PcGauntletRoster* roster) {
+    if (netplayRefuses != NULL && netplayRefuses("a gauntlet")) return 0;
+    if (launch.phase != LAUNCH_IDLE || R.state != PC_GAUNTLET_IDLE || !planRun(&R, name, bosses, picks, count, roster)) {
+        return 0;
+    }
     fprintf(stderr, "gauntlet: %s, %d fights (%d skipped), recovery %s; waiting for the field or the world map\n",
             R.name, R.count, R.skipped, recoveryNames[R.recovery]);
     return R.count;
@@ -277,7 +312,7 @@ int pcGauntletLastResult(void) {
 /* ---- the game's side ---- */
 
 int pcGauntletState(void) {
-    if (R.state == PC_GAUNTLET_IDLE && !R.autostarted) {
+    if (launch.phase == LAUNCH_IDLE && R.state == PC_GAUNTLET_IDLE && !R.autostarted) {
         pcGauntletPoll(); /* XG_GAUNTLET_AUTOSTART */
     }
     return R.state;
@@ -480,9 +515,139 @@ void pcGauntletFinish(int completed) {
     if (completed) writeRecord(vblanks);
     R.lastResult = completed != 0;
     R.state = PC_GAUNTLET_IDLE;
+    if (launch.phase == LAUNCH_PLAYING) {
+        launch.run.lastResult = R.lastResult;
+        launch.phase = LAUNCH_RETURNING;
+        stateRequestReturn();
+    }
 }
 
-/* ---- the menu's roster, the env's autostart ---- */
+/* ---- launch from the menu, with the original game parked in memory ---- */
+
+int netplayActive(void) __attribute__((weak));
+void softReboot(void); /* the game's own shutdown and boot */
+int pcGauntletRestoreSave(const unsigned char* block);
+void pcGauntletStartMusic(int id);
+extern u8 battleTransitionEffect;
+
+int pcGauntletLaunchAvailable(const char** why) {
+    if (netplayActive != NULL && netplayActive()) {
+        if (why) *why = "Not in an online session's window.";
+        return 0;
+    }
+    return stateRestartAvailable(why);
+}
+
+static int readSavedParty(const unsigned char* block, CardGameSave* save, PcGauntletRoster* out) {
+    memset(out, 0, sizeof *out);
+    memset(out->party, 0xFF, sizeof out->party);
+    if (block == NULL || !cardGameSaveRead(block, save)) return 0;
+    unsigned mask = save->joined;
+    for (int i = 0; i < 3; i++) {
+        int c = save->party[i];
+        if (c == 0xFF) continue;
+        if (c >= CARD_SAVE_MEMBERS) return 0;
+        if (!(mask & (1 << c))) continue;
+        const unsigned char* record = block + CARD_SAVE_PARTY + c * sizeof(GameStateCharacter);
+        unsigned gear = record[offsetof(GameStateCharacter, mA0_gearNum)];
+        if (gear >= 20 && gear != 0xFF) return 0;
+        int n = out->count++;
+        out->ids[n] = out->party[n] = c;
+        out->hasGear[n] = gear < 20;
+        mask &= ~(1 << c);
+    }
+    return out->count != 0;
+}
+
+/* The scan already sorts by story. A save supplies the cutoff and the
+ * active party, with non-pilots omitted for a Gear encounter. */
+static int planSavedRun(GauntletRun* run, const PcGauntletBoss* bosses, int count, const unsigned char* block) {
+    CardGameSave save;
+    PcGauntletRoster roster;
+    if (!readSavedParty(block, &save, &roster)) return -1;
+    int n = 0, skipped = 0;
+    for (int i = 0; i < count && n < PC_GAUNTLET_MAX; i++) {
+        const PcGauntletBoss* b = &bosses[i];
+        if (b->story < 0 || b->story > save.progress || b->disc > save.disc) continue;
+        unsigned char party[3];
+        if (eligibleParty(b, &roster, roster.party, party) == 0) {
+            skipped++;
+            continue;
+        }
+        if (run != NULL) copyFight(&run->fights[n], b, party);
+        n++;
+    }
+    if (run != NULL) {
+        run->count = n;
+        run->skipped = skipped;
+        prepareRun(run, "saved-story");
+    }
+    return n;
+}
+
+int pcGauntletSavedFights(const PcGauntletBoss* bosses, int count, const unsigned char* block) {
+    return planSavedRun(NULL, bosses, count, block);
+}
+
+int pcGauntletLaunch(const PcGauntletBoss* bosses, int count, const unsigned char* block) {
+    if (launch.phase != LAUNCH_IDLE || R.state != PC_GAUNTLET_IDLE || !pcGauntletLaunchAvailable(NULL)) return 0;
+    if (planSavedRun(&launch.run, bosses, count, block) <= 0) return 0;
+    memcpy(launch.save, block, sizeof launch.save);
+    launch.phase = LAUNCH_PENDING;
+    stateRequestRestart(1, softReboot);
+    fprintf(stderr, "gauntlet: %s, %d fights (%d skipped) requested at vblank %u\n",
+            launch.run.name, launch.run.count, launch.run.skipped, hwVSyncCount());
+    return launch.run.count;
+}
+
+int pcGauntletLaunchActive(void) {
+    return launch.phase != LAUNCH_IDLE;
+}
+
+int pcGauntletBootMode(void) {
+    return launch.phase != LAUNCH_IDLE && stateKept() ? 2 : -1;
+}
+
+int pcGauntletStartState(void) {
+    if (pcGauntletBootMode() < 0 || launch.phase == LAUNCH_RETURNING) return 0;
+    int autostarted = R.autostarted;
+    R = launch.run;
+    R.autostarted = autostarted;
+    launch.phase = LAUNCH_PLAYING;
+    if (!pcGauntletRestoreSave(launch.save)) {
+        fprintf(stderr, "gauntlet: the selected save's Gear parts could not be loaded\n");
+        pcGauntletLeave();
+        return 1;
+    }
+    if (pcGauntletStartBattle()) {
+        memcpy(gameState.m1D34_currentParty, R.fights[0].party, sizeof gameState.m1D34_currentParty);
+        battleTransitionEffect = 4;
+        pcGauntletStartMusic(pcGauntletFightMusic(0));
+    }
+    return 1;
+}
+
+void pcGauntletLeave(void) {
+    if (launch.phase != LAUNCH_PLAYING) return;
+    if (R.state == PC_GAUNTLET_RUNNING) {
+        pcGauntletFinish(0);
+    } else {
+        launch.run.lastResult = 0;
+        launch.phase = LAUNCH_RETURNING;
+        stateRequestReturn();
+    }
+}
+
+void pcGauntletVBlank(void) {
+    if (launch.phase == LAUNCH_RETURNING && !stateKept()) {
+        R.lastResult = launch.run.lastResult;
+        launch.phase = LAUNCH_IDLE;
+    } else if (launch.phase == LAUNCH_PENDING && !stateBusy() && !stateKept()) {
+        launch.phase = LAUNCH_IDLE;
+    }
+}
+
+/* ---- the current roster and the legacy headless field/world-map start ---- */
 
 void pcGauntletRoster(PcGauntletRoster* out) {
     memset(out, 0, sizeof *out);

@@ -1000,7 +1000,7 @@ int stateAvailable(const char** why) {
     if (kept.body != NULL) {
         /* The game the match came from waits in memory; a state of the match loaded later would have
          * no game to go back to, a state of before it would leave the match without it. */
-        if (why) *why = "Save states are off during a Battle arena match: Leave at its end brings your game back";
+        if (why) *why = "Save states are off while your game is suspended for an extra mode";
         return 0;
     }
 #if defined(__x86_64__) || defined(__aarch64__)
@@ -1024,6 +1024,14 @@ int stateBusy(void) {
 
 int stateRestartAvailable(const char** why) {
     if (why) *why = NULL;
+    if (stateKept()) {
+        if (why) *why = "Return to your game before starting another extra mode.";
+        return 0;
+    }
+    if (stateBusy()) {
+        if (why) *why = "Please wait for the current save, load or mode change.";
+        return 0;
+    }
     if (getenv("XG_SLOWDOWN") != NULL || portOverlayCd()) {
         if (why) *why = "Not during the slowdown replay or with XG_OVERLAY_CD";
         return 0;

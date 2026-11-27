@@ -11,7 +11,10 @@
  * loaded and keeps the links in a table keyed by the sequence.
  */
 #include "common.h"
+#include "pc_retail_heap.h"
 #include "main/sound.h"
+#include "main/filesystem.h"
+#include "main/memory.h"
 
 #define WDS_DISC_HEADER 0x30 /* the instruments' offset in the disc header */
 #define WDS_DISC_LINK 0x2C   /* the link slot: the fields before it are the same on the PC */
@@ -109,3 +112,52 @@ void pcSeqSetNext(SeqFile* seq, SeqFile* next) {
 /* A strong definition, not a common one, and in .bss (game C keeps zero
  * initialisers in .data), so the soft reset clears it. */
 __attribute__((nocommon)) SpuVolumes g_spuVolumes;
+
+/* Start a score from a fresh kernel, when an extra mode skips field loading. */
+#define MUSIC_DIR 0x1C
+#define MUSIC_SCORE(id) ((id) * 2 + 0x14)
+#define MUSIC_BANK(wave) ((wave) * 2 + 0x13)
+
+extern u8 battleMusic[0x3200]; /* main: the music's score (the field's and the world map's buffer) */
+extern s32 currentlyLoadedWave;
+extern s32 playMusicSubVar0;
+extern s32 playMusicSubVar2;
+extern s32 playWorldmapMusic;
+SoundInstance* createMusicInstance(void* data);
+void startMusicInstance(SoundInstance* inst, s32 volume, s32 arg);
+
+int pcStartIsolatedMusic(s32 id, s32 wave, s32 flags) {
+    s32 dir, sub;
+    Wds* wds;
+    int started = 0;
+
+    getCurrentDirectory(&dir, &sub);
+    setCurrentDirectory(MUSIC_DIR, 0);
+    if (flags == 1 && playMusicSubVar0 == 0 && wdsFile3 != NULL) {
+        /* playMusicSub: the large bank takes the second resident one's room */
+        playWorldmapMusic = 1;
+        unloadWds(wdsFile3);
+        playMusicSubVar0 = 1;
+        playMusicSubVar2 = 0;
+    }
+    if (wave != 0xFF && wave != currentlyLoadedWave) {
+        wds = allocateHeap(PC_HEAP_BYTES(getFileSizeAligned(MUSIC_BANK(wave))), 1);
+        if (wds != NULL) {
+            readFile(MUSIC_BANK(wave), wds, 0, 0x80);
+            waitReadCompletion(0);
+            loadWds(wds, 0);
+            waitForMusic(0x10);
+            freeHeap(wds);
+            currentlyLoadedWave = wave;
+        }
+    }
+    if (getFileSizeAligned(MUSIC_SCORE(id)) <= (s32)sizeof(battleMusic)) {
+        readFile(MUSIC_SCORE(id), battleMusic, 0, 0x80);
+        waitReadCompletion(0);
+        pMusic = createMusicInstance(battleMusic);
+        startMusicInstance(pMusic, 0x7F, 0);
+        started = 1;
+    }
+    setCurrentDirectory(dir, sub);
+    return started;
+}
