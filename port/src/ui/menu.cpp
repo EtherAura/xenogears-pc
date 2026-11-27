@@ -2881,16 +2881,25 @@ static void drawNetplayNotice(ImDrawList* dl, int w, int h) {
     ImVec2 content = font->CalcTextSizeA(size, FLT_MAX, wrap, netplayNotice.c_str());
     const char* ok = tr("OK");
     ImVec2 confirm = font->CalcTextSizeA(size, FLT_MAX, 0, ok);
-    float boxW = std::max(content.x, confirm.x) + 24 * unit;
-    float boxH = content.y + (netplayNoticeModal ? 25 : 14) * unit;
-    ImVec2 min((w - boxW) * 0.5f, (h - boxH) * 0.5f);
+    // On the game's pixel grid: whole game pixels across and down, from a whole
+    // window pixel, so the frame's pieces meet where the menu's do.
+    float boxW = ceilf((std::max(content.x, confirm.x) + 24 * unit) / unit) * unit;
+    float boxH = ceilf((content.y + (netplayNoticeModal ? 25 : 14) * unit) / unit) * unit;
+    ImVec2 min(floorf((w - boxW) * 0.5f), floorf((h - boxH) * 0.5f));
+    // Over the game no menu frame has run skin::beginFrame, so the overlay
+    // samples linearly: each frame piece's edge would blend in its neighbours
+    // in the atlas (seams where the pieces meet, dots at the corners). Texel
+    // for texel as the menu draws it, then back for what follows.
+    const ImGuiPlatformIO& pio = ImGui::GetPlatformIO();
+    if (pio.DrawCallback_SetSamplerNearest != nullptr) dl->AddCallback(pio.DrawCallback_SetSamplerNearest, nullptr);
     skin::box(dl, min, ImVec2(min.x + boxW, min.y + boxH));
     dl->AddText(font, size, ImVec2(min.x + 12 * unit, min.y + 7 * unit),
                 IM_COL32_WHITE, netplayNotice.c_str(), nullptr, wrap);
     if (netplayNoticeModal) {
-        dl->AddText(font, size, ImVec2((w - confirm.x) * 0.5f, min.y + content.y + 10 * unit),
+        dl->AddText(font, size, ImVec2(floorf((w - confirm.x) * 0.5f), min.y + content.y + 10 * unit),
                     IM_COL32(226, 184, 255, 255), ok);
     }
+    if (pio.DrawCallback_SetSamplerLinear != nullptr) dl->AddCallback(pio.DrawCallback_SetSamplerLinear, nullptr);
     skin::setUnit(oldUnit);
 }
 
