@@ -361,5 +361,18 @@ class DistTests(unittest.TestCase):
         code, log = self.run_audit(self.link(f'{self.build}/bin/disc.cue'))
         self.assertEqual(code, 0, log); self.assertNotIn('build path', log)
 
+    def test_engine_src_classified_as_src(self):
+        root = str(P.ROOT).lstrip('/')
+        for rel, want in ((f'{root}/src/field/f.c.o', 'src'),
+                          (f'{root}/engine/src/field/f.c.o', 'src'),
+                          ('src/ui/skin.cpp.o', 'port')):
+            obj = self.build / 'CMakeFiles' / 'game_field.dir' / rel
+            obj.parent.mkdir(parents=True, exist_ok=True)
+            obj.write_bytes(b'')
+        got = {src: cat for cat, src, _, _ in P.objects(self.build)}
+        self.assertEqual(got['src/field/f.c'], 'src')
+        self.assertEqual(got['engine/src/field/f.c'], 'src')
+        self.assertEqual(got['port/src/ui/skin.cpp'], 'port')
+
 
 if __name__ == '__main__': unittest.main()

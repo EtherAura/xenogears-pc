@@ -132,19 +132,25 @@ def relocated(objdump: str, obj: str, section: str) -> set[int]:
 
 def find_runs(blob: bytes, wanted: set[bytes]) -> list[tuple[int, int]]:
     """[start, end) runs of retail windows, zero bytes at their ends left out (payloadcheck's rule).
-    The section may sit between zeros in the executable (alignment, or a neighbour's zeroed
-    bytes): windows reaching past its ends see zeros there."""
+    The section may sit between zeros or non-zero bytes of a neighbouring section in the linked
+    executable: windows reaching past its ends see zeros there, and a run touching a section edge
+    keeps that edge's zero bytes (or a one-byte neighbour) toward the MIN-byte threshold so a
+    15-byte string + NUL at a section end cannot grow to >= MIN bytes next to a matching neighbour."""
     pad = bytes(MIN)
     padded = pad + blob + pad
     out = []
     for start, end in payloadcheck.runs(payloadcheck.hits(padded, wanted, MIN), MIN):
-        start, end = max(start - MIN, 0), min(end - MIN, len(blob))
-        while start < end and blob[start] == 0:
-            start += 1
-        while end > start and blob[end - 1] == 0:
-            end -= 1
-        if end - start >= MIN:
-            out.append((start, end))
+        rs, re_ = max(start - MIN, 0), min(end - MIN, len(blob))
+        ts, te = rs, re_
+        while ts < te and blob[ts] == 0:
+            ts += 1
+        while te > ts and blob[te - 1] == 0:
+            te -= 1
+        lo = rs if rs == 0 and start <= MIN else ts
+        hi = re_ if re_ == len(blob) and end >= MIN + len(blob) else te
+        edge_touch = (rs == 0 and ts == 0 and re_ >= MIN) or (re_ == len(blob) and te == len(blob) and len(blob) - rs >= MIN)
+        if te > ts and (hi - lo >= MIN or edge_touch):
+            out.append((ts, te))
     return out
 
 

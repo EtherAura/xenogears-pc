@@ -265,6 +265,17 @@ class Plan(unittest.TestCase):
         self.cc("b", B_C + NEW_RUN)
         self.refuses(self.plan.read_text(), want="stale")
 
+    def test_section_edge_nul_run_is_stripped(self):
+        """A 15-byte retail string + trailing NUL at the end of a section must be stripped,
+        since a non-zero neighbour in the linked image turns it into a >=16-byte payloadcheck hit."""
+        edge = b"EDGE_STR=%d %x\n\x00"
+        image = b"HEADER!" + edge + b"\x10" + b"TRAILER!"
+        wanted = pc_srcdata.payloadcheck.windows({"edge": image}, pc_srcdata.MIN)
+        blob = b"prefix\x00" + edge
+        self.assertEqual(pc_srcdata.find_runs(blob, wanted), [(7, 22)])
+        # Interior 15-byte string + NUL surrounded by non-matching bytes inside the same section is unaffected.
+        self.assertEqual(pc_srcdata.find_runs(blob + b"\x99", wanted), [])
+
 
 class PlanJP(Plan):
     ver = "jp"

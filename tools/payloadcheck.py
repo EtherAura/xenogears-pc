@@ -198,7 +198,7 @@ def objects(build: Path) -> list[tuple[str, str, Path, str]]:
                 cat = "generated"
             elif src.startswith(root):
                 src = src[len(root):]
-                cat = "src" if src.startswith("src/") else "port"
+                cat = "src" if src.startswith(("src/", "engine/src/")) else "port"
             else:
                 src = src if src.startswith("gen/") else "port/" + src
                 cat = "port"
