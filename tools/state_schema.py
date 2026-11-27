@@ -53,7 +53,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 import statecheck as sc  # noqa: E402 (game_library)
-from statecanon import state_hash  # noqa: E402 (the build id's hash, statecodec.c stateHash)
+from statecanon import HEAP_ALIAS_SPECS, STATE_ALIAS_KINDS, state_hash  # noqa: E402
 KEEP_TAGS = {
     "DW_TAG_compile_unit", "DW_TAG_structure_type", "DW_TAG_union_type", "DW_TAG_class_type", "DW_TAG_typedef",
     "DW_TAG_base_type", "DW_TAG_pointer_type", "DW_TAG_array_type", "DW_TAG_subrange_type",
@@ -1475,14 +1475,20 @@ def main() -> int:
             return None
         return d["attrs"].get("DW_AT_type")
 
+    word_kinds = {**STATE_ALIAS_KINDS, "scratch64": "scratch"}
+
+    def word_alias(off):
+        """Recognize a native address, ordering-table tag or scratch word."""
+        base = dies.get(types.strip(off))
+        if base is None or base["tag"] != "DW_TAG_base_type" or base["attrs"].get("DW_AT_byte_size") != 8:
+            return None
+        shown = types.name(off)
+        name = shown if shown in word_kinds else base["attrs"].get("DW_AT_name")
+        return name if name in word_kinds else None
+
     def meaningful(off):
         """A declared type that says more than the definition's integer: a pointer, or uptr/sptr/OTag."""
-        d = dies.get(off)
-        while d is not None and d["tag"] in ("DW_TAG_const_type", "DW_TAG_volatile_type"):
-            off = d["attrs"].get("DW_AT_type"); d = dies.get(off)
-        if d is None:
-            return False
-        if d["tag"] == "DW_TAG_typedef" and types.name(off) in ("uptr", "sptr", "OTag"):
+        if word_alias(off) in STATE_ALIAS_KINDS:
             return True
         return dies.get(types.strip(off), {}).get("tag") == "DW_TAG_pointer_type"
 
@@ -1670,13 +1676,13 @@ def main() -> int:
         """A type's id in the schema (its DIE offset), described in `table` once; typedefs and qualifiers
         are looked through, a struct keeps its typedef's name for messages."""
         shown = types.name(off)
-        if off in dies and dies[off]["tag"] == "DW_TAG_typedef" and shown in ("OTag", "uptr", "sptr", "scratch64"):
+        alias = word_alias(off)
+        if alias is not None:
             # typedefs with a meaning for a state (include/common.h, include/psyq.h): an ordering table's link
             # (the length in the top byte, an address below it), an integer that holds an address (uptr,
             # sptr), a work area's word that no state carries (scratch64)
-            kind = {"OTag": "otag", "uptr": "addr", "sptr": "addr", "scratch64": "scratch"}[shown]
-            table.setdefault(shown, {"k": kind, "size": types.size(off), "name": shown})
-            return shown
+            table.setdefault(alias, {"k": word_kinds[alias], "size": 8, "name": alias})
+            return alias
         off = types.strip(off)
         if off is None or off not in dies:
             return None
@@ -1773,6 +1779,12 @@ def main() -> int:
             spec = "prims"
         elif bare.endswith("*"):
             spec = "ptrs"
+        elif bare in HEAP_ALIAS_SPECS:
+            # MinGW may emit a declaration of the alias as a base integer type.
+            # The explicit heap annotation still tells us what the words hold.
+            spec = HEAP_ALIAS_SPECS[bare]
+            if spec == "otags":
+                table.setdefault("OTag", {"k": "otag", "size": 8, "name": "OTag"})
         elif bare.removeprefix("struct").removeprefix("union") in any_named:
             t = tid(any_named[bare.removeprefix("struct").removeprefix("union")])
             k = table.get(t, {}).get("k")

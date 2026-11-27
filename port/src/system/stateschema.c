@@ -290,6 +290,15 @@ static int loadTypes(StateSchema* s, const JsonDoc* d, JsonRef types) {
         t->n = intOr(d, r, "n", 0);
         const char* name = stringOr(&s->arena, d, r, "name");
         t->name = name ? name : "";
+        /* MinGW can also describe the same aliases as base integer types in
+         * individual compilation units, including inside saved structs. */
+        if (t->kind == ST_INT && t->size == 8) {
+            if (strcmp(t->name, "OTag") == 0) {
+                t->kind = ST_OTAG;
+            } else if (strcmp(t->name, "uptr") == 0 || strcmp(t->name, "sptr") == 0) {
+                t->kind = ST_ADDR;
+            }
+        }
         JsonRef fields = jsonGet(d, r, "fields");
         if (jsonType(d, fields) == JSON_ARRAY) {
             t->fieldCount = jsonCount(d, fields);
@@ -671,6 +680,15 @@ static int loadHeapTypes(StateSchema* s, const JsonDoc* d, JsonRef obj) {
                     : strcmp(k, "otags") == 0 ? ST_SPEC_OTAGS : ST_SPEC_NONE;
         } else {
             h->spec = ST_SPEC_NONE;
+            /* Older MinGW schemas kept the allocation's type name but emitted
+             * a null spec when DWARF described the typedef as a plain integer. */
+            const char* name = h->name ? h->name : "";
+            if (strcmp(name, "uptr") == 0 || strcmp(name, "sptr") == 0 ||
+                strcmp(name, "uptr[1]") == 0 || strcmp(name, "sptr[1]") == 0) {
+                h->spec = ST_SPEC_PTRS;
+            } else if (strcmp(name, "OTag") == 0 || strcmp(name, "OTag[1]") == 0) {
+                h->spec = ST_SPEC_OTAGS;
+            }
         }
         if (!mapPut(&s->heapByHash, h->hash, NULL, i, 1)) return 0;
     }

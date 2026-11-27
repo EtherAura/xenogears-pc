@@ -75,7 +75,10 @@ static const char* SCHEMA =
     "  \"30\": {\"k\": \"arr\", \"of\": \"30.d0\", \"n\": 2, \"size\": 16},"
     "  \"30.d0\": {\"k\": \"arr\", \"of\": \"40\", \"n\": 1, \"size\": 8},"
     "  \"40\": {\"k\": \"scratch\", \"size\": 8, \"name\": \"scratch64\"},"
-    "  \"50\": {\"k\": \"ptr\", \"size\": 8, \"fn\": true}},"
+    "  \"50\": {\"k\": \"ptr\", \"size\": 8, \"fn\": true},"
+    "  \"60\": {\"k\": \"int\", \"size\": 8, \"name\": \"OTag\"},"
+    "  \"70\": {\"k\": \"int\", \"size\": 8, \"name\": \"uptr\"},"
+    "  \"80\": {\"k\": \"int\", \"size\": 8, \"name\": \"unsigned long long\"}},"
     " \"type_names\": {\"Pair\": \"10\", \"PairAlias\": \"10\", \"s32\": \"20\", \"gone\": \"99\"},"
     " \"variables\": ["
     "  {\"name\": \"small\", \"addr\": 4096, \"size\": 4, \"module\": \"main\", \"section\": \"bss\", \"retail\": 2147483648, \"platform\": null, \"tid\": \"20\"},"
@@ -92,7 +95,9 @@ static const char* SCHEMA =
     " \"sections\": {\"main.data\": [8192, 9000]}, \"regions\": {\"heapArena\": [1048576, 2097152]},"
     " \"parts\": {\"hw\": \"system/hw.c\"},"
     " \"heap_types\": {\"479b06ef\": {\"name\": \"Pair\", \"spec\": {\"tid\": \"10\"}},"
-    "  \"00000002\": {\"name\": \"PC_PRIMS\", \"spec\": \"prims\"}, \"00000003\": {\"name\": \"Pair[1]\", \"spec\": {\"tid\": \"10\", \"one\": true}}},"
+    "  \"00000002\": {\"name\": \"PC_PRIMS\", \"spec\": \"prims\"}, \"00000003\": {\"name\": \"Pair[1]\", \"spec\": {\"tid\": \"10\", \"one\": true}},"
+    "  \"2a8dc9ca\": {\"name\": \"uptr\", \"spec\": null}, \"00000004\": {\"name\": \"sptr\", \"spec\": null},"
+    "  \"00000005\": {\"name\": \"OTag\", \"spec\": null}, \"00000006\": {\"name\": \"u64\", \"spec\": null}},"
     " \"counted\": {\"10\": {\"name\": \"Pair\", \"array\": \"m4_b\", \"count\": \"m0_a\", \"extra\": 1}},"
     " \"unions\": {\"10\": {\"name\": \"Pair\", \"member\": \"m4_b\", \"selector\": \"m0_a\", \"views\": [\"x\", \"y\"]}}}";
 
@@ -113,6 +118,9 @@ static void schemaChecks(void) {
     check(t && t->fields[1].bits == 3 && t->fields[1].bit == 33 && t->fields[0].retail == 0, "fields, a bitfield");
     check(t && t->fields[0].type == stateSchemaType(s, "20"), "a field's type");
     check(stateSchemaTypeAt(s, stateSchemaType(s, "50"))->fn == 1, "a function pointer");
+    check(stateSchemaTypeAt(s, stateSchemaType(s, "60"))->kind == ST_OTAG &&
+          stateSchemaTypeAt(s, stateSchemaType(s, "70"))->kind == ST_ADDR &&
+          stateSchemaTypeAt(s, stateSchemaType(s, "80"))->kind == ST_INT, "legacy MinGW integer aliases");
     check(stateSchemaTypeNamed(s, "PairAlias") == pair && stateSchemaTypeNamed(s, "gone") == ST_NONE, "type names");
     check(strcmp(stateSchemaTidName(s, pair), "Pair") == 0, "a type's own name wins as its stable name");
     check(stateSchemaVarCount(s) == 4, "variables: one per address, untyped ones left out");
@@ -158,6 +166,10 @@ static void schemaChecks(void) {
     const StHeapType* h = stateSchemaHeapType(s, 0x479b06ef);
     check(h && h->spec == ST_SPEC_TYPE && h->type == pair && !h->one, "a heap type");
     check(stateSchemaHeapType(s, 2)->spec == ST_SPEC_PRIMS && stateSchemaHeapType(s, 3)->one, "prims, PC_HEAP_ONE");
+    check(stateSchemaHeapType(s, 0x2a8dc9ca)->spec == ST_SPEC_PTRS && stateSchemaHeapType(s, 4)->spec == ST_SPEC_PTRS,
+          "legacy MinGW pointer words");
+    check(stateSchemaHeapType(s, 5)->spec == ST_SPEC_OTAGS && stateSchemaHeapType(s, 6)->spec == ST_SPEC_NONE,
+          "legacy MinGW ordering-table words and plain scalars");
     const StCounted* k = stateSchemaCounted(s, pair);
     check(k && strcmp(k->array, "m4_b") == 0 && k->extra == 1 && stateSchemaCountedNamed(s, "Pair") == k, "counted arrays");
     const StUnion* u = stateSchemaUnion(s, pair);

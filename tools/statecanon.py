@@ -70,6 +70,10 @@ def state_hash(data: bytes, seed: int = 0) -> int:
 
 # ---- the schema -----------------------------------------------------------------------------------
 
+STATE_ALIAS_KINDS = {"uptr": "addr", "sptr": "addr", "OTag": "otag"}
+HEAP_ALIAS_SPECS = {"uptr": "ptrs", "sptr": "ptrs", "OTag": "otags"}
+
+
 def var_identity(v: dict) -> str:
     """A variable's stable identity (docs section 2): <module>:<retail address> or <module>:pc:<name> in a game
     module, pc:<platform file>:<name> for a platform static."""
@@ -141,9 +145,15 @@ class Schema:
             s["ro"] = s.get("ro") or [list(r) for r in self.readelf_ro()]
         rebase(s, bias)
         self.types = s["types"]
+        for entry in self.types.values():
+            if entry["k"] == "int" and entry.get("size") == 8:
+                entry["k"] = STATE_ALIAS_KINDS.get(entry.get("name"), "int")
         self.type_names = s.get("type_names", {})
         # what heap blocks and recorded ranges hold, by the hash of the type's name (include/pc_state.h)
         self.heap_types = {int(k, 16): v for k, v in s.get("heap_types", {}).items()}
+        for entry in self.heap_types.values():
+            if entry.get("spec") is None:
+                entry["spec"] = HEAP_ALIAS_SPECS.get((entry.get("name") or "").removesuffix("[1]"))
         self.counted = s.get("counted", {})  # struct tid -> its counted array (PC_STATE_COUNTED)
         # the source's rules by type name too: each compile unit has its own DWARF entry for a struct
         self.counted_by_name = {r["name"]: r for r in self.counted.values()}

@@ -2087,8 +2087,10 @@ s32 pcFieldOffTick(void) {
  * step every other frame. Host-side only; the game never reads it. */
 s32 portFieldPictureEnabled(void);
 void portFieldSweepPicture(const s32* v, s32 n);
-u32 pcFieldPic[PC_FIELD_PIC_COUNT];
-s32 pcFieldPicCount[PC_FIELD_PIC_COUNT];
+/* Give these explicit initializers so the MinGW module link keeps their alignment for
+ * the vectorized copies in pcFieldPicHold. */
+u32 pcFieldPic[PC_FIELD_PIC_COUNT] = {0};
+s32 pcFieldPicCount[PC_FIELD_PIC_COUNT] = {0};
 /* Enhanced (xg-hbc.19.4): a picture between two vblanks outside the field
  * loop (f_800A55B8.c) leaves the frame's picture record as it was. */
 void pcFieldPicHold(s32 on) {
