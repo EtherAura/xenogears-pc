@@ -26,6 +26,7 @@ u8* battleConfigFile2;
 u8* currentBattleSpecificStrings;
 u16 bBattleTickMode0;
 void loadEnemies(void);
+int pcArenaRosterActive(void) { return 0; }
 void bzero(void* p, size_t n) { memset(p, 0, n); }
 static int checks;
 #include "test/check.h"

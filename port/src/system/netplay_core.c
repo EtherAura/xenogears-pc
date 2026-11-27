@@ -82,6 +82,8 @@
         v2 += v1; v1 = ROTL(v1, 17); v1 ^= v2; v2 = ROTL(v2, 32);                                                      \
     } while (0)
 
+static int hasMatchRecord(int mode) { return mode == NP_MODE_PARTY || mode == NP_MODE_ROSTER; }
+
 static uint64_t rd64(const uint8_t* p) {
     uint64_t v = 0;
     for (int i = 7; i >= 0; i--) v = v << 8 | p[i];
@@ -168,9 +170,10 @@ static int member(int id) {
 }
 
 int npGetTerms(const uint8_t* p, NpTerms* t) {
-    if (p[24] < 1 || p[24] > 15 || get16(p + 26) > 1000 || p[28] > NP_MODE_PARTY) return 0;
-    if (p[28] == NP_MODE_VERSUS && (get16(p + 32) >= NP_TABLES || p[34] > 15 || p[29] == 255 || !member(p[29]) ||
-                                   !member(p[30]) || !member(p[31]))) {
+    if (p[24] < 1 || p[24] > 15 || get16(p + 26) > 1000 || p[28] > NP_MODE_ROSTER) return 0;
+    if ((p[28] == NP_MODE_VERSUS || p[28] == NP_MODE_ROSTER) &&
+        (get16(p + 32) >= NP_TABLES || p[34] > 15 || p[29] == 255 ||
+         !member(p[29]) || !member(p[30]) || !member(p[31]))) {
         return 0;
     }
     t->delay = p[24];
@@ -392,7 +395,7 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
             t.config = p[28];
         }
     }
-    if (!refuse && t.mode == NP_MODE_PARTY) { /* player 2's party, in its pages */
+    if (!refuse && hasMatchRecord(t.mode)) { /* player 2's party, in its pages */
         int bytes = get16(p + 30);
         if (p[29] != 1 || npPartyPages(bytes) == 0) {
             refuse = NP_REFUSE_NO_PARTY;
@@ -419,7 +422,7 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
     s->welcome[25] = (uint8_t)refuse;
     s->welcome[36] = (uint8_t)reason;
     s->welcome[37] = (uint8_t)place;
-    if (t.mode == NP_MODE_PARTY) {
+    if (hasMatchRecord(t.mode)) {
         put16(s->welcome + 38, (uint16_t)s->partyBytes);
         put64(s->welcome + 40, s->partyHash);
         put64(s->welcome + 48, a->hash);
@@ -443,7 +446,7 @@ static int answer(NpSession* s, const uint8_t* p, const NetAddr* from, NpAssembl
         npSeal(s, s->pages[s->pageCount], NP_SETTINGS);
         send(s, from, s->pages[s->pageCount++]);
     }
-    if (t.mode == NP_MODE_PARTY) {
+    if (hasMatchRecord(t.mode)) {
         for (int i = 0; i < npPartyPages(s->partyBytes); i++) {
             npPutParty(s->pages[s->pageCount], rd64(p + 16), s->party, s->partyBytes, s->partyHash, i);
             npSeal(s, s->pages[s->pageCount], NP_PARTY);
@@ -468,7 +471,7 @@ int npHost(NpSession* s, uint64_t waitNs) {
     int waiting = 0; /* `hello` from `helloFrom` waits for its party's pages */
 
     memset(&a, 0, sizeof a);
-    if (s->terms.mode == NP_MODE_PARTY && npPartyPages(s->partyBytes) == 0) {
+    if (hasMatchRecord(s->terms.mode) && npPartyPages(s->partyBytes) == 0) {
         return end(s, NP_END_ERROR, "party vs party without a party of this side's");
     }
     for (;;) {
@@ -584,7 +587,7 @@ int npJoin(NpSession* s, const NetAddr* host, uint64_t waitNs) {
             if (p[25] != NP_REFUSE_NONE) return refused(s, p);
             NpTerms w = t;
             if (npGetTerms(p, &w)) { /* out of range: not ours */
-                if (w.mode != NP_MODE_PARTY) {
+                if (!hasMatchRecord(w.mode)) {
                     welcomed = 1;
                     t = w;
                 } else if (s->partyBytes > 0 && rd64(p + 48) == s->partyHash && npPartyPages(get16(p + 38)) > 0) {
@@ -595,11 +598,11 @@ int npJoin(NpSession* s, const NetAddr* host, uint64_t waitNs) {
                 }
             }
         }
-        if (welcomed && pages == all && (t.mode != NP_MODE_PARTY || partyDone)) {
+        if (welcomed && pages == all && (!hasMatchRecord(t.mode) || partyDone)) {
             s->terms = t;
             s->token = s->nonce;
             s->lastHeard = SDL_GetTicksNS();
-            if (t.mode == NP_MODE_PARTY) {
+            if (hasMatchRecord(t.mode)) {
                 int member = -1;
                 int reason = s->partyCheck != NULL ? s->partyCheck(s, a.data, a.bytes, &member) : 0;
                 if (reason != 0) { /* the host's party: refused here, and the host told */

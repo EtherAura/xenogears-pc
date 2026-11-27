@@ -109,6 +109,7 @@ enum {
     ARENA_MATCH_BATTLING = 1,
     ARENA_MATCH_VERSUS = 2,
     ARENA_MATCH_MIRROR = 3, /* a versus battle against a copy of the party */
+    ARENA_MATCH_ROSTER = 5, /* a player-built enemy roster */
     ARENA_MATCH_PARTY = 4,  /* party vs party: each player's party from a save (pcArenaMatchStartParty) */
 };
 int pcArenaMatchAvailable(const char** why); /* 0 with why (a sentence) where a match cannot start now */

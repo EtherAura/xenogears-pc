@@ -111,8 +111,8 @@ When a match ends both players choose **Rematch** or **Leave**. Leave goes
 back to where you were.
 
 In a **Versus battle** player 2 fights your party with the second controller:
-an enemy formation, commanded through the party's command ring (each attack
-under the game's name for it, or what it does); a **Mirror match**, your party
+an enemy formation, with attacks selected in a battle window and targets
+selected with the battle cursor; a **Mirror match**, your party
 against a copy of itself; or **Party vs party**, where each player picks a
 memory-card save and up to three of its members, with their levels,
 equipment, abilities and items as saved. Edited saves are accepted.

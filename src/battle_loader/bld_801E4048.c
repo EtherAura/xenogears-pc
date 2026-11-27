@@ -6,6 +6,10 @@
 #include "main/dialog.h"
 #include "main/filesystem.h"
 #include "battle/battle.h"
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+extern const unsigned char* pcArenaRosterBank(int, int*, int*) __attribute__((weak));
+#endif
 #include "battle_loader/battle_loader.h"
 #include "pc_convert.h"
 #include "pc_gameplay.h"
@@ -122,6 +126,10 @@ void batteLoaderPhase1_1(void) {
 
     battlePartyLayoutType = 0;
     battleBssBlock.m0_battleLoadDataVar2Ter = (u8*)(battleMechaInitData = battleLoadDataVar2);
+#ifdef PLATFORM_PC
+    pcVersusRosterSpaceTeams();
+    pcGauntletSpaceGears();
+#endif
     for (i = 0; i < 3; i++) {
         if ((battleVisualEntities[i].m2_characterId & 0x7F) != 0x7F) {
             isBattleSlotFilled.m0_isBattleSlotFilled[i] = 1;
@@ -174,6 +182,12 @@ void batteLoaderPhase1_1(void) {
     }
     for (i = 3; i < 11; i++) {
         if (battleVisualEntities[i].m2_characterId != 0x7F) {
+#ifdef PLATFORM_PC
+            if (pcArenaRosterEnemyTeams() && pcArenaRosterSide(i) == 0) {
+                battleVisualEntities[i].m1_indexInSlot = i - 3;
+                continue;
+            }
+#endif
             if (battleVisualEntities[i].m4_isGear == 0) {
                 battleVisualEntities[i].m1_indexInSlot = battleSlotLayout[battleVisualEntities[i].m0_positionSlot + 8][0];
                 battleSlotLayout[battleVisualEntities[i].m0_positionSlot + 8][1] |= characterIdToTargetBitmask(battleVisualEntities[i].m1_indexInSlot);
@@ -198,6 +212,16 @@ void batteLoaderPhase1_1(void) {
     }
     for (i = 3; i < 11; i++) {
         if (battleVisualEntities[i].m2_characterId != 0x7F) {
+#ifdef PLATFORM_PC
+            if (pcArenaRosterEnemyTeams() && pcArenaRosterSide(i) == 0) {
+                sBattleSlotPositions* row = &battleMechaInitData->m4_slotPositions[battleVisualEntities[i].m0_positionSlot];
+                s32 place = battleVisualEntities[i].m1_indexInSlot;
+                battleVisualEntities[i].mA_X = row->m0_party[place].vx;
+                battleVisualEntities[i].mC_Z = row->m0_party[place].vy;
+                battleVisualEntities[i].m6_direction = 0x80;
+                continue;
+            }
+#endif
             if (battleVisualEntities[i].m4_isGear == 0) {
                 battleVisualEntities[i].mA_X = battleMechaInitData->m4_slotPositions[battleVisualEntities[i].m0_positionSlot].mC_monsters[battleVisualEntities[i].m1_indexInSlot].vx;
                 battleVisualEntities[i].mC_Z = battleMechaInitData->m4_slotPositions[battleVisualEntities[i].m0_positionSlot].mC_monsters[battleVisualEntities[i].m1_indexInSlot].vy;
@@ -223,12 +247,23 @@ void loadEnemies(void) {
         unknownMonsterStatus0[i - 3].m3_removed = 0;
         if (battleBssBlock.m4_visualEntities[i].m2_characterId != 0x7F) {
             u8* p;
-            memmove(&battleEntities.m0_entities[i], &entities[battleBssBlock.m4_visualEntities[i].m2_characterId], sizeof(sBattleEntity));
 #ifdef PLATFORM_PC
-            pcGameplayEnemyLoaded(&battleEntities.m0_entities[i], i, currentBattleConfig.m0_battleId,
-                                  battleBssBlock.m4_visualEntities[i].m2_characterId);
+            s32 bank, type;
+            const u8* custom = pcArenaRosterBank != NULL ? pcArenaRosterBank(i, &bank, &type) : NULL;
+            if (custom != NULL) {
+                memmove(&battleEntities.m0_entities[i], custom + 0x32 + type * sizeof(sBattleEntity), sizeof(sBattleEntity));
+                pcGameplayEnemyLoaded(&battleEntities.m0_entities[i], i, bank, type);
+                p = (u8*)custom + ((const u16*)custom)[type];
+            } else
 #endif
-            p = battleConfigFile2 + ((u16*)battleConfigFile2)[battleBssBlock.m4_visualEntities[i].m2_characterId];
+            {
+                memmove(&battleEntities.m0_entities[i], &entities[battleBssBlock.m4_visualEntities[i].m2_characterId], sizeof(sBattleEntity));
+#ifdef PLATFORM_PC
+                pcGameplayEnemyLoaded(&battleEntities.m0_entities[i], i, currentBattleConfig.m0_battleId,
+                                      battleBssBlock.m4_visualEntities[i].m2_characterId);
+#endif
+                p = battleConfigFile2 + ((u16*)battleConfigFile2)[battleBssBlock.m4_visualEntities[i].m2_characterId];
+            }
             monstersScriptsEntities[i - 3].m0_scripts[0] = p + ((u16*)p)[0];
             monstersScriptsEntities[i - 3].m0_scripts[1] = p + ((u16*)p)[1];
             if (((u16*)p)[2] != 0xFFFF) {

@@ -11,6 +11,7 @@
 #define VERSUS_LABEL 24 /* game-text bytes of a label */
 
 /* versus.c */
+int pcVersusActionPromptActive(void);                     /* waiting for enemy attack or target input */
 void pcVersusWord(u8* out, const char* s);                /* fixed words in the narrow font's codes */
 void pcVersusGameText(u8* out, const u8* s, s32 max);     /* a string of the game's, at most max bytes */
 void pcVersusShowLabel(const u8* s);                      /* the acting entity's name label (window 5) */

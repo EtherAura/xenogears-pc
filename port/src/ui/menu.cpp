@@ -544,6 +544,9 @@ const NavButton navButtons[] = {
 #define NAV_BUTTONS (int)IM_COUNTOF(navButtons)
 
 bool keyHeld[SDL_SCANCODE_COUNT]; // every key, from the events (open or not)
+static std::string netplayNotice;
+static Uint64 netplayNoticeUntil;
+static bool netplayNoticeModal;
 bool navDown[NAV_BUTTONS];        // what ImGui was last told
 
 int padButton(const char* name) {
@@ -2642,6 +2645,21 @@ extern "C" int uiEvent(const SDL_Event* e) {
     if ((e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP) && e->key.scancode < SDL_SCANCODE_COUNT) {
         keyHeld[e->key.scancode] = e->key.down;
     }
+    if (netplayNoticeModal) {
+        if (e->type == SDL_EVENT_KEY_DOWN && !e->key.repeat) {
+            SDL_Scancode key = e->key.scancode;
+            if (key == SDL_SCANCODE_X || key == SDL_SCANCODE_C || key == SDL_SCANCODE_RETURN ||
+                key == SDL_SCANCODE_KP_ENTER || key == SDL_SCANCODE_ESCAPE) netplayNoticeModal = false;
+        } else if (e->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+            if (e->gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH || e->gbutton.button == SDL_GAMEPAD_BUTTON_EAST)
+                netplayNoticeModal = false;
+        } else if (e->type == SDL_EVENT_FINGER_UP ||
+                   (e->type == SDL_EVENT_MOUSE_BUTTON_UP && e->button.button == SDL_BUTTON_LEFT)) {
+            netplayNoticeModal = false;
+        }
+        return e->type != SDL_EVENT_QUIT &&
+               !(e->type >= SDL_EVENT_WINDOW_FIRST && e->type <= SDL_EVENT_WINDOW_LAST);
+    }
     if (!st.open) {
         // Keys and buttons let go while the game runs: ImGui must not find
         // them still down when the menu opens again.
@@ -2877,12 +2895,56 @@ extern "C" void uiPrepare(void) {
     fprintf(stderr, "ui: ready before the game (the touch pad): %.1f ms\n", (double)(SDL_GetTicksNS() - from) * 1e-6);
 }
 
+extern "C" void uiNetplayNotice(const char* text, int wait) {
+    if (text == nullptr) {
+        netplayNotice.clear();
+        return;
+    }
+    if (SDL_getenv("XG_HEADLESS") != nullptr || presentWindow() == nullptr) return;
+    netplayNotice = tr(text);
+    netplayNoticeUntil = SDL_GetTicks() + 2000;
+    if (!wait || !begin()) return;
+    netplayNoticeModal = true;
+    while (netplayNoticeModal) {
+        gpuPresentMenu(nullptr);
+        hwPausedFrame();
+        padPumpEvents();
+        SDL_Delay(16);
+    }
+    netplayNotice.clear();
+}
+
+static void drawNetplayNotice(ImDrawList* dl, int w, int h) {
+    float oldUnit = skin::unit();
+    float unit = float(skin::unitFor(w, h));
+    skin::setUnit(unit);
+    ImFont* font = skin::dialogueFont();
+    if (font == nullptr) font = ImGui::GetFont();
+    float size = 14 * unit;
+    float wrap = std::max(1.0f, std::min(264 * unit, w * 0.8f - 24 * unit));
+    ImVec2 content = font->CalcTextSizeA(size, FLT_MAX, wrap, netplayNotice.c_str());
+    const char* ok = tr("OK");
+    ImVec2 confirm = font->CalcTextSizeA(size, FLT_MAX, 0, ok);
+    float boxW = std::max(content.x, confirm.x) + 24 * unit;
+    float boxH = content.y + (netplayNoticeModal ? 25 : 14) * unit;
+    ImVec2 min((w - boxW) * 0.5f, (h - boxH) * 0.5f);
+    skin::box(dl, min, ImVec2(min.x + boxW, min.y + boxH));
+    dl->AddText(font, size, ImVec2(min.x + 12 * unit, min.y + 7 * unit),
+                IM_COL32_WHITE, netplayNotice.c_str(), nullptr, wrap);
+    if (netplayNoticeModal) {
+        dl->AddText(font, size, ImVec2((w - confirm.x) * 0.5f, min.y + content.y + 10 * unit),
+                    IM_COL32(226, 184, 255, 255), ok);
+    }
+    skin::setUnit(oldUnit);
+}
+
 extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture) {
-    if (!st.open) {
+    const bool notice = !netplayNotice.empty() && (netplayNoticeModal || SDL_GetTicks() < netplayNoticeUntil);
+    if (!st.open || notice) {
         // Over the game: a movie's captions, the touch pad (touchpad.cpp).
         const char* text = picture ? regionalSubtitle() : nullptr;
         bool pad = touchShown() != 0;
-        if ((!text && !pad) || !begin()) return;
+        if ((!text && !pad && !notice) || !begin()) return;
         if (!skin::native()) text = nullptr;
         // Zoom may put the movie's edges outside the presentation target.
         // Captions belong to the visible picture, including after a resize.
@@ -2894,7 +2956,7 @@ extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture
             visibleWidth=visibleMax.x-visibleMin.x, visibleHeight=visibleMax.y-visibleMin.y;
             if (visibleWidth<16 || visibleHeight<24) text = nullptr;
         }
-        if (!text && !pad) return;
+        if (!text && !pad && !notice) return;
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplSDL3_NewFrame();
         ImGuiIO& io = ImGui::GetIO();
@@ -2904,6 +2966,7 @@ extern "C" void uiRecord(void* cmd, int w, int h, int format, const int* picture
         ImDrawList* overlay=ImGui::GetForegroundDrawList();
         if (text) skin::caption(overlay, text, visibleMin, visibleMax);
         if (pad) touchpadDraw(overlay, float(w), float(h));
+        if (notice) drawNetplayNotice(overlay, w, h);
         ImGui::Render();
     } else if (!st.rendered || !st.vkReady) return;
     ImDrawData* dd = ImGui::GetDrawData();

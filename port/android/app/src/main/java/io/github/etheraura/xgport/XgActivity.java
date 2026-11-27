@@ -78,6 +78,7 @@ import android.widget.Toast;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.libsdl.app.SDLActivity;
@@ -553,6 +554,61 @@ public class XgActivity extends SDLActivity {
         runOnUiThread(this::finishAndRemoveTask);
     }
 
+    private File netplayStatus;
+    private boolean awayForNetplay;
+
+    // The session runs in a second Activity. Its private status file uses
+    // the same messages as the desktop session's stdout.
+    public String startNetplay(String[] arguments, String[] options, String region) {
+        // File creation calls into Android's native filesystem code, which
+        // requires a Java-compatible stack under CheckJNI.
+        CompletableFuture<String> statusPath = new CompletableFuture<>();
+        runOnUiThread(() -> {
+            try {
+                netplayStatus = File.createTempFile("netplay-", ".log", getCacheDir());
+            } catch (Exception e) {
+                Log.w(TAG, "netplay: could not open the status file", e);
+                statusPath.complete(null);
+                return;
+            }
+
+            String path = netplayStatus.getAbsolutePath();
+            // Let the game thread continue before starting the Activity, which
+            // pauses the current Activity and its game thread.
+            statusPath.complete(path);
+            try {
+                Intent session = new Intent(this, XgNetplayActivity.class);
+                session.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                session.putExtra("netplay-arguments", arguments);
+                session.putExtra("netplay-options", options);
+                session.putExtra("netplay-status", path);
+                session.putExtra("region", region);
+                session.putExtra("discs-dir", getIntent().getStringExtra("discs-dir"));
+                startActivity(session);
+            } catch (Exception e) {
+                Log.w(TAG, "netplay: could not open the session", e);
+                netplayReturned();
+            }
+        });
+        return statusPath.join();
+    }
+
+    private void netplayReturned() {
+        XgNetplayActivity.reportReturn(netplayStatus);
+        netplayStatus = null;
+        awayForNetplay = false;
+    }
+
+    @Override
+    protected void onPause() {
+        if (netplayStatus != null) awayForNetplay = true;
+        super.onPause();
+    }
+
+    public void stopNetplay() {
+        runOnUiThread(() -> sendBroadcast(new Intent(XgNetplayActivity.STOP).setPackage(getPackageName())));
+    }
+
     // A change of engine (port/src/system/engine.c, xg-mrj.3.21): the app starts again in a
     // new process, whose loader loads the other engine's library. RestartActivity, in a process
     // of its own, ends this one and starts this activity with the same extras (a development
@@ -642,6 +698,10 @@ public class XgActivity extends SDLActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (awayForNetplay) {
+            stopNetplay();
+            netplayReturned();
+        }
         readUpdateAllowed(); // back from the settings page updateAllowInstalls opened
     }
 

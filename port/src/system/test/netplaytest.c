@@ -238,7 +238,14 @@ static int packets(void) {
     npPutTerms(p, &w);
     CHECK(!npGetTerms(p, &u));
     w = v;
-    w.mode = NP_MODE_PARTY + 1;
+    w.mode = NP_MODE_ROSTER;
+    npPutTerms(p, &w);
+    CHECK(npGetTerms(p, &u) && u.mode == NP_MODE_ROSTER);
+    w.party[2] = 11;
+    npPutTerms(p, &w);
+    CHECK(!npGetTerms(p, &u));
+    w = v;
+    w.mode = NP_MODE_ROSTER + 1;
     npPutTerms(p, &w);
     CHECK(!npGetTerms(p, &u));
     t.delay = 0;
@@ -632,7 +639,7 @@ static int partyPages(void) {
     CHECK(!npAssemblyTake(&in, p, &done));
     npAssemblyStart(&in, 77, ha, NP_PARTY_MAX + 1); /* too long: none */
     CHECK(in.bytes == 0);
-    /* the terms: party vs party in range, the next mode out */
+    /* The record exchange's party mode and a mode outside the protocol. */
     NpTerms t, u;
     memset(&t, 0, sizeof t);
     t.delay = 3;
@@ -640,7 +647,7 @@ static int partyPages(void) {
     memset(p, 0, sizeof p);
     npPutTerms(p, &t);
     CHECK(npGetTerms(p, &u) && u.mode == NP_MODE_PARTY);
-    t.mode = NP_MODE_PARTY + 1;
+    t.mode = NP_MODE_ROSTER + 1;
     npPutTerms(p, &t);
     CHECK(!npGetTerms(p, &u));
     return 0;

@@ -97,6 +97,7 @@
 #include "common.h"
 #include "main/game_state.h"
 #include "arena.h"
+#include "arena_roster.h"
 #include "card/party.h"
 #include "card/saves.h"
 #include "cd/cd.h"
@@ -318,6 +319,7 @@ static const struct {
     {23, {0, 0, 0}, {0, 0, 0}}, /* Zeboim: field 363 config 7 (the dig site's; the ruins' slot 2 cuts player 1 off) */
     {30, {0, 0, 0}, {1, 1, 1}}, /* Lighthouse: field 403 config 0 (random) */
     {35, {0, 0, 0}, {0, 0, 0}}, /* Shevat: field 449 config 1 (random) */
+    {38, {0, 0, 0}, {0, 0, 0}}, /* Grahf's on-foot battle: table 14 config 3 */
     {59, {0, 0, 0}, {0, 0, 0}}, /* Solaris: field 546 config 0 (random) */
     {32, {1, 1, 1}, {1, 1, 1}}, /* Anima Relic 1: field 632 config 0 (random) */
     {44, {0, 0, 0}, {0, 0, 0}}, /* world map grassland: world map 0 area 2 config 0 */
@@ -557,7 +559,7 @@ static int matchOnline(void) {
 }
 
 int pcArenaGameLoaded(void) {
-    return gameSeen;
+    return gameSeen && !(portGameMode() == 1 && gameState.m231A_fieldID == TITLE_FIELD);
 }
 
 int pcArenaPartyNow(int party[3]) {
@@ -603,7 +605,7 @@ int pcArenaMatchAvailable(const char** why) {
 
 static int matchStart(int kind, int table, int config, const int party[3], int fromSave, int stage) {
     if (!pcArenaMatchAvailable(NULL) || (kind != ARENA_MATCH_BATTLING && kind != ARENA_MATCH_VERSUS &&
-                                         kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_PARTY)) {
+                                         kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_PARTY && kind != ARENA_MATCH_ROSTER)) {
         return 0;
     }
     if (kind == ARENA_MATCH_MIRROR || kind == ARENA_MATCH_PARTY) {
@@ -625,7 +627,7 @@ static int matchStart(int kind, int table, int config, const int party[3], int f
     M.kind = kind;
     M.table = table;
     M.config = config;
-    M.fromSave = fromSave && gameSeen && kind != ARENA_MATCH_PARTY;
+    M.fromSave = fromSave && pcArenaGameLoaded() && kind != ARENA_MATCH_PARTY;
     M.stage = kind != ARENA_MATCH_MIRROR && kind != ARENA_MATCH_PARTY ? 0 : stageEntry(stage) >= 0 ? stage : STAGE_DEFAULT;
     M.rematch = 0;
     M.seen = 0;
@@ -697,7 +699,8 @@ int pcVersusStage(unsigned char party[3], unsigned char places[3]) {
     /* a local match's own (as asked); else the setting (XG_VERSUS=mirror, and
      * online, where the session pins it to the host's) */
     int local = M.phase == MATCH_ON && (M.kind == ARENA_MATCH_MIRROR || M.kind == ARENA_MATCH_PARTY);
-    int i = stageEntry(local ? M.stage : pcArenaStageSetting());
+    int custom = pcArenaRosterStage();
+    int i = stageEntry(custom ? custom : local ? M.stage : pcArenaStageSetting());
     if (i < 0) return -1;
     for (int k = 0; k < 3; k++) {
         party[k] = stages[i].party[k];
@@ -948,6 +951,58 @@ static int envParty(const char* spec, XgPartyRecord* out) {
     return pcArenaPackSave(spec, xgPartyGameCodes(codes) ? codes : NULL, out);
 }
 
+/* arena replay form: roster,BANK.TYPE[+BANK.TYPE...],BANK.TYPE[+...].
+ * "party" or "party=0.9.3" in the first field selects Player 1's party. */
+static int envRoster(const char* text, int stage) {
+    ArenaLoadoutReview review = {0};
+    int* party = review.current.party;
+    const char* why = "Expected two enemy teams in bank.type notation.";
+    party[0] = 0;
+    party[1] = 2;
+    party[2] = 255;
+    review.current.loadout.stage = stage;
+    for (int side = 0; side < 2; side++) {
+        ArenaEnemyTeam* team = &review.current.loadout.side[side];
+        for (int i = 0; i < ARENA_ROSTER_STATS; i++) team->multiplier[i] = 100;
+        if (side == 0 && strncmp(text, "party", 5) == 0) {
+            text += 5;
+            if (*text == '=') {
+                int bytes = 0;
+                if (sscanf(text + 1, "%d.%d.%d%n", &party[0], &party[1], &party[2], &bytes) != 3) goto refused;
+                text += 1 + bytes;
+            }
+            if (*text++ != ',') goto refused;
+            continue;
+        }
+        for (;;) {
+            int bank, type, end = 0;
+            if (sscanf(text, "%d.%d%n", &bank, &type, &end) != 2 || bank < 0 || bank > 255 ||
+                type < 0 || type >= 8 || team->count == ARENA_ROSTER_SLOTS) goto refused;
+            int slot = team->count++;
+            team->enemy[slot] = (ArenaEnemy){bank, type};
+            text += end;
+            if (*text == '@') {
+                if (sscanf(text + 1, "%d.%d%n", &bank, &type, &end) != 2 || bank < 0 ||
+                    bank > 255 || type < 0 || type >= 8) goto refused;
+                team->gear[slot] = (ArenaEnemy){bank, type};
+                team->gearSlots |= 1 << slot;
+                review.current.loadout.callGear = 1;
+                text += end + 1;
+            }
+            if (*text != '+') break;
+            text++;
+        }
+        if (*text != (side == 0 ? ',' : 0)) goto refused;
+        if (side == 0) text++;
+    }
+    pcArenaLoadoutApprove(&review, 0, 1);
+    pcArenaLoadoutApprove(&review, 1, 1);
+    if (pcArenaRosterStart(&review, &why)) return 1;
+refused:
+    fprintf(stderr, "arena: XG_ARENA_MATCH roster: %s\n", why);
+    return 0;
+}
+
 /* XG_ARENA_MATCH (the header): a request as the menu makes it. */
 static void envMatch(void) {
     static int parsed;
@@ -975,7 +1030,9 @@ static void envMatch(void) {
             return;
         }
     }
-    if (strncmp(what, "battling", 8) == 0) {
+    if (strncmp(what, "roster,", 7) == 0) {
+        envRoster(what + 7, stage - 1);
+    } else if (strncmp(what, "battling", 8) == 0) {
         pcArenaMatchStart(ARENA_MATCH_BATTLING, 0, 0, NULL, 0);
     } else if (strncmp(what, "party,", 6) == 0) {
         static XgPartyRecord envSides[2];
@@ -997,7 +1054,7 @@ static void envMatch(void) {
             kind = ARENA_MATCH_MIRROR; /* mirror[,party] */
             t = VERSUS_MIRROR_TABLE;
             c = VERSUS_MIRROR_CONFIG;
-            if (what[6] == ',') snprintf(how, sizeof how, "%s", what + 7);
+            if (what[6] == ',') snprintf(how, sizeof how, "%.*s", (int)sizeof how - 1, what + 7);
         }
         if (kind == ARENA_MATCH_VERSUS && sscanf(what, "versus,%d,%d,%63s", &t, &c, how) < 2) {
             fprintf(stderr, "arena: XG_ARENA_MATCH: expected <vblank>:battling, <vblank>:versus,T,C[,party], "
@@ -1053,6 +1110,7 @@ void pcArenaVBlank(void) {
     case MATCH_RETURNING:
         if (!stateKept()) {
             M.phase = MATCH_IDLE;
+            if (M.kind == ARENA_MATCH_ROSTER) pcArenaRosterClear();
             pcArenaLog("match over: the kept game is back at vblank %u", hwVSyncCount());
         }
         break;

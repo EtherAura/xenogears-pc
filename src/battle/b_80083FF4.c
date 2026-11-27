@@ -1,4 +1,7 @@
 /* Provisional file (split where JP links the code in another order). */
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+#endif
 #include "common.h"
 #include "psyq.h"
 #include "main/game_state.h"
@@ -218,6 +221,17 @@ u8 getEntityToFace(u8 arg0) {
         targetsPerPriority[i] = 0xFF;
         sameSlot[i] = 0;
     }
+#ifdef PLATFORM_PC
+    if (pcArenaRosterEnemyTeams()) {
+        count = 0;
+        for (i = 3; i < 11; i++) {
+            if (pcArenaRosterSide(arg0) != pcArenaRosterSide(i) && isTargetValid(arg0, i)) {
+                candidates[count++] = i;
+                numValidTarget++;
+            }
+        }
+    } else
+#endif
     if (arg0 < 3) {
         for (i = 3, count = 0; i < 11; i++) {
             if (isTargetValid(arg0, i) != 0) {

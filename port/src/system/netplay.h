@@ -8,6 +8,7 @@
  */
 
 #include "card/party.h"
+#include "arena_roster.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -50,6 +51,7 @@ typedef struct {
     int party[3];      /* host: the party (character ids, 255 none) */
     int partyVsParty;  /* host: party vs party (each player's party from their own save) */
     int hasParty;      /* this side's party record below (party vs party; the joiner's for such a host) */
+    char roster[ARENA_LOADOUT_CODE]; /* both players approve the same roster before launching */
     XgPartyRecord record; /* ... (checked) */
 } NetplayStart;
 enum { NETPLAY_IDLE, NETPLAY_STARTING, NETPLAY_HOSTING, NETPLAY_JOINING, NETPLAY_CONNECTED, NETPLAY_OVER };

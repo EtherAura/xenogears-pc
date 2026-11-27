@@ -205,7 +205,9 @@ pcVersusLastResult
 pcVersusMirrorSlot
 pcVersusMirrorSprites
 pcVersusPartyFiles
+pcVersusPartyHash
 pcVersusRandom
+pcVersusRosterSpaceTeams
 performAttackSub2
 playBattleSoundFileAndWait
 playerLoadingCommands

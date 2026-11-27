@@ -3,6 +3,9 @@
  * battleMain, battleRenderDebugAndMain, the time bars and HP displays).
  * 0x80070E2C-0x800769E8; gcc-2.6.3-psx, ASPSX 2.34.
  */
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+#endif
 #include "common.h"
 #include "psyq.h"
 #include "main/filesystem.h"
@@ -230,7 +233,7 @@ static void pcBestiaryBattle(s32 end) {
     s32 down;
     s32 type;
 
-    if (pcBestiaryNote == NULL || pcVersusMirror()) { /* a mirror match's copy is no enemy of the set */
+    if (pcBestiaryNote == NULL || pcVersusMirror() || pcArenaRosterActive()) { /* a mirror match's copy is no enemy of the set */
         return;
     }
     for (i = 3; i < 11; i++) {
@@ -327,8 +330,14 @@ void battleMain(void) {
     memmove(currentBattleConfig, battleConfigs[requestedBattleConfig], 0x20);
     startBattleLoader(battleTransitionEffect);
     pcVersusBattleLoaded(); /* a mirror match: player 2's copy of the party into entities 3-5 (mirror.c) */
+#ifdef PLATFORM_PC
+    pcVersusRosterHideParty();
+#endif
     checkWinConditions();
     currentBattleMode = 2;
+#ifdef PLATFORM_PC
+    battleConfigFile3 = pcVersusRosterVisuals(battleConfigFile3);
+#endif
     initBattleGraphics(battleConfigFile3);
     battleCreateFader(0, 2, 0xFF, 0xFF, 0xFF);
     if (!needBattleEventOverlay) {
@@ -600,11 +609,16 @@ void battleTickMain(u8 arg0) {
         if (arg0 == 0) {
             /* a versus battle: player 2 makes the script's choices (versus.c); else as below */
             pcVersusMonsterTurn(battleVar2->m2D3_currentEntityTurn, battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m7C_statusFlags[2] & 0x2000);
+            if (pcVersusGearCalled()) goto mirrorTurnDone;
             if (!(battleVisualEntities[battleVar2->m2D3_currentEntityTurn].m3_hidden & 0x80) &&
                 !(battleEntities.m0_entities[battleVar2->m2D3_currentEntityTurn].m0_base.m34_monsterFlags & 0x400)) {
                 battleVar1->mB0_isDialogWindowInitialized[5] = 1;
                 previousEntityTurn.m8_nameLabels[0].m5E_currentMonsterNameStringWidth = renderString(
+#ifdef PLATFORM_PC
+                    pcVersusEnemyText(battleVar2->m2D3_currentEntityTurn, -1),
+#else
                     getDialogParamPointer(currentBattleSpecificStrings, battleMonsterMapping[battleVar2->m2D3_currentEntityTurn]),
+#endif
                     previousEntityTurn.m8_nameLabels[0].m58_ramBufferFromMonsterName, 0x39, 0);
                 loadImageSync(&previousEntityTurn.m8_nameLabels[0].m50_monsterNameVRamRect, previousEntityTurn.m8_nameLabels[0].m58_ramBufferFromMonsterName);
                 previousEntityTurn.m8_nameLabels[0].m5D_monsterNameIsDisplayed = 1;
@@ -808,11 +822,19 @@ void checkWinConditions(void) {
             }
         }
     }
-    if ((allPlayerCharacterBitmask & 0x7F8) == 0) {
-        performAttackSub3_var0.m2_battleRunningVar1 = 1;
-    }
-    if ((allPlayerCharacterBitmask & 7) == 0) {
-        performAttackSub3_var0.m2_battleRunningVar1 = 0x81;
+#ifdef PLATFORM_PC
+    if (pcArenaRosterEnemyTeams()) {
+        s32 result = pcVersusRosterResult(allPlayerCharacterBitmask);
+        if (result != 0) performAttackSub3_var0.m2_battleRunningVar1 = result;
+    } else
+#endif
+    {
+        if ((allPlayerCharacterBitmask & 0x7F8) == 0) {
+            performAttackSub3_var0.m2_battleRunningVar1 = 1;
+        }
+        if ((allPlayerCharacterBitmask & 7) == 0) {
+            performAttackSub3_var0.m2_battleRunningVar1 = 0x81;
+        }
     }
     if (performAttackSub3_var0.m2_battleRunningVar1 == 0) {
         mask = allPlayerCharacterBitmask;

@@ -239,6 +239,9 @@ int main(int argc, char** argv) {
     if (netplay && !netplayConnect(disc)) { /* the handshake; the session's options before hwInit reads them */
         return 1;
     }
+#ifdef __ANDROID__
+    if (netplay && SDL_getenv("XG_NETPLAY_STATUS_FILE") != NULL) androidActivityAction("netplayConnected");
+#endif
 
     /* Gamepads through the kernel's drivers, not libusb: reading some devices'
      * descriptors through libusb blocks SDL_Init indefinitely. */

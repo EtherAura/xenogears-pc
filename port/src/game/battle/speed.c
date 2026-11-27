@@ -22,6 +22,7 @@
  */
 #include "common.h"
 #include "battle/battle.h"
+#include "versus.h"
 
 void battleSpeedBattleFrame(int wait, unsigned int text); /* port/src/system/battlespeed.c */
 s32 pcBattleRetryShown(void);                             /* retryprompt.c */
@@ -44,7 +45,7 @@ void pcBattleSpeedFrame(void) {
             }
         }
     }
-    if (pcBattleRetryShown()) {
+    if (pcBattleRetryShown() || pcVersusActionPromptActive()) {
         wait = 1;
     }
     battleSpeedBattleFrame(wait, text);

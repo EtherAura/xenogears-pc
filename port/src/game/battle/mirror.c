@@ -1234,6 +1234,7 @@ static void turnLoop(u8 entity) {
     u8 target;
     s32 i;
 
+    pcVersusPartySelection(2);
     battleVar2->m2EA_notDefending = 1;
     battleVar2->m2E9_targetConfirmed = 0;
     battleVar2->m2DE_actionDone = 0;
@@ -1369,6 +1370,7 @@ static void turnLoop(u8 entity) {
     freeBattleRenderStruct2(entity);
     freeBillyBattleStructs(entity);
     battleBssBlock.mA78_startPlayingAttackAnimationVar0 = 0;
+    pcVersusPartySelection(0);
 }
 
 /* battleTickMain, an enemy's turn: 1 when it was player 2's member's (done

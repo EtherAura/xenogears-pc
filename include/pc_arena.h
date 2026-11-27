@@ -23,6 +23,28 @@
 extern "C" {
 #endif
 
+/* Custom arena formation and its per-actor retail resources. */
+int pcArenaRosterActive(void);
+int pcArenaRosterConfig(unsigned char* config);
+int pcArenaRosterStage(void);
+void pcArenaRosterClear(void);
+int pcArenaRosterSide(int entity);
+int pcArenaRosterEnemyTeams(void);
+void pcVersusRosterSpaceTeams(void);
+void pcVersusPartySelection(int player); /* 0 outside the party's command loop */
+int pcVersusPrivateSelection(void);
+int pcArenaRosterMultiplier(int slot, int stat);
+const unsigned char* pcArenaRosterBank(int slot, int* bank, int* type);
+const unsigned char* pcArenaRosterVisuals(int* bytes);
+void* pcVersusRosterVisuals(void* stock);
+unsigned char* pcVersusEnemyText(int entity, int name);
+void pcVersusRosterHideParty(void);
+int pcVersusRosterResult(unsigned mask);
+int pcVersusRosterTargetOp(const unsigned char* op, int actor);
+int pcArenaRosterGear(int slot, const unsigned char** controls, const unsigned char** model, int* x, int* position);
+void pcArenaRosterGearActivated(int slot);
+int pcVersusGearCalled(void);
+
 /* The session (pcArenaSession; port/src/system/arena.h's phases, which add
  * PENDING for a request not taken yet). */
 enum {

@@ -13,6 +13,7 @@
     <uses-feature android:name="android.hardware.type.pc" android:required="false" />
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- appCategory="game" (xg-098): Android 16+ ignores an app's orientation and resizing limits on
          screens 600 dp wide or more (tablets, foldables, desktop windows), except for games. -->
@@ -52,6 +53,16 @@
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
             </intent-filter>
         </activity>
+
+        <activity android:name=".XgNetplayActivity"
+            android:process=":netplay"
+            android:taskAffinity="${applicationId}.netplay"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|layoutDirection|colorMode|grammaticalGender|fontWeightAdjustment|assetsPaths"
+            android:preferMinimalPostProcessing="true"
+            android:excludeFromRecents="true"
+            android:exported="false" />
 
         <!-- A change of engine starts the app again in a new process (RestartActivity.java):
              this one runs in its own process, shows nothing and is not kept. -->

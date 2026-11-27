@@ -1,0 +1,51 @@
+#ifndef XG_ARENA_ROSTER_H
+#define XG_ARENA_ROSTER_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#define ARENA_ROSTER_SLOTS 8
+#define ARENA_ROSTER_STATS 6
+#define ARENA_LOADOUT_CODE 160 /* versioned hexadecimal data including both sides */
+
+typedef struct {
+    unsigned char bank, type;
+} ArenaEnemy;
+
+typedef struct {
+    ArenaEnemy enemy[ARENA_ROSTER_SLOTS];
+    ArenaEnemy gear[ARENA_ROSTER_SLOTS];
+    unsigned short multiplier[ARENA_ROSTER_STATS];
+    unsigned char count, gearSlots;
+} ArenaEnemyTeam;
+
+typedef struct {
+    ArenaEnemyTeam side[2]; /* side 0 is empty when the player brings a party */
+    unsigned char stage;
+    unsigned char callGear;
+} ArenaLoadout;
+
+typedef struct {
+    ArenaLoadout loadout;
+    int party[3];
+    int fromSave;
+} ArenaLoadoutChoice;
+
+typedef struct {
+    ArenaLoadoutChoice current, approved[2];
+    unsigned char ready;
+} ArenaLoadoutReview;
+
+void pcArenaLoadoutChanged(ArenaLoadoutReview* review);
+int pcArenaLoadoutReady(const ArenaLoadoutReview* review);
+int pcArenaLoadoutApprove(ArenaLoadoutReview* review, int player, int approve);
+int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char code[ARENA_LOADOUT_CODE]);
+int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]);
+int pcArenaRosterOnline(const ArenaLoadout* loadout, const char* disc, const char** why);
+int pcArenaRosterStart(const ArenaLoadoutReview* review, const char** why);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

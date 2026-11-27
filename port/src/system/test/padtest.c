@@ -269,6 +269,27 @@ int main(int argc, char** argv) {
         SDL_Quit(); return 0;
     }
     if (strcmp(argv[2], "write") == 0) {
+        /* Both live gamepads reach their own ports during a local match. */
+        uint8_t first[8] = {0}, second[8] = {0};
+        CHECK(SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1"));
+        InitPAD(first, sizeof(first), second, sizeof(second));
+        StartPAD();
+        padVBlank(); /* clear the startup input latch with both pads released */
+        CHECK(SDL_SetJoystickVirtualButton(pj, SDL_GAMEPAD_BUTTON_SOUTH, true));
+        CHECK(SDL_SetJoystickVirtualButton(xj, SDL_GAMEPAD_BUTTON_EAST, true));
+        SDL_UpdateJoysticks();
+        padVBlank();
+        CHECK(first[0] == 0 && first[2] == 0xff && first[3] == 0xbf);
+        CHECK(second[0] == 0 && second[2] == 0xff && second[3] == 0xdf);
+        neutral(pj);
+        padVBlank();
+        CHECK(first[3] == 0xff && second[3] == 0xdf);
+        neutral(xj);
+        padVBlank();
+        CHECK(first[3] == 0xff && second[3] == 0xff);
+        InitPAD(NULL, 0, NULL, 0);
+        SDL_ResetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS);
+
         CHECK(padStickDeadzone() == 50);
         padSelectProfile(-1);
         padSetGamepadInput(6, SDL_GAMEPAD_BUTTON_NORTH); /* default Square */

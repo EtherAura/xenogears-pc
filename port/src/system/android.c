@@ -275,6 +275,56 @@ void androidActivityAction(const char* method) {
     activityCall(method, "()V", NULL, NULL);
 }
 
+static jobjectArray stringArray(JNIEnv* env, const char* const* values, int count) {
+    jclass type = (*env)->FindClass(env, "java/lang/String");
+    if (type == NULL) return NULL;
+    jobjectArray array = (*env)->NewObjectArray(env, count, type, NULL);
+    (*env)->DeleteLocalRef(env, type);
+    for (int i = 0; array != NULL && i < count && !(*env)->ExceptionCheck(env); i++) {
+        jstring item = (*env)->NewStringUTF(env, values[i]);
+        if (item == NULL) break;
+        (*env)->SetObjectArrayElement(env, array, i, item);
+        (*env)->DeleteLocalRef(env, item);
+    }
+    return array;
+}
+
+int androidStartNetplay(const char* const* args, const char* const options[4], const char* region,
+                        char* status, size_t size) {
+    JNIEnv* env = SDL_GetAndroidJNIEnv();
+    jobject activity = SDL_GetAndroidActivity();
+    if (env == NULL || activity == NULL) return 0;
+    int ok = 0;
+    if ((*env)->PushLocalFrame(env, 12) == 0) {
+        jclass type = (*env)->GetObjectClass(env, activity);
+        jmethodID method = type != NULL ? (*env)->GetMethodID(env, type, "startNetplay",
+                                    "([Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;")
+                                       : NULL;
+        if (method != NULL) {
+            int count = 0;
+            while (args[count] != NULL) count++;
+            jobjectArray arguments = stringArray(env, args, count);
+            jobjectArray settings = arguments != NULL && !(*env)->ExceptionCheck(env)
+                                       ? stringArray(env, options, 4) : NULL;
+            jstring language = settings != NULL && !(*env)->ExceptionCheck(env) ? (*env)->NewStringUTF(env, region) : NULL;
+            jstring path = language != NULL ? (*env)->CallObjectMethod(env, activity, method, arguments, settings,
+                                                                     language) : NULL;
+            const char* utf = path != NULL ? (*env)->GetStringUTFChars(env, path, NULL) : NULL;
+            if (utf != NULL) {
+                ok = SDL_strlcpy(status, utf, size) < size;
+                (*env)->ReleaseStringUTFChars(env, path, utf);
+            }
+        }
+        (*env)->PopLocalFrame(env, NULL);
+    }
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionClear(env);
+        ok = 0;
+    }
+    (*env)->DeleteLocalRef(env, activity);
+    return ok;
+}
+
 void androidEndTask(void) {
     activityCall("endTask", "()V", NULL, NULL);
 }

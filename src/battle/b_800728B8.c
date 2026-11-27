@@ -6,6 +6,9 @@
 #include "main/dialog.h"
 #include "battle/battle.h"
 #ifdef PLATFORM_PC
+#include "pc_arena.h"
+#endif
+#ifdef PLATFORM_PC
 #include "pc_wide.h"
 #define AddPrim pcTextureHudPrim
 #endif
@@ -527,6 +530,9 @@ void battleRenderPlayerPortraits(void) {
 }
 
 void battleRenderCommandRing(void) {
+#ifdef PLATFORM_PC
+    if (pcVersusPrivateSelection()) return;
+#endif
     s32 i;
 
     if (battleVar1->mCB_drawCommandRing) {
@@ -558,6 +564,9 @@ void battleRenderCommandRing(void) {
 }
 
 void render_BA8_27C8_1E68(void) {
+#ifdef PLATFORM_PC
+    if (pcVersusPrivateSelection()) return;
+#endif
     if (battleVar1->m9C_renderBA8) {
         battleRenderPolyArray(battleVar0->mBA8_menuGlyphs[0], battleVar1->mF8_countOfBA8, battleVar1->mA5_ba8OddOrEven);
     }
@@ -589,6 +598,9 @@ void battleDrawAPBar(void) {
 #endif
     AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m8908_drMode[D_800CCB04.m30_battleOddOrEven]);
     for (i = 0; i < 7; i++) {
+#ifdef PLATFORM_PC
+        if (i < 4 && pcVersusPrivateSelection()) continue;
+#endif
         if (battleVar1->mB0_isDialogWindowInitialized[i]) {
             sBattleDialogWindow* w = battleDialogWindows[i];
 #ifdef PLATFORM_PC
@@ -653,6 +665,9 @@ void drawDescriptionText(void) {
 }
 
 void renderOpenMenu(void) {
+#ifdef PLATFORM_PC
+    if (pcVersusPrivateSelection()) return;
+#endif
 #ifdef PLATFORM_PC
     if (battleVar1->mB7_openMenuType) {
         s32 k, odd;
@@ -770,6 +785,9 @@ void renderTargetSelectionCursor(void) {
             }
         }
         for (i = 0; i < 4; i++) {
+#ifdef PLATFORM_PC
+            if (pcVersusPrivateSelection()) break;
+#endif
             if (battleG3->mE6_isDirectionEnabled[i]) {
                 setRGB0(&battleG3->m0_poly[i * 2 + battleG3->mE4_oddOrEven], battleG3->mE0_fadeValue, 0, 0);
                 AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleG3->m0_poly[i * 2 + battleG3->mE4_oddOrEven]);
@@ -779,6 +797,9 @@ void renderTargetSelectionCursor(void) {
 }
 
 void renderDeathBlowFlashPolys(void) {
+#ifdef PLATFORM_PC
+    if (pcVersusPrivateSelection()) return;
+#endif
     if (battleVar1->mA8_drawComboInput) {
         battleRenderPolyArray(pBattleRenderStruct2->m5550_commandNames, pBattleRenderStruct2->m5D70_count[0x10], pBattleRenderStruct2->m5D83_oddOrEven[0xC]);
 #ifdef PLATFORM_PC

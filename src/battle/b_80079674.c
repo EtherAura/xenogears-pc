@@ -4,6 +4,9 @@
  * (executeMonsterScriptLower) and executeMonsterScriptUpper (executeMonsterScriptUpper).
  * 0x80079674-0x80080AE4; gcc-2.6.3-psx, ASPSX 2.34.
  */
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+#endif
 #include "common.h"
 #include "pc_gameplay.h"
 #include "battle/battle.h"
@@ -1666,6 +1669,12 @@ s32 monsterBattleOpcode_ifSelfHidden(u8 entity) {
 u8 executeMonsterScriptLower(sBattleScriptExecutionContext* ctx, u8 entity, u8 index) {
     sBattleScriptContext* contexts = battleScriptContext;
 
+#ifdef PLATFORM_PC
+    if (pcVersusRosterTargetOp(ctx->m0_scriptPtr, entity)) {
+        advanceBattleScript(ctx);
+        return index;
+    }
+#endif
     switch (*ctx->m0_scriptPtr) {
     case 0x1:
         index = monsterBattleOpcode_writeContextByte(ctx, contexts, index);
@@ -2246,6 +2255,9 @@ void setupTurnRenderLoop(u8 entity) {
     s32 i;
     u8 hasItem;
     u8 target;
+#ifdef PLATFORM_PC
+    pcVersusPartySelection(1);
+#endif
 
 #ifdef PLATFORM_PC
     if (pcResumeAt() == PC_SAFE_BATTLE_TURN) {
@@ -2435,4 +2447,7 @@ void setupTurnRenderLoop(u8 entity) {
     battleSlotStatusVar0.m16_numTicksBeforeReady[entity] = battleSlotStatusVar0.m0_battleSlotStatusVar0[entity];
     battleVar1->m7C_hpDisplayDirty[entity] = 1;
     battleBssBlock.mA78_startPlayingAttackAnimationVar0 = 0;
+#ifdef PLATFORM_PC
+    pcVersusPartySelection(0);
+#endif
 }

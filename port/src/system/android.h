@@ -31,6 +31,9 @@ void androidRestart(void);
 int androidCutouts(float* rects, int max, float* w, float* h);
 /* XgActivity's method(String arg), no result: e.g. "copyPack", "texture". */
 void androidActivityActionText(const char* method, const char* arg);
+/* Start the session Activity and give its status file's path. */
+int androidStartNetplay(const char* const* args, const char* const options[4], const char* region,
+                        char* status, size_t size);
 /* The packs copied into the app's packs folder: each library's folders. */
 typedef struct {
     char library[16]; /* texture-packs, ui-packs, portrait-packs, sprite-packs, glyph-packs */

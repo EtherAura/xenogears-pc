@@ -27,6 +27,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef __ANDROID__
+#include "android.h"
+#include "engine.h"
+static char sessionPath[4096];
+static FILE* sessionOutput;
+static int sessionReturned;
+#endif
+
 #include "common.h"
 #include "main/game_state.h"
 #include "cd/cd.h"
@@ -57,6 +65,12 @@ static void copy(char* out, size_t size, const char* text) {
 static void parse(const char* line) {
     if (SDL_strncmp(line, "XGNP ", 5) != 0) return; /* the game's own output */
     line += 5;
+#ifdef __ANDROID__
+    if (SDL_strcmp(line, "activity returned") == 0) {
+        sessionReturned = 1;
+        return;
+    }
+#endif
     if (SDL_strncmp(line, "hosting ", 8) == 0) {
         L.state = NETPLAY_HOSTING;
         copy(L.detail, sizeof L.detail, line + 8);
@@ -95,25 +109,47 @@ static void parse(const char* line) {
     }
 }
 
+static void outputBytes(const char* buf, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (buf[i] == '\n' || buf[i] == '\r') {
+            L.line[L.used] = '\0';
+            if (L.used > 0) parse(L.line);
+            L.used = 0;
+        } else if (L.used + 1 < sizeof L.line) {
+            L.line[L.used++] = buf[i];
+        }
+    }
+}
+
 static void readOutput(void) {
     SDL_IOStream* out = SDL_GetProcessOutput(L.proc);
     char buf[256];
     size_t n;
     while (out != NULL && (n = SDL_ReadIO(out, buf, sizeof buf)) > 0) {
-        for (size_t i = 0; i < n; i++) {
-            if (buf[i] == '\n' || buf[i] == '\r') {
-                L.line[L.used] = '\0';
-                if (L.used > 0) parse(L.line);
-                L.used = 0;
-            } else if (L.used + 1 < sizeof L.line) {
-                L.line[L.used++] = buf[i];
-            }
-        }
+        outputBytes(buf, n);
     }
 }
 
 /* The process's news; when it has ended, its end. */
 static void checkProcess(void) {
+#ifdef __ANDROID__
+    if (sessionOutput != NULL) {
+        char buf[256];
+        size_t n;
+        clearerr(sessionOutput); /* the Activity may have appended more */
+        while ((n = fread(buf, 1, sizeof buf, sessionOutput)) > 0) outputBytes(buf, n);
+        if (sessionReturned || ferror(sessionOutput)) {
+            fclose(sessionOutput);
+            sessionOutput = NULL;
+            SDL_RemovePath(sessionPath);
+            if (L.state != NETPLAY_OVER) {
+                L.state = NETPLAY_OVER;
+                copy(L.detail, sizeof L.detail, "exit");
+            }
+        }
+        return;
+    }
+#endif
     int code = 0;
     if (L.proc == NULL) return;
     readOutput();
@@ -130,19 +166,28 @@ static void checkProcess(void) {
 }
 
 static void stopAtExit(void) {
+#ifdef __ANDROID__
+    if (sessionOutput != NULL) androidActivityAction("stopNetplay");
+#endif
     if (L.proc != NULL) SDL_KillProcess(L.proc, false); /* it tells the other player itself */
 }
 
 int netplayLaunch(const NetplayStart* o) {
     static int atExit;
-    char exe[4096], port[16], delay[16], progress[16], versus[32], party[32];
+    char port[16], delay[16], progress[16], versus[32], party[32];
     static char hex[2 * sizeof(XgPartyRecord) + 1];
     const char* args[24];
     int n = 0;
 
     checkProcess();
+#ifdef __ANDROID__
+    if (sessionOutput != NULL) return 0;
+    args[n++] = "xenogears";
+#else
+    char exe[4096];
     if (L.proc != NULL || !netSelfPath(exe, sizeof exe)) return 0;
     args[n++] = exe;
+#endif
     args[n++] = "--netplay";
     if (o->host) {
         SDL_snprintf(port, sizeof port, "%d", o->port);
@@ -175,10 +220,30 @@ int netplayLaunch(const NetplayStart* o) {
             args[n++] = versus;
         }
     }
+#ifndef __ANDROID__
     const char* disc = settingsGet("disc");
     if ((disc == NULL || disc[0] == '\0') && cdSwapPath(0) != NULL) args[n++] = cdSwapPath(0);
+#endif
     args[n] = NULL;
+    hex[0] = 0;
+    if (o->hasParty) {
+        const uint8_t* b = (const uint8_t*)&o->record;
+        for (size_t i = 0; i < sizeof o->record; i++) SDL_snprintf(hex + 2 * i, 3, "%02x", b[i]);
+    }
 
+#ifdef __ANDROID__
+    const char* options[] = {o->code, o->roster, hex, engineName(engineThis())};
+#ifdef VERSION_JP
+    const char* region = "jp";
+#else
+    const char* region = "us";
+#endif
+    sessionReturned = 0;
+    if (androidStartNetplay(&args[1], options, region, sessionPath, sizeof sessionPath)) {
+        sessionOutput = fopen(sessionPath, "r");
+        if (sessionOutput == NULL) androidActivityAction("stopNetplay");
+    }
+#else
     SDL_Environment* env = SDL_CreateEnvironment(true);
     SDL_PropertiesID props = SDL_CreateProperties();
     if (env == NULL || props == 0) {
@@ -202,9 +267,10 @@ int netplayLaunch(const NetplayStart* o) {
     SDL_SetEnvironmentVariable(env, "XG_NETPLAY_STATUS", "1", true);
     SDL_SetEnvironmentVariable(env, "XG_ENGINE_LAUNCHED", "1", true); /* this engine, whatever the setting says */
     SDL_SetEnvironmentVariable(env, "XG_NETPLAY_CODE", o->code, true);
+    if (o->roster[0] != 0) SDL_SetEnvironmentVariable(env, "XG_NETPLAY_ROSTER", o->roster, true);
+    else SDL_UnsetEnvironmentVariable(env, "XG_NETPLAY_ROSTER");
+
     if (o->hasParty) {
-        const uint8_t* b = (const uint8_t*)&o->record;
-        for (size_t i = 0; i < sizeof o->record; i++) SDL_snprintf(hex + 2 * i, 3, "%02x", b[i]);
         SDL_SetEnvironmentVariable(env, "XG_NETPLAY_PARTY", hex, true);
     } else {
         SDL_UnsetEnvironmentVariable(env, "XG_NETPLAY_PARTY");
@@ -217,6 +283,7 @@ int netplayLaunch(const NetplayStart* o) {
     L.proc = SDL_CreateProcessWithProperties(props);
     SDL_DestroyProperties(props);
     SDL_DestroyEnvironment(env);
+#endif
     memset(L.detail, 0, sizeof L.detail);
     L.used = 0;
     L.paused = 0;
@@ -224,12 +291,20 @@ int netplayLaunch(const NetplayStart* o) {
     L.delay = 0;
     L.refusedReason = 0;
     L.refusedMember = 255;
+#ifdef __ANDROID__
+    if (sessionOutput == NULL) {
+        L.state = NETPLAY_OVER;
+        copy(L.detail, sizeof L.detail, "error");
+        return 0;
+    }
+#else
     if (L.proc == NULL) {
         L.state = NETPLAY_OVER;
         SDL_snprintf(L.detail, sizeof L.detail, "start %s", SDL_GetError());
         fprintf(stderr, "netplay: the session's process did not start: %s\n", SDL_GetError());
         return 0;
     }
+#endif
     L.state = NETPLAY_STARTING;
     fprintf(stderr, "netplay: started a session's process (%s)\n", o->host ? "host" : "join");
     if (!atExit) {
@@ -268,6 +343,9 @@ int netplaySessionRefusedParty(int* reason, int* member) {
 }
 
 void netplaySessionStop(void) {
+#ifdef __ANDROID__
+    if (sessionOutput != NULL) androidActivityAction("stopNetplay");
+#endif
     if (L.proc != NULL) SDL_KillProcess(L.proc, false);
 }
 

@@ -28,6 +28,8 @@
 extern "C" {
 #include "cd/cd.h"
 #include "extras/versus_list.h"
+#include "extras/bestiary_data.h"
+#include "system/arena_roster.h"
 #include "system/arena.h"
 #include "system/netplay.h"
 #include "system/pad.h"
@@ -42,6 +44,9 @@ extern "C" int xgVersusScanStep(XgVersusScan* s, int budget) __attribute__((weak
 extern "C" double xgVersusScanProgress(const XgVersusScan* s) __attribute__((weak));
 extern "C" int xgVersusScanResult(XgVersusScan* s, XgVersusFormation** out) __attribute__((weak));
 extern "C" void xgVersusScanFree(XgVersusScan* s) __attribute__((weak));
+extern "C" XgDisc* xgDiscOpen(const char*, const char**) __attribute__((weak));
+extern "C" void xgDiscClose(XgDisc*) __attribute__((weak));
+extern "C" int xgBeastsRead(XgDisc*, XgBeast**, int) __attribute__((weak));
 // ... and the jukebox's scores (extras/extras.h).
 extern "C" int extrasJukeboxSongCount(void) __attribute__((weak));
 extern "C" const char* extrasJukeboxSongTitle(int i, int* musicId) __attribute__((weak));
@@ -184,6 +189,7 @@ const StageName stageNames[] = {
     {23, N_("Zeboim"), N_("The buried city under the Ethos dig site, and the dig site's transfer lobby.")},
     {30, N_("Lighthouse"), N_("The underground landing below the lighthouse: a ruined city.")},
     {35, N_("Shevat"), N_("The outer escape lift and the terrace.")},
+    {38, N_("Grahf's arena"), N_("The stage from Grahf's on-foot battle.")},
     {59, N_("Solaris"), N_("Etrenank's lower levels, the Soylent System and Krelian's laboratory.")},
     {32, N_("Anima Relic 1"), N_("The relic's corridors and lift lobby, and the Nisan mausoleum's metal bridge.")},
     {44, N_("Grassland (world map)"), N_("The world map's grassland, where most random battles on foot are.")},
@@ -255,13 +261,13 @@ bool pickedParty(int party[3], bool online, bool* fromSave) {
     return party[0] != 255;
 }
 
-void partyPicker(bool online) {
+void partyPicker(bool online, bool allowCurrent = true) {
     markBlock();
     PartyChoice& P = parties[online];
     bool loaded = pcArenaGameLoaded() != 0;
-    if (!loaded && P.mode == PARTY_CURRENT) P.mode = PARTY_NEW;
+    if ((!loaded || !allowCurrent) && P.mode == PARTY_CURRENT) P.mode = PARTY_NEW;
     ImGui::TextUnformatted(tr("Your party"));
-    ImGui::BeginDisabled(!loaded);
+    ImGui::BeginDisabled(!loaded || !allowCurrent);
     if (ImGui::RadioButton(tr("The current party"), P.mode == PARTY_CURRENT)) {
         sfx::play(sfx::CHOOSE);
         P.mode = PARTY_CURRENT;
@@ -328,6 +334,8 @@ struct {
     std::vector<XgVersusFormation> list;
     FormationChoice local, online;
 } formations;
+
+char rosterCode[ARENA_LOADOUT_CODE] = "";
 
 int matchChoice(const char* const* labels, int count, int selected) {
     markBlock();
@@ -494,6 +502,268 @@ void opponentHpOption() {
          "neither player sees the other's. Online, the host's choice holds for both players.");
 }
 
+void rosterBlock(bool online, void (*resumeGame)()) {
+    if (online) rosterCode[0] = 0;
+    static ArenaLoadoutReview review{};
+    static std::vector<XgBeast> beasts, gears;
+    static std::string discPath;
+    static bool both = false;
+    static bool setup = false;
+    static char filter[64] = "";
+    static char incoming[ARENA_LOADOUT_CODE] = "";
+    static int selected[2] = {-1, -1};
+    static int quantities[2] = {1, 1};
+    static bool held[2] = {};
+    static SDL_JoystickID pad[2] = {};
+    static const char* error = nullptr;
+    int session = netplaySessionState();
+    if (session != NETPLAY_IDLE && session != NETPLAY_OVER) {
+        pcArenaLoadoutChanged(&review);
+        hint("End the online session to edit the loadout.");
+        return;
+    }
+    const char* path = cdSwapPath(0);
+    if (xgBeastsRead == nullptr || path == nullptr) {
+        hint("Enemy team selection requires a Xenogears disc.");
+        return;
+    }
+    if (!setup || discPath != path) {
+        setup = true;
+        discPath = path;
+        beasts.clear();
+        gears.clear();
+        review = {};
+        selected[0] = selected[1] = -1;
+        error = nullptr;
+        for (auto& team : review.current.loadout.side) {
+            for (auto& multiplier : team.multiplier) multiplier = 100;
+        }
+        XgDisc* disc = xgDiscOpen(path, nullptr);
+        if (disc != nullptr) {
+            XgBeast* read = nullptr;
+            int count = xgBeastsRead(disc, &read, 0);
+            for (int i = 0; i < count; i++) {
+                if (read[i].visual == 1 && read[i].hp > 0) beasts.push_back(read[i]);
+                if (read[i].visual == -1 && read[i].gear && read[i].hp > 0) gears.push_back(read[i]);
+            }
+            free(read);
+            xgDiscClose(disc);
+        }
+    }
+    bool changed = false;
+    if (online) {
+        markBlock();
+        hint("Paste the loadout shared by the other player, or build one below.");
+
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##arenaloadout", tr("Paste a loadout code"), incoming, sizeof(incoming));
+        if (ImGui::Button(tr("Load code"))) {
+            ArenaLoadout imported = {};
+            int party[3];
+            int stage = -1;
+            if (pcArenaLoadoutDecode(incoming, &imported, party)) {
+                for (int i = 0; i < pcArenaStageCount(); i++) {
+                    if (pcArenaStageId(i) == imported.stage) stage = imported.stage;
+                }
+            }
+            if (stage >= 0 && (!settingsPinned("arena_stage") || pcArenaStageSetting() == stage + 1)) {
+                review.current.loadout = imported;
+                both = imported.side[0].count != 0;
+                parties[1].mode = PARTY_PICK;
+                memcpy(parties[1].picked, party, sizeof party);
+                pcArenaSetStage(stage + 1);
+                changed = true;
+                incoming[0] = 0;
+                error = nullptr;
+            } else {
+                error = N_("This loadout code or its stage cannot be used.");
+            }
+        }
+        if (error) hint("%s", tr(error));
+    }
+    markBlock();
+    changed |= skin::checkbox(tr("Enemy teams on both sides"), &both);
+    hint("Give both players enemy teams, or use a character party for Player 1.");
+    if (!both && review.current.loadout.side[0].count != 0) {
+        review.current.loadout.side[0].count = 0;
+        review.current.loadout.side[0].gearSlots = 0;
+    }
+    markBlock();
+    bool call = review.current.loadout.callGear != 0;
+    if (skin::checkbox(tr("Call Gear for both players"), &call)) {
+        review.current.loadout.callGear = call;
+        changed = true;
+    }
+    hint("Let both players call an assigned Gear during a fight.");
+    stagePicker();
+    unsigned char stage = pcArenaStageSetting() - 1;
+    changed |= stage != review.current.loadout.stage;
+    review.current.loadout.stage = stage;
+    int party[3] = {0, 2, 255};
+    bool fromSave = false;
+    bool partyOk = true;
+    if (!both) {
+        partyPicker(online, !online);
+        partyOk = pickedParty(party, online, &fromSave);
+    }
+    changed |= memcmp(review.current.party, party, sizeof(party)) != 0 || fromSave != review.current.fromSave;
+    memcpy(review.current.party, party, sizeof(party));
+    review.current.fromSave = fromSave;
+    ImGui::SetNextItemWidth(-1);
+    ImGui::InputTextWithHint("##custom-enemy-filter", tr("Filter by enemy"), filter, sizeof(filter));
+    const char* stats[ARENA_ROSTER_STATS] = {
+        N_("HP"), N_("Physical attack"), N_("Ether"), N_("Defense"), N_("Ether defense"), N_("Agility"),
+    };
+    for (int side = both ? 0 : 1; side < 2; side++) {
+        ArenaEnemyTeam& team = review.current.loadout.side[side];
+        int cap = side == 0 ? 3 : 5;
+        ImGui::PushID(side);
+        ImGui::SeparatorText(tr(side == 0 ? "Player 1 enemies" : "Player 2 enemies"));
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::BeginCombo("##enemy", selected[side] < 0 ? tr("Choose an enemy") : beasts[selected[side]].name)) {
+            for (int i = 0; i < (int)beasts.size(); i++) {
+                const auto& b = beasts[i];
+                std::string name = b.name;
+                std::string query = filter;
+                auto lower = [](unsigned char ch) { return (char)tolower(ch); };
+                std::transform(name.begin(), name.end(), name.begin(), lower);
+                std::transform(query.begin(), query.end(), query.begin(), lower);
+                if (name.find(query) == std::string::npos) continue;
+                char label[110];
+                snprintf(label, sizeof(label), "%s (%d.%d)##enemy%d",
+                         b.name[0] ? b.name : tr("Enemy"), b.set, b.type, i);
+                if (ImGui::Selectable(label, selected[side] == i)) selected[side] = i;
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::SetNextItemWidth(150 * skin::unit());
+        ImGui::SliderInt(tr("Quantity"), &quantities[side], 1, cap);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(selected[side] < 0 || team.count + quantities[side] > cap);
+        if (ImGui::Button(tr("Add"))) {
+            const auto& b = beasts[selected[side]];
+            for (int i = 0; i < quantities[side]; i++) {
+                team.enemy[team.count++] = ArenaEnemy{(unsigned char)b.set, (unsigned char)b.type};
+            }
+            changed = true;
+        }
+        ImGui::EndDisabled();
+        for (int i = 0; i < team.count; i++) {
+            ArenaEnemy id = team.enemy[i];
+            auto found = std::find_if(beasts.begin(), beasts.end(), [id](const XgBeast& b) {
+                return b.set == id.bank && b.type == id.type;
+            });
+            ImGui::PushID(i);
+            ImGui::Text("%d. %s", i + 1, found != beasts.end() ? found->name : tr("Enemy"));
+            ImGui::SameLine();
+            if (ImGui::SmallButton(tr("Remove"))) {
+                for (int j = i + 1; j < team.count; j++) {
+                    team.enemy[j - 1] = team.enemy[j];
+                    team.gear[j - 1] = team.gear[j];
+                }
+                unsigned lower = (1u << i) - 1;
+                team.gearSlots = (team.gearSlots & lower) | ((team.gearSlots >> 1) & ~lower);
+                team.count--;
+                i--;
+                changed = true;
+                ImGui::PopID();
+                continue;
+            }
+            if (call) {
+                ArenaEnemy gear = team.gear[i];
+                bool assigned = (team.gearSlots & (1 << i)) != 0;
+                auto choice = std::find_if(gears.begin(), gears.end(), [gear](const XgBeast& b) {
+                    return b.set == gear.bank && b.type == gear.type;
+                });
+                ImGui::SetNextItemWidth(-1);
+                if (ImGui::BeginCombo("##gear", assigned && choice != gears.end() ? choice->name : tr("No Gear assigned"))) {
+                    if (ImGui::Selectable(tr("No Gear assigned"), !assigned)) {
+                        team.gearSlots &= ~(1 << i);
+                        changed = true;
+                    }
+                    for (const auto& b : gears) {
+                        char label[100];
+                        snprintf(label, sizeof(label), "%s (%d.%d)",
+                                 b.name[0] ? b.name : tr("Gear"), b.set, b.type);
+                        if (ImGui::Selectable(label, assigned && b.set == gear.bank && b.type == gear.type)) {
+                            team.gear[i] = ArenaEnemy{(unsigned char)b.set, (unsigned char)b.type};
+                            team.gearSlots |= 1 << i;
+                            changed = true;
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+            }
+            ImGui::PopID();
+        }
+        if (ImGui::TreeNode(tr("Enemy stats"))) {
+            for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
+                int percent = team.multiplier[i];
+                if (ImGui::SliderInt(tr(stats[i]), &percent, 25, 400, "%d%%")) {
+                    team.multiplier[i] = percent;
+                    changed = true;
+                }
+            }
+            ImGui::TreePop();
+        } else {
+            ImGui::Text("%s %u%%  %s %u%%  %s %u%%", tr(stats[0]), team.multiplier[0],
+                        tr(stats[1]), team.multiplier[1], tr(stats[2]), team.multiplier[2]);
+            ImGui::Text("%s %u%%  %s %u%%  %s %u%%", tr(stats[3]), team.multiplier[3],
+                        tr(stats[4]), team.multiplier[4], tr(stats[5]), team.multiplier[5]);
+        }
+        ImGui::PopID();
+    }
+    if (changed) {
+        pcArenaLoadoutChanged(&review);
+        error = nullptr;
+    }
+    bool canApprove = partyOk && review.current.loadout.side[1].count != 0 &&
+                      (!both || review.current.loadout.side[0].count != 0);
+    if (online) {
+        markBlock();
+        if (canApprove) pcArenaLoadoutEncode(&review.current.loadout, party, rosterCode);
+        ImGui::BeginDisabled(rosterCode[0] == 0);
+        if (ImGui::Button(tr("Copy loadout code"))) ImGui::SetClipboardText(rosterCode);
+        ImGui::EndDisabled();
+        hint("Share the code after editing. Either player can load it, review both teams, and make changes. "
+             "Both players must approve the same code.");
+        return;
+    }
+    for (int player = 0; player < 2; player++) {
+        SDL_JoystickID device = padProfileDevice(player);
+        if (device != pad[player]) {
+            pcArenaLoadoutApprove(&review, player, 0);
+            pad[player] = device;
+            held[player] = true;
+        }
+        bool pressed = device != 0 && padGamepadHeld(device, 13); // Select in the controller profile
+        if (pressed && !held[player] && canApprove && !changed)
+            pcArenaLoadoutApprove(&review, player, !(review.ready & (1 << player)));
+        held[player] = pressed;
+    }
+    const char* why = nullptr;
+    bool available = pcArenaMatchAvailable(&why);
+    markBlock();
+    ImGui::SeparatorText(tr("Approve the loadout"));
+    ImGui::TextUnformatted(tr("Select: Ready"));
+    hint("Each player presses Select on their controller.");
+    ImGui::BeginDisabled(!canApprove);
+    if (pad[0] == 0 && ImGui::Button(tr("Approve as Player 1"))) pcArenaLoadoutApprove(&review, 0, 1);
+    ImGui::EndDisabled();
+    ImGui::Text("%s  ·  %s", tr(review.ready & 1 ? "Player 1 ready" : "Waiting for Player 1"),
+                tr(review.ready & 2 ? "Player 2 ready" : "Waiting for Player 2"));
+    ImGui::BeginDisabled(!available || !canApprove || !pcArenaLoadoutReady(&review));
+    if (ImGui::Button(tr("Fight##custom"))) {
+        if (pcArenaRosterStart(&review, &error)) {
+            pcArenaLoadoutChanged(&review);
+            resumeGame();
+        }
+    }
+    ImGui::EndDisabled();
+    if (error != nullptr) hint("%s", tr(error));
+    availability(available, why);
+}
+
 const XgVersusFormation* formationPicker(FormationChoice& choice) {
     markBlock();
     if (xgVersusScanBegin == nullptr) {
@@ -564,7 +834,7 @@ void versusBlock(void (*resumeGame)()) {
     int kind = 0;
     int match = pcArenaMatchPhase(&kind);
     if (match != ARENA_PHASE_IDLE &&
-        (kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_MIRROR || kind == ARENA_MATCH_PARTY)) {
+        (kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_MIRROR || kind == ARENA_MATCH_PARTY || kind == ARENA_MATCH_ROSTER)) {
         matchState(match, resumeGame);
         return;
     }
@@ -582,8 +852,9 @@ void versusBlock(void (*resumeGame)()) {
         ImGui::TextUnformatted(tr("In a versus battle."));
         return;
     }
-    enum { Formation, Mirror, Party };
-    static const char* const modes[] = {N_("An enemy formation"), N_("Mirror match"), N_("Party vs party")};
+    enum { Formation, Mirror, Party, Custom };
+    static const char* const modes[] = {N_("An enemy formation"), N_("Mirror match"), N_("Party vs party"),
+                                        N_("Custom enemy teams")};
     static int mode = Formation;
     mode = matchChoice(modes, IM_COUNTOF(modes), mode);
     switch (mode) {
@@ -593,11 +864,18 @@ void versusBlock(void (*resumeGame)()) {
     case Party:
         hint("Each player controls a party from a memory-card save. Both parties fight on foot.");
         break;
+    case Custom:
+        hint("Build enemy teams and review the loadout together before fighting.");
+        break;
     default:
         hint("Player 2 uses the second controller to choose attacks and targets for an enemy formation.");
         break;
     }
     musicPicker();
+    if (mode == Custom) {
+        rosterBlock(false, resumeGame);
+        return;
+    }
     opponentHpOption();
     if (mode == Mirror || mode == Party) stagePicker();
     if (mode == Mirror) {
@@ -636,7 +914,7 @@ void versusBlock(void (*resumeGame)()) {
     availability(available, why);
 }
 
-enum OnlineMatch { OnlineBattling, OnlineVersus, OnlineParty };
+enum OnlineMatch { OnlineBattling, OnlineVersus, OnlineParty, OnlineCustom };
 
 struct {
     bool loaded = false;
@@ -647,6 +925,7 @@ struct {
     int delay = 3;
     int mode = OnlineBattling;
     bool joinerPicks = true;
+    bool custom = false;     // the active session's mode
     XgPartyRecord record;    // this machine's party (the online browser's)
 } O;
 
@@ -673,6 +952,7 @@ void endText(const char* d, char* out, size_t size) {
         {"busy", N_("The host is busy.")},
         {"pick", N_("Select Versus battle and choose an enemy formation, then join again.")},
         {"disc", N_("The other player's disc is not the same as yours.")},
+        {"loadout", N_("Both players need to approve the same valid custom loadout.")},
         {"noparty", N_("Select Party vs party and choose a save, then join again.")},
         {"stage", N_("The host's battle stage is not one of this game's.")},
         {"address", N_("The address is not host:port, or that host is unknown.")},
@@ -751,12 +1031,15 @@ void onlineBlock() {
         textLines(line);
         int refusedReason = 0, refusedMember = 255;
         if (state == NETPLAY_HOSTING && netplaySessionRefusedParty(&refusedReason, &refusedMember)) {
-            char why[320];
-            arenaPartyReason(refusedReason, refusedMember, why, sizeof why);
-            snprintf(line, sizeof line, tr("A player joined with a party that cannot be used, and was refused (they "
-                                           "see why): %s Waiting for another."), why);
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textWarning);
-            ImGui::TextWrapped("%s", line);
+            if (O.custom) {
+                ImGui::TextWrapped("%s", tr("The joining player approved a different loadout. Waiting for a match."));
+            } else {
+                char why[320];
+                arenaPartyReason(refusedReason, refusedMember, why, sizeof why);
+                ImGui::TextWrapped(tr("A player joined with a party that cannot be used, and was refused (they "
+                                      "see why): %s Waiting for another."), why);
+            }
             ImGui::PopStyleColor();
         }
         if (netplaySessionPaused()) ImGui::TextUnformatted(tr("The other player paused."));
@@ -804,9 +1087,11 @@ void onlineBlock() {
         hint("A name or an IPv4 address, then the port (192.168.1.20:7461); an IPv6 address goes in brackets "
              "([2001:db8::20]:7461).");
     }
-    static const char* const modes[] = {N_("Battling"), N_("Versus battle"), N_("Party vs party")};
+    static const char* const modes[] = {N_("Battling"), N_("Versus battle"), N_("Party vs party"),
+                                        N_("Custom enemy teams")};
     O.mode = matchChoice(modes, IM_COUNTOF(modes), O.mode);
     hint("Choose the same match type on both sides.");
+    const bool custom = O.mode == OnlineCustom;
     const bool bringing = O.mode == OnlineParty;
     bool partyOk = false;
     const XgVersusFormation* formation = nullptr;
@@ -834,13 +1119,17 @@ void onlineBlock() {
         partyOk = arenaSavesPanel(0, &O.record);
         hint("Both players bring a party from their own save. Edited saves are accepted within the game's ranges.");
         break;
+    case OnlineCustom:
+        rosterBlock(true, nullptr);
+        break;
     }
     if (O.host) musicPicker();
     markBlock();
-    bool ready = O.code[0] != '\0' && (!bringing || partyOk) &&
+    bool ready = O.code[0] != '\0' && (!bringing || partyOk) && (!custom || rosterCode[0]) &&
                  (O.host ? O.mode != OnlineVersus || O.joinerPicks || formation : strchr(O.address, ':') != nullptr);
     ImGui::BeginDisabled(!ready);
-    const char* start = O.host ? tr("Host##netplay") : tr("Join##netplay");
+    const char* start = custom ? (O.host ? tr("Approve and host") : tr("Approve and join"))
+                               : (O.host ? tr("Host##netplay") : tr("Join##netplay"));
     if (ImGui::Button(start)) {
         NetplayStart s = {};
         s.host = O.host;
@@ -855,6 +1144,7 @@ void onlineBlock() {
         if (s.hasParty) s.record = O.record;
         s.joinerPicks = s.versus && O.joinerPicks;
         s.pick = !O.host && formation;
+        if (custom) memcpy(s.roster, rosterCode, sizeof(s.roster));
         if (formation) {
             s.table = formation->table;
             s.config = formation->config;
@@ -870,12 +1160,14 @@ void onlineBlock() {
         settingsSetInt("netplay_delay", O.delay);
         if (!O.host) settingsSet("netplay_address", O.address);
         settingsSave();
+        O.custom = custom;
         sfx::play(netplayLaunch(&s) ? sfx::CHOOSE : sfx::BUZZ);
     }
     ImGui::EndDisabled();
     if (O.code[0] == '\0') hint("Enter the session code.");
     else if (!O.host && strchr(O.address, ':') == nullptr) hint("Enter the host's address and port.");
     else if (bringing && !partyOk) hint("Choose a party from a memory-card save.");
+    else if (custom && !rosterCode[0]) hint("Load or build a valid custom loadout.");
     else if (!ready) hint("Choose an enemy formation or let Player 2 choose.");
     else hint("Both players see each other's IP address. The host's gameplay settings apply to both players.");
 }

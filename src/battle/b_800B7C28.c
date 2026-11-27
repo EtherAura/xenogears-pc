@@ -10,6 +10,9 @@
 #include "main/memory.h"
 #include "main/filesystem.h"
 #include "battle/battle.h"
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+#endif
 
 #ifdef PLATFORM_PC
 #include "battle_loader/battle_loader.h"
@@ -2453,6 +2456,12 @@ void updateCharacterBlinkColor(TaskHeader* arg0) {
     s32 phase;
     s32 c;
 
+#ifdef PLATFORM_PC
+    if (pcVersusPrivateSelection()) {
+        task->m20_phase++;
+        return;
+    }
+#endif
     actor = task->m1C_actor;
     phase = task->m20_phase << 6;
     c = getAngleCos(phase) + 0x1000;
@@ -2498,6 +2507,9 @@ void updateTargetSelectionMarkerSub0Sub1(void) {
         actor = battleBssBlock.m8C8C_spriteActorCores[battleBssBlock.mA72_currentEntity];
         task->m1C_actor = actor;
         task->m24_entity = battleBssBlock.mA72_currentEntity;
+#ifdef PLATFORM_PC
+        if (!pcVersusPrivateSelection())
+#endif
         actor->m2B_code &= ~1;
     }
 }
@@ -2557,6 +2569,9 @@ void drawSpinningEnemySelectionCursor(TaskHeader* arg0) {
     ScaleMatrixL(&m, &scale);
     SetRotMatrix(&m);
     SetTransMatrix(&m);
+#ifdef PLATFORM_PC
+    if (!pcVersusPrivateSelection())
+#endif
     renderCustomPolyBuffer(cursor->m64_customPolySubBuffer, cursor->m5C_buffer[battleBssBlock.m8C84_oddOrEven], characterRenderingOT, 0, 0, 0);
 }
 

@@ -371,7 +371,9 @@ static int statLimit(int field, int value) {
     return 255;
 }
 
-static void enemyStats(void* entity, int set, int type, ScriptStat* snapshot) {
+extern int pcArenaRosterMultiplier(int slot, int stat) __attribute__((weak));
+
+static void enemyStats(void* entity, int set, int type, int slot, ScriptStat* snapshot) {
     sBattleEntity* e = entity;
     int before[SCRIPT_STATS] = {
         e->m0_base.m4E_MaxHP, e->m0_base.m4C_HP, e->mA4_gear.m64_maxHp, e->mA4_gear.m60_hp,
@@ -381,7 +383,8 @@ static void enemyStats(void* entity, int set, int type, ScriptStat* snapshot) {
     int after[SCRIPT_STATS];
     for (int i = 0; i < SCRIPT_STATS; i++) {
         int stat = scriptStats[i];
-        int percent = hardPercent(set, type, stat) * pcGameplayEnemyMultiplier(stat);
+        int selected = slot >= 0 && pcArenaRosterMultiplier != NULL ? pcArenaRosterMultiplier(slot, stat) : 0;
+        int percent = selected ? selected * 100 : hardPercent(set, type, stat) * pcGameplayEnemyMultiplier(stat);
         after[i] = percent == 10000 ? before[i] : scaled(before[i], percent, 1, statLimit(i, before[i]));
         if (snapshot != NULL) snapshot[i] = (ScriptStat){percent, before[i], after[i]};
     }
@@ -402,11 +405,11 @@ static void enemyStats(void* entity, int set, int type, ScriptStat* snapshot) {
 /* Entities outside the battle's enemy slots (the bestiary's rows, tests):
  * no script snapshot. The loader's copies go through pcGameplayEnemyLoaded,
  * a script's copy of a monster through pcGameplayEnemyCopied. */
-void pcGameplayEnemyStats(void* entity) { enemyStats(entity, -1, -1, NULL); }
-void pcGameplayEnemyStatsForType(void* entity, int set, int type) { enemyStats(entity, set, type, NULL); }
+void pcGameplayEnemyStats(void* entity) { enemyStats(entity, -1, -1, -1, NULL); }
+void pcGameplayEnemyStatsForType(void* entity, int set, int type) { enemyStats(entity, set, type, -1, NULL); }
 
 void pcGameplayEnemyLoaded(void* entity, int slot, int set, int type) {
-    enemyStats(entity, set, type, slot >= 3 && slot < 11 ? enemyScriptStats[slot - 3] : NULL);
+    enemyStats(entity, set, type, slot, slot >= 3 && slot < 11 ? enemyScriptStats[slot - 3] : NULL);
 }
 
 void pcGameplayEnemyCopied(int dest, int source) {

@@ -232,6 +232,9 @@ static struct {
     int seenVersus;
     int64_t desyncTest;
     int status; /* XG_NETPLAY_STATUS=1: state lines on stdout */
+#ifdef __ANDROID__
+    FILE* statusFile;
+#endif
     uint64_t lostShown; /* the connection lost: when the note was last put up */
     int64_t blackoutAt; /* XG_NETPLAY_TEST_BLACKOUT=<vblank>:<ms> */
     uint64_t blackoutNs;
@@ -242,6 +245,7 @@ static struct {
     char save[64];
     int hasParty;
     XgPartyRecord party;
+    char roster[ARENA_LOADOUT_CODE];
     uint8_t codes[XG_PARTY_CODE_TABLE];
     int haveCodes;
     XgPartyRecord sides[2];
@@ -250,8 +254,8 @@ static struct {
     FILE* hashLog;     /* XG_NETPLAY_HASH_LOG */
 } N;
 
-void presentShowNote(const char* text); /* gpu/present.c */
-void gpuPresentMenu(const char* shot);  /* gpu/libgpu.c: the last picture again */
+void uiNetplayNotice(const char* text, int wait); /* ui/menu.cpp */
+void gpuPresentMenu(const char* shot);           /* gpu/libgpu.c: the last picture again */
 
 /* ---- the settings that change the game ---- */
 
@@ -350,12 +354,16 @@ static void say(const char* fmt, ...) {
 static void status(const char* fmt, ...) {
     va_list ap;
     if (!N.status) return;
-    fputs("XGNP ", stdout);
+    FILE* out = stdout;
+#ifdef __ANDROID__
+    if (N.statusFile != NULL) out = N.statusFile;
+#endif
+    fputs("XGNP ", out);
     va_start(ap, fmt);
-    vfprintf(stdout, fmt, ap);
+    vfprintf(out, fmt, ap);
     va_end(ap);
-    fputc('\n', stdout);
-    fflush(stdout);
+    fputc('\n', out);
+    fflush(out);
 }
 
 /* An end's word on the status line. */
@@ -374,6 +382,9 @@ static int memberId(const int ids[3], int place) {
 static void statusEnd(const NpSession* s) {
     if (s->reason == NP_END_DESYNC) {
         status("over desync %u", s->endFrame);
+    } else if (N.roster[0] && (s->reason == NP_END_PARTY_REFUSED ||
+                              s->reason == NP_END_PEER_PARTY || s->reason == NP_END_NO_PARTY)) {
+        status("over loadout");
     } else if (s->reason == NP_END_PARTY_REFUSED || s->reason == NP_END_PEER_PARTY) {
         /* the member: this side's own (its party refused), or the other's (refused here) */
         int own[3];
@@ -429,13 +440,11 @@ static void stop(int end) {
     else statusEnd(&N.np);
     npBye(&N.np, end);
     N.active = 0;
-    if (SDL_getenv("XG_HEADLESS") == NULL && !(end == END_LEAVE && !N.status)) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Xenogears netplay", text, NULL);
-    }
+    pcVersusSetPerspective(0);
+    uiNetplayNotice(text, end != END_LEAVE || N.status);
     if (N.status) {
         quitNow(); /* the menu's session: the game that started it goes on */
     }
-    presentShowNote(text);
     toTitle();
 }
 
@@ -468,14 +477,26 @@ static void note(NpSession* s, int what, const char* text) {
         status("refused party %d %d", N.np.partyReason, memberId(N.checkedIds, N.np.partyMember));
         break;
     case NP_NOTE_WAITING: say("waiting for the other player..."); status("waiting"); break;
-    case NP_NOTE_PAUSED: say("the other player paused (the menu, or the game in the background)"); status("paused"); break;
-    case NP_NOTE_BACK: say("the other player is back"); status("back"); break;
+    case NP_NOTE_PAUSED:
+        say("the other player paused (the menu, or the game in the background)");
+        status("paused");
+        N.lostShown = 0;
+        break;
+    case NP_NOTE_BACK:
+        say("the other player is back");
+        status("back");
+        uiNetplayNotice(NULL, 0);
+        break;
     case NP_NOTE_LOST:
         say("the connection is lost: waiting for it to come back (up to %d s)", (int)(N.np.silentNs / 1000000000ull));
         status("lost");
         N.lostShown = 0;
         break;
-    case NP_NOTE_RESUMED: say("the connection is back: going on"); status("resumed"); break;
+    case NP_NOTE_RESUMED:
+        say("the connection is back: going on");
+        status("resumed");
+        uiNetplayNotice(NULL, 0);
+        break;
     case NP_NOTE_MOVED: say("the other player is at %s now", text); status("moved %s", text); break;
     }
 }
@@ -487,9 +508,10 @@ static void pollQuit(void) {
     quitPoll(1);
     hwPausedFrame(); /* the stall watchdog: waiting here is no stall */
     uint64_t now = SDL_GetTicksNS();
-    if (N.np.lost && now - N.lostShown > 1000000000ull) {
+    if ((N.np.lost || N.np.peerPaused) && now - N.lostShown > 1000000000ull) {
         N.lostShown = now;
-        presentShowNote("Connection lost: waiting for the other player to come back");
+        uiNetplayNotice(N.np.lost ? "Connection lost. Waiting for the other player."
+                                 : "The other player paused.", 0);
         gpuPresentMenu(NULL);
     }
 }
@@ -716,15 +738,44 @@ static int ownParty(const char* disc, int* cardsRead) {
     return 1;
 }
 
+static int checkRosterAgreement(NpSession* session, const uint8_t* data, int bytes, int* member) {
+    (void)session;
+    *member = -1;
+    return bytes == (int)strlen(N.roster) && memcmp(data, N.roster, (size_t)bytes) == 0 ? 0 : 1;
+}
+
 int netplayConnect(const char* disc) {
     NpSession* s = &N.np;
     int cardsRead = 0;
+    int approvedParty[3];
 
     const char* st = SDL_getenv("XG_NETPLAY_STATUS");
     N.status = st != NULL && atoi(st) != 0;
+#ifdef __ANDROID__
+    const char* path = SDL_getenv("XG_NETPLAY_STATUS_FILE");
+    if (N.status && path != NULL) N.statusFile = fopen(path, "a");
+#endif
 #ifndef _WIN32
     if (N.status) signal(SIGPIPE, SIG_IGN); /* the menu's end of the pipe gone: no end of this session */
 #endif
+    const char* approved = SDL_getenv("XG_NETPLAY_ROSTER");
+    if (approved != NULL && approved[0] != 0) {
+        ArenaLoadout roster;
+        const char* why = "The approved loadout code is invalid.";
+        if (!pcArenaLoadoutDecode(approved, &roster, approvedParty) ||
+            !pcArenaLoadoutEncode(&roster, approvedParty, N.roster) || !pcArenaRosterOnline(&roster, disc, &why)) {
+            say("%s", why);
+            status("over loadout");
+            return 0;
+        }
+        if (N.host) {
+            N.terms.mode = NP_MODE_ROSTER;
+            N.terms.table = 2;
+            N.terms.config = 13;
+            N.terms.pick = 0;
+            for (int i = 0; i < 3; i++) N.terms.party[i] = approvedParty[i];
+        }
+    }
     npInit(s, N.host, N.code, compatId(), REGION);
     say("this game's compatibility id: %016llx", (unsigned long long)s->compatId);
     s->note = note;
@@ -733,8 +784,9 @@ int netplayConnect(const char* disc) {
     s->hasPick = N.hasPick;
     s->pickTable = N.pickTable;
     s->pickConfig = N.pickConfig;
-    s->partyCheck = checkParty;
-    if (!ownParty(disc, &cardsRead)) return 0;
+    s->partyCheck = N.roster[0] ? checkRosterAgreement : checkParty;
+    if (N.roster[0]) npSetParty(s, (const uint8_t*)N.roster, (int)strlen(N.roster));
+    else if (!ownParty(disc, &cardsRead)) return 0;
     if (N.host && N.terms.mode == NP_MODE_PARTY && !N.hasParty) {
         say("party vs party needs this side's party: --save CARD.NUMBER[.ID...] (or the menu's)");
         status("over ownparty %d 255", XG_PARTY_BAD_MEMBERS);
@@ -773,6 +825,17 @@ int netplayConnect(const char* disc) {
             return 0;
         }
     }
+    if ((s->terms.mode == NP_MODE_ROSTER) != (N.roster[0] != 0)) {
+        status("over loadout");
+        npBye(s, END_NONE);
+        return 0;
+    }
+    if (s->terms.mode == NP_MODE_ROSTER) {
+        s->terms.table = 2;
+        s->terms.config = 13;
+        for (int i = 0; i < 3; i++) s->terms.party[i] = approvedParty[i];
+        say("both players approved the same enemy loadout");
+    }
     say("connected: input delay %d vblanks, story progress %d", s->terms.delay, s->terms.progress);
     for (int i = 0; i < logicCount; i++) {
         if (logic[i].kind == K_STAGE && !stageListed(s->terms.settings[i])) { /* within range, but not one of ours */
@@ -803,7 +866,7 @@ int netplayConnect(const char* disc) {
         netAddrText(&s->peer, peer, sizeof peer);
         status("connected %s %d %s", peer, s->terms.delay,
                s->terms.mode == NP_MODE_PARTY    ? "party"
-               : s->terms.mode == NP_MODE_VERSUS ? "versus"
+               : (s->terms.mode == NP_MODE_VERSUS || s->terms.mode == NP_MODE_ROSTER) ? "versus"
                                                  : "battling");
     }
     logicPin(&s->terms);
@@ -828,7 +891,7 @@ int netplayConnect(const char* disc) {
         setEnv("XG_PARTY", "");
         setEnv("XG_VERSUS", "");
         setEnv("XG_GAMESTATE", "");
-    } else if (s->terms.mode == NP_MODE_VERSUS) {
+    } else if (s->terms.mode == NP_MODE_VERSUS || s->terms.mode == NP_MODE_ROSTER) {
         say("a versus battle: table %d config %d%s, party %d,%d,%d", s->terms.table, s->terms.config,
             N.host && s->terms.pick ? " (player 2's choice)" : "", s->terms.party[0],
             s->terms.party[1], s->terms.party[2]);
@@ -869,7 +932,7 @@ int netplayActive(void) {
 int netplayRefuses(const char* what) {
     if (!N.active) return 0;
     say("%s: not during an online session", what);
-    presentShowNote("Not during an online session");
+    uiNetplayNotice("Unavailable during an online session.", 0);
     return 1;
 }
 
@@ -976,7 +1039,7 @@ void netplayPace(void) {
         return;
     }
     int mode = pcWideGetMode();
-    if (N.np.terms.mode == NP_MODE_VERSUS || N.np.terms.mode == NP_MODE_PARTY) {
+    if (N.np.terms.mode == NP_MODE_VERSUS || N.np.terms.mode == NP_MODE_PARTY || N.np.terms.mode == NP_MODE_ROSTER) {
         int versus = pcVersusSession();
         if (versus == PC_VERSUS_IN) {
             N.seenVersus = 1;

@@ -410,6 +410,13 @@ int SDL_main(int argc, char* argv[]) {
             region = argv[++i];
         } else if (strcmp(argv[i], "--env") == 0 && i + 1 < argc) {
             setOptions(argv[++i]);
+        } else if (strcmp(argv[i], "--netplay-options") == 0 && i + 5 < argc) {
+            setenv("XG_NETPLAY_CODE", argv[++i], 1);
+            setenv("XG_NETPLAY_ROSTER", argv[++i], 1);
+            setenv("XG_NETPLAY_PARTY", argv[++i], 1);
+            setenv("XG_ENGINE", argv[++i], 1);
+            setenv("XG_NETPLAY_STATUS_FILE", argv[++i], 1);
+            setenv("XG_NETPLAY_STATUS", "1", 1);
         } else if (strcmp(argv[i], "--image") == 0 && i + 1 < argc) {
             addImage(argv[++i]);
         } else if (strcmp(argv[i], "--app-version") == 0 && i + 1 < argc) {

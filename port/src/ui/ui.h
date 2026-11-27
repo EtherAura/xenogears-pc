@@ -157,6 +157,9 @@ int uiEvent(const union SDL_Event* e);  /* every event the pump takes: 1 when th
 int uiVBlank(void);                     /* after the vblank's pump: runs the menu if it was asked
                                          * for, until it closes; 1 if it ran */
 int uiIsOpen(void);
+/* Online status on the last game picture, with native window art.
+ * wait: show a confirmation before returning. NULL clears a status. */
+void uiNetplayNotice(const char* text, int wait);
 
 /* port/src/gpu/vk.c: the device the menu draws with (given once it exists),
  * the menu's part of the present pass (cmd a VkCommandBuffer inside the

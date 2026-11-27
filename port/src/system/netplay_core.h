@@ -23,9 +23,9 @@ extern "C" {
 #endif
 
 #define NP_MAGIC 0x504E4758u /* "XGNP" */
-#define NP_VERSION 6 /* 4: the battle music among the settings (xg-htn.35.146); 5: the opponent's HP (.143);
+#define NP_VERSION 7 /* 4: the battle music among the settings (xg-htn.35.146); 5: the opponent's HP (.143);
                       * 6: party vs party (.143: NP_PARTY pages, the parties' hashes in HELLO and WELCOME,
-                      * the stage among the settings) */
+                      * the stage among the settings), 7: shared enemy loadouts use the same record pages */
 #define NP_VERSION_OLDEST 3 /* the first of the 80-byte packets: a peer from 3 on is told "another build" */
 #define NP_PACKET 80
 #define NP_TAG 72 /* the tag's place: SipHash-2-4 of bytes 0..71 */
@@ -52,7 +52,7 @@ enum {
 };
 
 /* What the host decides and the joiner takes (range-checked on arrival). */
-enum { NP_MODE_BATTLING, NP_MODE_VERSUS, NP_MODE_PARTY };
+enum { NP_MODE_BATTLING, NP_MODE_VERSUS, NP_MODE_PARTY, NP_MODE_ROSTER };
 #define NP_TABLES 253 /* versus: the battle debug selector's tables 0..252, 16 configs each */
 
 typedef struct {

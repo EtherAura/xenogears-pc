@@ -3,6 +3,9 @@
  * battle.cpp: battleSetupStringInPolyFT4*, setupStringsForMonsterNames,
  * executeBattleCode_*). 0x800769E8-0x80079674; gcc-2.6.3-psx, ASPSX 2.34.
  */
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+#endif
 #include "common.h"
 #include "pc_gameplay.h"
 #include "psyq.h"
@@ -507,7 +510,13 @@ void executeBattleCode_finalizeDamageEntry(u8 entity, u8 idx) {
 
 void executeBattleCode_showMonsterName(u8 idx, u8 entity) {
     if (battleTickMain_var0 < 9) {
-        previousEntityTurn.m8_nameLabels[battleTickMain_var0].m5E_currentMonsterNameStringWidth = renderString(getDialogParamPointer(currentBattleSpecificStrings, battleScriptContext[idx].m3_nameIndex), previousEntityTurn.m8_nameLabels[battleTickMain_var0].m58_ramBufferFromMonsterName, 0x39, battleTickMain_var0 & 1);
+        previousEntityTurn.m8_nameLabels[battleTickMain_var0].m5E_currentMonsterNameStringWidth = renderString(
+#ifdef PLATFORM_PC
+            pcVersusEnemyText(entity, battleScriptContext[idx].m3_nameIndex),
+#else
+            getDialogParamPointer(currentBattleSpecificStrings, battleScriptContext[idx].m3_nameIndex),
+#endif
+            previousEntityTurn.m8_nameLabels[battleTickMain_var0].m58_ramBufferFromMonsterName, 0x39, battleTickMain_var0 & 1);
         loadImageSync(&previousEntityTurn.m8_nameLabels[battleTickMain_var0].m50_monsterNameVRamRect, previousEntityTurn.m8_nameLabels[battleTickMain_var0].m58_ramBufferFromMonsterName);
         battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m23_battleEntityIndex = entity;
         battleCurrentDamages[battleVar2->m2DA_indexInBattleVar48].m47_battleAnimationToPlay = 0xFA;
@@ -587,6 +596,9 @@ void executeBattleCode_playAnimation(u8 entity, u8 idx, u8 target) {
 }
 
 void executeBattleCode_setMonsterRestoreMask(u8 entity, u8 idx, u8 target) {
+#ifdef PLATFORM_PC
+    if (pcArenaRosterActive()) return; /* the match keeps its approved slots */
+#endif
     bBattleTickMode0 = battleScriptContext[idx].m6_mask;
 }
 
@@ -602,6 +614,9 @@ void executeBattleCode_copyMonsterToSlot(u8 dest, u8 idx, u8 target) {
     s32 i;
     u8 src;
 
+#ifdef PLATFORM_PC
+    if (pcArenaRosterActive()) return; /* the match keeps its approved slots */
+#endif
     for (i = 0; i < 11; i++) {
         if (bitmaskCharacterCheck(battleScriptContext[idx].m6_mask, i)) {
             src = i;

@@ -9865,8 +9865,32 @@ msgid "Each player controls a party from a memory-card save. Both parties fight 
 msgstr "各プレイヤーがメモリーカードのセーブからパーティを選び、徒歩で戦います。"
 
 #: port/src/ui/arena.cpp
+msgid "Build enemy teams and review the loadout together before fighting."
+msgstr "敵のチームを作り、編成を二人で確認してから戦います。"
+
+#: port/src/ui/arena.cpp
 msgid "Player 2 uses the second controller to choose attacks and targets for an enemy formation."
 msgstr "プレイヤー 2 は 2 つ目のコントローラーで敵の技とターゲットを選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "Paste the loadout shared by the other player, or build one below."
+msgstr "相手から受け取った編成コードを貼るか、下で編成を作ります。"
+
+#: port/src/ui/arena.cpp
+msgid "Give both players enemy teams, or use a character party for Player 1."
+msgstr "両方を敵チームにするか、プレイヤー 1 にキャラクターのパーティを使います。"
+
+#: port/src/ui/arena.cpp
+msgid "Let both players call an assigned Gear during a fight."
+msgstr "対戦中に両プレイヤーが割り当てたギアを呼べます。"
+
+#: port/src/ui/arena.cpp
+msgid "Share the code after editing. Either player can load it, review both teams, and make changes. Both players must approve the same code."
+msgstr "編集後にコードを共有してください。どちらも読み込んで両チームを確認し、編集できます。二人が同じコードを承認してください。"
+
+#: port/src/ui/arena.cpp
+msgid "Select: Ready"
+msgstr "セレクト: 準備完了"
 
 #: port/src/ui/arena.cpp
 msgid "Select Versus battle and choose an enemy formation, then join again."
@@ -9919,6 +9943,10 @@ msgstr "ホストのアドレスとポートを入力してください。"
 #: port/src/ui/arena.cpp
 msgid "Choose a party from a memory-card save."
 msgstr "メモリーカードのセーブからパーティを選んでください。"
+
+#: port/src/ui/arena.cpp
+msgid "Load or build a valid custom loadout."
+msgstr "有効な編成を読み込むか作成してください。"
 
 #: port/src/ui/arena.cpp
 msgid "Choose an enemy formation or let Player 2 choose."
