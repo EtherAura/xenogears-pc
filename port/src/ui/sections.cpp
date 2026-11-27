@@ -549,19 +549,80 @@ bool dialogOpen() {
     return dialog.pending;
 }
 
-// wide: the path on a line of its own, the buttons under it (long paths).
-bool folderField(const char* id, char* buf, size_t size, int tag, const char* use, bool wide = false) {
+struct PathScroll {
+    std::string value;
+    double idleSince = 0.0;
+    float width = 0.0f;
+    int lastFrame = -1;
+};
+
+bool scrollingFolderInput(char* path, size_t size, PathScroll& scroll) {
+    const char* label = "##folder";
+    const ImVec2 padding = ImGui::GetStyle().FramePadding;
+    const float width = ImGui::CalcItemWidth() - 2.0f * padding.x;
+    const bool editing = ImGui::GetActiveID() == ImGui::GetID(label);
+    const float overflow = width > 0.0f && !editing ? ImGui::CalcTextSize(path).x - width : 0.0f;
+    const bool scrolling = overflow > 0.0f;
+
+    // Let InputText handle focus and editing. Draw the idle text ourselves
+    // only when it needs to move.
+    if (scrolling) ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(0, 0, 0, 0));
+    bool go = ImGui::InputText(label, path, size,
+                               ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+    if (scrolling) ImGui::PopStyleColor();
+
+    const double now = ImGui::GetTime();
+    const int frame = ImGui::GetFrameCount();
+    const bool active = ImGui::IsItemActive();
+    if (editing || active || scroll.lastFrame != frame - 1 || scroll.width != width || scroll.value != path) {
+        scroll.value = path;
+        scroll.idleSince = now;
+        scroll.width = width;
+    }
+    scroll.lastFrame = frame;
+    if (scrolling && ImGui::IsItemVisible()) {
+        // Travel in both directions, pausing at each end. Round the
+        // position to a screen pixel so the moving glyphs stay sharp.
+        const double speed = 48.0 * scale();
+        const double period = 2.0 * (overflow / speed + 1.0);
+        const double phase = fmod(now - scroll.idleSince, period);
+        const double travel = std::min(phase, period - phase) - 0.5;
+        const float offset = floorf(std::clamp(static_cast<float>(travel * speed), 0.0f, overflow));
+        ImVec2 start = ImGui::GetItemRectMin();
+        ImVec2 end = ImGui::GetItemRectMax();
+        start.x += padding.x;
+        start.y += padding.y;
+        end.x -= padding.x;
+        ImDrawList* draw = ImGui::GetWindowDrawList();
+        draw->PushClipRect(start, end, true);
+        draw->AddText(ImVec2(start.x - offset, start.y), ImGui::GetColorU32(ImGuiCol_Text), path);
+        draw->PopClipRect();
+    }
+    return go;
+}
+
+// A folder picked with Browse or entered with Return takes effect immediately.
+// `use` adds a button that runs the same action on the typed path.
+bool folderField(const char* id, char* buf, size_t size, int tag, const char* use, bool wide = false,
+                 PathScroll* scroll = nullptr) {
     ImGui::PushID(id);
-    float buttons=ImGui::CalcTextSize(tr("Browse...")).x+ImGui::CalcTextSize(tr(use)).x+
-        ImGui::GetStyle().FramePadding.x*4+ImGui::GetStyle().ItemSpacing.x*2;
+    float padding = ImGui::GetStyle().FramePadding.x * 2 + ImGui::GetStyle().ItemSpacing.x;
+    float buttons = ImGui::CalcTextSize(tr("Browse...")).x + padding;
+    if (use != nullptr) buttons += ImGui::CalcTextSize(tr(use)).x + padding;
     ImGui::SetNextItemWidth(wide ? -1.0f : -buttons);
-    bool go=ImGui::InputText("##folder",buf,size,ImGuiInputTextFlags_EnterReturnsTrue);
+    bool go = scroll ? scrollingFolderInput(buf, size, *scroll)
+                     : ImGui::InputText("##folder", buf, size, ImGuiInputTextFlags_EnterReturnsTrue);
     if (!wide) ImGui::SameLine();
     ImGui::BeginDisabled(dialogOpen());
-    if (ImGui::Button(tr("Browse..."))) browseFolder(tag,buf[0]?buf:NULL);
-    ImGui::EndDisabled(); ImGui::SameLine();
-    go|=ImGui::Button(tr(use)); go|=browsed(tag,buf,size);
-    ImGui::PopID(); return go;
+    if (ImGui::Button(tr("Browse..."))) browseFolder(tag, buf[0] ? buf : NULL);
+    ImGui::EndDisabled();
+    if (use != nullptr) {
+        ImGui::SameLine();
+        go |= ImGui::Button(tr(use));
+    }
+    go |= browsed(tag, buf, size);
+    ImGui::PopID();
+    return go;
 }
 
 // A path to type (keyboard) or pick (Browse: SDL's file dialog), and a button
@@ -639,6 +700,48 @@ void presetsSection() {
 }
 
 bool customWindowOpen;
+
+bool fullscreenRow(SDL_Window* win, bool wizard = false) {
+    bool full = win != nullptr && (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN);
+    if (row("Fullscreen", wizard ? nullptr : "fullscreen")) {
+        if (offOnList("fullscreen", &full)) presentSetFullscreen(full);
+        hint(wizard ? "Use the whole screen." : "F11 or Alt+Enter too.");
+        overrideNote("fullscreen");
+    }
+    return full;
+}
+
+void resolutionRow(bool wizard = false) {
+    if (!row(wizard ? "Render scale" : "Resolution", wizard ? nullptr : "upscale")) return;
+
+    // The list: exact first, then auto, then 2x..12x (hires.c's values 1, 0, 2..12).
+    static const char* const names[] = {"1x (PS1 resolution)", "Auto (from the window)", "2x", "3x", "4x",
+                                        "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"};
+    int up = hiresUpscale();
+    int index = up == 1 ? 0 : up == 0 ? 1 : up;
+    const char* preview = wizard && index < 2 ? (index == 0 ? "1x" : tr("Auto")) : tr(names[index]);
+    if (skin::beginCombo("##upscale", preview)) {
+        for (int i = 0; i < (int)IM_COUNTOF(names); i++) {
+            if (skin::comboItem(tr(names[i]), index == i)) hiresSetUpscale(i == 0 ? 1 : i == 1 ? 0 : i);
+            if (index == i) ImGui::SetItemDefaultFocus();
+        }
+        skin::endCombo();
+    }
+    if (wizard) {
+        hint("1x uses the PS1 resolution. Auto adapts to the window.");
+    } else if (up == 1) {
+        hint(hiresPrecision() ? "PS1 resolution, with subpixel geometry in the displayed picture."
+                             : "The PS1's picture pixel for pixel, as it always was.");
+    } else {
+        hint("Drawn at %dx the PS1's resolution in a copy of the picture the game never reads. Movies stay "
+             "as they are.", hiresScaleNow());
+        if (up == 0) {
+            hint("Auto: as many times as the window's height holds PS1 lines (4x in a 1868x965 window, 9x at "
+                 "4K).");
+        }
+    }
+    overrideNote("upscale");
+}
 
 void displaySection() {
     opt::beginPage("display", DISPLAY);
@@ -748,16 +851,7 @@ void displaySection() {
     }
 
     SDL_Window* win = window();
-    bool full = win != NULL && (SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN);
-    if (row("Fullscreen", "fullscreen")) {
-        static const char* const offOn[] = {"Off", "On"};
-        if (choice("fullscreen", offOn, 2, full) != (int)full) {
-            full = !full;
-            presentSetFullscreen(full);
-        }
-        hint("F11 or Alt+Enter too.");
-        overrideNote("fullscreen");
-    }
+    bool full = fullscreenRow(win);
 
 #ifndef __ANDROID__ // the window fills the screen there, with or without the system bars
     if (row("Window size", "window_width window_height")) {
@@ -822,38 +916,7 @@ void displaySection() {
 
     // ---- how sharp: the resolution, colour and the filters
     opt::group(N_("Quality"));
-    if (row("Resolution", "upscale")) {
-        // The list: exact first, then auto, then 2x..12x (hires.c's values 1, 0, 2..12).
-        static const char* const names[] = {"1x (PS1 resolution)", "Auto (from the window)", "2x", "3x", "4x",
-                                            "5x", "6x", "7x", "8x", "9x", "10x", "11x", "12x"};
-        int up = hiresUpscale();
-        int index = up == 1 ? 0 : up == 0 ? 1 : up;
-        ImGui::SetNextItemWidth(comboWidth(names, (int)IM_COUNTOF(names), tr(names[index])));
-        if (skin::beginCombo("##upscale", tr(names[index]))) {
-            for (int i = 0; i < (int)IM_COUNTOF(names); i++) {
-                if (skin::comboItem(tr(names[i]), index == i)) {
-                    hiresSetUpscale(i == 0 ? 1 : i == 1 ? 0 : i);
-                }
-                if (index == i) {
-                    ImGui::SetItemDefaultFocus();
-                }
-            }
-            skin::endCombo();
-        }
-        if (up == 1) {
-            hint(hiresPrecision() ? "PS1 resolution, with subpixel geometry in the displayed picture."
-                                  : "The PS1's picture pixel for pixel, as it always was.");
-        } else {
-            hint("Drawn at %dx the PS1's resolution in a copy of the picture the game never reads. Movies stay "
-                 "as they are.",
-                 hiresScaleNow());
-            if (up == 0) {
-                hint("Auto: as many times as the window's height holds PS1 lines (4x in a 1868x965 window, 9x at "
-                     "4K).");
-            }
-        }
-        overrideNote("upscale");
-    }
+    resolutionRow();
 
     if (row("Colour", "upscale_color")) {
         static const char* const colours[] = {"True colour", "15-bit", "15-bit fine", "Raw 8-bit"};
@@ -3292,6 +3355,7 @@ Message biosMsg, discMsg;
 struct DiscSetup {
     char first[4096], other[4096], region[3];
     char imageDir[4096], biosDir[4096], bios[4096];
+    PathScroll imageScroll, biosScroll;
     CdImageInfo info[2];
     CdSetupImage found[16];
     int foundCount;
@@ -3495,24 +3559,23 @@ void menuLookRows() {
 
     if (row("Menu font size", "menu_font_scale")) {
         static const int fontSteps[] = {75, 80, 85, 90, 95, 100, 110, 120, 130, 140, 150};
-        static const char* const fontNames[] = {"75%",  "80%",  "85%",  "90%",  "95%", "100%",
-                                                "110%", "120%", "130%", "140%", "150%"};
         int percent = skin::fontScalePercent();
         char now[16];
-        snprintf(now, sizeof(now), "%d%%", percent);
-        ImGui::SetNextItemWidth(comboWidth(fontNames, (int)IM_COUNTOF(fontNames), now));
+        snprintf(now, sizeof now, "%d%%", percent);
         int chosen = percent;
         if (skin::beginCombo("##menufontscale", now)) {
-            for (int i = 0; i < (int)IM_COUNTOF(fontSteps); i++) {
-                if (skin::comboItem(fontNames[i], fontSteps[i] == percent)) chosen = fontSteps[i];
-                if (fontSteps[i] == percent) ImGui::SetItemDefaultFocus();
+            for (int step : fontSteps) {
+                char label[16];
+                snprintf(label, sizeof label, "%d%%", step);
+                if (skin::comboItem(label, step == percent)) chosen = step;
+                if (step == percent) ImGui::SetItemDefaultFocus();
             }
             skin::endCombo();
         }
         if (chosen != percent) {
             skin::setFontScalePercent(chosen);
         }
-        hint("Scales the menu's text independently of the panel's layout size (75%% to 150%%; 100%% is sharpest).");
+        hint("Changes the text size without resizing the menu.");
         overrideNote("menu_font_scale");
     }
 
@@ -3942,7 +4005,7 @@ bool discSetupCommand(const char* command, const char* argument) {
 }
 
 const char* const setupSectionNames[SETUP_SECTIONS] = {N_("Disc images"), "BIOS", N_("Presets")};
-const char* const wizardStepNames[WIZARD_STEPS] = {N_("Setup"), N_("Presets & Settings")};
+const char* const wizardStepNames[WIZARD_STEPS] = {N_("Disc setup"), N_("Game setup")};
 
 // What a missing BIOS takes away: what the game draws with the BIOS's own
 // font (B(51h) Krom2RawAdd, port/src/system/krom.c): the save titles on the
@@ -3950,8 +4013,8 @@ const char* const wizardStepNames[WIZARD_STEPS] = {N_("Setup"), N_("Presets & Se
 // some scenes (the field's EX BEh lines, getScrollingTextGlyph).
 const char* const biosFeatures[] = {N_("Save titles on the memory card screens"), N_("Text that scrolls over some scenes")};
 
-void startupMenuRow(const char* id) {
-    if (row("Startup menu", "menu_on_startup")) {
+void startupMenuRow(const char* id, bool wizard = false) {
+    if (row("Startup menu", wizard ? nullptr : "menu_on_startup")) {
         bool on = settingsBool("menu_on_startup", 0) != 0;
         if (offOnList(id, &on)) {
             settingsDescribe("menu_on_startup",
@@ -3959,28 +4022,42 @@ void startupMenuRow(const char* id) {
             settingsSetInt("menu_on_startup", on ? 1 : 0);
             settingsSave();
         }
-        hint("On: open the pre-game menu (Presets, Settings, Discs, BIOS, Start) on every launch. Off (default): "
-             "boot straight into the game next time. Change this anytime in Settings (F1 > System > This menu > "
-             "Startup menu), or pass --menu to open it once.");
+        if (wizard) hint("Show the pre-game menu on every launch.");
+        else hint("On: open the pre-game menu (Presets, Settings, Discs, BIOS, Start) on every launch. Off (default): "
+                  "boot straight into the game next time. Change this anytime in Settings (F1 > System > This menu > "
+                  "Startup menu), or pass --menu to open it once.");
     }
 }
 
-void setupWizardStep1() {
-    opt::beginPage("setup-wiz-1", -1, false);
-    opt::group(N_("Disc images"), opt::STACKED);
-    row("Image folder");
-    if (folderField("setup-folder", setup.imageDir, sizeof setup.imageDir, 42, "Search", true)) searchImages();
-    hint("The folder holding your Xenogears disc images (subfolders for each disc are searched too).");
-    if (setup.searched && setup.foundCount > 0) {
-        row("Found");
+const char* setupFileName(const char* path) {
+    const char* name = path;
+    for (const char* p = path; *p; ++p) {
+        if (*p == '/' || *p == '\\') name = p + 1;
+    }
+    return name;
+}
+
+void setupStartingDisc() {
+    char value[80];
+    if (setup.valid) {
+        snprintf(value, sizeof value, tr("%s Disc %d"), setup.info[0].region, setup.info[0].disc);
+    } else {
+        snprintf(value, sizeof value, "%s", setup.searched ? tr("Not found") : tr("None"));
+    }
+    if (setup.foundCount == 0) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(value);
+    } else if (skin::beginCombo("##starting-disc", value)) {
         for (int i = 0; i < setup.foundCount; i++) {
             const CdSetupImage& f = setup.found[i];
-            const char* name = strrchr(f.path, '/');
+            const char* name = setupFileName(f.path);
             char label[600];
             bool wrongRegion = setup.region[0] && strcmp(f.info.region, setup.region) != 0;
-            snprintf(label, sizeof label, "%s Disc %d: %s##found%d", f.info.region, f.info.disc, name ? name + 1 : f.path, i);
+            snprintf(label, sizeof label, tr("%s Disc %d: %s"), f.info.region, f.info.disc, name);
+            bool selected = !strcmp(f.path, setup.first);
+            ImGui::PushID(i);
             ImGui::BeginDisabled(wrongRegion);
-            if (skin::selectable(label, !strcmp(f.path, setup.first) || !strcmp(f.path, setup.other))) {
+            if (skin::comboItem(label, selected)) {
                 copyPath(setup.first, f.path);
                 setup.other[0] = '\0';
                 for (int j = 0; j < setup.foundCount; j++)
@@ -3988,100 +4065,84 @@ void setupWizardStep1() {
                         copyPath(setup.other, setup.found[j].path);
                 verifySetup();
             }
+            if (selected) ImGui::SetItemDefaultFocus();
             ImGui::EndDisabled();
+            ImGui::PopID();
         }
-        hint("Choose the disc to start on; the other disc of the same release goes with it.");
+        skin::endCombo();
     }
-    if (opt::plain()) {
-        setup.message.draw();
-        for (int i = 0; i < 2; i++) {
-            if (setup.info[i].disc) {
-                ImGui::Text(tr("%s Disc %d: %s"), setup.info[i].region, setup.info[i].disc, setup.info[i].boot);
-            }
-        }
+    if (setup.valid && setup.info[1].disc) {
+        hint("Disc %d is ready for swapping.", setup.info[1].disc);
+    } else {
+        hint("Choose which disc to start with.");
     }
+}
 
-    opt::group("BIOS", opt::STACKED);
-    row("BIOS folder");
-    if (folderField("setup-biosdir", setup.biosDir, sizeof setup.biosDir, 43, "Search", true)) searchBios();
-    hint("Optional: a folder containing a 512 KB PS1 BIOS image (e.g. scph5501.bin). Read in place, never copied.");
-    if (opt::plain()) {
-        if (setup.biosOk) {
-            setup.biosMessage.draw();
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-            textLines("Optional: only needed for save titles on memory card screens and scrolling scene text. "
-                      "Leave empty to continue without one (can be set later in F1 > System > Discs and BIOS).");
-            ImGui::PopStyleColor();
-        }
-    }
+bool wizardButton(const char* label) {
+    const char* text = tr(label);
+    float width = ImGui::CalcTextSize(text).x + ImGui::GetStyle().FramePadding.x * 2;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - width));
+    return ImGui::Button(text);
+}
 
-    opt::group(N_("Startup"));
-    startupMenuRow("##setup_wizard_menu_on_startup");
-    if (opt::plain()) {
-        bool on = settingsBool("menu_on_startup", 0) != 0;
-        ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        textLines(on ? "On: the pre-game menu will open on every launch. Change this anytime in Settings "
-                       "(F1 > System > This menu > Startup menu)."
-                     : "Off: future launches start straight into the game. Enable the startup menu anytime in "
-                       "Settings (F1 > System > This menu > Startup menu), or pass --menu once.");
-        ImGui::PopStyleColor();
+void setupWizardStep1() {
+    opt::beginPage("setup-wiz-1", -1);
+    if (row("Disc folder")) {
+        if (folderField("setup-folder", setup.imageDir, sizeof setup.imageDir, 42, nullptr, false, &setup.imageScroll)) {
+            searchImages();
+        }
+        if (setup.message.error && setup.message.text[0]) hint("%s", setup.message.text);
+        else hint("Browse or type a folder path and press Enter.");
     }
+    if (row("Starting disc")) setupStartingDisc();
+    if (row("BIOS folder")) {
+        if (folderField("setup-biosdir", setup.biosDir, sizeof setup.biosDir, 43, nullptr, false, &setup.biosScroll)) {
+            searchBios();
+        }
+        if (setup.biosMessage.error && setup.biosMessage.text[0]) hint("%s", setup.biosMessage.text);
+        else hint("Optional PS1 BIOS for save titles and scrolling scene text.");
+    }
+    if (row("BIOS")) {
+        ImGui::AlignTextToFramePadding();
+        if (setup.biosOk) wrappedText("%s", setupFileName(setup.bios));
+        else ImGui::TextDisabled("%s", setup.biosMessage.text[0] ? tr("Not found") : tr("None"));
+    }
+    startupMenuRow("##setup_wizard_menu_on_startup", true);
     opt::endPage();
 
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
     markBlock();
     ImGui::BeginDisabled(!setup.valid);
-    if (ImGui::Button(tr("Next >##wiz_step1_next"))) {
+    if (wizardButton(N_("Next"))) {
         if (!setup.biosOk) setup.withoutBios = true;
         sfx::play(sfx::CHOOSE);
         showSetupSection(1);
     }
     ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button(tr("Quit##wiz_step1_quit"))) {
-        sfx::play(sfx::BACK);
-        closeMenu();
-    }
-    hint(setup.valid ? "Continue to choose a preset or configure settings directly."
-                     : "Choose a folder with your Xenogears disc image(s) to continue.");
+    hint("Choose a preset or start with your current settings.");
 }
 
 void setupWizardStep2() {
     opt::beginPage("setup-wiz-2", -1);
-    if (opt::plain()) {
-        markBlock();
-        ImGui::PushStyleColor(ImGuiCol_Text, skin::textHint);
-        textLines("Choose a preset below, click Configure settings to customise options yourself, or click Start Game to launch right away.");
-        ImGui::PopStyleColor();
+    opt::presetRows(true);
+    fullscreenRow(window(), true);
+    resolutionRow(true);
+    if (row("Settings")) {
+        if (ImGui::Button(tr("Configure"))) openPreGameSettings();
+        hint("Open the full F1 settings menu.");
     }
-    opt::group(N_("Presets"));
-    opt::presetRows();
     opt::endPage();
 
     ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
     markBlock();
-    if (ImGui::Button(tr("< Back##wiz_step2_back"))) {
-        sfx::play(sfx::BACK);
-        showSetupSection(0);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(tr("Configure settings##wiz_settings"))) {
-        openPreGameSettings();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(tr("Start Game##wiz_start"))) {
+    if (wizardButton(N_("Start Game"))) {
         if (!setup.biosOk) setup.withoutBios = true;
         if (setupStart()) {
             sfx::play(sfx::CHOOSE);
             closeMenu();
         }
     }
-    hint("Configure settings opens the full menu before launching; Start Game saves your setup and plays.");
+    hint("Save your setup and launch Xenogears.");
 }
 
 void setupPresets() {

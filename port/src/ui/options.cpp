@@ -1439,18 +1439,18 @@ const std::vector<Preset>& presets() {
                 {"perspective_textures", 1, nullptr},
                 {"geometry_slivers", 1, nullptr},
                 {"geometry_seam_guard", 1, nullptr},
-                {"texture_style_3d", 9, nullptr},
-                {"texture_style_sprite", 9, nullptr},
-                {"texture_style_hud", 9, nullptr},
-                {"texture_style_battle_hud", 9, nullptr},
-                {"texture_style_text", 6, nullptr},
-                {"texture_style_icon", 9, nullptr},
+                {"texture_style_3d", 0, nullptr},
+                {"texture_style_sprite", 0, nullptr},
+                {"texture_style_hud", 0, nullptr},
+                {"texture_style_battle_hud", 0, nullptr},
+                {"texture_style_text", 0, nullptr},
+                {"texture_style_icon", 0, nullptr},
                 {"texture_filter_portrait", 0, nullptr},
                 {"texture_filter_menu_portrait", 0, nullptr},
                 {"texture_filter_battle_portrait", 0, nullptr},
-                {"portrait_set", 0, "cel-8x"},
-                {"menu_portrait_set", 0, "cel-8x"},
-                {"battle_portrait_set", 0, "cel-8x"},
+                {"portrait_set", 0, "original"},
+                {"menu_portrait_set", 0, "original"},
+                {"battle_portrait_set", 0, "original"},
                 {"text_smooth", 0, nullptr},
                 {"present_shader", 0, ""},
                 {"menu_text", 1, nullptr},
@@ -1458,7 +1458,7 @@ const std::vector<Preset>& presets() {
                 {"menu_font_scale", 85, nullptr},
                 {"menu_dark", 1, nullptr},
                 {"menu_desc_autoscroll", 1, nullptr},
-                {"movie_replacements", 1, nullptr},
+                {"movie_replacements", 0, nullptr},
                 {"sprite_preload", 1, nullptr},
                 {"volume", 100, nullptr},
                 {"binaural_headphones", 0, nullptr},
@@ -1532,13 +1532,13 @@ const std::vector<Preset>& presets() {
     };
     p.push_back({N_("Enhanced (Normal Mode)"),
                  N_("The Enhanced setup on Normal difficulty: 16:9 widescreen with expanded vertical framing, "
-                    "Auto resolution, Cel 8x artwork and portraits, Enhanced text, 60 Hz modes, full HD-2D scene "
+                    "Auto resolution, original artwork, 60 Hz modes, full HD-2D scene "
                     "effects, free and first-person camera, Speedup, bug fixes, enemy info and battle retry, with "
                     "vanilla 100% encounter rate and rewards."),
                  enhancedValues(false, false)});
     p.push_back({N_("Enhanced (Hard Mode)"),
                  N_("The Enhanced setup on Hard difficulty: 16:9 widescreen with expanded vertical framing, "
-                    "Auto resolution, Cel 8x artwork and portraits, Enhanced text, 60 Hz modes, full HD-2D scene "
+                    "Auto resolution, original artwork, 60 Hz modes, full HD-2D scene "
                     "effects, free and first-person camera, Speedup, bug fixes, enemy info and battle retry, with "
                     "Hard difficulty, 26% encounter rate and 300% EXP, gold and deathblow learning."),
                  enhancedValues(true, false)});
@@ -1691,6 +1691,19 @@ bool resetAllWanted;
 char presetMessage[200];
 bool presetError;
 
+void askPreset(int i) {
+    asking = i;
+    askWanted = true;
+}
+
+void saveCurrentPreset() {
+    int n = saveMine();
+    snprintf(presetMessage, sizeof presetMessage, tr("My setup saved: %d settings."), n);
+    presetError = false;
+    fprintf(stderr, "ui: my setup saved (%d settings)\n", n);
+    sfx::play(sfx::CHOOSE);
+}
+
 bool beginModal(const char* name) {
     nextModal();
     bool open = ImGui::BeginPopupModal(name, NULL,
@@ -1703,12 +1716,28 @@ bool beginModal(const char* name) {
 
 } // namespace
 
-void presetRows() {
+void presetRows(bool compact) {
     int count = (int)presets().size();
     bool haveMine = settingsGet(MINE_KEY) != nullptr && settingsGet(MINE_KEY)[0] != '\0';
     int total = count + (haveMine ? 1 : 0);
-    for (int i = 0; i < total; i++) {
-        const char* name = i < count ? presets()[i].name : "My setup";
+    auto presetName = [count](int i) { return i < count ? presets()[i].name : N_("My setup"); };
+    if (compact && row("Preset")) {
+        int current = 0;
+        while (current < total && !changesOf(current).empty()) ++current;
+        const char* preview = current < total ? tr(presetName(current)) : tr("Current settings");
+        if (skin::beginCombo("##preset", preview)) {
+            for (int i = 0; i < total; i++) {
+                ImGui::PushID(i);
+                if (skin::comboItem(tr(presetName(i)), i == current)) askPreset(i);
+                if (i == current) ImGui::SetItemDefaultFocus();
+                ImGui::PopID();
+            }
+            skin::endCombo();
+        }
+        hint("Choose a preset to review its changes.");
+    }
+    for (int i = 0; !compact && i < total; i++) {
+        const char* name = presetName(i);
         const char* about = i < count ? presets()[i].about
                                       : "Your saved setup (preset_mine): restores every setting as saved.";
         int diffs = (int)changesOf(i).size();
@@ -1726,10 +1755,7 @@ void presetRows() {
         ImGui::PushID(i);
         bool chosen = ImGui::Selectable(tr(name), diffs == 0, 0, ImGui::CalcTextSize(tr(name)));
         ImGui::PopID();
-        if (chosen) {
-            asking = i;
-            askWanted = true;
-        }
+        if (chosen) askPreset(i);
         if (diffs == 0) {
             ImGui::SameLine(0, 10 * scale());
             ImGui::PushStyleColor(ImGuiCol_Text, skin::textGood);
@@ -1744,38 +1770,33 @@ void presetRows() {
         hint("%s", tr(about));
         hint("Shows every change before applying. Settings a preset does not name stay as they are.");
     }
+    if (compact) {
+        if (row("My setup")) {
+            if (ImGui::Button(tr("Save preset"))) saveCurrentPreset();
+            hint("Save your current settings as a preset.");
+        }
+    }
     if (presetMessage[0] != '\0' && plain()) {
         ImGui::PushStyleColor(ImGuiCol_Text, presetError ? skin::textError : skin::textGood);
         textLines(presetMessage);
         ImGui::PopStyleColor();
     }
-    if (pg.active) {
+    if (!compact && pg.active) {
         if (!hiddenBySubmenu() && mode == MODE_NORMAL) {
             emitTail();
             closeTable();
             markBlock();
-            if (ImGui::Button(tr(haveMine ? "Save my current setup again" : "Save my current setup"))) {
-                int n = saveMine();
-                snprintf(presetMessage, sizeof presetMessage, tr("My setup saved: %d settings."), n);
-                presetError = false;
-                fprintf(stderr, "ui: my setup saved (%d settings)\n", n);
-                sfx::play(sfx::CHOOSE);
-            }
+            if (ImGui::Button(tr(haveMine ? "Save my current setup again" : "Save my current setup"))) saveCurrentPreset();
             hint("Keeps every setting the presets know as it is now (in settings.ini, preset_mine): the presets' list "
                  "then has My setup, to come back to it.");
         }
-    } else if (row("My setup", MINE_KEY)) {
-        if (ImGui::Button(tr(haveMine ? "Save my current setup again" : "Save my current setup"))) {
-            int n = saveMine();
-            snprintf(presetMessage, sizeof presetMessage, tr("My setup saved: %d settings."), n);
-            presetError = false;
-            fprintf(stderr, "ui: my setup saved (%d settings)\n", n);
-            sfx::play(sfx::CHOOSE);
-        }
+    } else if (!compact && row("My setup", MINE_KEY)) {
+        if (ImGui::Button(tr(haveMine ? "Save my current setup again" : "Save my current setup"))) saveCurrentPreset();
         hint("Keeps every setting the presets know as it is now (in settings.ini, preset_mine): the presets' list "
              "then has My setup, to come back to it.");
     }
     if (indexing()) return;
+    emitTail();
     closeTable();
     if (askWanted) {
         ImGui::OpenPopup("##presetask");
@@ -1817,11 +1838,15 @@ void presetRows() {
             settingsSave();
             bool engineChanged = false;
             for (const Change& c : changes) engineChanged |= c.spec->key == "engine";
-            snprintf(presetMessage, sizeof presetMessage,
-                     tr(engineChanged ? "%s applied: %d settings changed. The engine changes at the next launch "
-                                        "(System > Engine can restart now)."
-                                      : "%s applied: %d settings changed."),
-                     name, (int)changes.size());
+            if (compact) {
+                snprintf(presetMessage, sizeof presetMessage, tr("%s applied."), name);
+            } else {
+                snprintf(presetMessage, sizeof presetMessage,
+                         tr(engineChanged ? "%s applied: %d settings changed. The engine changes at the next launch "
+                                            "(System > Engine can restart now)."
+                                          : "%s applied: %d settings changed."),
+                         name, (int)changes.size());
+            }
             presetError = false;
             sfx::play(sfx::CHOOSE);
             ImGui::CloseCurrentPopup();

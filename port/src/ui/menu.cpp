@@ -63,6 +63,8 @@ const char* const listNames[SECTION_COUNT] = {
 namespace {
 
 // XG_UI_SCRIPT (ui.h).
+constexpr SDL_MouseID scriptMouseId = static_cast<SDL_MouseID>(-3);
+
 struct Step {
     unsigned long at; // menu frame, or vblank with onVBlank
     bool onVBlank;
@@ -100,6 +102,8 @@ struct State {
     bool preGameSettings; // true while browsing full Settings from the pre-game / setup screen
     bool startupMenu;    // opened via UI_SETUP_STARTUP (menu_on_startup / --menu)
     bool wizard;         // first-launch step-by-step setup wizard (when !startupMenu)
+    const char* setupConfirmButton;
+    const char* setupCancelButton;
     bool helpWanted, backWanted; // the legend's help and back, clicked
     bool resetScroll;    // reset content pane scroll on submenu transition
     bool restoreContent;         // a click on nothing took the cursor out of the section: back to it
@@ -141,7 +145,7 @@ struct State {
     unsigned playsSeen;      // sfx::plays() after the last frame's sounds
     unsigned long quietUntil; // no cursor sound for a move before this frame (something else sounded)
     ImVec2 mouse = ImVec2(-FLT_MAX, -FLT_MAX);
-    bool touchMouse; // mouse events came from touch (SDL_TOUCH_MOUSEID)
+    bool emulatedMouse; // the last accepted pointer input came from touch or a script
     ImRect pane;
     ImDrawList* paneDrawList;
     unsigned long frames;
@@ -337,6 +341,7 @@ void runStep(Step& s) {
         e.type = SDL_EVENT_MOUSE_MOTION;
         e.motion.timestamp = SDL_GetTicksNS();
         e.motion.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
+        e.motion.which = scriptMouseId;
         e.motion.x = x;
         e.motion.y = y;
         SDL_PushEvent(&e);
@@ -345,6 +350,7 @@ void runStep(Step& s) {
             b.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
             b.button.timestamp = SDL_GetTicksNS();
             b.button.windowID = e.motion.windowID;
+            b.button.which = scriptMouseId;
             b.button.button = SDL_BUTTON_LEFT;
             b.button.down = true;
             b.button.clicks = 1;
@@ -401,6 +407,7 @@ void runStep(Step& s) {
         SDL_Event e = {};
         e.type = SDL_EVENT_MOUSE_WHEEL;
         e.wheel.timestamp = SDL_GetTicksNS();
+        e.wheel.which = scriptMouseId;
         e.wheel.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
         e.wheel.y = (float)atof(s.arg);
         e.wheel.integer_y = (int)e.wheel.y;
@@ -415,6 +422,7 @@ void runStep(Step& s) {
         b.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
         b.button.timestamp = SDL_GetTicksNS();
         b.button.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
+        b.button.which = scriptMouseId;
         b.button.button = SDL_BUTTON_RIGHT;
         b.button.down = true;
         b.button.clicks = 1;
@@ -429,6 +437,7 @@ void runStep(Step& s) {
         b.type = SDL_EVENT_MOUSE_BUTTON_UP;
         b.button.timestamp = SDL_GetTicksNS();
         b.button.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
+        b.button.which = scriptMouseId;
         b.button.button = SDL_BUTTON_RIGHT;
         SDL_PushEvent(&b);
     } else if (strcmp(s.cmd, "background") == 0) {
@@ -470,6 +479,7 @@ void runScript(bool onVBlank, unsigned long now, bool all = false) {
             b.type = SDL_EVENT_MOUSE_BUTTON_UP;
             b.button.timestamp = SDL_GetTicksNS();
             b.button.windowID = presentWindow() != NULL ? SDL_GetWindowID(presentWindow()) : 0;
+            b.button.which = scriptMouseId;
             b.button.button = r.kind == 4 ? SDL_BUTTON_LEFT : SDL_BUTTON_RIGHT;
             SDL_PushEvent(&b);
         }
@@ -514,8 +524,14 @@ struct NavButton {
     const char* button; // pad.h's name
     ImGuiKey key;
 };
-#define BUTTON_CHOOSE padConfirmButton()
-#define BUTTON_BACK padCancelButton()
+const char* menuConfirmButton() {
+    return st.setup ? st.setupConfirmButton : padConfirmButton();
+}
+
+const char* menuCancelButton() {
+    return st.setup ? st.setupCancelButton : padCancelButton();
+}
+
 const NavButton navButtons[] = {
     {"up", ImGuiKey_GamepadDpadUp},     {"down", ImGuiKey_GamepadDpadDown},   {"left", ImGuiKey_GamepadDpadLeft},
     {"right", ImGuiKey_GamepadDpadRight}, {"confirm", ImGuiKey_GamepadFaceDown}, {"cancel", ImGuiKey_GamepadFaceRight},
@@ -528,8 +544,8 @@ bool keyHeld[SDL_SCANCODE_COUNT]; // every key, from the events (open or not)
 bool navDown[NAV_BUTTONS];        // what ImGui was last told
 
 int padButton(const char* name) {
-    if (!strcmp(name, "confirm")) name = padConfirmButton();
-    if (!strcmp(name, "cancel")) name = padCancelButton();
+    if (!strcmp(name, "confirm")) name = menuConfirmButton();
+    if (!strcmp(name, "cancel")) name = menuCancelButton();
     for (int i = 0; i < PAD_BUTTONS; i++) {
         if (strcmp(padButtonName(i), name) == 0) {
             return i;
@@ -1142,8 +1158,8 @@ Legend legend() {
         snprintf(out, 64, "%.63s", t.c_str()); // (a key name is short; a long one is cut)
     };
     if (usingPad()) {
-        join(l.choose, pad(BUTTON_CHOOSE), nullptr);
-        join(l.back, pad(BUTTON_BACK), nullptr);
+        join(l.choose, pad(menuConfirmButton()), nullptr);
+        join(l.back, pad(menuCancelButton()), nullptr);
         char ud[64], lr[64];
         join(ud, pad("up"), pad("down"), "");
         join(lr, pad("left"), pad("right"), "");
@@ -1151,8 +1167,8 @@ Legend legend() {
         join(l.section, pad("l1"), pad("r1"));
         join(l.help, pad("triangle"), nullptr);
     } else {
-        join(l.choose, buttonKeyName(BUTTON_CHOOSE), "Enter");
-        join(l.back, buttonKeyName(BUTTON_BACK), "Esc");
+        join(l.choose, buttonKeyName(menuConfirmButton()), "Enter");
+        join(l.back, buttonKeyName(menuCancelButton()), "Esc");
         // The arrows (the game's font has them; ImGui's own, without a disc, not).
         snprintf(l.move, sizeof(l.move), "%s", skin::native() ? "\xe2\x86\x91\xe2\x86\x93\xe2\x86\x90\xe2\x86\x92" : tr("Arrows"));
         join(l.section, buttonKeyName("l1"), buttonKeyName("r1"));
@@ -1271,7 +1287,7 @@ void drawFrame() {
     // The section pane is a nav scope of its own: Right (or Enter, A) on the
     // list goes into it, Esc or B comes back out (popping any active submenu
     // first, then returning to the commands arc).
-    if (st.contentId != 0 && ImGui::GetFocusID() == st.contentId) {
+    if (!inWizard && st.contentId != 0 && ImGui::GetFocusID() == st.contentId) {
         if (st.inContent) {
             stepBack();
         } else {
@@ -1300,7 +1316,7 @@ void drawFrame() {
     // in the menu uses them (a list open, a field being edited, a capture,
     // the cursor in a section).
     bool pad = (io.BackendFlags & ImGuiBackendFlags_HasGamepad) && (io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad);
-    bool free = st.escapeFree && !st.inContent && !capturing();
+    bool free = st.escapeFree && (inWizard || !st.inContent) && !capturing();
     if (st.backWanted) {
         // The legend's or header's back, clicked: pop submenu, else return to
         // the commands arc, else leave the menu.
@@ -1320,9 +1336,8 @@ void drawFrame() {
         } else if (!popupOpen()) {
             leaveOrReturn();
         }
-    }
-    if (free && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
-                 (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))) {
+    } else if (free && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+                        (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false)))) {
         if (inWizard || st.opened || (!inSetup && opt::inSubmenu(st.section))) stepBack();
         else leaveOrReturn();
     }
@@ -1628,7 +1643,12 @@ void drawFrame() {
 
         char headerText[256];
         if (inWizard) {
-            snprintf(headerText, sizeof headerText, tr("Step %d of %d: %s"), st.section + 1, (int)WIZARD_STEPS, secTitle);
+            char step[24];
+            snprintf(step, sizeof step, "%d/%d", st.section + 1, (int)WIZARD_STEPS);
+            float stepX = titleMaxX - ImGui::CalcTextSize(step).x;
+            st.paneDrawList->AddText(ImVec2(stepX, hy), ImGui::GetColorU32(skin::textHint), step);
+            titleMaxX = stepX - 8 * u;
+            snprintf(headerText, sizeof headerText, "%s", secTitle);
         } else if (subTitle != nullptr) {
             snprintf(headerText, sizeof headerText, "%s > %s", secTitle, subTitle);
             if (hx + ImGui::CalcTextSize(headerText).x > titleMaxX) {
@@ -1944,7 +1964,7 @@ void drawFrame() {
     };
     Part variants[3][5];
     // On a changed setting the reset keys join the legend (no Reset button on the row).
-    const char* reset = st.inContent && opt::cursorRowChanged() ? resetText() : "";
+    const char* reset = !inSetup && st.inContent && opt::cursorRowChanged() ? resetText() : "";
     const char* section = inWizard ? "" : keys.section;
     part(variants[0][0], keys.choose, tr("choose"));
     part(variants[0][1], keys.back, tr("back"));
@@ -2044,6 +2064,14 @@ void frame() {
     for (ImDrawList* list : projectedLists) IM_DELETE(list);
     projectedLists.clear();
     updateScale();
+    ImGuiIO& io = ImGui::GetIO();
+    const bool mouseEnabled = skin::menuMouse();
+    if (mouseEnabled) {
+        io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+    } else {
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+        if (SDL_CursorVisible()) SDL_HideCursor();
+    }
     ImGui_ImplVulkan_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     {
@@ -2060,7 +2088,6 @@ void frame() {
         // repeats after 0.72 KeyRepeatDelay, then every 0.8 KeyRepeatRate,
         // and a key held t seconds repeats once t passes the delay: at
         // frame 32, 36, 40...
-        ImGuiIO& io = ImGui::GetIO();
         float vblank = (float)hwVSyncPeriod();
         io.DeltaTime = vblank;
         io.KeyRepeatDelay = 31.5f * vblank / 0.72f;
@@ -2074,13 +2101,12 @@ void frame() {
     // L3+R3, anything else held) are not a press in it. Navigation is off
     // meanwhile, but ImGui keeps following the buttons (clearing HasGamepad
     // would forget them, and a button still held would then press).
-    ImGuiIO& io = ImGui::GetIO();
     if (capturing() || st.padQuiet) {
         io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
     } else {
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
     }
-    bool allowMouse = skin::menuMouse() || st.touchMouse || st.stepCount > 0;
+    bool allowMouse = mouseEnabled || st.emulatedMouse;
     if (!allowMouse) {
         st.mouse = ImVec2(-FLT_MAX, -FLT_MAX);
         io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
@@ -2097,9 +2123,12 @@ void frame() {
     bool moving = !st.setup && !st.backlog && !st.ask && (age < menuMotion::OPENING_FRAMES || st.leaving);
     menuMotion::View view = st.leaving ? menuMotion::leaving(st.centre, skin::unit(), unsigned(st.frames - st.closedAt))
                                        : menuMotion::opening(st.centre, skin::unit(), age);
-    if (!st.setup && !st.backlog && !st.ask && ImGui::IsMousePosValid(&st.mouse)) {
+    if ((!mouseEnabled && st.emulatedMouse) ||
+        (!st.setup && !st.backlog && !st.ask && ImGui::IsMousePosValid(&st.mouse))) {
+        // Touch and scripted positions take precedence over the SDL
+        // backend's desktop cursor position when the mouse is disabled.
         ImVec2 mouse = st.mouse;
-        if (moving) {
+        if (moving && ImGui::IsMousePosValid(&mouse)) {
             if (st.leaving) mouse = ImVec2(-FLT_MAX, -FLT_MAX);
             else if (!view.inverse(mouse, &mouse)) mouse = ImVec2(-FLT_MAX, -FLT_MAX);
         }
@@ -2234,6 +2263,7 @@ void suspend(bool menuOpen) {
 }
 
 void run() {
+    const bool cursorWasVisible = SDL_CursorVisible();
     if (!skin::native() && skin::init()) {
         st.unit = 0; // the game's look now (a disc came after a first opening without one): its style
     }
@@ -2266,7 +2296,7 @@ void run() {
     st.opened = st.wizard;
     st.escapeFree = false;
     st.padQuiet = true;
-    st.touchMouse = false;
+    st.emulatedMouse = false;
     if (!skin::menuMouse()) st.mouse = ImVec2(-FLT_MAX, -FLT_MAX);
     st.lastNav = 0;
     st.openedAt = st.frames;
@@ -2326,6 +2356,9 @@ void run() {
     SDL_StopTextInput(presentWindow());
     SDL_CaptureMouse(false);
     SDL_SetCursor(SDL_GetDefaultCursor());
+    if (cursorWasVisible) SDL_ShowCursor();
+    else SDL_HideCursor();
+    ImGui::GetIO().ConfigFlags &= ~(ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoMouseCursorChange);
     st.open = false;
     settingsSave();
     if (extrasJukeboxEnd) extrasJukeboxEnd();
@@ -2567,6 +2600,13 @@ extern "C" int uiIsOpen(void) {
     return st.open;
 }
 
+static bool acceptMenuPointer(SDL_MouseID id) {
+    const bool emulated = id == SDL_TOUCH_MOUSEID || id == scriptMouseId;
+    if (!emulated && !skin::menuMouse()) return false;
+    st.emulatedMouse = emulated;
+    return true;
+}
+
 extern "C" int uiEvent(const SDL_Event* e) {
     noteInput(e);
     lifecycle(e);
@@ -2622,9 +2662,7 @@ extern "C" int uiEvent(const SDL_Event* e) {
         ImGui_ImplSDL3_ProcessEvent(e);
         return 1;
     case SDL_EVENT_MOUSE_MOTION: {
-        bool touch = e->motion.which == SDL_TOUCH_MOUSEID;
-        if (!touch && !skin::menuMouse() && st.stepCount == 0) return 1;
-        if (touch) st.touchMouse = true;
+        if (!acceptMenuPointer(e->motion.which)) return 1;
         // Into window pixels, as ImGui works (frame()).
         SDL_Event m = *e;
         m.motion.x *= st.pixelsPerUnit;
@@ -2635,9 +2673,7 @@ extern "C" int uiEvent(const SDL_Event* e) {
     }
     case SDL_EVENT_MOUSE_BUTTON_DOWN:
     case SDL_EVENT_MOUSE_BUTTON_UP: {
-        bool touch = e->button.which == SDL_TOUCH_MOUSEID;
-        if (!touch && !skin::menuMouse() && st.stepCount == 0) return 1;
-        if (touch) st.touchMouse = true;
+        if (!acceptMenuPointer(e->button.which)) return 1;
         if (e->button.button == SDL_BUTTON_RIGHT) {
             // The right button goes back, as Esc: out of a list or a field,
             // from an option to the commands, from the commands out.
@@ -2662,7 +2698,7 @@ extern "C" int uiEvent(const SDL_Event* e) {
     case SDL_EVENT_FINGER_CANCELED:
         return 1;
     case SDL_EVENT_MOUSE_WHEEL:
-        if (e->wheel.which != SDL_TOUCH_MOUSEID && !skin::menuMouse() && st.stepCount == 0) return 1;
+        if (!acceptMenuPointer(e->wheel.which)) return 1;
         ImGui_ImplSDL3_ProcessEvent(e);
         return 1;
     case SDL_EVENT_TEXT_INPUT:
@@ -2727,6 +2763,10 @@ extern "C" int uiDiscSetup(const char* region, int flags, char* chosen, unsigned
     if (!st.scriptLoaded) { st.scriptLoaded = true; loadScript(); }
     bool startup = (flags & UI_SETUP_STARTUP) != 0;
     discSetupOpened(region, (flags & UI_SETUP_NO_DISC) != 0, startup);
+    // Presets can change the game's button convention. Keep Choose and
+    // Back on their opening buttons until this setup session ends.
+    st.setupConfirmButton = padConfirmButton();
+    st.setupCancelButton = padCancelButton();
     st.setup = true;
     st.startupMenu = startup;
     st.wizard = !startup;

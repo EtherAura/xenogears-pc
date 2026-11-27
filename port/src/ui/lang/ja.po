@@ -1537,6 +1537,18 @@ msgid "Resolution"
 msgstr "解像度"
 
 #: port/src/ui/sections.cpp
+msgid "Render scale"
+msgstr "描画倍率"
+
+#: port/src/ui/sections.cpp
+msgid "Auto"
+msgstr "自動"
+
+#: port/src/ui/sections.cpp
+msgid "1x uses the PS1 resolution. Auto adapts to the window."
+msgstr "1x は PS1 の解像度です。自動はウィンドウに合わせます。"
+
+#: port/src/ui/sections.cpp
 msgid "PS1 resolution, with subpixel geometry in the displayed picture."
 msgstr "PS1 の解像度。表示する絵ではサブピクセル精度のジオメトリ。"
 
@@ -1832,6 +1844,10 @@ msgstr "ワイド画面の中の 4:3 の絵(ムービー)の左右: 黒帯、横
 #: port/src/ui/sections.cpp
 msgid "Fullscreen"
 msgstr "フルスクリーン"
+
+#: port/src/ui/sections.cpp
+msgid "Use the whole screen."
+msgstr "画面全体を使います。"
 
 #: port/src/ui/sections.cpp
 msgid "On"
@@ -3278,6 +3294,109 @@ msgstr "Vulkan にはシステムのローダーを通してつなぎます。�
 #: port/src/ui/sections.cpp
 msgid "Disc images"
 msgstr "ディスクイメージ"
+
+#: port/src/ui/sections.cpp
+msgid "Disc setup"
+msgstr "ディスク設定"
+
+#: port/src/ui/sections.cpp
+msgid "Game setup"
+msgstr "ゲーム設定"
+
+#: port/src/ui/menu.cpp
+msgid "< Quit"
+msgstr "< 終了"
+
+#: port/src/ui/menu.cpp
+msgid "< Back"
+msgstr "< 戻る"
+
+#: port/src/ui/sections.cpp
+msgid "Starting disc"
+msgstr "開始ディスク"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "%s Disc %d"
+msgstr "%s ディスク %d"
+
+#: port/src/ui/sections.cpp
+msgid "Not found"
+msgstr "見つかりません"
+
+#: port/src/ui/sections.cpp
+msgid "Browse or type a folder path and press Enter."
+msgstr "フォルダを選ぶか、パスを入力して Enter を押します。"
+
+#: port/src/ui/sections.cpp
+msgid "Choose which disc to start with."
+msgstr "最初に使うディスクを選びます。"
+
+#: port/src/ui/sections.cpp
+#, c-format
+msgid "Disc %d is ready for swapping."
+msgstr "ディスク %d も使えます。"
+
+#: port/src/ui/sections.cpp
+msgid "Optional PS1 BIOS for save titles and scrolling scene text."
+msgstr "セーブのタイトルと場面で流れる文字に使う PS1 BIOS (省略可)。"
+
+#: port/src/ui/sections.cpp
+msgid "Show the pre-game menu on every launch."
+msgstr "起動するたびにゲーム開始前のメニューを開きます。"
+
+#: port/src/ui/sections.cpp
+msgid "Startup menu"
+msgstr "起動時のメニュー"
+
+#: port/src/ui/sections.cpp
+msgid "Choose a preset or start with your current settings."
+msgstr "プリセットを選ぶか、今の設定でゲームを始めます。"
+
+#: port/src/ui/sections.cpp
+msgid "Settings"
+msgstr "設定"
+
+#: port/src/ui/sections.cpp
+msgid "Configure"
+msgstr "開く"
+
+#: port/src/ui/sections.cpp
+msgid "Open the full F1 settings menu."
+msgstr "F1 の設定メニューを開きます。"
+
+#: port/src/ui/sections.cpp
+msgid "Changes the text size without resizing the menu."
+msgstr "メニューの大きさはそのままで、文字の大きさを変えます。"
+
+#: port/src/ui/sections.cpp
+msgid "Start Game"
+msgstr "ゲーム開始"
+
+#: port/src/ui/sections.cpp
+msgid "Save your setup and launch Xenogears."
+msgstr "設定を保存してゼノギアスを始めます。"
+
+#: port/src/ui/options.cpp
+msgid "Current settings"
+msgstr "現在の設定"
+
+#: port/src/ui/options.cpp
+msgid "Choose a preset to review its changes."
+msgstr "プリセットを選ぶと変更内容を確認できます。"
+
+#: port/src/ui/options.cpp
+#, c-format
+msgid "%s applied."
+msgstr "%s を適用しました。"
+
+#: port/src/ui/options.cpp
+msgid "Save preset"
+msgstr "プリセットを保存"
+
+#: port/src/ui/options.cpp
+msgid "Save your current settings as a preset."
+msgstr "現在の設定をプリセットとして保存します。"
 
 #: port/src/ui/sections.cpp
 msgid "Save titles on the memory card screens"

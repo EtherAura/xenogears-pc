@@ -108,8 +108,8 @@ void opened();
 bool changed(const char* key);
 void reset(const char* key);
 
-// Presets section (and pre-game Presets page): its rows.
-void presetRows();
+// The wizard uses a single dropdown to choose a preset.
+void presetRows(bool compact = false);
 // Reset all known changed settings back to their defaults (with confirmation).
 void resetAllRow();
 
