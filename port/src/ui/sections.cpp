@@ -685,17 +685,6 @@ bool offOnList(const char* id, bool* value, const char* off = N_("Off"), const c
     return true;
 }
 
-// ---- Presets ----------------------------------------------------------------------------
-
-void presetsSection() {
-    opt::beginPage("presets", PRESETS);
-    opt::group(N_("Presets"));
-    opt::presetRows();
-    opt::group(N_("Reset"));
-    opt::resetAllRow();
-    opt::endPage();
-}
-
 bool customWindowOpen;
 
 bool fullscreenRow(SDL_Window* win, bool wizard = false) {
@@ -3375,6 +3364,15 @@ struct DiscSetup {
     int engine; // system/engine.h: synced with engineSetting()
 } setup;
 
+void presetsSection() {
+    opt::beginPage("presets", PRESETS);
+    opt::group(N_("Presets"));
+    opt::presetRows(false, setup.valid && !setup.accepted ? setup.first : nullptr);
+    opt::group(N_("Reset"));
+    opt::resetAllRow();
+    opt::endPage();
+}
+
 // A path into one of the setup's 4096-byte fields (from another of them).
 void copyPath(char* dst, const char* src) {
     size_t n = strlen(src);
@@ -4133,7 +4131,7 @@ void setupWizardStep1() {
 
 void setupWizardStep2() {
     opt::beginPage("setup-wiz-2", -1);
-    opt::presetRows(true);
+    opt::presetRows(true, setup.first);
     fullscreenRow(window(), true);
     resolutionRow(true);
     if (row("Settings")) {
@@ -4157,7 +4155,7 @@ void setupWizardStep2() {
 void setupPresets() {
     opt::beginPage("setup-presets", -1);
     opt::group(N_("Presets"));
-    opt::presetRows();
+    opt::presetRows(false, setup.first);
     opt::group(N_("Startup"));
     startupMenuRow("##setup_menu_on_startup");
     opt::endPage();

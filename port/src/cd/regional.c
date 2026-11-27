@@ -127,17 +127,26 @@ int regionalMovieEnabled(void) { return settingsBool("japanese_cutscene_audio",0
 void regionalSetBattle(int on) { describe(); settingsSetInt("japanese_battle_voices",!!on); settingsSave(); }
 void regionalSetMovie(int on) { describe(); settingsSetInt("japanese_cutscene_audio",!!on); settingsSave(); }
 const char* regionalSourcePath(int disc) { return disc>=1 && disc<=2 ? sourcePath(disc) : ""; }
+static int verifySource(const char* path, int disc) {
+    CdImageInfo info;
+    char why[64];
+    return cdVerifyImage(path,&info,why,sizeof why) && !strcmp(info.region,"JP") && info.disc==disc;
+}
 int regionalSourceFound(int disc) {
     if (disc<1 || disc>2) return 0;
     Source* s=&sources[disc-1];
     if (s->attempted) return s->image!=NULL;
     if (!sourcePath(disc)[0]) return 0;
-    if (!s->found) {
-        CdImageInfo info;
-        char why[64];
-        s->found=cdVerifyImage(s->path,&info,why,sizeof why) && !strcmp(info.region,"JP") && info.disc==disc ? 1 : -1;
-    }
+    if (!s->found) s->found=verifySource(s->path,disc) ? 1 : -1;
     return s->found>0;
+}
+int regionalSourceFoundBeside(int disc, const char* startingImage) {
+    if (disc<1 || disc>2) return 0;
+    const char* configured=settingsGet(sourceKey(disc));
+    if (configured && *configured) return verifySource(configured,disc);
+    if (!startingImage || !*startingImage) startingImage=cdSwapPath(0);
+    char path[4096];
+    return cdFindImageBeside(startingImage,"JP",disc,path,sizeof path);
 }
 const char* regionalSourceStatus(int disc) {
     Source* s=source(disc);

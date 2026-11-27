@@ -109,7 +109,7 @@ bool changed(const char* key);
 void reset(const char* key);
 
 // The wizard uses a single dropdown to choose a preset.
-void presetRows(bool compact = false);
+void presetRows(bool compact = false, const char* startingImage = nullptr);
 // Reset all known changed settings back to their defaults (with confirmation).
 void resetAllRow();
 

@@ -57,8 +57,8 @@
  *                          canvas's unused rows are trimmed to system memory
  *                          whatever the device heap's fill (else only when it
  *                          is 70% full; XG_TEST_HI_HEAP_PERCENT=n fakes the fill)
- *   XG_VK_FIFO=1           present with FIFO (default: mailbox, else
- *                          immediate, so presenting never holds up the game)
+ *   XG_VK_FIFO=1           always present with FIFO (default: prefer mailbox,
+ *                          with FIFO as the synchronized fallback)
  *   XG_VK_ACQUIRE_US=<n>   how long a vblank may wait for a swapchain image
  *                          (default 1000; a busy swapchain skips the frame)
  *   XG_PRESENT_LOG=1       a line per vblank on stderr: what the game handed

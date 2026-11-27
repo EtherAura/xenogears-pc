@@ -2151,13 +2151,11 @@ static VkPresentModeKHR choosePresentMode(void) {
     if (bufferedPresentation() || envFlag("XG_VK_FIFO") || (displayLockFifo != NULL && displayLockFifo())) {
         return VK_PRESENT_MODE_FIFO_KHR;
     }
-    /* The game's own vblank paces the frames: presenting must not block it. */
-    static const VkPresentModeKHR order[] = {VK_PRESENT_MODE_MAILBOX_KHR, VK_PRESENT_MODE_IMMEDIATE_KHR};
-    for (size_t o = 0; o < 2; o++) {
-        for (uint32_t i = 0; i < n; i++) {
-            if (modes[i] == order[o]) {
-                return order[o];
-            }
+    /* Mailbox lets the game's clock pace the frames without tearing.
+     * Use FIFO when Mailbox is unavailable to keep scanout synchronized. */
+    for (uint32_t i = 0; i < n; i++) {
+        if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
+            return VK_PRESENT_MODE_MAILBOX_KHR;
         }
     }
     return VK_PRESENT_MODE_FIFO_KHR;

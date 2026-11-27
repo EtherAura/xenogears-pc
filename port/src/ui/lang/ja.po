@@ -3402,6 +3402,14 @@ msgid "Choose a preset to review its changes."
 msgstr "プリセットを選ぶと変更内容を確認できます。"
 
 #: port/src/ui/options.cpp
+msgid "Japanese Disc %d is missing or invalid."
+msgstr "日本語版のディスク %d が見つからないか、イメージが無効です。"
+
+#: port/src/ui/options.cpp
+msgid "Add the disc images in Audio > Japanese audio to apply this preset."
+msgstr "このプリセットを適用するには、「サウンド」→「日本語版の音声」でディスクイメージを指定してください。"
+
+#: port/src/ui/options.cpp
 #, c-format
 msgid "%s applied."
 msgstr "%s を適用しました。"

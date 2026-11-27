@@ -14,6 +14,9 @@ const char* regionalSourceStatus(int disc);
  * menu's check before either is on. Its image is verified once, not
  * opened. */
 int regionalSourceFound(int disc);
+/* Check the configured image or search beside the starting image selected in setup.
+ * With no selection, use the drive's starting image. This does not cache the result. */
+int regionalSourceFoundBeside(int disc, const char* startingImage);
 /* Takes effect at once while nothing has been read from the disc's
  * previous image; otherwise at the next launch (`why` says which). */
 int regionalSetSource(int disc, const char* path, char* why, size_t size);

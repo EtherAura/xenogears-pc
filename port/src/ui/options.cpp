@@ -1360,6 +1360,7 @@ struct Preset {
     const char* name;  // N_()
     const char* about; // N_()
     std::vector<PresetValue> values;
+    bool requiresJapaneseDiscs = false;
 };
 
 const std::vector<Preset>& presets() {
@@ -1428,7 +1429,7 @@ const std::vector<Preset>& presets() {
                 {"fog", 2, nullptr},
                 {"color_grade", 2, nullptr},
                 {"color_grade_area", 1, nullptr},
-                {"particles", 2, nullptr},
+                {"particles", 1, nullptr},
                 {"particle_size", 0, nullptr},
                 {"sun_glare", 2, nullptr},
                 {"particles_footsteps", 1, nullptr},
@@ -1549,11 +1550,11 @@ const std::vector<Preset>& presets() {
     p.push_back({N_("Enhanced (Normal Mode, Undub)"),
                  N_("Enhanced (Normal Mode) with Japanese battle voices, Japanese cutscene audio and "
                     "Japanese-translation subtitles."),
-                 enhancedValues(false, true)});
+                 enhancedValues(false, true), true});
     p.push_back({N_("Enhanced (Hard Mode, Undub)"),
                  N_("Enhanced (Hard Mode) with Japanese battle voices, Japanese cutscene audio and "
                     "Japanese-translation subtitles."),
-                 enhancedValues(true, true)});
+                 enhancedValues(true, true), true});
     p.push_back({N_("Crisp Widescreen"),
                  N_("Clean modern presentation without post-processing: the Enhanced engine, 16:9 widescreen with "
                     "expanded vertical framing, Auto resolution, Nearest filter, 60 Hz modes, Speedup, and all "
@@ -1691,6 +1692,7 @@ std::vector<Change> changesOf(int preset) {
 
 int asking = -1;   // the preset whose confirmation is open
 bool askWanted;
+bool missingJapaneseDisc[2];
 bool resetAllWanted;
 char presetMessage[200];
 bool presetError;
@@ -1698,6 +1700,15 @@ bool presetError;
 void askPreset(int i) {
     asking = i;
     askWanted = true;
+}
+
+bool checkMissingJapaneseDiscs(const char* startingImage) {
+    const auto& builtIn = presets();
+    bool required = asking >= 0 && asking < (int)builtIn.size() && builtIn[asking].requiresJapaneseDiscs;
+    for (int disc = 1; disc <= 2; disc++) {
+        missingJapaneseDisc[disc - 1] = required && !regionalSourceFoundBeside(disc, startingImage);
+    }
+    return missingJapaneseDisc[0] || missingJapaneseDisc[1];
 }
 
 void saveCurrentPreset() {
@@ -1720,7 +1731,7 @@ bool beginModal(const char* name) {
 
 } // namespace
 
-void presetRows(bool compact) {
+void presetRows(bool compact, const char* startingImage) {
     int count = (int)presets().size();
     bool haveMine = settingsGet(MINE_KEY) != nullptr && settingsGet(MINE_KEY)[0] != '\0';
     int total = count + (haveMine ? 1 : 0);
@@ -1803,6 +1814,7 @@ void presetRows(bool compact) {
     emitTail();
     closeTable();
     if (askWanted) {
+        checkMissingJapaneseDiscs(startingImage);
         ImGui::OpenPopup("##presetask");
         askWanted = false;
     }
@@ -1816,6 +1828,18 @@ void presetRows(bool compact) {
             snprintf(title, sizeof title, tr("Apply %s? It changes:"), name);
         }
         textLines(title);
+        bool missingDiscs = missingJapaneseDisc[0] || missingJapaneseDisc[1];
+        if (missingDiscs) {
+            ImGui::PushStyleColor(ImGuiCol_Text, skin::textError);
+            for (int disc = 1; disc <= 2; disc++) {
+                if (!missingJapaneseDisc[disc - 1]) continue;
+                char warning[160];
+                snprintf(warning, sizeof warning, tr("Japanese Disc %d is missing or invalid."), disc);
+                textLines(warning);
+            }
+            textLines(tr("Add the disc images in Audio > Japanese audio to apply this preset."));
+            ImGui::PopStyleColor();
+        }
         bool scrolled = changes.size() > 10;
         if (scrolled) {
             float maxH = std::min(10.0f * skin::rowHeight(), ImGui::GetIO().DisplaySize.y * 0.45f);
@@ -1831,8 +1855,9 @@ void presetRows(bool compact) {
             ImGui::PopStyleColor();
         }
         if (scrolled) ImGui::EndChild();
-        ImGui::BeginDisabled(changes.empty());
-        if (ImGui::Button(tr("Apply"))) {
+        bool canApply = !changes.empty() && !missingDiscs;
+        ImGui::BeginDisabled(!canApply);
+        if (ImGui::Button(tr("Apply")) && canApply && !checkMissingJapaneseDiscs(startingImage)) {
             for (const Change& c : changes) {
                 if (c.spec->text()) c.spec->setText(c.text.c_str());
                 else c.spec->set(c.spec->arg, c.value);
