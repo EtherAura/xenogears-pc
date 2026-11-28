@@ -1299,8 +1299,8 @@ void drawGearBattleMenuEscape(s32 arg0) {
     case 6:
     case 7:
 #ifdef PLATFORM_PC
-        if (pcVersusPartyCanExitGear(arg0) && pcVersusCallPartyGear(arg0)) {
-            battleVar2->m2DE_actionDone = 1;
+        if (pcVersusPartyCanExitGear(arg0)) {
+            drawGearCircleMenuSpecial(arg0);
             return;
         }
 #endif
@@ -1356,18 +1356,32 @@ void drawGearBattleMenuEscape(s32 arg0) {
     }
 }
 
-/* Gear menu 0x18 (gear chi/abilities) */
+/* Gear Special, or Call Gear in the top slot of the Versus ring. */
 void drawGearCircleMenuSpecial(s32 arg0) {
     switch (battleInputButton) {
     case 4:
     case 6:
     case 7: {
         u8 idx = arg0;
+#ifdef PLATFORM_PC
+        u8 menu = battleVar2->m2DD_currentActiveBattleMenu;
+        if (menu == 0x18 && pcVersusPartyCanExitGear(idx)) {
+            if (pcVersusCallPartyGear(idx)) {
+                battleVar2->m2DE_actionDone = 1;
+            }
+            return;
+        }
+#endif
         loadGearCommandText(idx);
         if (drawCircleMenuGearSpecial_update(idx) != 0) {
             executeAbility(idx);
         } else {
+#ifdef PLATFORM_PC
+            battleVar2->m2DD_currentActiveBattleMenu = menu;
+            battleVar2->m2E2_previousActiveBattleMenu = 0xFF;
+#else
             battleVar2->m2DD_currentActiveBattleMenu = 0x18;
+#endif
         }
         return;
     }

@@ -1235,9 +1235,16 @@ void pcVersusPartyGearMenu(int slot) {
     if (!partyGearSlot(slot) || !partyGearRulesActive()) return;
     sBattleVar2Sub* menu = &battleVar2->m0_entityMenus[slot];
     menu->m1C_isCommandEnabled[7] = partyCanCallGear(slot) ? 0 : party1C_InitialValues[7];
+    const u8* gearRing = battleCommandsSetups[17];
+    menu->mC_extraCommandsMapping2[2] = gearRing[2];
+    menu->mC_extraCommandsMapping2[3] = gearRing[3];
     if (pcVersusPartyCanExitGear(slot)) {
-        menu->mC_extraCommandsMapping2[2] = battleCommandsSetups[0][7];
-        menu->m1C_isCommandEnabled[8] = 0;
+        /* Like the on-foot ring, Call Gear is above Ether. Special takes
+         * Escape's position on the left, with its original availability. */
+        menu->mC_extraCommandsMapping2[2] = gearRing[3];
+        menu->mC_extraCommandsMapping2[3] = battleCommandsSetups[0][7];
+        menu->m1C_isCommandEnabled[8] = menu->m1C_isCommandEnabled[4];
+        menu->m1C_isCommandEnabled[4] = 0;
     }
 }
 

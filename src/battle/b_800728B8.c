@@ -458,6 +458,9 @@ static void wideAnchorPartyBoxes(void) {
 #endif
 
 void battleRenderPortraitSelection(void) {
+#ifdef PLATFORM_PC
+    if (pcArenaRosterEnemyTeams() || pcArenaRosterMixed()) return;
+#endif
     if (battleVar0->m6415_drawHighlight) {
         setRGB0(&battleVar0->m63C8_portraitHighlight[battleVar0->m6414_highlightOddOrEven], battleVar0->m6410_highlightLevel, battleVar0->m6410_highlightLevel, battleVar0->m6410_highlightLevel);
         AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m63C8_portraitHighlight[battleVar0->m6414_highlightOddOrEven]);

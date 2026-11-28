@@ -655,6 +655,17 @@ static void drawRosterPortrait(const RosterHud* hud, s32 index, s32 slot, s32 x,
     s32 rim = slot < pcArenaRosterFirstEnemy() ? 0 : ROSTER_PORTRAIT_RIM;
     s32 size = ROSTER_PORTRAIT_SIZE - 2 * rim;
 
+    if (battleVar0->m6415_drawHighlight && slot == battleVar2->m2D3_currentEntityTurn) {
+        POLY_F4* pulse = &battleVar0->m63C8_portraitHighlight[hud->odd];
+        s32 level = battleVar0->m6410_highlightLevel;
+        setXYWH(pulse, x, y, ROSTER_PORTRAIT_SIZE, ROSTER_PORTRAIT_SIZE);
+        setRGB0(pulse, level, level, level);
+        /* The sort order draws the background and portrait before this overlay. */
+        AddPrim(hud->ot, pulse);
+        AddPrim(hud->ot, &battleVar0->m63F8_portraitHighlightDrMode[hud->odd]);
+        pcWidePrim(pulse, hud->wideX, 0);
+    }
+
     if (pcArenaRosterMixed()) {
         drawMixedPortrait(hud, index, slot, x, y, rim);
     } else if (rosterPortraitSlot[index] == slot) {
@@ -795,7 +806,7 @@ void pcBattleRosterHud(void) {
     RosterHud hud;
 
     s32 mixed = pcArenaRosterMixed();
-    if ((!mixed && !pcArenaRosterEnemyTeams()) || battleVar0 == NULL || battleVar1 == NULL ||
+    if ((!mixed && !pcArenaRosterEnemyTeams()) || battleVar0 == NULL || battleVar1 == NULL || battleVar2 == NULL ||
         battleFont == NULL || currentBattleSpecificStrings == NULL) {
         return;
     }

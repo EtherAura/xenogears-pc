@@ -12,6 +12,9 @@
 #include "main/game_state.h"
 
 extern void battleRenderDebugAndMain(void);
+#ifdef PLATFORM_PC
+extern s32 battleSetupStringInPolyFT4Small(s32 character, POLY_FT4 (*polys)[2], s16 x, s16 y);
+#endif
 extern void freeBattleVar0_A230(void);
 extern void removeTargetSelectionCursors(void);
 extern u8 currentBattleMode; /* currentBattleMode */
@@ -941,6 +944,9 @@ s32 updateBattleMenuSpriteForMenu(u8 entity, u8 set, u8 dimOnly) {
         }
         j = 0;
         while ((id = battleMenuGraphicConfigs2[layout[i]][j]) != 0xFFFF) {
+#ifdef PLATFORM_PC
+            u8 compactSpecial = id == 0x400E && pcVersusPartyCanExitGear(entity);
+#endif
             if (id >= 0x4000) {
                 battleVar2->m2C0_circleMenuCommandsNames[id & 3] = battleVar2->m0_entityMenus[entity].m0_circleMenuBattleCommandsMapping[id & 0xFF];
                 id = battleVar2->m0_entityMenus[entity].m0_circleMenuBattleCommandsMapping[id & 0xFF];
@@ -950,9 +956,19 @@ s32 updateBattleMenuSpriteForMenu(u8 entity, u8 set, u8 dimOnly) {
                 }
             }
             start = battleVar1->mD0_battleCommandLength[page[i]] * 2;
-            battleVar1->mD0_battleCommandLength[page[i]] += battleSetupStringInPolyFT4Large(id,
-                (POLY_FT4 (*)[2])&battleVar0->m641C_commandGlyphs[page[i]][battleVar1->mD0_battleCommandLength[page[i]] * 2],
-                battleMenuGraphicConfigs2[layout[i]][j + 1], battleMenuGraphicConfigs2[layout[i]][j + 2]);
+#ifdef PLATFORM_PC
+            /* The full-size Special Options label clips at the left edge. */
+            if (compactSpecial) {
+                battleVar1->mD0_battleCommandLength[page[i]] += battleSetupStringInPolyFT4Small(id,
+                    (POLY_FT4 (*)[2])&battleVar0->m641C_commandGlyphs[page[i]][start],
+                    battleMenuGraphicConfigs2[layout[i]][j + 1] - 7, battleMenuGraphicConfigs2[layout[i]][j + 2] - 1);
+            } else
+#endif
+            {
+                battleVar1->mD0_battleCommandLength[page[i]] += battleSetupStringInPolyFT4Large(id,
+                    (POLY_FT4 (*)[2])&battleVar0->m641C_commandGlyphs[page[i]][battleVar1->mD0_battleCommandLength[page[i]] * 2],
+                    battleMenuGraphicConfigs2[layout[i]][j + 1], battleMenuGraphicConfigs2[layout[i]][j + 2]);
+            }
             color = (battleMenuGraphicConfigs2[layout[i]][j + 3] & 0xFF) >> 1;
             if (battleMenuGraphicConfigs2[layout[i]][j + 3] >= 0x2000) {
                 if (battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[battleMenuGraphicConfigs2[layout[i]][j + 3] & 0xF] != 0) {

@@ -1262,6 +1262,8 @@ void pcVersusViewHpShown(void) {
 void pcVersusViewTurn(u8 entity) {
     if (pcArenaRosterEnemyTeams() || pcArenaRosterMixed()) {
         viewSide = pcArenaRosterSide(entity) + 1;
+        /* Use the native pulse clock and let battleTickMain clear it at turn end. */
+        battleVar0->m6415_drawHighlight = 1;
         return;
     }
     if (!mirrorOn) {
@@ -1335,7 +1337,7 @@ static void drawRing(u8 entity, u8 menu) {
     battleVar1->mCB_drawCommandRing = 1;
 }
 
-/* Escape gives the match to Player 1. Call Gear uses this slot when dismounting is allowed. */
+/* Escape gives the match to Player 1. Special uses its Gear slot when dismounting is allowed. */
 static int confirmForfeit(void) {
     if (battleInputButton != 4 && battleInputButton != 6 && battleInputButton != 7) return 0;
     pcArenaLog("mirror match: player 2 gave up (vblank %u)", hwVSyncCount());
@@ -1385,11 +1387,11 @@ static void turnLoop(u8 entity) {
     for (i = 0; i < 16; i++) {
         menu->m1C_isCommandEnabled[i] = self->m0_base.m7A_commandEnabledBF & party1C_InitialValues[i];
     }
-    pcVersusPartyGearMenu(entity);
     if (c == 7 && inGear) {
         menu->m1C_isCommandEnabled[13] = party1C_InitialValues[13];
         menu->m1C_isCommandEnabled[4] = party1C_InitialValues[4];
     }
+    pcVersusPartyGearMenu(entity);
     if (c == 4) {
         int hasPrimary, hasSecondary;
         if (inGear) {
