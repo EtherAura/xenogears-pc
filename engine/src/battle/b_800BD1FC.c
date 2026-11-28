@@ -6,6 +6,8 @@
 #include "common.h"
 #include "main/debug_font.h"
 #include "pc_wide.h"
+#include "pc_interpolation.h"
+#include "field_mecha/mecha.h"
 #include "pc_speedup.h"
 #include "psyq.h"
 #include "main/sprite.h"
@@ -865,6 +867,15 @@ void battleRender(void) {
         POLLHOST();
         updateBattleDebugger();
     }
+    if (pcInterpolationHighRate()) {
+        for (i = 0; i < BATTLE_MECHA_COUNT; i++) {
+            if (battleMechas[i] != NULL && battleMechas[i]->m34_visible && battleMechas[i]->m0_model != NULL) {
+                const RECT* clip = &battleBssBlock.m8C50_currentRenderStruct->m0_drawEnv.clip;
+                pcInterpolationFrameBegin(PC_INTERP_BATTLE, clip->x, clip->y, clip->w, clip->h);
+                break;
+            }
+        }
+    }
     clearShapeTransfertTableEntry(battleBssBlock.m8C84_oddOrEven);
     updateBattleCamera();
     pcBattle60SceneBegin(); /* Enhanced, 60 Hz (b_800B7C28.c) */
@@ -912,7 +923,8 @@ void battleRender(void) {
     PutDrawEnv(&battleBssBlock.m8C50_currentRenderStruct->m0_drawEnv);
     shapeTransfert();
     pcBattleSceneDepth(); /* Enhanced (xg-rgcf.5.3): the scene's depth, for the display copy's effects */
-    DrawOTag(&battleBssBlock.m8C50_currentRenderStruct->m70_ot[0xFFF]);
+    pcDrawSceneOTag(&battleBssBlock.m8C50_currentRenderStruct->m70_ot[0xFFF], &battleBssBlock.m8C50_currentRenderStruct->m70_ot[2]);
+    pcInterpolationFrameEnd();
     battlePreviewEndFrame();
     battleLoadFileFrom0xC();
     if (battleRenderCount == 1) {

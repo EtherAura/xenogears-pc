@@ -5,6 +5,7 @@
 #define ORDERED_DEPTH
 #endif
 #include "ordered.glsl"
+#include "hdr.glsl"
 layout(local_size_x=8,local_size_y=8) in;
 layout(set=0,binding=0,r16ui) uniform uimage2D vram;
 layout(set=0,binding=2,r16ui) uniform uimage2D wideImg;
@@ -14,7 +15,24 @@ layout(set=0,binding=4,r32ui) uniform uimage2D hiWide;
 // A registered scene's batch (vk.c drawOrdered): the scene's depth image and
 // where the target's pixels fall in it, as hires.frag's depthOrigin/Size.
 layout(set=2,binding=0,r32ui) uniform uimage2D sceneDepth;
-layout(push_constant) uniform Depth { ivec2 origin; ivec2 size; } depthPc;
+#endif
+#ifdef ORDERED_MSAA
+// The scratch is shared across bands, but all triangle groups in one band
+// see the same epoch and retain the original samples through each resolve.
+layout(set=3,binding=0,std430) buffer SampleScratch { uint scratch[]; };
+#endif
+#if defined(DEPTH) || defined(ORDERED_MSAA)
+layout(push_constant) uniform Resolve {
+    ivec2 origin;
+    ivec2 size;
+#ifdef ORDERED_MSAA
+    ivec2 sampleOrigin;
+    uint sampleStride;
+    uint sampleEpoch;
+    uint sampleCount;
+    uint sampleBase;
+#endif
+} pc;
 #endif
 ivec3 ordRgb5(uint v){return ivec3(v&31u,v>>5&31u,v>>10&31u);}
 ivec3 ordRgb8(uint v){return ivec3(v&255u,v>>8&255u,v>>16&255u);}
@@ -49,7 +67,9 @@ uint ordApply(uint dst,uvec4 op,bool native) {
         if((flags&(ORD_SURFACE|ORD_FRINGE))!=0u)coverage=covered;
         else if((flags&ORD_CLEAR)!=0u)coverage=0u;
     }
-    return color|((flags&ORD_MASK)!=0u?mask:0u)|coverage;
+    uint emission = native ? 0u : ((flags >> ORD_HDR_SHIFT) & 63u) << HDR_SHIFT;
+    if (emission != 0u) emission = max(emission, dst & HDR_MASK);
+    return color|((flags&ORD_MASK)!=0u?mask:0u)|coverage|emission;
 }
 void main() {
     ivec2 q=ivec2(gl_GlobalInvocationID.xy);
@@ -62,6 +82,15 @@ void main() {
     else if(kind==1u)dst=imageLoad(wideImg,p).r;
     else if(kind==2u)dst=imageLoad(hiVram,p).r;
     else dst=imageLoad(hiWide,p).r;
+#ifdef ORDERED_MSAA
+    ivec2 sp = p - pc.sampleOrigin;
+    uint point = uint(sp.y) * pc.sampleStride + uint(sp.x);
+    uint sampleAt = pc.sampleBase + point * pc.sampleCount;
+    uint allSamples = (1u << pc.sampleCount) - 1u;
+    bool split = scratch[point] == pc.sampleEpoch;
+    uint words[4];
+    if (split) for (uint s = 0u; s < pc.sampleCount; ++s) words[s] = scratch[sampleAt + s];
+#endif
     // Keep only eight indices live per lane. Long overdraw is resolved in
     // sorted chunks; short lists avoid a 64-entry array's register pressure.
     uint ids[8],last=0u;bool haveLast=false;
@@ -85,17 +114,51 @@ void main() {
         if(at!=0xffffffffu){atomicAdd(ordered.overflow,1u);return;}
         for(int k=0;k<n;k++) {
             uvec4 op=ordered.operation[ids[k]];
+#ifdef ORDERED_MSAA
+            uint mask = (op.w >> ORD_SAMPLE_SHIFT) & allSamples;
+#ifdef DEPTH
+            if ((mask & 1u) != 0u && (op.w & ORD_DEPTH) != 0u && ordWrites(split ? words[0] : dst, op, false)) {
+                z = opDepth[ids[k]];
+                haveZ = true;
+            }
+#endif
+            if (!split && mask == allSamples) {
+                dst = ordApply(dst, op, false);
+            } else if (mask != 0u) {
+                if (!split) for (uint s = 0u; s < pc.sampleCount; ++s) words[s] = dst;
+                split = true;
+                for (uint s = 0u; s < pc.sampleCount; ++s)
+                    if ((mask & (1u << s)) != 0u) words[s] = ordApply(words[s], op, false);
+            }
+#else
 #ifdef DEPTH
             if((op.w&ORD_DEPTH)!=0u&&ordWrites(dst,op,kind<2u)){z=opDepth[ids[k]];haveZ=true;}
 #endif
             dst=ordApply(dst,op,kind<2u);
+#endif
         }
         if(n<8)break;
         last=ordered.operation[ids[7]].y;haveLast=true;
     }
 #ifdef DEPTH
-    ivec2 dp=p-depthPc.origin;
-    if(haveZ&&all(greaterThanEqual(dp,ivec2(0)))&&all(lessThan(dp,depthPc.size)))imageStore(sceneDepth,dp,uvec4(z));
+    ivec2 dp=p-pc.origin;
+    if(haveZ&&all(greaterThanEqual(dp,ivec2(0)))&&all(lessThan(dp,pc.size)))imageStore(sceneDepth,dp,uvec4(z));
+#endif
+#ifdef ORDERED_MSAA
+    if (split) {
+        ivec3 sum = ivec3(0);
+        uint energy = 0u;
+        for (uint s = 0u; s < pc.sampleCount; ++s) {
+            uint word = words[s];
+            scratch[sampleAt + s] = word;
+            sum += ordRgb8(word);
+            energy += word >> HDR_SHIFT;
+        }
+        scratch[point] = pc.sampleEpoch;
+        uint hdr = ((energy + pc.sampleCount / 2u) / pc.sampleCount) << HDR_SHIFT;
+        dst = ordPack8((sum + int(pc.sampleCount / 2u)) / int(pc.sampleCount)) |
+              (words[0] & 0x03000000u) | hdr;
+    }
 #endif
     if(kind==0u)imageStore(vram,p,uvec4(dst));
     else if(kind==1u)imageStore(wideImg,p,uvec4(dst));

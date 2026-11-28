@@ -417,6 +417,8 @@ int pcGearPoseFieldActive(void); /* Enhanced, the 60 Hz field (port/src/game/bat
 s32 pcGearPoseFor(const sLoadedMechas* m);
 MATRIX* pcGearPoseRoot(s32 s, MATRIX* game);
 MATRIX* pcGearPoseFinal(s32 s, s32 bone, MATRIX* game);
+unsigned pcGearPoseDraw(const sLoadedMechas* m, const MATRIX* view, s32 pose, int field,
+                       sLoadedMechas* const* mechas, unsigned count);
 void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 renderMode, s32 arg4, OTag* ot,
                    s32 oddOrEven) {
     s32 pose;
@@ -444,6 +446,7 @@ void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 r
         bones = b;
         /* Enhanced, the 60 Hz field: the pose drawn, gearpose.c's halfway one on a step frame */
         pose = pcGearPoseFieldActive() ? pcGearPoseFor(mecha) : -1;
+        unsigned gear = pcGearPoseDraw(mecha, m1, pose, 1, loadedMechas, 10);
         CompMatrix(m1, pcGearPoseRoot(pose, &b->mC_localMatrix), sp40);
         pcFieldPicAdd(PC_FIELD_PIC_GEARS, pcGearPoseRoot(pose, &b->mC_localMatrix)->t[0]); /* Enhanced oracle: the root drawn */
         pcFieldPicAdd(PC_FIELD_PIC_GEARS, pcGearPoseRoot(pose, &b->mC_localMatrix)->t[1]);
@@ -523,7 +526,7 @@ void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 r
                 z = z2;
             }
             z >>= gDepthDivider;
-            pcInterpolationKeyType(mecha, mecha->m0_model, 0x10000, &mecha->mB8_Polys[oddOrEven], PC_INTERP_SHADOW);
+            pcInterpolationKeyType(mecha, mecha->m0_model, 0x10000, &mecha->mB8_Polys[oddOrEven], gear ? PC_INTERP_HELD : PC_INTERP_SHADOW);
             addPrim(ot + z, &mecha->mB8_Polys[oddOrEven]);
             if (z > 0x2D8) {
                 z = 0x2D8;
@@ -560,7 +563,8 @@ void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 r
                 }
                 SetRotMatrix(sp00);
                 SetTransMatrix(sp00);
-                pcInterpolationObjectType(b, model->m0_blocks[b->m8_geometryId], PC_INTERP_MECHA);
+                if (gear) pcInterpolationGearObject(b, model->m0_blocks[b->m8_geometryId], gear, i);
+                else pcInterpolationObjectType(b, model->m0_blocks[b->m8_geometryId], PC_INTERP_MECHA);
                 submitModelForRendering(model->m0_blocks[b->m8_geometryId], b->m68_prims[oddOrEven], ot,
                                         renderMode);
                 pcInterpolationObject(0, 0);

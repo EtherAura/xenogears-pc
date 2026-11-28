@@ -20,6 +20,8 @@
  *   upscale_gpu_ms=0   optional Auto GPU budget, off by default; 1..50 ms
  *                      per video frame. Fixed resolutions are unaffected.
  *   upscale=2..12      N fixed
+ *   scene_render_scale=0    match N (default); 1..12 caps the scene's raster
+ *   scene_msaa=0           off (default), or 2/4 coverage samples for the scene
  *   geometry_precision=0      PS1 integer vertices; 1 keeps
  *                             subpixel projected vertices, including at 1x
  *                             defaults off at 1x, on with upscaling
@@ -76,6 +78,8 @@
 #include "system/settings.h"
 #include "system/engine.h"
 #include "pc_effect.h"
+#include "pc_wide.h"
+#include "ui/l10n.h"
 
 /* system/battlespeed.c: the game speed now, 1 outside battles and while a
  * battle holds 1x (weak: the GPU tests link no battle speed). */
@@ -87,6 +91,9 @@ extern int battleSpeedFactor(void) __attribute__((weak));
 static struct {
     int loaded;
     int upscale; /* 0 auto, 1 exact, 2..12 */
+    int sceneScale; /* projected 3D raster cap, or 0 for the display-copy scale */
+    int sceneMsaa;
+    int anisotropy;
     int lastUpscale; /* the upscaled choice Shift+F4 goes back to (0 auto) */
     int color;   /* HIRES_COLOR_* */
     int orderingMode;
@@ -173,7 +180,16 @@ static void load(void) {
         }
     }
     hr.precision = settingsBool("geometry_precision", hr.upscale != 1);
-    gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
+    settingsDescribe("scene_render_scale", "Projected 3D scene raster cap: 0 matches Resolution (default), or 1..12 times PS1 resolution");
+    hr.sceneScale = settingsInt("scene_render_scale", 0);
+    if (hr.sceneScale < 0 || hr.sceneScale > 12) hr.sceneScale = 0;
+    settingsDescribe("scene_msaa", "scene_msaa: 0 off (default), 2 or 4 coverage samples for upscaled scene geometry");
+    hr.sceneMsaa = settingsInt("scene_msaa", 0);
+    if (hr.sceneMsaa != 2 && hr.sceneMsaa != 4) hr.sceneMsaa = 0;
+    settingsDescribe("texture_anisotropy", "texture_anisotropy: 0 off (default), 2, 4 or 8 for 3D textures above 1x");
+    hr.anisotropy = settingsInt("texture_anisotropy", 0);
+    if (hr.anisotropy != 2 && hr.anisotropy != 4 && hr.anisotropy != 8) hr.anisotropy = 0;
+    hiresPrecisionTable();
     s = settingsGet("upscale_color");
     hr.color = HIRES_COLOR_TRUE;
     for (int i = 0; s != NULL && i < COLOR_MODES; i++) {
@@ -206,8 +222,14 @@ int gpuOrderingMode(void) { load(); return hr.orderingMode; }
 void gpuSetOrderingMode(int mode) {
     load();
     if (mode < GPU_ORDERING_AUTO || mode > GPU_ORDERING_FALLBACK || hr.orderingMode == mode) return;
+    int raster = hiresSceneScaleNow();
+    int samples = hiresSceneMsaaNow();
     hr.orderingMode = mode;
     gvkSetOrderingMode(mode);
+    if (raster != hiresSceneScaleNow() || samples != hiresSceneMsaaNow()) {
+        interpolationReset();
+        hiresGpuTimePause();
+    }
     if (mode == GPU_ORDERING_AUTO) settingsSet("gpu_ordered_batches", "auto");
     else settingsSetInt("gpu_ordered_batches", mode);
     settingsSave();
@@ -253,8 +275,8 @@ void hiresSetUpscale(int v) {
     autoResolutionReset(&hr.automatic, 0);
     if (settingsGet("geometry_precision") == NULL) {
         hr.precision = v != 1;
-        gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
     }
+    hiresPrecisionTable();
     hr.failedAt = 0;
     char text[8];
     snprintf(text, sizeof(text), "%d", v);
@@ -295,6 +317,98 @@ void hiresSetColor(int c) {
 int hiresScaleNow(void) {
     int n = gvkHiScale();
     return n > 0 ? n : 1;
+}
+
+int hiresSceneScale(void) { load(); return hr.sceneScale; }
+
+void hiresSetSceneScale(int scale) {
+    load();
+    if (scale < 0 || scale > 12 || scale == hr.sceneScale) return;
+    int previous = hiresSceneScaleNow();
+    gvkBarrier(); /* finish both copies' queued draws on the old grid */
+    hr.sceneScale = scale;
+    /* The retained game frames and their snapshots were drawn at the old
+     * scale. Start a new pair before letting the replay use the new grid. */
+    if (interpolationEnabled() && previous != hiresSceneScaleNow()) interpolationReset();
+    else hiresPrecisionTable();
+    hiresGpuTimePause(); /* samples at the previous raster density are stale */
+    settingsSetInt("scene_render_scale", scale);
+    settingsSave();
+}
+
+const char* hiresSceneScaleStatus(void) {
+    if (!gvkOrderedWrites()) return N_("Reduced scene scale requires GPU ordering.");
+    return NULL;
+}
+
+int hiresSceneScaleNow(void) {
+    int scale = hiresSceneScale(), copy = hiresScaleNow();
+    return scale && scale < copy && !hiresSceneScaleStatus() ? scale : copy;
+}
+
+int hiresSceneMsaa(void) { load(); return hr.sceneMsaa; }
+
+void hiresSetSceneMsaa(int samples) {
+    load();
+    if ((samples != 0 && samples != 2 && samples != 4) || samples == hr.sceneMsaa) return;
+    int previous = hiresSceneMsaaNow();
+    gvkBarrier();
+    hr.sceneMsaa = samples;
+    /* Endpoints contain resolved pixels from the previous sample count. */
+    if (interpolationEnabled() && previous != hiresSceneMsaaNow()) interpolationReset();
+    else hiresPrecisionTable();
+    hiresGpuTimePause();
+    settingsSetInt("scene_msaa", samples);
+    settingsSave();
+}
+
+int hiresSceneMsaaSupported(int samples) {
+    return samples == 0 || gvkMsaaSupported(samples);
+}
+
+const char* hiresSceneMsaaStatus(void) {
+    int samples = hiresSceneMsaa();
+    if (!samples) return NULL;
+    if (hiresScaleNow() <= 1) return N_("MSAA is available above 1x Resolution.");
+    if (!hiresSceneMsaaSupported(samples)) return N_("The current renderer cannot use this MSAA setting.");
+    return NULL;
+}
+
+int hiresSceneMsaaNow(void) {
+    return hiresSceneMsaaStatus() ? 0 : hiresSceneMsaa();
+}
+
+int hiresAnisotropy(void) { load(); return hr.anisotropy; }
+
+void hiresSetAnisotropy(int value) {
+    load();
+    if ((value != 0 && value != 2 && value != 4 && value != 8) || value == hr.anisotropy) return;
+    int previous = hiresAnisotropyNow();
+    gvkBarrier();
+    hr.anisotropy = value;
+    if (interpolationEnabled() && previous != hiresAnisotropyNow()) interpolationReset();
+    else hiresPrecisionTable();
+    hiresGpuTimePause();
+    settingsSetInt("texture_anisotropy", value);
+    settingsSave();
+}
+
+const char* hiresAnisotropyStatus(void) {
+    if (!hiresAnisotropy()) return NULL;
+    if (hiresScaleNow() <= 1) return N_("Anisotropic filtering is available above 1x Resolution.");
+    return NULL;
+}
+
+int hiresAnisotropyNow(void) {
+    return hiresAnisotropyStatus() ? 0 : hiresAnisotropy();
+}
+
+void hiresSceneSize(int* width, int* height) {
+    const GpuDisplay* d = gpuDisplay();
+    const WideView* view = wideCurrentView();
+    int scale = hiresSceneScaleNow();
+    *width = !d->enabled || d->rgb24 ? 0 : scale * (view->wide ? view->w : d->w);
+    *height = !d->enabled || d->rgb24 ? 0 : scale * (view->wide ? view->h : d->h);
 }
 
 /* upscale_large=half (the Enhanced engine only; vk.c drawHiBatch takes it
@@ -356,11 +470,12 @@ void pcHiresBattlingBlur(const void* rect) {
 }
 
 int hiresPrecision(void) { load(); return hr.precision; }
-/* The GTE's table of what it projected (its view depths too): subpixel
- * geometry, smooth motion and the scene's depth image (scene.c) each need it. */
+/* The independent scene raster and MSAA also use the GTE's address-validated
+ * projection table to identify projected geometry. */
 void hiresPrecisionTable(void) {
     load();
-    gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
+    gtePrecisionEnable(hr.precision || ((hr.sceneScale || hr.sceneMsaa || hr.anisotropy) && hr.upscale != 1) ||
+                       interpolationEnabled() || sceneWantsCopy());
 }
 int hiresPerspective(void) { load(); return hr.perspective; }
 int hiresSeamGuard(void) { load(); return hr.seamGuard; }
@@ -380,7 +495,7 @@ void hiresSetSeamGuard(int on) {
 void hiresSetPrecision(int on) {
     load();
     hr.precision = on != 0;
-    gtePrecisionEnable(hr.precision || interpolationEnabled() || sceneWantsCopy());
+    hiresPrecisionTable();
     settingsSetInt("geometry_precision", hr.precision);
     settingsSave();
 }
@@ -440,6 +555,13 @@ static int wanted(const GpuDisplay* d, int W, int H) {
         n--;
     }
     return n >= 2 ? n : copyAt1 ? 1 : 0;
+}
+
+int hiresStartupScale(void) {
+    load();
+    if (hr.upscale == 0) return 0;
+    int n = wanted(NULL, 0, 0); /* a fixed scale does not need a displayed frame */
+    return n ? n : 1;
 }
 
 void hiresVBlank(const GpuDisplay* d, int W, int H) {
@@ -514,6 +636,10 @@ void hiresVBlank(const GpuDisplay* d, int W, int H) {
 
 void hiresMarkDetail(VRect r) {
     tilesAdd(&hr.detail, r);
+}
+
+int hiresHasDetail(VRect r) {
+    return tilesHit(&hr.detail, r);
 }
 
 /* A picture between's device-side keep of the displayed buffer (libgpu.c

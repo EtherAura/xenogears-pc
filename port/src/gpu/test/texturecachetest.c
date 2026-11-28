@@ -50,6 +50,42 @@ static void streamPage(uint32_t at) {
 static void pushRing(void) {
     for (int i = 0; i < 64; ++i) vramMarkUploaded((VRect){i, 0, i, 0}, 0);
 }
+
+static int testMipmaps(void) {
+    reset();
+    uint16_t clut = 400 << 6;
+    put(1, 400, 0x001f);
+    put(2, 400, 0x83e0);
+    put(3, 400, 0x7c00);
+    put(128, 10, 0x3021);
+    put(128, 11, 0x3021);
+    TextureRequest patch = {2, clut, 0, 0, 10, 3, 2, 0, 0};
+    TextureSample a, b;
+    CHECK(textureMipmapPixels(3, 2) == 9);
+    CHECK(textureMipmapSample(textureCacheGet(patch), patch, &a));
+    static const uint8_t mips[12] = {128, 128, 0, 255, 0, 0, 0, 0, 64, 64, 0, 128};
+    CHECK(a.rgba[7] == 128 && a.rgba[11] == 0);
+    CHECK(!memcmp(a.rgba + 24, mips, sizeof(mips)));
+    CHECK(textureMipmapSample(textureCacheGet(patch), patch, &b) && a.revision == b.revision);
+    put(2, 400, 0xfc00); /* palette animation without changing any indices */
+    CHECK(textureMipmapSample(textureCacheGet(patch), patch, &b) && a.revision != b.revision);
+    CHECK(b.rgba[24] == 128 && b.rgba[25] == 0 && b.rgba[26] == 128 && b.rgba[27] == 255);
+    put(128, 10, 0x3001); /* animated texels in the same page */
+    CHECK(textureMipmapSample(textureCacheGet(patch), patch, &b) && b.rgba[27] == 191);
+    static const uint8_t artwork[] = {
+        255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 128, 0, 255, 0, 128,
+        255, 0, 0, 255, 0, 0, 255, 0, 0, 255, 0, 128, 0, 255, 0, 128,
+    };
+    TextureSample replacement = {artwork, UINT64_C(0x8000000000000001), 0, 0, 2, 1, 2, NULL, 1};
+    TextureRequest crop = {.w = 1, .h = 1};
+    CHECK(textureMipmapReplacement(&replacement, crop, NULL, &b));
+    static const uint8_t tail[] = {128, 0, 0, 128, 0, 255, 0, 255, 64, 128, 0, 192};
+    CHECK(!memcmp(b.rgba, tail, sizeof(tail))); /* transparent blue RGB contributes nothing */
+    crop.u = 1;
+    CHECK(textureMipmapReplacement(&replacement, crop, NULL, &a) && a.revision == b.revision);
+    return 0;
+}
+
 int main(void) {
     reset();
     {
@@ -388,7 +424,32 @@ int main(void) {
     textureSampleStats(&ss); CHECK(ss.made == 17);
     big.revision = 7000001; CHECK(textureUpscaleSample(&big, big.request, 4, &again));
     textureSampleStats(&ss); CHECK(ss.made == 18 && ss.evictions == 2 && ss.entries == 16);
+
+    /* Replacement tails can grow the shared cache by 32 MiB. Even if all
+     * six tails are older, a seventeenth native variant must evict native. */
+    static uint8_t pack[2048 * 2048 * 4];
+    TextureSample replacement = {.rgba = pack, .w = 256, .h = 256, .scale = 8};
+    size_t tailBytes = (textureMipmapPixels(2048, 2048) - 2048u * 2048u) * 4;
+    for (int i = 0; i < 6; ++i) {
+        replacement.revision = 8000000 + i;
+        CHECK(textureMipmapReplacement(&replacement, big.request, NULL, &again));
+    }
+    textureSampleStats(&ss); CHECK(ss.bytes == (64u << 20) + 6 * tailBytes && ss.evictions == 2);
+    for (int i = 0; i <= 16; ++i) if (i != 2) {
+        big.revision = 7000000 + i;
+        CHECK(textureUpscaleSample(&big, big.request, 4, &again));
+    }
+    big.revision = 7000017; CHECK(textureUpscaleSample(&big, big.request, 4, &again));
+    textureSampleStats(&ss); CHECK(ss.made == 25 && ss.evictions == 3 && ss.entries == 22);
+    replacement.revision = 8000000;
+    CHECK(textureMipmapReplacement(&replacement, big.request, NULL, &again));
+    textureSampleStats(&ss); CHECK(ss.made == 25);
+    replacement.revision = 8000006;
+    CHECK(textureMipmapReplacement(&replacement, big.request, NULL, &again));
+    textureSampleStats(&ss); CHECK(ss.bytes == (64u << 20) + 6 * tailBytes && ss.evictions == 4);
     textureSampleReset();
+    if (testMipmaps()) return 1;
+    textureCacheReset();
     puts("Texture cache: content keys, CLUTs, wrapping, provenance, stable regions and LRU passed");
     printf("%d checks passed\n", checks);
     return 0;

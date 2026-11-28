@@ -15,7 +15,7 @@ static int checks,compact;
 #define SIDE 40
 #define ORIGIN 16
 static const int corner[6][2]={{0,0},{1,0},{0,1},{1,0},{1,1},{0,1}};
-static void rectangle(int index,int wide,int enhanced) {
+static void rectangle(int index,int wide,int enhanced,int scene,int serialized) {
     GpuVertex v[6]={0};HiVertex hv[6]={0};
     uint32_t mode=(uint32_t)(index%4)<<3;
     if(index%3)mode|=DRAW_SEMI;
@@ -35,17 +35,25 @@ static void rectangle(int index,int wide,int enhanced) {
             .mode=mode,.tex=(uint32_t)(10|2<<7|(index%4)<<5),.clipMin=ORIGIN|ORIGIN<<16,
             .clipMax=(ORIGIN+SIDE-1)|(ORIGIN+SIDE-1)<<16,.span=UINT32_MAX};
         hv[k]=(HiVertex){.x=x+.125f,.y=y+.25f,.u=v[k].u,.v=v[k].v,
-            .r=v[k].r,.g=v[k].g,.b=v[k].b,.mode=mode|DRAW_PRECISE,.tex=v[k].tex,
+            .r=v[k].r,.g=v[k].g,.b=v[k].b,.mode=mode|DRAW_PRECISE|(scene?DRAW_SCENE_RASTER:0),.tex=v[k].tex,
             .clipMin=v[k].clipMin,.clipMax=v[k].clipMax,.uvMax=7|7<<16,
             .w=1.0f+(float)corner[k][0]/2};
     }
-    if(enhanced) {if(wide)gvkHiDrawWide(hv,6);else gvkHiDraw(hv,6);}
+    if(enhanced) {
+        int step = serialized ? 3 : 6;
+        for (int first = 0; first < 6; first += step) {
+            if (wide) gvkHiDrawWide(hv + first, step); else gvkHiDraw(hv + first, step);
+            if (serialized) gvkBarrier();
+        }
+    }
     else {if(wide)gvkDrawWide(v,6);else gvkDraw(v,6);}
 }
-static int run(int on,int wide,int n,int color,uint16_t* native,uint32_t* copy) {
+static int run(int on,int wide,int n,int color,int raster,int serialized,uint16_t* native,uint32_t* copy) {
     gpuSetOrderingMode(on ? GPU_ORDERING_FALLBACK : GPU_ORDERING_SPLIT);
     CHECK(gvkOrderedWrites()==(on||gvkHasInterlock()));
     hiresSetUpscale(n);hiresSetColor(color);CHECK(gvkHiConfigure(n>1?n:0,color)==(n>1?n:0));
+    hiresSetSceneScale(raster);
+    if (raster) CHECK(hiresSceneScaleNow() == raster);
     if(wide)gvkWideTouch(ORIGIN+SIDE);
     uint16_t zero[SIDE*SIDE]={0},tex[64];
     for(int i=0;i<64;i++)tex[i]=(uint16_t)(i%5==0?0:(i*913)&0x7fff)|((i%3==0)?0x8000:0);
@@ -59,7 +67,8 @@ static int run(int on,int wide,int n,int color,uint16_t* native,uint32_t* copy) 
         if(wide)gvkUploadWide(rect,init,SIDE);else {gvkUpload(rect,init,SIDE);gvkHiLoad(rect,init,SIDE,HI_LOAD_REPLICATE,0,NULL,0);}
     }
     for(int i=0;i<(compact?73:173);i++) {
-        rectangle(i,wide,0);if(n>1)rectangle(i,wide,1);
+        rectangle(i,wide,0,0,0);
+        if(n>1)rectangle(i,wide,1,raster && i%6!=1,serialized);
         if(!on)gvkBarrier();
     }
     gvkBarrier();
@@ -116,6 +125,109 @@ static int clipped(void) {
     }
     CHECK(!memcmp(a,b,sizeof(a)));CHECK(!gvkOrderedOverflow());return 0;
 }
+static int hdrEmissivePixels(void) {
+    hiresSetUpscale(2);
+    CHECK(gvkHiConfigure(2, HIRES_COLOR_RAW) == 2);
+    uint16_t clear[SIDE * SIDE] = {0};
+    VRect rect = {ORIGIN, ORIGIN, ORIGIN + SIDE - 1, ORIGIN + SIDE - 1};
+    const int at = (ORIGIN + 9) * 2;
+    HiVertex draw[6] = {0};
+    for (int i = 0; i < 6; i++) {
+        draw[i] = (HiVertex){.x = ORIGIN + 8 + (i % 3 == 1 ? 8 : 0),
+                             .y = ORIGIN + 8 + (i % 3 == 2 ? 8 : 0),
+                             .r = 255, .g = 255, .b = 255, .w = 1,
+                             .clipMax = 1023u | (511u << 16)};
+    }
+    for (int ordered = 0; ordered < 2; ordered++) {
+        gpuSetOrderingMode(ordered ? GPU_ORDERING_FALLBACK : GPU_ORDERING_SPLIT);
+        gvkUpload(rect, clear, SIDE);
+        gvkHiLoad(rect, clear, SIDE, HI_LOAD_REPLICATE, 0, NULL, 0);
+        for (int i = 0; i < 6; i++)
+            draw[i].mode = DRAW_HDR_EMISSION | DRAW_SEMI | (1u << DRAW_SEMI_SHIFT);
+        if (ordered) gvkHiDraw(draw, 6);
+        else {
+            gvkHiDraw(draw, 3);
+            gvkBarrier();
+            gvkHiDraw(draw + 3, 3);
+        }
+        uint32_t pixel = 0;
+        CHECK(gvkHiRead(0, &pixel, at, at, 1, 1));
+        CHECK(pixel == ((63u << 26) | 0xFFFFFFu));
+        for (int i = 0; i < 6; i++) draw[i].mode = 0; /* an opaque white overlay */
+        gvkHiDraw(draw, 3);
+        CHECK(gvkHiRead(0, &pixel, at, at, 1, 1));
+        CHECK(pixel == 0xFFFFFFu);
+    }
+    return 0;
+}
+
+static int msaaAcrossGroups(void) {
+    gpuSetOrderingMode(GPU_ORDERING_FALLBACK);
+    hiresSetUpscale(4);
+    CHECK(gvkHiConfigure(4, HIRES_COLOR_RAW) == 4);
+    uint16_t clear[SIDE * SIDE] = {0};
+    HiVertex faces[9] = {0};
+    const int xy[6][2] = {{32, 32}, {40, 32}, {32, 40}, {40, 32}, {40, 40}, {32, 40}};
+    for (int i = 0; i < 6; ++i) {
+        faces[i] = (HiVertex){.x = xy[i][0], .y = xy[i][1], .w = 1, .clipMin = 16u | (16u << 16),
+            .clipMax = 55u | (55u << 16), .mode = DRAW_PRECISE | DRAW_SCENE_RASTER | DRAW_SURFACE};
+        if (i < 3) {
+            faces[i].r = 240;
+            faces[i].mode |= DRAW_SET_MASK;
+        } else {
+            faces[i].g = 120;
+            faces[i].mode |= DRAW_SEMI | DRAW_CHECK_MASK | (1u << DRAW_SEMI_SHIFT);
+            faces[i + 3] = faces[i];
+            faces[i + 3].x = faces[i - 3].x;
+            faces[i + 3].y = faces[i - 3].y;
+        }
+    }
+    for (int samples = 2; samples <= 4; samples *= 2) {
+        if (!hiresSceneMsaaSupported(samples)) continue;
+        hiresSetSceneMsaa(samples);
+        CHECK(hiresSceneMsaaNow() == samples);
+        for (int raster = 3; raster <= 4; ++raster) for (int wide = 0; wide <= 1; ++wide) {
+            hiresSetSceneScale(raster);
+            /* The narrow full-width clip places the diagonal on a scratch
+             * band boundary as well as separating its two draws by a list. */
+            int y = samples == 4 ? 60 : 92;
+            VRect area = {16, 16 + y, 55, 55 + y};
+            uint32_t pixels[2][48 * 48];
+            for (int padded = 0; padded < 2; ++padded) {
+                HiVertex run[(ORDERED_TRIANGLES + 2) * 3];
+                memcpy(run, faces, sizeof(HiVertex) * 3);
+                int last = padded ? ORDERED_TRIANGLES * 3 : 3;
+                for (int i = 3; i < last; ++i) {
+                    run[i] = faces[i % 3];
+                    run[i].x -= 15;
+                    run[i].y -= 15;
+                }
+                memcpy(run + last, faces + 3, sizeof(HiVertex) * 6);
+                for (int i = 0; i < last + 6; ++i) {
+                    run[i].y += y;
+                    run[i].clipMin = 0;
+                    run[i].clipMax = 1023u | (511u << 16);
+                }
+                if (wide) {
+                    gvkUploadWide(area, clear, SIDE);
+                    gvkHiDrawWide(run, last + 6);
+                } else {
+                    gvkHiLoad(area, clear, SIDE, HI_LOAD_REPLICATE, 0, NULL, 0);
+                    gvkHiDraw(run, last + 6);
+                }
+                CHECK(gvkHiRead(wide, pixels[padded], 30 * 4, (30 + y) * 4, 48, 48));
+            }
+            CHECK(!memcmp(pixels[0], pixels[1], sizeof(pixels[0])));
+            uint32_t edge = pixels[0][24 * 48 + 24];
+            CHECK((edge & 0xFFFFFFu) == 0x003C78u);
+            CHECK(!gvkOrderedOverflow());
+        }
+    }
+    hiresSetSceneMsaa(0);
+    hiresSetSceneScale(0);
+    return 0;
+}
+
 int main(int argc,char** argv) {
     compact=argc>1&&strcmp(argv[1],"--compact")==0;
     CHECK(planner()==0);
@@ -135,7 +247,7 @@ int main(int argc,char** argv) {
         int n=scales[si];
         size_t size=(size_t)SIDE*SIDE*n*n*4;
         uint32_t* ha=malloc(size),*hb=malloc(size);CHECK(ha&&hb);
-        CHECK(run(0,wide,n,color,a,ha)==0);CHECK(run(1,wide,n,color,b,hb)==0);
+        CHECK(run(0,wide,n,color,0,0,a,ha)==0);CHECK(run(1,wide,n,color,0,0,b,hb)==0);
         CHECK(memcmp(a,b,sizeof(a))==0);
         if(n>1) {
             if(memcmp(ha,hb,size))for(size_t i=0;i<size/4;i++)if(ha[i]!=hb[i]) {fprintf(stderr,"ordered mismatch wide%d n%d colour%d at %zu: %08x/%08x\n",wide,n,color,i,ha[i],hb[i]);break;}
@@ -143,7 +255,23 @@ int main(int argc,char** argv) {
         }
         free(ha);free(hb);
     }
+    /* Compare bounded coarse lists against a triangle at a time at a 3:4
+     * ratio. Alternate in full-resolution draws with masks and dither. */
+    for (int wide = 0; wide < 2; ++wide) for (int color = 0; color < 4; ++color) {
+        uint32_t* reference = malloc(SIDE * SIDE * 16 * sizeof(*reference));
+        uint32_t* resolved = malloc(SIDE * SIDE * 16 * sizeof(*resolved));
+        CHECK(reference && resolved);
+        CHECK(run(1,wide,4,color,3,1,a,reference)==0);
+        CHECK(run(1,wide,4,color,3,0,b,resolved)==0);
+        CHECK(memcmp(a,b,sizeof(a))==0);
+        CHECK(memcmp(reference,resolved,SIDE*SIDE*16*sizeof(*reference))==0);
+        free(reference);
+        free(resolved);
+    }
+    hiresSetSceneScale(0);
     CHECK(clipped()==0);
+    CHECK(hdrEmissivePixels() == 0);
+    CHECK(msaaAcrossGroups() == 0);
     gpuSetOrderingMode(GPU_ORDERING_SPLIT);
     CHECK(!gvkOrderedWrites());
     CHECK(gpuOrderingStatus() == GPU_ORDERING_SPLIT_ACTIVE);

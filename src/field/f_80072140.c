@@ -10,6 +10,7 @@
 #include "stack.h"
 #include "field/field.h"
 #include "pc_interpolation.h"
+#include "pc_scene.h"
 #include "pc_slide.h"
 #include "pc_retail_heap.h"
 #include "pc_speedup.h"
@@ -1403,10 +1404,13 @@ void updateAndRenderField(void) {
         }
         linkOT(&pCurrentFieldRenderingContext->m80D4_uiOT[7], pCurrentFieldRenderingContext->mCC_OT, op9DVar1.m50_linkOTIndex);
     }
-    DrawOTag(&pCurrentFieldRenderingContext->m80D4_uiOT[7]);
 #ifdef PLATFORM_PC
+    pcDrawSceneOTag(&pCurrentFieldRenderingContext->m80D4_uiOT[7],
+                   g_updateAllEntitiesSub2Var0 == 0 ? &pCurrentFieldRenderingContext->m80D4_uiOT[6] : NULL);
     pcInterpolationFrameEnd();
     gtePrecisionEndDraw();
+#else
+    DrawOTag(&pCurrentFieldRenderingContext->m80D4_uiOT[7]);
 #endif
     do {
         now = VSync(-1);

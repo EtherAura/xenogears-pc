@@ -1208,6 +1208,10 @@ void presentWindowEvent(const SDL_Event* e) {
     /* Only real changes: the window as created matches the settings already,
      * and an XG_ override it was created from must not reach the file. */
     switch (e->type) {
+    case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+    case SDL_EVENT_WINDOW_HDR_STATE_CHANGED:
+        gpuHdrDisplayChanged();
+        break;
     case SDL_EVENT_WINDOW_RESIZED:
         /* KWin (Plasma 6.7, Wayland) opens a window at a size of its own,
          * half the work area or the app's last, whatever the client asked:

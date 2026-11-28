@@ -618,7 +618,7 @@ static void battling60Between(void) {
     }
     pcBattlingSceneDepth(b->scene); /* Enhanced (xg-rgcf.5.3): the effects on the picture between too */
     pcGpuQuiet(1); /* no DrawSync callback, no event for this drawing */
-    DrawOTagEnv(battlingCurrentOt, &env);
+    pcDrawSceneOTagEnv(battlingCurrentOt, &env, b->scene->m284_layer->m4_ot[battlingBufferIndex]);
     pcGpuQuiet(0);
     cpuTimeBetween(2, 0);
     sandboxLeave(rk);

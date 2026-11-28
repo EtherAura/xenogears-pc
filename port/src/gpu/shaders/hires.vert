@@ -39,7 +39,7 @@ layout(push_constant) uniform Hi {
     ivec2 target;   // the target's size in hi-res pixels
     ivec2 wideSize; // the hi-res wide target's size (texel reads stay inside)
     ivec2 ditherOrigin; // private replay's origin in the authored target, at 1x
-    int coarse;     // the block size the COARSE build uses (2); the layout's field, unread
+    int rasterScale; // samples per native pixel in the COARSE build
 } pc;
 
 #ifdef DEPTH
@@ -73,11 +73,6 @@ void main() {
 #ifdef ORDERED_LIST
     vOrder = uint(gl_VertexIndex) / 3u;
 #endif
-#ifdef COARSE
-    const float cs = 2.0; // rasterised at N/2: each fragment a 2x2 block (vk.c hiBatchCoarseRuns)
-#else
-    const float cs = 1.0;
-#endif
     // The VRAM copy's triangles rasterise where the wide pass's do (the shift
     // added as the wide pass added it, exactly: gp0.c preciseSnap) and the
     // fragment stores them back (HiVertex.rasterShift); pc.target is one
@@ -85,8 +80,12 @@ void main() {
     // device gives both copies the same coverage, texels and shades.
     ivec2 shift = ivec2(int(inRasterShift << 16) >> 16, int(inRasterShift) >> 16);
     vRasterShift = shift * pc.n;
-    vec2 p = (inPos + vec2(shift)) * float(pc.n) / cs + 0.5;
-    gl_Position = vec4((p / (vec2(pc.target) / cs) * 2.0 - 1.0) * inW, 0.0, inW);
+#ifdef COARSE
+    vec2 p = (inPos + vec2(shift)) * float(pc.rasterScale) + 0.5;
+#else
+    vec2 p = (inPos + vec2(shift)) * float(pc.n) + 0.5;
+#endif
+    gl_Position = vec4((p / vec2(pc.target) * 2.0 - 1.0) * inW, 0.0, inW);
     vUV = inUV;
     vColor = inColor;
     vMode = inMode;

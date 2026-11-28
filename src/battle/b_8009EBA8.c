@@ -3,6 +3,7 @@
 #include "psyq.h"
 #include "gte.h"
 #include "pc_geometry.h"
+#include "pc_interpolation.h"
 #include "stack.h"
 #include "main/memory.h"
 #include "main/filesystem.h"
@@ -616,6 +617,10 @@ MATRIX* pcGearPoseFinal(s32 s, s32 bone, MATRIX* game);
 #define GEAR_FINAL(i, m) (m)
 #endif
 
+#ifdef PLATFORM_PC
+unsigned pcGearPoseDraw(const sLoadedMechas* m, const MATRIX* view, s32 pose, int field,
+                       sLoadedMechas* const* mechas, unsigned count);
+#endif
 void submitMechaForRendering_battle(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 renderMode, s32 arg4, OTag* ot,
                    s32 oddOrEven) {
     SVECTOR sv;
@@ -666,6 +671,9 @@ void submitMechaForRendering_battle(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2
         }
 #ifdef PLATFORM_PC
         pose = pcGearPoseFor(mecha);
+#endif
+#ifdef PLATFORM_PC
+        unsigned gear = pcGearPoseDraw(mecha, m1, pose, 0, battleMechas, BATTLE_MECHA_COUNT);
 #endif
         CompMatrix(m1, GEAR_ROOT(&b->mC_localMatrix), sp40);
         if (!(mecha->m4A_flags & 1) && battleMechaVar2 != 0) {
@@ -774,8 +782,14 @@ void submitMechaForRendering_battle(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2
                 }
                 SetRotMatrix(sp00);
                 SetTransMatrix(sp00);
+#ifdef PLATFORM_PC
+                if (gear) pcInterpolationGearObject(b, model->m0_blocks[b->m8_geometryId], gear, i);
+#endif
                 submitModelForRendering(model->m0_blocks[b->m8_geometryId], b->m68_prims[oddOrEven], ot,
                                         renderMode);
+#ifdef PLATFORM_PC
+                pcInterpolationObject(0, 0);
+#endif
             }
         }
         {
@@ -2734,6 +2748,9 @@ void drawBattleHorizonBackdrop(sBattleHorizon* h, SVECTOR* eye, SVECTOR* at, MAT
 #endif
 
     if (h != NULL) {
+#ifdef PLATFORM_PC
+        pcInterpolationBattleBackdrop();
+#endif
         addPrim(ot, &h->m3C_drawModes[oddOrEven]);
         dir.vx = at->vx - eye->vx;
         dir.vy = 0;

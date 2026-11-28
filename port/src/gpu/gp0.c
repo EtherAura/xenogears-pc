@@ -124,6 +124,8 @@ static struct {
      * copy's vertices carry a depth: their own where the GTE gave one, else
      * sceneZ, the depth of the ordering-table slot being drawn. */
     int sceneOn;
+    int sceneRaster;
+    int anisotropy, anisotropyScale;
     float sceneZ;
     /* Complete face canvas for the current polygon, before raster clipping.
      * Upload history is bounded and can forget an otherwise unchanged face. */
@@ -133,6 +135,7 @@ static struct {
     int flatUvValid; uint32_t flatUvMin, flatUvMax;
     int poseSkip; /* a part its actor's pose replaced in the copy (spritePose) */
     TextureSample sample;
+    TextureSample packMips;
     int sampled, filter;
 
     /* The texture cache (psx-spx "GPU Texture Caching"): 256 entries of four
@@ -418,6 +421,17 @@ void gp0SetPacket(const WidePacket* p) {
     gp.pkt = p;
 }
 
+void gp0SceneRaster(int enabled) {
+    gp.sceneRaster = enabled;
+    gp.anisotropy = enabled ? hiresAnisotropyNow() : 0;
+    if (gp.anisotropy) {
+        gp.anisotropyScale = hiresSceneScaleNow();
+        if (!hiresSceneScale() && hiresCoarseLarge() && !interpolationCapturing() &&
+            gp.anisotropyScale >= 4 && !(gp.anisotropyScale & 1))
+            gp.anisotropyScale /= 2; /* conservative for the legacy half-resolution runs */
+    }
+}
+
 void gp0Reset(void) {
     /* The batch's tracked tiles are forgotten below: what it drew must be
      * finished before anything drawn after can read or overwrite it. */
@@ -428,6 +442,8 @@ void gp0Reset(void) {
     gp.texKey = cacheKey(0);
     gp.wide = 0;
     gp.pkt = NULL;
+    gp.sceneRaster = 0;
+    gp.anisotropy = 0;
     gp.texWindow = 0;
     gp.clipX0 = gp.clipY0 = gp.clipX1 = gp.clipY1 = 0;
     gp.offX = gp.offY = gp.wideShiftY = 0;
@@ -746,7 +762,8 @@ static void observeTexture(uint32_t tex,uint32_t lo,uint32_t hi) {
 
 /* Decode before this primitive is marked rendered. Self-feedback keeps
  * the ordered VRAM/twin path, rather than freezing its evolving source. */
-static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi, VRect box, const ReadSet* reads) {
+static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi, VRect box, const ReadSet* reads,
+                           float footprint2) {
     gp.sampled = 0;
     if(mode&DRAW_TEXTURED) {
         unsigned depth=(tex>>7)&3;
@@ -758,16 +775,27 @@ static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi
     if ((tex & 0xff9fu) == 0x8180u) return;
     if (!(mode & DRAW_TEXTURED) || !gvkHiScale() || gp.poseSkip) return;
     int kind = gp.pkt && gp.pkt->classified ? gp.pkt->texClass : PC_TEX_3D;
-    gp.filter = textureFilter(kind);
+    gp.filter = gp.pkt && gp.pkt->interfaceArt ? textureInterfaceFilter() : textureFilter(kind);
+    int anisotropy = footprint2 > 0 ? gp.anisotropy : 0;
+    if (gp.filter > TEXTURE_FILTER_LINEAR || gp.wideTex) anisotropy = 0;
+    if (anisotropy && ((tex >> 7) & 3u) >= 2u) {
+        for (int i = 0; i < reads->n; ++i)
+            if (hiresHasDetail(reads->r[i])) anisotropy = 0;
+    }
     int hudScale=textureHudScale(kind);
     int celScale=textureCelScale(kind);
     int glyphs=textureUseGlyphs(kind);
     int portrait=PC_TEX_IS_PORTRAIT(kind);
     int spriteCel=textureUseSpriteCel(kind) && textureSpriteCelEnabled();
-    if ((!gp.filter && !hudScale && !celScale && !spriteCel && !((portrait && portraitPackClassEnabled(kind)) || (textureUsePack(kind) && texturePackActive())) && !glyphs) || (gp.wide && gp.wideTex)) return;
-    if (!gp.wide) for (int i = 0; i < reads->n; ++i) {
+    int usePack = (portrait && portraitPackClassEnabled(kind)) || (textureUsePack(kind) && texturePackActive());
+    if ((!anisotropy && !gp.filter && !hudScale && !celScale && !spriteCel && !usePack && !glyphs) || (gp.wide && gp.wideTex)) return;
+    if (!gp.wide || anisotropy) for (int i = 0; i < reads->n; ++i) {
         VRect r = reads->r[i];
-        if (r.x0 <= box.x1 && r.x1 >= box.x0 && r.y0 <= box.y1 && r.y1 >= box.y0) return;
+        if (r.x0 <= box.x1 && r.x1 >= box.x0 && r.y0 <= box.y1 && r.y1 >= box.y0) {
+            if (!gp.wide) return;
+            anisotropy = 0;
+            break;
+        }
     }
     int u = (int16_t)lo, v = (int16_t)(lo >> 16);
     TextureRequest patch = {(uint16_t)tex, (uint16_t)(tex >> 16), gp.texWindow,
@@ -777,8 +805,11 @@ static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi
      * in hiTriangle, so use that same canvas when selecting its artwork. */
     if (portrait && gp.portraitSource.w) patch = gp.portraitSource;
     if (patch.w < 1 || patch.h < 1 || patch.w > 256 || patch.h > 256) return;
+    int nativeAnisotropy = anisotropy && footprint2 >= 1.0f && lo != hi;
+    int nativeMips = nativeAnisotropy && !usePack && !celScale;
+    if (!nativeAnisotropy && !gp.filter && !hudScale && !celScale && !spriteCel && !usePack && !glyphs) return;
     TextureRequest source = gp.glyphSource.w ? gp.glyphSource : portrait && gp.portraitSource.w ? gp.portraitSource :
-        kind == PC_TEX_3D ? textureRequestSnapStable(patch) : textureRequestSnap(patch);
+        kind == PC_TEX_3D && !nativeMips ? textureRequestSnapStable(patch) : textureRequestSnap(patch);
     const DecodedTexture* d = textureCacheGet(source);
     /* Above 2x the shader cuts edges at the copy's actual resolution.
      * Keep native texels (including 1x packs), rather than enlarging the
@@ -786,7 +817,14 @@ static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi
     int sampleFilter = gp.filter == TEXTURE_FILTER_EDGE && gvkHiScale() > 2 ? TEXTURE_FILTER_NEAREST : gp.filter;
     /* a portrait category set to Texture pack (portrait_set=texture-pack) takes the texture pack's way */
     if (portrait && !textureUsePack(kind)) gp.sampled = portraitPackClassSample(d,patch,kind,&gp.sample);
-    else if(textureUsePack(kind)) gp.sampled = texturePackSample(d,patch,sampleFilter,&gp.sample);
+    else if (textureUsePack(kind)) {
+        gp.sampled = texturePackSample(d, patch, sampleFilter, &gp.sample);
+        if (gp.sampled && anisotropy && footprint2 * gp.sample.scale * gp.sample.scale >= 1.0f &&
+            textureMipmapReplacement(&gp.sample, patch, d, &gp.packMips)) {
+            gp.filter = TEXTURE_FILTER_ANISOTROPIC | TEXTURE_FILTER_ANISOTROPIC_PACK | anisotropy |
+                (gp.filter == TEXTURE_FILTER_LINEAR ? TEXTURE_FILTER_ANISOTROPIC_LINEAR : 0);
+        }
+    }
     else if(spriteCel) {
         gp.sampled = textureSpriteCelSample(d,patch,sampleFilter,&gp.sample);
         /* A sprite the library does not cover draws exactly as Original: the
@@ -811,7 +849,21 @@ static void prepareTexture(uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi
         if (gp.sampled && textureGlyphSmooth()) gp.filter=TEXTURE_FILTER_TEXT_SMOOTH;
     }
     if (!gp.sampled && hudScale) gp.sampled=textureUpscaleSample(d,patch,hudScale,&gp.sample);
+    if (!gp.sampled && nativeAnisotropy) {
+        const DecodedTexture* exact = nativeMips ? d : textureCacheGet(textureRequestSnap(patch));
+        if (textureMipmapSample(exact, patch, &gp.sample)) {
+            gp.sampled = 1;
+            gp.filter = TEXTURE_FILTER_ANISOTROPIC | anisotropy |
+                (gp.filter == TEXTURE_FILTER_LINEAR ? TEXTURE_FILTER_ANISOTROPIC_LINEAR : 0);
+            return;
+        }
+    }
     if (!gp.sampled && gp.filter) gp.sampled = textureSampleGet(d,patch,sampleFilter,&gp.sample);
+}
+
+static int projectedSceneTriangle(const PVertex* a, const PVertex* b, const PVertex* c, int kind) {
+    return gp.sceneRaster && kind == PC_TEX_3D && a->depth > 0 && b->depth > 0 && c->depth > 0 &&
+           (!gp.pkt || (!gp.pkt->interfaceArt && !(gp.pkt->flags & PC_WIDE_NOT_SCENE)));
 }
 
 /* A subpixel position for the hi-res copy, the same in VRAM and in the
@@ -880,6 +932,12 @@ static void hiVertex(HiVertex* o, float x, float y, float u, float v, float r, f
     o->r = r;
     o->g = g;
     o->b = b;
+    /* Only classified, textured scene sprites can be emissive. The shader
+     * still checks that the texel actually takes the additive blend. */
+    if ((mode & (DRAW_TEXTURED | DRAW_SEMI | DRAW_FADE)) == (DRAW_TEXTURED | DRAW_SEMI) &&
+        gp.pkt && gp.pkt->classified && gp.pkt->texClass == PC_TEX_SPRITE && gpuHdrActive()) {
+        mode |= DRAW_HDR_EMISSION;
+    }
     o->mode = mode;
     o->tex = tex;
     o->texWindow = gp.texWindow;
@@ -1022,8 +1080,11 @@ static void polygonUvBounds(const PVertex* v, int count, int kind, uint32_t* lo,
     *lo = uvWord(u0, v0); *hi = uvWord(u1, v1);
 }
 
+static float faceFootprint2(const PVertex* a, const PVertex* b, const PVertex* c);
+static void triangleReads(ReadSet* reads, const PVertex* a, const PVertex* b, const PVertex* c,
+                          uint32_t tpage, uint32_t clut, int* uv);
 static void recordPolygon(const PVertex* v, int count, uint32_t mode, uint32_t tex,
-                          const void* const* addresses, unsigned piece) {
+                          const GtePrecise* projected, unsigned piece) {
     if (!interpolationRecording(gp.wide) || interpolationCaptureSample() || gp.poseSkip) return;
     if (gp.pkt && ((gp.pkt->geometry == PC_GEOMETRY_ONLY && !gvkHiScale()) ||
                    (gp.pkt->geometry == PC_GEOMETRY_HIDE && gvkHiScale() && hiresPrecision()))) return;
@@ -1034,13 +1095,10 @@ static void recordPolygon(const PVertex* v, int count, uint32_t mode, uint32_t t
         TextureRequest r=gp.glyphSource;
         lo=uvWord(r.u,r.v); hi=uvWord(r.u+r.w-1,r.v+r.h-1);
     }
-    GtePrecise projected[4];
-    int geometry = interpolationGeometryPacket();
-    int precision = geometry && addresses != NULL;
+    int precision = projected && interpolationGeometryPacket();
     for (int k = 0; precision && k < count; k++) {
-        uint32_t word; memcpy(&word, addresses[k], sizeof(word));
-        if (!gtePrecisionLookup(addresses[k], word, &projected[k]) ||
-            v[k].x != (int16_t)word + gp.offX + gp.wideShift ||
+        uint32_t word = projected[k].word;
+        if (v[k].x != (int16_t)word + gp.offX + gp.wideShift ||
             v[k].y != (int16_t)(word >> 16) + gp.offY + gp.wideShiftY) precision = 0;
     }
     if (gvkHiScale() && kind == PC_TEX_3D) {
@@ -1052,14 +1110,37 @@ static void recordPolygon(const PVertex* v, int count, uint32_t mode, uint32_t t
     }
     const int index[6] = {0, 1, 2, 1, 2, 3};
     HiVertex out[6];
+    InterpGearVertex gear[6];
+    int gearPose = precision && interpolationGearPacket();
+    InterpTextureFootprint footprints[2] = {0};
     int n = count == 4 ? 6 : 3;
+    uint32_t drawMode = mode;
     for (int k = 0; k < n; k++) {
         const PVertex* p = &v[index[k]];
+        if (k % 3 == 0) {
+            drawMode = mode;
+            const PVertex* b = &v[index[k + 1]], *c = &v[index[k + 2]];
+            if (projectedSceneTriangle(p, b, c, kind)) {
+                drawMode |= DRAW_SCENE_RASTER;
+                if (gp.anisotropy && (mode & DRAW_TEXTURED) && !gp.wideTex && textureFilter(kind) <= TEXTURE_FILTER_LINEAR) {
+                    ReadSet reads = {0};
+                    int uv[4];
+                    triangleReads(&reads, p, b, c, (uint16_t)tex, tex >> 16, uv);
+                    int safe = 1;
+                    if (((tex >> 7) & 3u) >= 2u) for (int i = 0; i < reads.n; ++i)
+                        if (hiresHasDetail(reads.r[i])) safe = 0;
+                    if (safe) {
+                        footprints[k / 3] = (InterpTextureFootprint){faceFootprint2(p, b, c),
+                            uvWord(uv[0], uv[2]), uvWord(uv[1], uv[3])};
+                    }
+                }
+            }
+        }
         /* Live hiTriangle uses address-validated fractional coordinates for
          * projected HUD too (the compass). Object identity controls motion
          * blending, not the precision of a discrete snapshot's endpoint. */
         hiVertex(&out[k], p->precise ? p->preciseX : (float)p->x, p->precise ? p->preciseY : (float)p->y,
-                 (float)p->u, (float)p->v, (float)p->r, (float)p->g, (float)p->b, mode, tex,
+                 (float)p->u, (float)p->v, (float)p->r, (float)p->g, (float)p->b, drawMode, tex,
                  lo, hi);
         if (p->precise && hiresPerspective()) out[k].w = p->depth / 4096.0f;
         sceneVertexZ(&out[k], p);
@@ -1067,6 +1148,14 @@ static void recordPolygon(const PVertex* v, int count, uint32_t mode, uint32_t t
             out[k].x = preciseSnap(projected[index[k]].x) + (float)(gp.offX + gp.wideShift);
             out[k].y = preciseSnap(projected[index[k]].y) + (float)(gp.offY + gp.wideShiftY);
             if (hiresPerspective() && hiresPrecision()) out[k].w = (float)projected[index[k]].z / 4096.0f;
+            if (gearPose) {
+                const GtePrecise* pr = &projected[index[k]];
+                memcpy(gear[k].local, pr->local, sizeof(gear[k].local));
+                gear[k].screen = pr->screen;
+                gear[k].perspective = hiresPerspective() && hiresPrecision();
+                gear[k].center[0] = pr->center[0] / 65536.0f + gp.offX + gp.wideShift;
+                gear[k].center[1] = pr->center[1] / 65536.0f + gp.offY + gp.wideShiftY;
+            }
         }
     }
     /* The triangles hiTriangle seals (opaque, precise, projected) carry their perimeter edges, as
@@ -1074,7 +1163,7 @@ static void recordPolygon(const PVertex* v, int count, uint32_t mode, uint32_t t
     if ((mode & DRAW_PRECISE) && !(mode & DRAW_SEMI) && kind == PC_TEX_3D && hiresSeamGuard()) {
         for (int k = 0; k < n; k++) out[k].mode |= (count == 4 ? (k < 3 ? 5u : 6u) : 7u) << DRAW_SEAL_SHIFT;
     }
-    interpolationDraw(out, n, kind, gp.wide, gp.wideShift, gp.wideShiftY, piece);
+    interpolationDrawPolygons(out, n, kind, gp.wide, gp.wideShift, gp.wideShiftY, piece, footprints, gearPose ? gear : NULL);
 }
 
 static void recordQuad(float x0, float y0, float x1, float y1, float u0, float v0, float du, float dv,
@@ -1250,6 +1339,7 @@ static void hiTriangle(const PVertex* a, const PVertex* b, const PVertex* c, uin
                kind == PC_TEX_3D;
     if (probeSolid) mode = DRAW_FILL;
     if (kind == PC_TEX_3D) mode |= DRAW_SURFACE;
+    if (projectedSceneTriangle(a, b, c, kind)) mode |= DRAW_SCENE_RASTER;
     if (a->precise && b->precise && c->precise && kind == PC_TEX_3D) mode |= DRAW_PRECISE;
     for (int i = 0; i < 3; i++) {
         hiVertex(&o[i], p[i]->precise ? p[i]->preciseX : (float)p[i]->x,
@@ -1264,7 +1354,8 @@ static void hiTriangle(const PVertex* a, const PVertex* b, const PVertex* c, uin
     HiVertex sealed[21];
     int n = seal ? gp0SealTriangle(o, sealed, perimeter, gp.sceneOn) : 0;
     const TextureSample* sample = gp.sampled && (mode & DRAW_TEXTURED) ? &gp.sample : NULL;
-    gvkHiDrawFace(n ? sealed : o, n ? n : 3, gp.wide, sample, gp.filter);
+    const TextureSample* mips = sample && (gp.filter & TEXTURE_FILTER_ANISOTROPIC_PACK) ? &gp.packMips : NULL;
+    gvkHiDrawFace(n ? sealed : o, n ? n : 3, gp.wide, sample, gp.filter, mips);
 }
 
 int gp0SealTriangle(const HiVertex src[3], HiVertex out[21], unsigned perimeter, int sceneDepth) {
@@ -2518,6 +2609,47 @@ static int batchAddHi(VRect w, const ReadSet* reads) {
 /* A triangle with an area whose every row misses the 1x sample points (a
  * sliver between two pixels): the copy still draws it, or the polygons
  * beside it would show a hairline gap. */
+/* Bound the footprint for the whole projected triangle before pulling its
+ * texture into the cache. U/W, V/W and 1/W are affine. The derivative
+ * numerator is affine in the interpolated U,V, so its norm is bounded by
+ * its value at the vertices, divided by the smallest 1/W in the triangle. */
+static float faceFootprint2(const PVertex* a, const PVertex* b, const PVertex* c) {
+    const PVertex* v[3] = {a, b, c};
+    float x[3], y[3], u[3], t[3], q[3];
+    int perspective = hiresPerspective();
+    for (int i = 0; i < 3; i++) {
+        q[i] = perspective && v[i]->precise ? 4096.0f / v[i]->depth : 1.0f;
+        x[i] = v[i]->precise ? v[i]->preciseX : (float)v[i]->x;
+        y[i] = v[i]->precise ? v[i]->preciseY : (float)v[i]->y;
+        u[i] = (float)v[i]->u * q[i];
+        t[i] = (float)v[i]->v * q[i];
+    }
+    float x1 = x[1] - x[0], x2 = x[2] - x[0], y1 = y[1] - y[0], y2 = y[2] - y[0];
+    float bound = (x1 * y2 - x2 * y1) * gp.anisotropyScale * fminf(q[0], fminf(q[1], q[2]));
+    if (bound == 0) return INFINITY;
+    float qux = (q[1] - q[0]) * y2 - (q[2] - q[0]) * y1;
+    float quy = (q[2] - q[0]) * x1 - (q[1] - q[0]) * x2;
+    float ux = (u[1] - u[0]) * y2 - (u[2] - u[0]) * y1;
+    float uy = (u[2] - u[0]) * x1 - (u[1] - u[0]) * x2;
+    float vx = (t[1] - t[0]) * y2 - (t[2] - t[0]) * y1;
+    float vy = (t[2] - t[0]) * x1 - (t[1] - t[0]) * x2;
+    float largest = 0.0f;
+    for (int i = 0; i < 3; i++) {
+        float a0 = ux - v[i]->u * qux, a1 = uy - v[i]->u * quy;
+        float b0 = vx - v[i]->v * qux, b1 = vy - v[i]->v * quy;
+        largest = fmaxf(largest, a0*a0 + a1*a1 + b0*b0 + b1*b1);
+    }
+    return largest / (bound * bound);
+}
+
+static void prepareFaceTexture(const PVertex* a, const PVertex* b, const PVertex* c,
+                               uint32_t mode, uint32_t tex, uint32_t lo, uint32_t hi, VRect box, const ReadSet* reads) {
+    int kind = gp.pkt && gp.pkt->classified ? gp.pkt->texClass : PC_TEX_3D;
+    float footprint2 = gp.anisotropy && (mode & DRAW_TEXTURED) &&
+        projectedSceneTriangle(a, b, c, kind) ? faceFootprint2(a, b, c) : 0.0f;
+    prepareTexture(mode, tex, lo, hi, box, reads, footprint2);
+}
+
 static void hiSliver(const PVertex* a, const PVertex* b, const PVertex* c, uint32_t mode, uint32_t tpage,
                      uint32_t clut, unsigned perimeter) {
     int64_t area2 = (int64_t)(b->x - a->x) * (c->y - a->y) - (int64_t)(c->x - a->x) * (b->y - a->y);
@@ -2558,7 +2690,7 @@ static void hiSliver(const PVertex* a, const PVertex* b, const PVertex* c, uint3
     if (mode & DRAW_TEXTURED) {
         triangleReads(&reads, a, b, c, tpage, clut, uv);
     }
-    prepareTexture(mode,tpage | clut<<16,uvWord(uv[0],uv[2]),uvWord(uv[1],uv[3]),box,&reads);
+    prepareFaceTexture(a, b, c, mode,tpage | clut<<16,uvWord(uv[0],uv[2]),uvWord(uv[1],uv[3]),box,&reads);
     if (!batchAddHi(box, &reads)) {
         return;
     }
@@ -2658,7 +2790,7 @@ static void triangle(const PVertex* a, const PVertex* b, const PVertex* c, uint3
         }
         vramDeferCpuDraw(box);
         vramResolveCpuDraw(box);
-        prepareTexture(mode,tex,uvMin,uvMax,box,&reads);
+        prepareFaceTexture(a, b, c, mode,tex,uvMin,uvMax,box,&reads);
         if (hi) hiTriangle(a,b,c,mode,tex,uvMin,uvMax,perimeter);
         return;
     }
@@ -2670,14 +2802,14 @@ static void triangle(const PVertex* a, const PVertex* b, const PVertex* c, uint3
         CPU_TIME_END(CPU_CACHE);
         if (cached == 2 || cached == 3) {
             if (hi && (cached == 3 || plainHiReplay())) {
-                prepareTexture(mode, tex, uvMin, uvMax, box, &reads);
+                prepareFaceTexture(a, b, c, mode, tex, uvMin, uvMax, box, &reads);
                 hiTriangle(a, b, c, mode, tex, uvMin, uvMax, perimeter);
             }
             return;
         }
         if (cached) mode |= DRAW_CACHED;
     }
-    prepareTexture(mode,tex,uvMin,uvMax,box,&reads);
+    prepareFaceTexture(a, b, c, mode,tex,uvMin,uvMax,box,&reads);
     if (!batchAdd(box, &reads)) {
         return;
     }
@@ -3062,8 +3194,25 @@ static void spriteCellFromCorners(const PVertex* v, uint32_t tpage, uint32_t clu
 
 /* Both draws of one packet use the same address-validated projections.
  * Coordinate offsets and wrapping are still checked in each target. */
-static int packetProjectionStatus;
+static unsigned packetProjectionChecked, packetProjectionValid;
 static GtePrecise packetProjection[4];
+
+/* GP0 walks the packet for VRAM, the wide copy and motion capture. An
+ * address/word match is the same in each, even though their clip and
+ * offsets differ. Check only the vertices this particular draw needs. */
+static const GtePrecise* polygonProjection(const uint32_t* const* addresses, const uint32_t* words,
+                                           int first, int count) {
+    for (int i = first; i < first + count; i++) {
+        unsigned bit = 1u << i;
+        if (!(packetProjectionChecked & bit)) {
+            packetProjectionChecked |= bit;
+            if (gtePrecisionLookup(addresses[i], words[i], &packetProjection[i]))
+                packetProjectionValid |= bit;
+        }
+        if (!(packetProjectionValid & bit)) return NULL;
+    }
+    return packetProjection + first;
+}
 
 static void polygon(void) {
     gp.portraitSource = (TextureRequest){0};
@@ -3174,18 +3323,9 @@ static void polygon(void) {
         v[k].depth = 0;
     }
     int subpixel = hiresPrecision();
-    if (gvkHiScale() != 0 && (subpixel || gp.sceneOn)) {
-        if (!packetProjectionStatus) {
-            packetProjectionStatus = 1;
-            for (int k = 0; k < n; k++) {
-                if (!gtePrecisionLookup(addr[k], raw_[k], &packetProjection[k])) {
-                    packetProjectionStatus = -1;
-                    break;
-                }
-            }
-        }
-        const GtePrecise* precise = packetProjection;
-        int complete = packetProjectionStatus > 0;
+    if (gvkHiScale() != 0 && (subpixel || gp.sceneOn || gp.sceneRaster)) {
+        const GtePrecise* precise = polygonProjection(addr, raw_, 0, n);
+        int complete = precise != NULL;
         if (complete) {
             for (int k = 0; k < n; k++) {
                 /* A wrapped GP0 coordinate field cannot retain the original
@@ -3254,16 +3394,13 @@ static void polygon(void) {
             }
         }
     }
-    if (!firstInvalid && !secondInvalid) {
-        recordPolygon(v, n, mode, tpage | clut << 16, (const void* const*)addr, 0);
-    } else {
-        /* Retail skips only the oversized half of a quad. Capture its
-         * other triangle too; a topology change holds this face locally. */
-        int first = firstInvalid ? 1 : 0;
-        PVertex valid[3] = {v[first], v[first + 1], v[first + 2]};
-        const void* validAddr[3] = {addr[first], addr[first + 1], addr[first + 2]};
-        recordPolygon(valid, 3, mode, tpage | clut << 16, validAddr, 0);
-    }
+    /* Retail skips only the oversized half of a quad. Capture the other
+     * triangle too. A topology change holds just this face in replay. */
+    int first = firstInvalid ? 1 : 0;
+    int visible = firstInvalid || secondInvalid ? 3 : n;
+    const GtePrecise* projected = interpolationGeometryPacket() ?
+        polygonProjection(addr, raw_, first, visible) : NULL;
+    recordPolygon(v + first, visible, mode, tpage | clut << 16, projected, 0);
     /* psx-spx "GPU Render Polygon Commands / Notes": a quad is the triangle
      * (v0, v1, v2), then (v1, v2, v3), each in packet order (which matters
      * for buildSpans' reference vertex). */
@@ -3383,7 +3520,7 @@ static void rectangle(int x, int y, int w, int h, int u0, int v0, const PVertex*
             if (cached == 2 || cached == 3) {
                 if (gvkHiScale() && (cached == 3 || plainHiReplay())) {
                     uint32_t tex=tpage | clut<<16, lo=uvWord(ulo,vlo), hi=uvWord(uhi,vhi);
-                    prepareTexture(mode,tex,lo,hi,wr,&reads);
+                    prepareTexture(mode,tex,lo,hi,wr,&reads,0);
                     hiQuad(x,y,x+w,y+h,u0,v0,w*du,h*dv,color,mode,tex,lo,hi);
                 }
                 return;
@@ -3391,7 +3528,7 @@ static void rectangle(int x, int y, int w, int h, int u0, int v0, const PVertex*
             if (cached) mode |= DRAW_CACHED;
         }
     }
-    prepareTexture(mode,tpage | clut<<16,uvWord(ulo,vlo),uvWord(uhi,vhi),wr,&reads);
+    prepareTexture(mode,tpage | clut<<16,uvWord(ulo,vlo),uvWord(uhi,vhi),wr,&reads,0);
     probe(mode & DRAW_FILL ? "fill" : "rectangle", x, y, x + w - 1, y + h - 1);
     VRect ownedBox = wr;
     if (!gp.wide && !(mode & (DRAW_TEXTURED | DRAW_FILL)) &&
@@ -4099,7 +4236,7 @@ static void execute(void) {
          * by word (polylineWord). */
         int polylineStart = op >= 0x40 && op < 0x60 && (op & 0x08);
         gp.replayed = 0;
-        packetProjectionStatus = 0;
+        packetProjectionChecked = packetProjectionValid = 0;
         memset(&gp.wideUv, 0, sizeof(gp.wideUv));
         if (!polylineStart && wideBegin()) {
             uint32_t e1 = gp.e1;

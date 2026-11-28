@@ -8,6 +8,10 @@
 
 #ifdef PLATFORM_PC
 
+/* Draw a scene, ending the reduced 3D raster at the first UI tag. */
+void pcDrawSceneOTag(void* first, const void* uiTag);
+void pcDrawSceneOTagEnv(void* first, void* drawEnv, const void* uiTag);
+
 /* The scene the next DrawOTag draws: its ordering tables (mainOt of
  * mainCount entries, groundOt of groundCount or NULL), each slot zPerSlot
  * view depth units apart; uiTag, the first tag the walk reaches after the

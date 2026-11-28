@@ -42,6 +42,11 @@
 namespace menu {
 namespace opt {
 
+extern const char* const sceneScaleNames[13];
+extern const char* const sceneMsaaNames[3];
+extern const char* const anisotropyNames[4];
+extern const int anisotropyLevels[4];
+
 enum RowFlags {
     RESTART = 1,  // applies when the game starts again (badge "After restart")
     ENHANCED = 2, // the Enhanced engine only (badge "Enhanced only")

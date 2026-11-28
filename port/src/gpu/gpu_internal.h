@@ -168,11 +168,13 @@ typedef struct {
 #define DRAW_RESOLVED 0x4000u /* final native words, opaque including black */
 #define DRAW_CACHED 0x2000u    /* native decoded texels appended to span rows */
 #define DRAW_FADE 0x8000u      /* PC: every texel blended half and half (pcFadePrim), STP or not */
+#define DRAW_HDR_EMISSION 0x10000u /* display copy: bright texels of an additive sprite */
 /* Motion smoothing's snapshots only (gp0.c recordPolygon, vk.c interpolationSealReplay): the
  * triangle's perimeter edges for the seam fringe its replay gives it as hiTriangle gives the live
  * one (bit i: the edge from vertex i to i + 1). Never reaches a shader. */
 #define DRAW_SEAL_SHIFT 16
 #define DRAW_SEAL_MASK (7u << DRAW_SEAL_SHIFT)
+#define DRAW_SCENE_RASTER 0x80000u /* display copy: projected scene geometry */
 
 typedef struct {
     int x, y, w, h; /* VRAM area shown */
@@ -189,6 +191,7 @@ typedef struct {
 int gvkInit(void* sdlWindow);
 void gvkShutdown(void);
 int gvkHasInterlock(void);
+int gvkMsaaSupported(int samples);
 /* 1: the chosen device is an integrated GPU, -1 a discrete or other one, 0 none chosen yet. */
 int gvkDeviceIntegrated(void);
 /* hires.c: the settings whose defaults depend on the device, applied once it is chosen. */
@@ -353,7 +356,8 @@ int gvkHiFeedbackSource(VRect source);
 /* One live projected triangle, optionally followed by its seam-edge strips.
  * All vertices share clip, texture and sampling state. */
 int gvkHiSealFace(const HiVertex src[3], unsigned perimeter, int depth, int wide);
-void gvkHiDrawFace(const HiVertex* v, int n, int wide, const struct TextureSample* sample, int filter);
+void gvkHiDrawFace(const HiVertex* v, int n, int wide, const struct TextureSample* sample, int filter,
+                  const struct TextureSample* packMips);
 void gvkHiDrawCaptured(const HiVertex* v,int n,int wide);
 void gvkHiDrawTexture(const HiVertex* v, int n, int wide, const struct TextureSample* sample, int filter);
 /* An upload's side in the copy, recorded before its 1x upload: `data` (rows
@@ -396,9 +400,11 @@ void gvkWideTouch(int x1);
 /* hires.c */
 /* At each vblank, after the present pass (target: the window's size). */
 void hiresVBlank(const GpuDisplay* d, int targetW, int targetH);
+int hiresStartupScale(void); /* fixed scale after device limits, or 0 for Auto */
 void hiresGpuTimePause(void); /* menu/movie/blank: keep cap, invalidate samples */
 /* gp0.c: tiles of VRAM where the copy has drawn (more than its 1x picture). */
 void hiresMarkDetail(VRect r);
+int hiresHasDetail(VRect r);
 /* libgpu.c pcVramKeepDevice: which tiles of r have detail, kept across a
  * picture between and put back with the copy's pixels there. */
 void hiresDetailKeep(VRect r);
@@ -569,6 +575,7 @@ typedef struct {
     int32_t fill;      /* beside a 4:3 picture in a wide frame: 0 black, 1 blurred picture */
     int32_t picture;   /* the picture prepass (vk.c): its pixels' first word in the span buffer, -1 none */
     int32_t codes;     /* its xbr codes, -1 none */
+    int32_t hdrHighlights; /* encode highlight strength in the HDR composition pass */
 } PresentConstants;
 
 /* The constants for a target of w x h pixels. The note's 1-bit bitmap, if
@@ -601,6 +608,7 @@ void gp0Fill(VRect r, uint32_t rgb);
 /* The packet being fed (pcWidePrim's treatment, or NULL), for the wide copy. */
 struct WidePacket;
 void gp0SetPacket(const struct WidePacket* p);
+void gp0SceneRaster(int enabled);
 void gp0ProbeVBlank(uint32_t vblank);
 /* Fill a rectangle of the wide target. */
 void gp0WideFill(VRect r, uint32_t rgb);
@@ -632,7 +640,9 @@ typedef struct WidePacket {
     int texDx;      /* added to texel x (captures) */
     int texDy;      /* added after native texture Y wrapping */
     int texClass;   /* PC_TEX_*; independent of aspect and wide flags */
-    int classified;
+    /* Share the old classification word so active packets keep their state layout. */
+    unsigned classified : 1;
+    unsigned interfaceArt : 1;
     int geometry;   /* PC_GEOMETRY_*; independent of aspect and wide flags */
     int geometryAbr; /* 0 inherit, 1..4 private untextured blend mode */
     int poseGroup;   /* 1 + the actor's part group (pcSpritePosePart), else 0 */

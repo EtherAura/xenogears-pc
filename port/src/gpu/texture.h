@@ -108,6 +108,15 @@ typedef struct TextureSample {
     int keep;
 } TextureSample;
 int textureSampleGet(const DecodedTexture* texture, TextureRequest patch, int filter, TextureSample* out);
+/* Internal sample encoding passed to the display-copy draw. The low four
+ * bits hold the tap limit, bit 5 preserves Linear during magnification. */
+#define TEXTURE_FILTER_ANISOTROPIC 16
+#define TEXTURE_FILTER_ANISOTROPIC_LINEAR 32
+#define TEXTURE_FILTER_ANISOTROPIC_PACK 64
+size_t textureMipmapPixels(int w, int h);
+int textureMipmapSample(const DecodedTexture* texture, TextureRequest patch, TextureSample* out);
+int textureMipmapReplacement(const TextureSample* sample, TextureRequest patch, const DecodedTexture* original,
+                             TextureSample* out);
 void textureSampleReset(void);
 /* The 2x/4x variant cache (Edge, Upscaled), since a reset: lookups served,
  * variants made (one malloc each), Scale2x passes run, the bytes made, and

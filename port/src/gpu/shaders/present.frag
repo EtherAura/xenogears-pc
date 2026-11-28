@@ -51,6 +51,7 @@ layout(push_constant) uniform Display {
     int fill; // beside a 4:3 picture in a wide frame: 0 black, 1 blurred picture
     int picture; // the picture prepass's pixels: their first word in the span buffer (-1: none)
     int codes;   // its xbr codes (-1: none)
+    int hdrHighlights;
 } pc;
 
 #ifdef PICTURE_PREPASS
@@ -82,6 +83,12 @@ uint byteAt(int x, int y, int n) {
     return (fetch(x + (n >> 1), y) >> ((n & 1) * 8)) & 0xFFu;
 }
 
+uint copyPixel(ivec2 s) {
+    ivec2 size = pc.src == 2 ? imageSize(hiVram) : imageSize(hiWide);
+    ivec2 a = (pc.disp.xy + s) % size;
+    return pc.src == 2 ? imageLoad(hiVram, a).r : imageLoad(hiWide, a).r;
+}
+
 // Pixel s of the display area, 0..255 per channel.
 vec3 pixel(ivec2 s) {
     int y = pc.disp.y + s.y;
@@ -98,9 +105,7 @@ vec3 pixel(ivec2 s) {
         int n = s.x * 3;
         c = uvec3(byteAt(pc.disp.x, y, n), byteAt(pc.disp.x, y, n + 1), byteAt(pc.disp.x, y, n + 2));
     } else if (pc.src >= 2) {
-        ivec2 size = pc.src == 2 ? imageSize(hiVram) : imageSize(hiWide);
-        ivec2 a = ivec2((pc.disp.x + s.x) % size.x, y % size.y);
-        uint w = pc.src == 2 ? imageLoad(hiVram, a).r : imageLoad(hiWide, a).r;
+        uint w = copyPixel(s);
         c = uvec3(w & 255u, (w >> 8) & 255u, (w >> 16) & 255u);
     } else {
         uint w = pc.src != 0 ? imageLoad(wideImg, ivec2((pc.disp.x + s.x) & 2047, y & 2047)).r
@@ -131,6 +136,7 @@ vec3 filterPixel(ivec2 s) {
 }
 
 #include "filters.glsl"
+#include "hdr.glsl"
 
 #ifdef PICTURE_PREPASS
 void main() {
@@ -169,10 +175,15 @@ void main() {
     ivec2 p = ivec2(gl_FragCoord.xy);
     ivec2 f = p - pc.dest.xy;
     vec3 col = vec3(0.0);
+    float emission = 0.0;
     ivec2 c = p - pc.clip.xy;
     if (pc.enabled != 0 && all(greaterThanEqual(f, ivec2(0))) && all(lessThan(f, pc.dest.zw)) &&
         all(greaterThanEqual(c, ivec2(0))) && all(lessThan(c, pc.clip.zw))) {
         col = filterPicture(pc.filterMode, f, pc.disp.zw, pc.dest.zw, pc.codes);
+        if (pc.hdrHighlights != 0) {
+            ivec2 source = ((2 * f + 1) * pc.disp.zw) / (2 * pc.dest.zw);
+            emission = hdrStrength(copyPixel(source));
+        }
     } else if (pc.enabled != 0 && pc.fill != 0 && f.y >= 0 && f.y < pc.dest.w && all(greaterThanEqual(c, ivec2(0))) &&
                all(lessThan(c, pc.clip.zw))) {
         col = blurFill(p);
@@ -183,8 +194,11 @@ void main() {
         int i = b.y * pc.osdStride + b.x;
         uint w = osd.words[pc.osdBase + (i >> 5)];
         col = ((w >> uint(i & 31)) & 1u) != 0u ? vec3(255.0, 250.0, 225.0) : col * 0.3;
+        emission = 0.0;
     }
-    outColor = vec4(col / 255.0, 1.0);
+    // The HDR output pass consumes the inverse mark. Standard alpha blending
+    // by overlays reduces the mark in proportion to their opacity.
+    outColor = vec4(col / 255.0, 1.0 - emission);
 }
 #endif
 #endif

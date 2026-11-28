@@ -13,9 +13,13 @@ const uint ORD_QUARTER5 = 1024u;
 // The operation replaces the scene's depth there (a DEPTH build: hires.frag's
 // rule) with its entry in OrderedDepths; the resolve keeps the last such.
 const uint ORD_DEPTH = 2048u;
+// Bits 12-15: the hardware coverage mask in the multisampled collector.
+const uint ORD_SAMPLE_SHIFT = 12u;
 // Bits 16-23: smooth text's coverage of the pixel in 255ths (0: whole);
 // the resolved colour is blended over the destination by it.
 const uint ORD_COVER_SHIFT = 16u;
+// Bits 24-29 carry the display copy's highlight strength.
+const uint ORD_HDR_SHIFT = 24u;
 layout(set=ORDERED_SET,binding=0,std430) coherent buffer Operations {
     uint firstOrder;
     uint overflow;

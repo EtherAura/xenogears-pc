@@ -57,6 +57,12 @@ int gvkDeviceIntegrated(void); /* port/src/gpu/vk.c: Auto's GPU budget is 8 ms b
 namespace menu {
 namespace opt {
 
+const char* const sceneMsaaNames[3] = {N_("Off"), "2x", "4x"};
+const char* const anisotropyNames[4] = {N_("Off"), "2x", "4x", "8x"};
+const int anisotropyLevels[4] = {0, 2, 4, 8};
+const char* const sceneScaleNames[13] = {N_("Match Resolution"), "1x", "2x", "3x", "4x", "5x", "6x",
+                                         "7x", "8x", "9x", "10x", "11x", "12x"};
+
 namespace {
 
 // ---- the settings the menu knows ------------------------------------------------------
@@ -178,8 +184,24 @@ std::vector<Spec>& table() {
     add("fullscreen", N_("Fullscreen"),
         [](int) { return presentWindow() != NULL && (SDL_GetWindowFlags(presentWindow()) & SDL_WINDOW_FULLSCREEN) ? 1 : 0; },
         [](int, int v) { presentSetFullscreen(v); }, PRESENT_FULLSCREEN_DEFAULT).mine = false;
+    add("hdr_output", N_("HDR output"), [](int) { return gpuHdrRequested(); },
+        [](int, int v) { gpuSetHdrRequested(v); }, 0).mine = false;
+    add("hdr_paper_white", N_("HDR paper white"), [](int) { return gpuHdrPaperWhite(); },
+        [](int, int v) { gpuSetHdrPaperWhite(v); }, GPU_HDR_PAPER_WHITE_DEFAULT).mine = false;
+    add("hdr_highlights", N_("HDR highlight strength"), [](int) { return gpuHdrHighlightStrength(); },
+        [](int, int v) { gpuSetHdrHighlightStrength(v); }, GPU_HDR_HIGHLIGHT_DEFAULT).mine = false;
     add("upscale", N_("Resolution"), [](int) { return hiresUpscale(); }, [](int, int v) { hiresSetUpscale(v); }, 1,
         upscaleNames, 13);
+    add("scene_render_scale", N_("Scene render scale"), [](int) { return hiresSceneScale(); },
+        [](int, int v) { hiresSetSceneScale(v); }, 0, sceneScaleNames, IM_COUNTOF(sceneScaleNames)).mine = false;
+    add("scene_msaa", N_("Scene MSAA"), [](int) { return hiresSceneMsaa() / 2; },
+        [](int, int v) { hiresSetSceneMsaa(v * 2); }, 0, sceneMsaaNames, IM_COUNTOF(sceneMsaaNames)).mine = false;
+    add("texture_anisotropy", N_("Anisotropic filtering"), [](int) {
+        auto at = std::find(std::begin(anisotropyLevels), std::end(anisotropyLevels), hiresAnisotropy());
+        return (int)(at - std::begin(anisotropyLevels));
+    }, [](int, int v) {
+        if (v >= 0 && v < IM_COUNTOF(anisotropyLevels)) hiresSetAnisotropy(anisotropyLevels[v]);
+    }, 0, anisotropyNames, IM_COUNTOF(anisotropyNames)).mine = false;
     {
         Spec& s = add("upscale_gpu_ms", N_("Auto GPU limit"), [](int) { return hiresGpuBudget(); },
                       [](int, int v) { hiresSetGpuBudget(v); }, 0, nullptr);
@@ -285,6 +307,8 @@ std::vector<Spec>& table() {
             [](int kind, int v) { textureSetAppearance(kind, v); }, 0, appearanceNames, 10)
             .arg = k.kind;
     }
+    add("texture_filter_interface", N_("Interface art"), [](int) { return textureInterfaceFilter(); },
+        [](int, int v) { textureSetInterfaceFilter(v); }, TEXTURE_FILTER_NEAREST, appearanceNames, TEXTURE_FILTER_COUNT);
     static const struct {
         const char* key;
         const char* label;

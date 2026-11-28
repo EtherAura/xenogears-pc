@@ -3,6 +3,7 @@
 
 /* Owned draw snapshots. Nothing here reads game memory or advances a clock. */
 #include "gpu_internal.h"
+#include "interpolation_gear.h"
 
 #define INTERP_MAX_VERTICES 65536
 #define INTERP_MAX_DRAWS 16384
@@ -10,13 +11,23 @@
 #define INTERP_FREEZES 16
 #define INTERP_SETS (INTERP_FRAMES+2+INTERP_FRAMES*INTERP_FREEZES)
 #define INTERP_MAX_PIXELS (2u * 1024u * 1024u) /* owned 32-bit storage words */
+#define INTERP_MAX_MIP_WORDS (512u * 1024u)
+#define INTERP_PACK_PAGES 64 /* one bit per shared page in InterpFrame */
 /* Previous/current presentation endpoints, up to two completed native
  * buffers awaiting display, and the next frame being constructed. */
 #define INTERP_FRAMES 5
 #define INTERP_SAMPLE_PALETTE (1u << 18)
+/* Ordinary replay textures with bit 16 refer to a retained pack page.
+ * Indexed pages keep their RGBA palette in the snapshot's word arena. */
+#define INTERP_SAMPLE_RESIDENT (1u << 16)
+#define INTERP_SAMPLE_INDEXED (1u << 17)
 #define INTERP_SAMPLE_CAPTURE (1u << 19)
 #define INTERP_SAMPLE_EVOLVING (1u << 20)
 #define INTERP_SAMPLE_UNCACHED (1u << 21) /* owned immutable/ordered source */
+/* For ordinary anisotropic textures only, bit 21 marks private mip data. */
+#define INTERP_SAMPLE_MIPS (1u << 21)
+#define INTERP_MIP_BASE_ONLY (1u << 30)
+#define INTERP_MIP_SHARED (1u << 31)
 #define INTERP_SAMPLE_NATIVE_CACHE (1u << 22)
 #define INTERP_SAMPLE_STEP_SOURCE (1u << 23)
 /* Mutually exclusive sample formats: captures use bit 23 for a step image;
@@ -36,6 +47,7 @@ typedef struct {
     int kind; /* host coverage provenance, never native draw behaviour */
     int collapse; /* authored wide tile: clamp negative width after lerping */
     int placement;
+    unsigned gear, bone, gearFirst;
     float anchor[3];
 } InterpDraw;
 
@@ -53,8 +65,14 @@ typedef struct {
     InterpOp* ops;
     uint32_t opCount, opCapacity;
     HiVertex* vertices;
+    InterpGearRig gears[INTERP_GEAR_RIGS];
+    InterpGearVertex* gearVertices;
+    uint32_t gearCount, gearVertexCount, gearVertexCapacity;
     InterpDraw* draws;
     uint32_t* pixels;
+    uint32_t* mipWords;
+    uint32_t mipCount, mipCapacity;
+    uint64_t packPages;
     uint32_t* lookup; /* object/face -> draw index + 1 */
     uint32_t* anchors; /* object -> placement draw index + 1 */
     uint32_t vertexCount, drawCount, pixelCount;
@@ -79,10 +97,13 @@ void interpFramePlacement(InterpFrame* f, float x, float y, float z);
 int interpFrameOp(InterpFrame* f, InterpOp op);
 int interpFrameWords(InterpFrame* f, const uint32_t* words, uint32_t count, uint32_t* offset);
 int interpFrameDraw(InterpFrame* f, const HiVertex* v, int count, uint64_t object, uint64_t face, uint64_t material);
+void interpFrameGearDraw(InterpFrame* f, unsigned gear, unsigned bone, const InterpGearVertex* vertices);
 int interpFramePixels(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_t* offset);
 /* Lossless owned palette + packed indices when it saves storage, otherwise
  * RGBA words. No palette or indices are borrowed from native resources. */
 int interpFrameSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_t* offset, uint32_t* format);
+int interpFrameMipSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_t* offset, uint32_t* format);
+int interpFrameMipWords(InterpFrame* f, const uint32_t* words, uint32_t count, uint32_t* offset);
 int interpSampleEqual(const InterpFrame* f, uint32_t offset, uint32_t format, const uint8_t* rgba, size_t count);
 /* Unknown/discrete draws have object zero. Scene/projection discontinuities
  * reject the pair; changing faces retain their earlier authored image while

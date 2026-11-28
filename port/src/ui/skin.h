@@ -129,6 +129,11 @@ bool comboItem(const char* label, bool selected);
 // A pixel-art checkbox on the game's grid: PS1 metallic bevel box with an outlined red check mark.
 bool checkbox(const char* label, bool* v);
 
+// Left and Right adjust a focused slider directly. Keep ImGui's dragging and text input.
+bool sliderInt(const char* label, int* value, int min, int max, const char* format = "%d",
+               ImGuiSliderFlags flags = 0, int step = 1);
+bool sliderFloat(const char* label, float* value, float min, float max, const char* format, float step);
+
 // The purple selection band behind this window's keyboard/gamepad cursor.
 // Call after Begin/BeginChild and its background, before its controls.
 void focusWindow();

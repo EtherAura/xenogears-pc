@@ -6,6 +6,7 @@
 #include "psyq.h"
 #include "gte.h"
 #include "pc_geometry.h"
+#include "pc_scene.h"
 #include "main/dialog.h"
 #include "main/filesystem.h"
 #include "main/memory.h"
@@ -499,6 +500,10 @@ void updateBattlingGearGlowLights(BattlingScene* scene, BattlingGear* gear, s32 
     MulRotationMatrix(2, NODE_LIGHT(node));
 }
 
+#ifdef PLATFORM_PC
+static const void* pcBattlingUiTag;
+#endif
+
 /* Battle scene draw: camera, gears, lights, ring wall, radar, backdrop. */
 s32 renderBattlingArenaScene(BattlingScene* scene) {
     MATRIX m2;
@@ -567,6 +572,9 @@ s32 renderBattlingArenaScene(BattlingScene* scene) {
     }
     drawBattlingGround(layer->m4_ot[battlingBufferIndex], battlingCameraTarget.vx, battlingCameraTarget.vz);
     addBattlingLayerToOt(layer);
+#ifdef PLATFORM_PC
+    pcBattlingUiTag = layer->m4_ot[battlingBufferIndex];
+#endif
     addBattlingHudTPage();
     addPolyG4(battlingCurrentOt, &battlingBackdropGradient[battlingBufferIndex]);
     return 0;
@@ -600,6 +608,9 @@ s32 renderBattlingDemoScene(BattlingScene* scene) {
     updateBattlingHitSparks(layer->m4_ot[battlingBufferIndex], &scene->m4_root->mC_worldMatrix);
     drawBattlingLineEffects(layer->m4_ot[battlingBufferIndex]);
     addBattlingLayerToOt(layer);
+#ifdef PLATFORM_PC
+    pcBattlingUiTag = layer->m4_ot[battlingBufferIndex];
+#endif
     addBattlingHudTPage();
 #ifdef PLATFORM_PC
     pcWideBattlingDemo(battlingCurrentOt); /* the last frame's margins (wide.c) */
@@ -2460,6 +2471,11 @@ loop:
         startBattlingFrameTimer();
         DrawSync(0);
         PutDispEnv(&disp);
+#ifdef PLATFORM_PC
+        pcDrawSceneOTagEnv(battlingCurrentOt, &battlingDisplayBuffer->m0_drawEnv, pcBattlingUiTag);
+        pcBattlingUiTag = NULL;
+#else
         DrawOTagEnv(battlingCurrentOt, &battlingDisplayBuffer->m0_drawEnv);
+#endif
         goto loop;
 }

@@ -22,6 +22,7 @@
 #include "gpu/gpu.h"
 #include "gpu/gpu_internal.h"
 #include "gpu/interpolation.h"
+#include "gpu/texture.h"
 #include "pc_interpolation.h"
 #include "system/hw.h"
 #include "test/env.h"
@@ -1656,6 +1657,162 @@ static void testSync(void) {
     DrawSyncCallback(NULL);
 }
 
+static void testSceneRaster(void) {
+    int savedInterpolation = interpolationSetting();
+    interpolationSetEnabled(0);
+    useScale(5);
+    hiresSetColor(HIRES_COLOR_RAW);
+    gvkHiConfigure(5, HIRES_COLOR_RAW);
+    hiresSetSceneScale(2);
+    checks++;
+    if (hiresSceneScaleNow() != (gvkOrderedWrites() ? 2 : 5)) {
+        failures++;
+        puts("FAIL effective scene raster scale");
+    }
+    HiVertex face[6] = {0};
+    for (int i = 0; i < 6; ++i) {
+        int corner = i % 3;
+        face[i] = (HiVertex){.x = 32 + (i / 3) * 16 + (corner == 1 ? 8 : 0),
+                             .y = 32 + (corner == 2 ? 8 : 0), .r = corner == 1 ? 200 : 40,
+                             .w = 1, .mode = DRAW_PRECISE | (i < 3 ? DRAW_SCENE_RASTER : 0),
+                             .clipMax = 1023u | (511u << 16)};
+    }
+    gvkHiDraw(face, 6);
+    uint32_t reduced[5] = {0}, full[5] = {0};
+    checks++;
+    if (!gvkHiRead(0, reduced, 34 * 5, 33 * 5, 5, 1) || !gvkHiRead(0, full, 50 * 5, 33 * 5, 5, 1) ||
+        full[0] == full[1] || (gvkOrderedWrites() ? (reduced[0] != reduced[1] || reduced[1] != reduced[2] ||
+                                                   reduced[2] == reduced[3] || reduced[3] != reduced[4])
+                                                : memcmp(reduced, full, sizeof(reduced)) != 0)) {
+        failures++;
+        printf("FAIL scene raster samples: %u,%u,%u,%u,%u against full %u,%u,%u,%u,%u\n",
+               reduced[0], reduced[1], reduced[2], reduced[3], reduced[4], full[0], full[1], full[2], full[3], full[4]);
+    }
+    hiresSetSceneScale(0);
+    interpolationSetEnabled(savedInterpolation);
+    restoreScale();
+}
+
+static void testSceneMsaa(void) {
+    int savedInterpolation = interpolationSetting();
+    interpolationSetEnabled(0);
+    useScale(4);
+    hiresSetColor(HIRES_COLOR_RAW);
+    gvkHiConfigure(4, HIRES_COLOR_RAW);
+    static const int xy[6][2] = {{32, 32}, {40, 32}, {32, 40}, {40, 32}, {40, 40}, {32, 40}};
+    HiVertex quad[6] = {0}, clear[6] = {0};
+    for (int i = 0; i < 6; ++i) {
+        quad[i] = (HiVertex){.x = xy[i][0], .y = xy[i][1], .r = 240, .w = 1,
+                             .mode = DRAW_PRECISE | DRAW_SCENE_RASTER | DRAW_SURFACE,
+                             .clipMin = 30u | (30u << 16), .clipMax = 42u | (42u << 16)};
+        clear[i] = (HiVertex){.x = xy[i][0] == 32 ? 30 : 43,
+                              .y = xy[i][1] == 32 ? 30 : 43, .w = 1, .mode = DRAW_FILL};
+    }
+    for (int samples = 2; samples <= 4; samples *= 2) {
+        hiresSetSceneMsaa(samples);
+        int expected = hiresSceneMsaaSupported(samples) ? samples : 0;
+        checks++;
+        if (hiresSceneMsaaNow() != expected) {
+            failures++;
+            printf("FAIL effective scene MSAA setting %d\n", samples);
+        }
+        for (int raster = 3; raster <= 4; raster++) {
+            hiresSetSceneScale(raster);
+            HiVertex faces[9];
+            memcpy(faces, quad, sizeof(quad));
+            for (int i = 0; i < 3; ++i) {
+                faces[i].mode |= DRAW_SET_MASK;
+                faces[i + 3].mode |= DRAW_SEMI | DRAW_CHECK_MASK | (1u << 3); /* add green */
+                faces[i + 3].r = 0;
+                faces[i + 3].g = 120;
+                faces[i + 6] = faces[i + 3];
+                faces[i + 6].x = faces[i].x;
+                faces[i + 6].y = faces[i].y; /* protected by the first triangle */
+            }
+            gvkHiDraw(clear, 6);
+            if (gvkOrderedWrites()) {
+                gvkHiDraw(faces, 9);
+            } else {
+                /* The exact split backend relies on GP0 to split overlaps.
+                 * This fixture calls the backend directly. */
+                for (int first = 0; first < 9; first += 3) {
+                    gvkBarrier();
+                    gvkHiDraw(faces + first, 3);
+                }
+            }
+            uint32_t edge = 0, inside = 0, outside = 0;
+            int read = gvkHiRead(0, &edge, 36 * 4, 36 * 4, 1, 1) &&
+                       gvkHiRead(0, &inside, 35 * 4, 35 * 4, 1, 1) &&
+                       gvkHiRead(0, &outside, 37 * 4, 37 * 4, 1, 1);
+            checks++;
+            uint32_t rgb = edge & 0xFFFFFF;
+            if (!read || (inside & 0x1FFFFFF) != 0x10000F0 || (outside & 0x1FFFFFF) != 0x007800 ||
+                (expected ? rgb != 0x003C78 : (rgb != 0x0000F0 && rgb != 0x007800))) {
+                failures++;
+                printf("FAIL scene MSAA %dx, %dx raster: colours %08x, %08x, %08x\n",
+                       samples, raster, edge, inside, outside);
+            }
+        }
+    }
+    useScale(1);
+    checks++;
+    if (hiresSceneMsaaNow() != 0) {
+        failures++;
+        puts("FAIL MSAA must be off at 1x");
+    }
+    hiresSetSceneScale(0);
+    hiresSetSceneMsaa(0);
+    interpolationSetEnabled(savedInterpolation);
+    restoreScale();
+}
+
+static void testAnisotropy(void) {
+    useScale(2);
+    hiresSetColor(HIRES_COLOR_RAW);
+    gvkHiConfigure(2, HIRES_COLOR_RAW);
+    static uint8_t pattern[16 * 128 * 4];
+    for (int y = 0; y < 128; y++) for (int x = 0; x < 16; x++) {
+        uint8_t* texel = &pattern[(y * 16 + x) * 4];
+        texel[0] = y & 1 ? 240 : 16;
+        texel[1] = x < 8 ? 32 : 192;
+        texel[3] = y & 1 ? 255 : 128;
+    }
+    TextureRequest patch = {.w = 16, .h = 128};
+    DecodedTexture source = {.request = patch, .rgba = pattern, .revision = UINT64_C(0x7000000000000001)};
+    TextureSample nearest, mips;
+    if (!textureSampleGet(&source, patch, TEXTURE_FILTER_NEAREST, &nearest) ||
+        !textureMipmapSample(&source, patch, &mips)) {
+        failures++;
+        puts("FAIL anisotropic fixture allocation");
+        restoreScale();
+        return;
+    }
+    const int x[] = {0, 1, 0, 1, 1, 0}, y[] = {0, 0, 1, 0, 1, 1};
+    for (int i = 0; i < 3; i++) {
+        HiVertex quad[6] = {0};
+        for (int j = 0; j < 6; j++) {
+            quad[j] = (HiVertex){.x = 32 + i * 24 + 16 * x[j], .y = 32 + 8 * y[j],
+                                 .u = 15 * x[j], .v = 127 * y[j], .w = 1,
+                                 .mode = DRAW_TEXTURED | DRAW_RAW | DRAW_PRECISE | DRAW_SURFACE,
+                                 .clipMax = 1023u | (511u << 16), .uvMax = 15u | (127u << 16)};
+        }
+        const int filter = i == 0 ? TEXTURE_FILTER_NEAREST : TEXTURE_FILTER_ANISOTROPIC | (i == 1 ? 4 : 8);
+        gvkHiDrawTexture(quad, 6, 0, i == 0 ? &nearest : &mips, filter);
+    }
+    uint32_t original = 0, filtered4 = 0, filtered8 = 0;
+    int ok = gvkHiRead(0, &original, 35 * 2 + 1, 36 * 2 + 1, 1, 1) &&
+             gvkHiRead(0, &filtered4, 59 * 2 + 1, 36 * 2 + 1, 1, 1) &&
+             gvkHiRead(0, &filtered8, 83 * 2 + 1, 36 * 2 + 1, 1, 1);
+    checks++;
+    if (!ok || ((original & 255u) != 16u && (original & 255u) != 240u) ||
+        (filtered4 & 255u) != 128u || (filtered8 & 255u) < 112u || (filtered8 & 255u) > 144u ||
+        (filtered4 & 0x1FFFF00u) != (original & 0x1FFFF00u) || (filtered8 & 0x1FFFF00u) != (original & 0x1FFFF00u)) {
+        failures++;
+        printf("FAIL anisotropic samples: original %08x, 4x %08x, 8x %08x\n", original, filtered4, filtered8);
+    }
+    restoreScale();
+}
+
 int main(int argc, char** argv) {
     SDL_setenv_unsafe("XG_SPEEDUP", "1", 1);
     const char* out = argc > 1 ? argv[1] : ".";
@@ -1699,6 +1856,9 @@ int main(int argc, char** argv) {
     testWideRows();
     testWideGrowthPressure();
     testWideGrowthExhausted();
+    testSceneRaster();
+    testSceneMsaa();
+    testAnisotropy();
 
     DISPENV disp;
     SetDefDispEnv(&disp, 0, 0, 320, 240);

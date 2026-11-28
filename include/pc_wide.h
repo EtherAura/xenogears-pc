@@ -207,6 +207,9 @@ void pcWidePrimTex2D(void* prim, int dx, unsigned int flags, int texDx, int texD
 #define PC_TEX_IS_PORTRAIT(kind) ((kind) == PC_TEX_PORTRAIT || (kind) == PC_TEX_BATTLE_PORTRAIT || (kind) == PC_TEX_MENU_PORTRAIT || (kind) == PC_TEX_MENU_THUMB_PORTRAIT)
 #define PC_TEX_PORTRAIT_SIZE(kind) (((kind) == PC_TEX_BATTLE_PORTRAIT || (kind) == PC_TEX_MENU_THUMB_PORTRAIT) ? 24 : (kind) == PC_TEX_MENU_PORTRAIT ? 48 : 64)
 void pcTextureClass(void* prim, int kind);
+/* Use the interface filter for this packet's artwork. Its texture class
+ * still selects replacement art and upscaling. */
+void pcTextureInterface(void* prim);
 /* Draw this packet half transparent, every texel (blend mode 0, whatever its STP bit): the
  * free field camera's scenery between it and the party. The same per-DrawOTag lifetime. */
 void pcFadePrim(void* prim);

@@ -103,12 +103,12 @@ float sliderWidth(float extraRight = 0.0f) {
 }
 
 // A setting's choices: a drop-down (every setting's the same width), the chosen one shown at its right.
-int listChoice(const char* id, const char* const* names, int count, int value);
+int listChoice(const char* id, const char* const* names, int count, int value, unsigned disabled = 0);
 int choice(const char* id, const char* const* names, int count, int value) {
     return listChoice(id, names, count, value);
 }
 
-int listChoice(const char* id, const char* const* names, int count, int value) {
+int listChoice(const char* id, const char* const* names, int count, int value, unsigned disabled) {
     int chosen = value;
     const char* preview = value >= 0 && value < count ? tr(names[value]) : tr("Custom");
     char hiddenId[128];
@@ -120,6 +120,12 @@ int listChoice(const char* id, const char* const* names, int count, int value) {
     ImGui::SetNextItemWidth(comboWidth(names, count, preview));
     if (skin::beginCombo(comboId, preview)) {
         for (int i = 0; i < count; i++) {
+            if (i < 32 && (disabled & (1u << i))) {
+                ImGui::BeginDisabled();
+                skin::comboItem(tr(names[i]), value == i);
+                ImGui::EndDisabled();
+                continue;
+            }
             if (skin::comboItem(tr(names[i]), value == i)) {
                 chosen = i;
             }
@@ -831,6 +837,36 @@ void displaySection() {
     SDL_Window* win = window();
     bool full = fullscreenRow(win);
 
+    if (row("HDR output", "hdr_output")) {
+        bool requested = gpuHdrRequested() != 0;
+        if (offOnList("##hdr_output", &requested)) gpuSetHdrRequested(requested);
+        if (gpuHdrActive()) hint("HDR output is active.");
+        else if (gpuHdrAvailable()) hint("HDR is available on this display.");
+        else hint("SDR output. HDR requires support from the display, operating system and graphics driver.");
+        overrideNote("hdr_output");
+    }
+    if (row("HDR paper white", "hdr_paper_white")) {
+        int nits = gpuHdrPaperWhite();
+        ImGui::BeginDisabled(!gpuHdrRequested());
+        ImGui::SetNextItemWidth(78.0f * scale());
+        if (skin::sliderInt("##hdr_paper_white", &nits, GPU_HDR_PAPER_WHITE_MIN, GPU_HDR_PAPER_WHITE_MAX,
+                            tr("%d nits"), ImGuiSliderFlags_AlwaysClamp, 5))
+            gpuSetHdrPaperWhite(nits);
+        ImGui::EndDisabled();
+        hint("Brightness for ordinary artwork, menus and movies in HDR.");
+        overrideNote("hdr_paper_white");
+    }
+    if (row("HDR highlight strength", "hdr_highlights")) {
+        int strength = gpuHdrHighlightStrength();
+        ImGui::BeginDisabled(!gpuHdrRequested());
+        ImGui::SetNextItemWidth(78.0f * scale());
+        if (skin::sliderInt("##hdr_highlights", &strength, 0, 100, "%d%%", ImGuiSliderFlags_AlwaysClamp))
+            gpuSetHdrHighlightStrength(strength);
+        ImGui::EndDisabled();
+        hint("Extra brightness for effects. At zero, all content stays at or below paper white.");
+        overrideNote("hdr_highlights");
+    }
+
 #ifndef __ANDROID__ // the window fills the screen there, with or without the system bars
     if (row("Window size", "window_width window_height")) {
         static const int winPresets[][2] = {{960, 720}, {1280, 960}, {1440, 1080}, {1280, 720}, {1920, 1080}};
@@ -895,6 +931,45 @@ void displaySection() {
     // ---- how sharp: the resolution, colour and the filters
     opt::group(N_("Quality"));
     resolutionRow();
+
+    if (row("Scene render scale", "scene_render_scale")) {
+        int scale = hiresSceneScale();
+        int selected = choice("##scene_render_scale", opt::sceneScaleNames, IM_COUNTOF(opt::sceneScaleNames), scale);
+        if (selected != scale) hiresSetSceneScale(selected);
+        int sw, sh, ow = 0, oh = 0;
+        hiresSceneSize(&sw, &sh);
+        if (win) SDL_GetWindowSizeInPixels(win, &ow, &oh);
+        if (sw > 0 && sh > 0 && ow > 0 && oh > 0) hint("Scene %dx%d (%dx), output %dx%d.", sw, sh, hiresSceneScaleNow(), ow, oh);
+        hint("Display copy %dx. Auto and its GPU budget still set its resolution.", hiresScaleNow());
+        if (hiresSceneScale() && hiresSceneScaleNow() == hiresScaleNow()) {
+            if (const char* status = hiresSceneScaleStatus()) hint("%s", tr(status));
+        }
+        overrideNote("scene_render_scale");
+    }
+
+    if (row("Scene MSAA", "scene_msaa")) {
+        int selected = hiresSceneMsaa() / 2;
+        unsigned disabled = 0;
+        for (int i = 1; i < IM_COUNTOF(opt::sceneMsaaNames); i++) {
+            if (!hiresSceneMsaaSupported(i * 2)) disabled |= 1u << i;
+        }
+        int value = listChoice("##scene_msaa", opt::sceneMsaaNames, IM_COUNTOF(opt::sceneMsaaNames), selected, disabled);
+        if (value != selected) hiresSetSceneMsaa(value * 2);
+        if (const char* status = hiresSceneMsaaStatus()) hint("%s", tr(status));
+        else if (disabled == 6) hint("Scene MSAA is unavailable on this renderer.");
+        overrideNote("scene_msaa");
+    }
+
+    if (row("Anisotropic filtering", "texture_anisotropy")) {
+        int current = hiresAnisotropy(), selected = 0;
+        for (int i = 1; i < IM_COUNTOF(opt::anisotropyLevels); i++)
+            if (opt::anisotropyLevels[i] == current) selected = i;
+        int value = choice("##texture_anisotropy", opt::anisotropyNames, IM_COUNTOF(opt::anisotropyNames), selected);
+        if (value != selected) hiresSetAnisotropy(opt::anisotropyLevels[value]);
+        if (const char* status = hiresAnisotropyStatus()) hint("%s", tr(status));
+        else hint("Reduces shimmer on angled 3D textures, including texture packs.");
+        overrideNote("texture_anisotropy");
+    }
 
     if (row("Colour", "upscale_color")) {
         static const char* const colours[] = {"True colour", "15-bit", "15-bit fine", "Raw 8-bit"};
@@ -1010,6 +1085,14 @@ void displaySection() {
         appearanceRow("Sprites","texture_style_sprite",PC_TEX_SPRITE,-1,false);
         appearanceRow("HUD","texture_style_hud",PC_TEX_HUD,-1,false);
         appearanceRow("Battle HUD","texture_style_battle_hud",PC_TEX_BATTLE_HUD,-1,false);
+        if (row("Interface art", "texture_filter_interface")) {
+            static const char* const filters[] = {"Original", "Linear", "Edge"};
+            int filter = textureInterfaceFilter();
+            int selected = choice("##interface", filters, TEXTURE_FILTER_COUNT, filter);
+            if (selected != filter) textureSetInterfaceFilter(selected);
+            hint("Smoothing for textured artwork in the in-game menus. Applies with upscaling or subpixel geometry.");
+            overrideNote("texture_filter_interface");
+        }
         appearanceRow("Text","texture_style_text",PC_TEX_TEXT,-1,false);
         appearanceRow("Battle icons","texture_style_icon",PC_TEX_ICON,-1,false);
         appearanceRow("Dialogue portraits","texture_filter_portrait portrait_set",PC_TEX_PORTRAIT,0,false);
@@ -1054,16 +1137,19 @@ void displaySection() {
             ImGui::BeginDisabled(hiresUpscale() != 0);
             int gpuBudget = hiresGpuBudget();
             ImGui::SetNextItemWidth(sliderWidth());
-            if (ImGui::SliderInt("##gpu_budget", &gpuBudget, 1, 50, "%d ms", ImGuiSliderFlags_AlwaysClamp))
+            if (skin::sliderInt("##gpu_budget", &gpuBudget, 1, 50, "%d ms", ImGuiSliderFlags_AlwaysClamp))
                 hiresSetGpuBudget(gpuBudget);
             ImGui::EndDisabled();
             hint("The budget covers GPU work per video frame. CPU or display waits can still limit speed.");
         }
         if (row("Large surfaces", "upscale_large", opt::ENHANCED)) {
             bool coarseLarge = hiresCoarseLarge();
+            ImGui::BeginDisabled(hiresSceneScale() != 0);
             if (offOnList("##upscale_large", &coarseLarge, N_("Full resolution"), N_("Half resolution")))
                 hiresSetCoarseLarge(coarseLarge);
-            hint("Arenas, Gears and screen-covering layers drawn at half the upscale; text, the HUD and small things stay at full. Cheaper on handheld GPUs; 2x2 blocks on their edges. Off by default.");
+            ImGui::EndDisabled();
+            if (hiresSceneScale()) hint("Available when Scene render scale is set to Match Resolution.");
+            else hint("Arenas, Gears and screen-covering layers drawn at half the upscale; text, the HUD and small things stay at full. Cheaper on handheld GPUs; 2x2 blocks on their edges. Off by default.");
             overrideNote("upscale_large");
         }
         // ===== INTEGRATION POINT: port/src/ui/diagnostics.cpp (diagnostics.h) =====
@@ -1822,7 +1908,7 @@ const SDL_DialogFileFilter japaneseFilters[] = {{"Japanese Xenogears discs", "cu
 void audioSlider(const char* id, const char* key, int def, int lo, int hi) {
     int ms = settingsInt(key, def);
     ImGui::SetNextItemWidth(sliderWidth());
-    if (ImGui::SliderInt(id, &ms, lo, hi, "%d ms")) {
+    if (skin::sliderInt(id, &ms, lo, hi, "%d ms")) {
         settingsSetInt(key, ms);
         spuOutputApplySettings();
     }
@@ -1857,7 +1943,7 @@ void audioSection() {
     if (row("Volume", "volume")) {
         int volume = settingsInt("volume", 100);
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##volume", &volume, 0, 100, "%d%%")) {
+        if (skin::sliderInt("##volume", &volume, 0, 100, "%d%%")) {
             settingsSetInt("volume", volume);
             spuOutputApplySettings();
         }
@@ -2178,7 +2264,7 @@ void touchRows() {
         int opacity = touchOpacityPercent();
         ImGui::BeginDisabled(off);
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##touch_opacity", &opacity, 10, 100, "%d%%")) {
+        if (skin::sliderInt("##touch_opacity", &opacity, 10, 100, "%d%%")) {
             touchSetOpacityPercent(opacity);
             preview = !off;
         }
@@ -2190,7 +2276,7 @@ void touchRows() {
         int size = touchSizePercent();
         ImGui::BeginDisabled(off);
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##touch_size", &size, 60, 140, "%d%%")) {
+        if (skin::sliderInt("##touch_size", &size, 60, 140, "%d%%")) {
             touchSetSizePercent(size);
             preview = !off;
         }
@@ -2287,7 +2373,7 @@ void controlsSection() {
         int deadzone = padStickDeadzone();
         ImGui::BeginDisabled(!stick);
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##deadzone", &deadzone, 0, 95, "%d%%")) {
+        if (skin::sliderInt("##deadzone", &deadzone, 0, 95, "%d%%")) {
             padSetStickDeadzone(deadzone);
         }
         ImGui::EndDisabled();
@@ -2322,7 +2408,7 @@ void controlsSection() {
         float testW = ImGui::CalcTextSize(tr("Test")).x + ImGui::GetStyle().FramePadding.x * 2 +
                       ImGui::GetStyle().ItemSpacing.x;
         ImGui::SetNextItemWidth(sliderWidth(testW));
-        if (ImGui::SliderInt("##vibration_strength", &strength, 0, 100, "%d%%")) {
+        if (skin::sliderInt("##vibration_strength", &strength, 0, 100, "%d%%")) {
             rumbleSetStrength(strength);
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
@@ -2506,7 +2592,7 @@ void cameraSection() {
     if (row("Horizontal speed", "camera_turn_speed", opt::ENHANCED)) {
         int turn = padCameraTurnSpeed();
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##camera_turn_speed", &turn, 25, 300, "%d%%")) padSetCameraTurnSpeed(turn);
+        if (skin::sliderInt("##camera_turn_speed", &turn, 25, 300, "%d%%")) padSetCameraTurnSpeed(turn);
         if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
         hint("Camera horizontal sensitivity for the right stick, camera keys and first-person mouse look. Default: 100%%.");
         overrideNote("camera_turn_speed");
@@ -2514,7 +2600,7 @@ void cameraSection() {
     if (row("Vertical speed", "camera_tilt_speed", opt::ENHANCED)) {
         int tilt = padCameraTiltSpeed();
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##camera_tilt_speed", &tilt, 25, 300, "%d%%")) padSetCameraTiltSpeed(tilt);
+        if (skin::sliderInt("##camera_tilt_speed", &tilt, 25, 300, "%d%%")) padSetCameraTiltSpeed(tilt);
         if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
         hint("Camera vertical sensitivity for the right stick, camera keys and first-person mouse look. Default: 100%%.");
         overrideNote("camera_tilt_speed");
@@ -2522,7 +2608,7 @@ void cameraSection() {
     if (row("Right stick dead zone", "camera_stick_deadzone", opt::ENHANCED)) {
         int dead = padCameraDeadzone();
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##camera_stick_deadzone", &dead, 0, 60, "%d%%")) padSetCameraDeadzone(dead);
+        if (skin::sliderInt("##camera_stick_deadzone", &dead, 0, 60, "%d%%")) padSetCameraDeadzone(dead);
         if (ImGui::IsItemDeactivatedAfterEdit()) settingsSave();
         hint("How far the right stick must move before the camera does (the left stick's dead zone, under Controls, "
              "is the D-pad's). Default: 20%%.");
@@ -3094,7 +3180,7 @@ void battlesSection() {
     if (row("Random encounters", "encounter_rate")) {
         int rate = pcGameplayEncounterRate();
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##encounter_rate", &rate, 0, 400, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+        if (skin::sliderInt("##encounter_rate", &rate, 0, 400, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
             pcGameplaySetEncounterRate(rate);
         }
         hint("Applies while walking in fields and on the world map. 0%% turns random encounters off; 100%% is the "
@@ -3104,7 +3190,7 @@ void battlesSection() {
     if (row("Deathblow learning", "deathblow_learning")) {
         int practice = pcGameplayDeathblowLearning();
         ImGui::SetNextItemWidth(sliderWidth());
-        if (ImGui::SliderInt("##deathblow_learning", &practice, 0, 1000, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+        if (skin::sliderInt("##deathblow_learning", &practice, 0, 1000, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
             pcGameplaySetDeathblowLearning(practice);
         }
         hint("Practice each normal attack gives toward new deathblows. 100%% is original; 0%% adds none. "
@@ -3140,7 +3226,7 @@ void battlesSection() {
             ImGui::PushID(stat);
             int percent = pcGameplayEnemyMultiplier(stat);
             ImGui::SetNextItemWidth(sliderWidth());
-            if (ImGui::SliderInt("##enemy_stat", &percent, 25, 400, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+            if (skin::sliderInt("##enemy_stat", &percent, 25, 400, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
                 pcGameplaySetEnemyMultiplier(stat, percent);
             }
             overrideNote(pcGameplayEnemyKey(stat));
@@ -3163,7 +3249,7 @@ void battlesSection() {
             ImGui::PushID(100 + reward);
             int percent = pcGameplayRewardMultiplier(reward);
             ImGui::SetNextItemWidth(sliderWidth());
-            if (ImGui::SliderInt("##reward", &percent, 0, 1000, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
+            if (skin::sliderInt("##reward", &percent, 0, 1000, "%d%%", ImGuiSliderFlags_AlwaysClamp)) {
                 pcGameplaySetRewardMultiplier(reward, percent);
             }
             overrideNote(pcGameplayRewardKey(reward));

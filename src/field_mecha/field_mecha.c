@@ -420,6 +420,10 @@ void freeMechaModelBlocks(sMechaInitVar4* p, s32 freeBlocks) {
 /* Noah: submitMechaForRendering. Shadow quad under the root (unless
  * m4A_flags & 1), every enabled bone's model, then the attached effects
  * (m114 cloth parts, m118 CLUT animations, m110 trails). */
+#ifdef PLATFORM_PC
+unsigned pcGearPoseDraw(const sLoadedMechas* m, const MATRIX* view, s32 pose, int field,
+                       sLoadedMechas* const* mechas, unsigned count);
+#endif
 void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 renderMode, s32 arg4, OTag* ot,
                    s32 oddOrEven) {
     SVECTOR sv;
@@ -444,6 +448,9 @@ void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 r
         scale = mecha->m1C_scale;
         numBones = b->mA_numBones;
         bones = b;
+#ifdef PLATFORM_PC
+        unsigned gear = pcGearPoseDraw(mecha, m1, -1, 1, loadedMechas, 10);
+#endif
         CompMatrix(m1, &b->mC_localMatrix, sp40);
         if (!(mecha->m4A_flags & 1)) {
             s32 s;
@@ -521,7 +528,7 @@ void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 r
             }
             z >>= gDepthDivider;
 #ifdef PLATFORM_PC
-            pcInterpolationKeyType(mecha, mecha->m0_model, 0x10000, &mecha->mB8_Polys[oddOrEven], PC_INTERP_SHADOW);
+            pcInterpolationKeyType(mecha, mecha->m0_model, 0x10000, &mecha->mB8_Polys[oddOrEven], gear ? PC_INTERP_HELD : PC_INTERP_SHADOW);
 #endif
             addPrim(ot + z, &mecha->mB8_Polys[oddOrEven]);
             if (z > 0x2D8) {
@@ -555,7 +562,8 @@ void submitMechaForRendering(sLoadedMechas* mecha, MATRIX* m1, MATRIX* m2, s32 r
                 SetRotMatrix(sp00);
                 SetTransMatrix(sp00);
 #ifdef PLATFORM_PC
-                pcInterpolationObjectType(b, model->m0_blocks[b->m8_geometryId], PC_INTERP_MECHA);
+                if (gear) pcInterpolationGearObject(b, model->m0_blocks[b->m8_geometryId], gear, i);
+                else pcInterpolationObjectType(b, model->m0_blocks[b->m8_geometryId], PC_INTERP_MECHA);
 #endif
                 submitModelForRendering(model->m0_blocks[b->m8_geometryId], b->m68_prims[oddOrEven], ot,
                                         renderMode);

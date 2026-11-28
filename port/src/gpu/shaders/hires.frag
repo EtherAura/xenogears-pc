@@ -60,6 +60,7 @@ layout(location = 12) flat in uint vOrder;
 #endif
 
 #include "prompt.glsl"
+#include "hdr.glsl"
 #ifdef ORDERED_LIST
 #define ORDERED_COLLECT
 #ifdef DEPTH
@@ -81,6 +82,7 @@ const uint DRAW_FILL = 0x100u;
 const uint DRAW_PRECISE = 0x400u;
 const uint DRAW_SURFACE = 0x800u;
 const uint DRAW_FRINGE = 0x1000u;
+const uint DRAW_HDR_EMISSION = 0x10000u;
 
 const uint MASK = 0x1000000u; // the hi-res pixel's mask (STP) bit
 // Display-only coverage, independent of the PS1 mask bit. Original faces
@@ -105,12 +107,26 @@ layout(push_constant) uniform Hi {
     ivec2 target;
     ivec2 wideSize;
     ivec2 ditherOrigin;
-    int coarse; // the block size the COARSE build uses (2); the layout's field, unread
-#ifdef DEPTH
+    int rasterScale; // samples per native pixel in the COARSE build
+#if defined(DEPTH) || defined(MSAA)
     ivec2 depthOrigin; // the depth image's pixel (0, 0) in the target (hi-res pixels)
     ivec2 depthSize;   // its size
 #endif
+#ifdef MSAA
+    int sampleX;
+    int sampleY;
+    int sampleStride;
+    uint sampleEpoch;
+#endif
 } pc;
+#ifdef MSAA
+// Rasterizer coverage at one shade per pixel. Keep the packed sample words
+// until this ordered run ends so adjacent faces and translucent overlaps
+// see each sample's original colour, mask and seam coverage.
+layout(constant_id = 1) const uint sampleCount = 4u;
+layout(set = 2, binding = 0, std430) coherent buffer SampleStamps { uint sampleStamps[]; };
+layout(set = 2, binding = 1, std430) coherent buffer SceneSamples { uint sceneSamples[]; };
+#endif
 #ifdef TILE_IMAGE
 // At Auto's 1x level, texel and output grids coincide. Specializing this
 // uniform eliminates integer divisions for both axes of every sample.
@@ -232,6 +248,7 @@ ivec3 ditherAverage(ivec3 v) {
 // is coloured with the primitive's live CLUT, as the 1x texel would be.
 // Private replay (bit 18) instead owns an exact RGBA palette before the
 // indices; the high byte stores its length minus one. No live CLUT is read.
+// With a kept index map, the palette follows a word pointing to that map.
 uint samplePixel(ivec2 t, ivec2 lo, ivec2 hi, int scale) {
     ivec2 origin = ivec2(int(vSample.y << 16) >> 16, int(vSample.y) >> 16);
     ivec2 size = ivec2(vSample.z & 65535u, vSample.z >> 16);
@@ -254,9 +271,10 @@ uint samplePixel(ivec2 t, ivec2 lo, ivec2 hi, int scale) {
     }
     bool ownedPalette = (vSample.w & 0x40000u) != 0u;
     uint paletteSize = ownedPalette ? (vSample.w >> 24) + 1u : 0u;
-    uint w = fromKept ? kept[vSample.x + (i >> 2)] : pixels[vSample.x + paletteSize + (i >> 2)];
+    uint keptBase = fromKept && ownedPalette ? pixels[vSample.x] : vSample.x;
+    uint w = fromKept ? kept[keptBase + (i >> 2)] : pixels[vSample.x + paletteSize + (i >> 2)];
     uint index = (w >> ((i & 3u) * 8u)) & 255u;
-    if (ownedPalette) return pixels[vSample.x + index];
+    if (ownedPalette) return pixels[vSample.x + uint(fromKept) + index];
     uint clut = vTex >> 16;
     uint c = fetch(int(clut & 0x3Fu) * 16 + int(index), int((clut >> 6) & 0x1FFu));
     if (c == 0u) {
@@ -282,6 +300,137 @@ float textCover = 1.0;
 
 // The texel boundary nudge (filteredPixel's comment), none at 1x.
 float boundaryNudge(int scale) { return scale > 1 ? 1.0/256.0 : 0.0; }
+
+vec4 linearTexels(vec2 pos, ivec2 lo, ivec2 hi, int scale) {
+    pos -= 0.5;
+    ivec2 base = ivec2(floor(pos));
+    vec2 f = fract(pos);
+    vec3 rgb = vec3(0);
+    float coverage = 0;
+    for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
+        uint tap = samplePixel(base + ivec2(x, y), lo, hi, scale);
+        float weight = (x == 0 ? 1.0 - f.x : f.x) * (y == 0 ? 1.0 - f.y : f.y);
+        if ((tap >> 24) != 0u) { rgb += vec3(rgb8(tap)) * weight; coverage += weight; }
+    }
+    return vec4(rgb, coverage);
+}
+
+vec4 mipTexel(uint base, uint levelOffset, ivec2 size, ivec2 p, bool levelZero, bool resident, bool owned) {
+    p = clamp(p, ivec2(0), size - 1);
+    uint index = levelOffset + uint(p.y * size.x + p.x);
+    uint c;
+    if (owned && (vWideTex & 0x40000u) != 0u) {
+        // The snapshot owns one lossless palette for the entire lower chain.
+        uint colors = (vWideTex >> 24) + 1u;
+        uint word = pixels[base + colors + (index >> 2)];
+        c = pixels[base + ((word >> ((index & 3u) * 8u)) & 255u)];
+    } else {
+        c = resident ? kept[base + index] : pixels[base + index];
+    }
+    uint alpha = c >> 24;
+    if (alpha == 0u) return vec4(0.0);
+    if (levelZero) alpha = 255u;
+    return vec4(rgb8(c), float(alpha));
+}
+
+vec4 mipLinear(uint base, uint levelOffset, ivec2 size, vec2 p, ivec2 lo, ivec2 hi, bool levelZero, bool resident, bool owned) {
+    p -= 0.5;
+    ivec2 t = ivec2(floor(p));
+    vec2 w = fract(p);
+    return mix(mix(mipTexel(base, levelOffset, size, clamp(t, lo, hi), levelZero, resident, owned),
+                   mipTexel(base, levelOffset, size, clamp(t + ivec2(1, 0), lo, hi), levelZero, resident, owned), w.x),
+               mix(mipTexel(base, levelOffset, size, clamp(t + ivec2(0, 1), lo, hi), levelZero, resident, owned),
+                   mipTexel(base, levelOffset, size, clamp(t + 1, lo, hi), levelZero, resident, owned), w.x), w.y);
+}
+
+uint anisotropicPixel(vec2 at, vec2 dx, vec2 dy, ivec2 lo, ivec2 hi, uint sampling, out bool clear) {
+    bool pack = (sampling & 64u) != 0u;
+    bool owned = (vSample.w & 0x200000u) != 0u;
+    bool baseOnly = (pack || owned) && (vWideEdge & 0x40000000u) != 0u;
+    int imageScale = int((vSample.w >> 8) & 255u);
+    at *= float(imageScale);
+    dx *= float(imageScale);
+    dy *= float(imageScale);
+    uint nearest = samplePixel(ivec2(floor(at + boundaryNudge(imageScale))), lo, hi, imageScale);
+    clear = (nearest >> 24) == 0u;
+    uint stp = (nearest >> 24) == 128u ? MASK : 0u;
+    uint original = (nearest & 0xFFFFFFu) | stp;
+    if (pack && (sampling & 32u) != 0u) {
+        vec4 bilinear = linearTexels(at, lo, hi, imageScale);
+        clear = bilinear.a < 0.5;
+        if (!clear) original = pack8(ivec3(floor(bilinear.rgb / bilinear.a + 0.5))) | stp;
+    }
+    if (clear) return 0u; // keep the base image's coverage and STP
+
+    ivec2 origin = ivec2(int(vSample.y << 16) >> 16, int(vSample.y) >> 16);
+    ivec2 size = ivec2(vSample.z & 65535u, vSample.z >> 16);
+    // Ellipse of the screen pixel in texture space: the eigenvalues of
+    // J*transpose(J) give its squared axes, including perspective/shear.
+    vec2 u = vec2(dx.x, dy.x), v = vec2(dx.y, dy.y);
+    float uu = dot(u, u), vv = dot(v, v), uv = dot(u, v);
+    float major2 = 0.5 * (uu + vv + length(vec2(uu - vv, 2.0 * uv)));
+    float major = sqrt(major2);
+    if (isnan(major) || isinf(major) || (major <= 1.0 && (pack || (sampling & 32u) == 0u)))
+        return original;
+    float minor = abs(dx.x * dy.y - dx.y * dy.x) / max(major, 1e-6);
+    int limit = int(sampling & 15u);
+    float width = max(1.0, max(minor, major / float(limit)));
+    int count = int(clamp(ceil(major / (baseOnly ? 1.0 : width)), 1.0, float(limit)));
+    vec2 direction = uu >= vv ? vec2(major2 - vv, uv) : vec2(uv, major2 - uu);
+    direction *= major / max(length(direction), 1e-6);
+
+    // Fixed-colour replacement mips share a whole image across faces and
+    // may only read complete blocks inside this face. Indexed replacement
+    // and native mips are built for the face's patch.
+    uint base = pack || owned ? vWideEdge & 0x3FFFFFFFu : vSample.x;
+    bool resident = !owned && (pack ? (vWideEdge & 0x80000000u) != 0u : (vSample.w & 0x10000u) != 0u);
+    bool sharedPage = pack && (owned ? (vWideEdge & 0x80000000u) != 0u : (vSample.w & 0x20000u) == 0u);
+    if ((pack || owned) && !sharedPage) {
+        ivec2 start = max(origin, lo);
+        size = min(origin + size, hi + 1) - start;
+        origin = start;
+    }
+    size *= imageScale;
+    origin *= imageScale;
+    ivec2 fullSize = size;
+    ivec2 patchStart = max(ivec2(0), lo * imageScale - origin);
+    ivec2 patchEnd = min(size, (hi + 1) * imageScale - origin);
+    ivec2 firstTap = ivec2(0), lastTap = size - 1;
+    int lod = baseOnly ? 0 : int(clamp(floor(log2(width) + 0.5), 0.0, 11.0));
+    int level = 0;
+    uint levelOffset = 0u;
+    for (; level < lod && any(greaterThan(size, ivec2(1))); level++) {
+        ivec2 next = (size + 1) / 2;
+        if (sharedPage) {
+            int block = 2 << level;
+            ivec2 first = (patchStart + block - 1) / block;
+            ivec2 last = mix(patchEnd / block, next, equal(patchEnd, fullSize)) - 1;
+            if (any(greaterThan(first, last))) break;
+            firstTap = first;
+            lastTap = last;
+        } else {
+            lastTap = next - 1;
+        }
+        if ((!pack && !owned) || level > 0) levelOffset += uint(size.x * size.y);
+        size = next;
+    }
+    float scale = exp2(float(-level));
+    vec2 center = (at - vec2(origin)) * scale;
+    vec2 step = direction * (scale / float(count));
+    vec2 tap = center - 0.5 * float(count - 1) * step;
+    vec4 sum = vec4(0.0);
+    for (int i = 0; i < count; ++i, tap += step) {
+        vec2 pos = clamp(tap, vec2(0), vec2(size));
+        if ((pack || owned) && level == 0) {
+            vec4 value = linearTexels(pos + vec2(origin), lo, hi, imageScale);
+            sum += vec4(value.rgb, value.a * 255.0);
+        } else {
+            sum += mipLinear(base, levelOffset, size, pos, firstTap, lastTap, level == 0, resident, owned);
+        }
+    }
+    if (sum.a <= 0.0) return original;
+    return pack8(ivec3(clamp(floor(sum.rgb * (255.0 / sum.a) + 0.5), 0.0, 255.0))) | stp;
+}
 
 uint filteredPixel(vec2 at, ivec2 lo, ivec2 hi, out bool clear) {
     int scale = int((vSample.w >> 8) & 255u);
@@ -360,16 +509,10 @@ uint filteredPixel(vec2 at, ivec2 lo, ivec2 hi, out bool clear) {
         return (edge & 0xffffffu) | ((edge >> 24) == 128u ? MASK : 0u);
     }
     uint nearest = samplePixel(ivec2(floor(at*float(scale) + boundaryNudge(scale))),lo,hi,scale); // the boundary nudge above
-    vec2 pos = at*float(scale) - 0.5;
-    ivec2 base = ivec2(floor(pos)); vec2 f = fract(pos);
-    vec3 rgb = vec3(0); float coverage = 0;
-    for (int y = 0; y < 2; ++y) for (int x = 0; x < 2; ++x) {
-        uint tap = samplePixel(base + ivec2(x,y),lo,hi,scale);
-        float weight = (x == 0 ? 1.0-f.x : f.x) * (y == 0 ? 1.0-f.y : f.y);
-        if ((tap >> 24) != 0u) { rgb += vec3(rgb8(tap))*weight; coverage += weight; }
-    }
+    vec4 bilinear = linearTexels(at * float(scale), lo, hi, scale);
+    float coverage = bilinear.a;
     clear = coverage < 0.5;
-    ivec3 color = coverage > 0.0 ? ivec3(floor(rgb/coverage + 0.5)) : ivec3(0);
+    ivec3 color = coverage > 0.0 ? ivec3(floor(bilinear.rgb / coverage + 0.5)) : ivec3(0);
     return pack8(color) | ((nearest >> 24) == 128u ? MASK : 0u);
 }
 
@@ -383,7 +526,7 @@ bool hiKeeps(uint dst, uint mode) {
 // The copy's new word at pixel pp (inside the 1x pixel q) over dst: colour
 // in the push constant's mode, the mask bit and the display coverage.
 uint hiPixel(uint dst, ivec2 pp, ivec2 q, uint mode, bool resolved, uint fill, bool raw, bool semi, uint semiMode,
-             bool dithered, ivec3 front8, ivec3 front5, uint maskOut) {
+             bool dithered, ivec3 front8, ivec3 front5, uint maskOut, uint emission) {
     uint color;
     if (resolved || (mode & DRAW_FILL) != 0u) {
         color = fill;
@@ -414,25 +557,34 @@ uint hiPixel(uint dst, ivec2 pp, ivec2 q, uint mode, bool resolved, uint fill, b
     uint coverage = dst & COVERED;
     if ((mode & (DRAW_SURFACE | DRAW_FRINGE)) != 0u) coverage = COVERED;
     else if (resolved || (mode & DRAW_FILL) != 0u) coverage = 0u;
-    return color | maskOut | coverage;
+    // Any ordinary draw, including a HUD pixel or fade, replaces the mark.
+    if (emission != 0u) emission = max(emission, dst & HDR_MASK);
+    return color | maskOut | coverage | emission;
 }
 
 void main() {
     bool evolving = (vSample.w & 0x100000u) != 0u;
     bool cachedCapture = (vSample.w & 0x400000u) != 0u;
     bool replayed = (evolving || cachedCapture) && (vSample.w & 0x200000u) == 0u && imageLoad(replayCache,ivec2(0,256)).r != 0u;
-    // COARSE (upscale_large=half, vk.c hiBatchCoarseRuns): the fragment is a
-    // 2x2 block whose first pixel is p; it samples at its own centre (the
-    // block's) and writes every pixel of the block below. 2 divides N, so a
-    // block is inside one 1x pixel. Without it the loop below is one pixel.
-#ifdef COARSE
-    const int cs = 2;
-#else
-    const int cs = 1;
-#endif
-    ivec2 p = ivec2(gl_FragCoord.xy) * cs - vRasterShift; // the VRAM copy's pixel (hires.vert)
     int n = HI_SCALE;
-    ivec2 q = p / n; // the 1x pixel
+    // Expand the reduced grid inside each native pixel. Rounding the two
+    // boundaries up partitions even ratios such as a 2x raster in a 5x copy
+    // without overlap or crossing native texture, dither or mask boundaries.
+#ifdef COARSE
+    int raster = pc.rasterScale;
+    ivec2 grid = ivec2(gl_FragCoord.xy) - (vRasterShift / n) * raster;
+    ivec2 q = (grid - ivec2(lessThan(grid, ivec2(0))) * (raster - 1)) / raster;
+    ivec2 local = grid - q * raster;
+    ivec2 begin = (local * n + raster - 1) / raster;
+    ivec2 p = q * n + begin;
+    ivec2 extent = ((local + 1) * n + raster - 1) / raster - begin;
+    float step = float(n) / float(raster);
+#else
+    ivec2 p = ivec2(gl_FragCoord.xy) - vRasterShift;
+    ivec2 q = p / n;
+    const ivec2 extent = ivec2(1);
+    const float step = 1.0;
+#endif
     // Texture coordinates and colour as the PS1 samples them, centred on
     // each 1x pixel's block: the PS1 takes them at its sample point (the
     // block's corner, where coverage is decided) and rounds to the nearest
@@ -443,8 +595,9 @@ void main() {
     // A native-block shift can cross a thin face or a quad's diagonal,
     // selecting another texture strip as the face turns. Keep sprite,
     // HUD, text and integer-fallback sampling on the native block grid.
-    float shift = (vMode & DRAW_PRECISE) != 0u ? 0.0 : (0.5 - 0.5 * float(n)) / float(cs); // derivatives are per fragment: cs pixels
-    vec2 uvAt = vUV + shift * (dFdx(vUV) + dFdy(vUV)) + 0.5;
+    float shift = (vMode & DRAW_PRECISE) != 0u ? 0.0 : (0.5 - 0.5 * float(n)) / step;
+    vec2 uvDx = dFdx(vUV), uvDy = dFdy(vUV);
+    vec2 uvAt = vUV + shift * (uvDx + uvDy) + 0.5;
     vec3 colorAt = vColor + shift * (dFdx(vColor) + dFdy(vColor));
     bool spanInside = true;
     if ((evolving || cachedCapture) && n == 1) {
@@ -532,6 +685,9 @@ void main() {
                 if((vSample.w&0x10000u)!=0u)word=imageLoad(replayCache,at).r;
                 else word = all(greaterThanEqual(at,ivec2(0))) && all(lessThan(at,imageSize(DST))) ? (evolving && (vSample.w&0x800000u)==0u ? imageLoad(DST,at).r : imageLoad(REPLAY_SOURCE,at).r) : 0u;
                 clear = (word & (MASK | 0xF8F8F8u)) == 0u;
+            } else if ((vSample.w & 16u) != 0u && (vSample.w & 255u) >= 17u) {
+                // The display-copy sample stores filter + 1 in its low byte.
+                word = anisotropicPixel(uvAt, uvDx, uvDy, lo, hi, (vSample.w & 255u) - 1u, clear);
             } else if (vSample.w != 0u) {
                 word = filteredPixel(uvAt,lo,hi,clear);
             } else if ((tpage & ~0x60u) == 0x8180u) {
@@ -590,36 +746,51 @@ void main() {
 
     front5 = clamp(front5, 0, 31);
     front8 = clamp(front8, 0, 255);
+    uint emission = 0u;
+    if ((mode & DRAW_HDR_EMISSION) != 0u && semi && (semiMode == 1u || semiMode == 3u)) {
+        float peak = hdrPeak(vec3(front8)) / 255.0;
+        emission = hdrEmission(smoothstep(0.35, 1.0, peak) * (semiMode == 3u ? 0.25 : 1.0));
+    }
 #ifdef ORDERED_LIST
     if(write) {
         uint flags=orderedFlags(resolved?mode|DRAW_FILL:mode,semi,semiMode,maskOut!=0u),front;
-        if(textCover<1.0)flags|=uint(clamp(floor(textCover*255.0+0.5),1.0,254.0))<<ORD_COVER_SHIFT;
-        if(resolved || (mode&DRAW_FILL)!=0u)front=fill;
-        else if(raw)front=pack8(front8);
-        else if(pc.color==0&&dithered)front=pack8(ditherAverage(front8));
-        else if(pc.color==0){front=pack8(expand5(front5));flags|=ORD_QUARTER5;}
-        else {
-            ivec3 f=front5;
-            if(dithered) {
-                ivec2 dp=pc.color==1?q+pc.ditherOrigin:p+pc.ditherOrigin*n;
-                f=clamp((front8+dither[(dp.y&3)*4+(dp.x&3)])>>3,0,31);
-            }
-            front=uint(f.r)|uint(f.g)<<5|uint(f.b)<<10;flags|=ORD_QUANT5;
-        }
-#ifdef DEPTH
-        // The interlocked pass's rule (below): a fragment that replaces the
-        // pixel owns its depth; ordered.comp keeps the last one that does.
-        ivec2 zp = p - pc.depthOrigin;
-        uint z = 0u;
-        if (vInvZ != 0.0 && !semi && textCover >= 1.0 &&
-            all(greaterThanEqual(zp, ivec2(0))) && all(lessThan(zp, pc.depthSize))) {
-            z = depthWord();
-            flags |= ORD_DEPTH;
-        }
-        orderedAppend(p,front,flags,z);
-#else
-        orderedAppend(p,front,flags,0u);
+#ifdef ORDERED_MSAA
+        flags |= (uint(gl_SampleMaskIn[0]) & 15u) << ORD_SAMPLE_SHIFT;
 #endif
+        flags |= (emission >> HDR_SHIFT) << ORD_HDR_SHIFT;
+        if(textCover<1.0)flags|=uint(clamp(floor(textCover*255.0+0.5),1.0,254.0))<<ORD_COVER_SHIFT;
+        // Collect the footprint on the display grid, where each pixel has
+        // its own destination colour, mask, dither phase and depth.
+        for (int by = 0; by < extent.y; by++) for (int bx = 0; bx < extent.x; bx++) {
+            ivec2 pp = p + ivec2(bx, by);
+            uint pixelFlags = flags;
+            if(resolved || (mode&DRAW_FILL)!=0u)front=fill;
+            else if(raw)front=pack8(front8);
+            else if(pc.color==0&&dithered)front=pack8(ditherAverage(front8));
+            else if(pc.color==0){front=pack8(expand5(front5));pixelFlags|=ORD_QUARTER5;}
+            else {
+                ivec3 f=front5;
+                if(dithered) {
+                    ivec2 dp=pc.color==1?q+pc.ditherOrigin:pp+pc.ditherOrigin*n;
+                    f=clamp((front8+dither[(dp.y&3)*4+(dp.x&3)])>>3,0,31);
+                }
+                front=uint(f.r)|uint(f.g)<<5|uint(f.b)<<10;pixelFlags|=ORD_QUANT5;
+            }
+#ifdef DEPTH
+            // The interlocked pass's rule (below): a fragment that replaces the
+            // pixel owns its depth; ordered.comp keeps the last one that does.
+            ivec2 zp = pp - pc.depthOrigin;
+            uint z = 0u;
+            if (vInvZ != 0.0 && !semi && textCover >= 1.0 &&
+                all(greaterThanEqual(zp, ivec2(0))) && all(lessThan(zp, pc.depthSize))) {
+                z = depthWord();
+                pixelFlags |= ORD_DEPTH;
+            }
+            orderedAppend(pp,front,pixelFlags,z);
+#else
+            orderedAppend(pp,front,pixelFlags,0u);
+#endif
+        }
     }
 #elif defined(TILE_IMAGE)
     // As draw.frag's: a fragment that writes nothing leaves the attachment
@@ -627,7 +798,7 @@ void main() {
     if (write) {
         uint dst = checkDestination ? checkedPixel :
                    (semi || textCover < 1.0 ? colorAttachmentReadEXT(tilePixel).r : 0u);
-        outPixel = hiPixel(dst, p, q, mode, resolved, fill, raw, semi, semiMode, dithered, front8, front5, maskOut);
+        outPixel = hiPixel(dst, p, q, mode, resolved, fill, raw, semi, semiMode, dithered, front8, front5, maskOut, emission);
 #ifdef DEPTH
         outDepth = vInvZ != 0.0 && !semi && textCover >= 1.0 ? depthWord() : colorAttachmentReadEXT(tileDepth).r;
 #endif
@@ -636,22 +807,67 @@ void main() {
     }
 #else
     BEGIN_ORDERED();
-    if (write) for (int by = 0; by < cs; by++) for (int bx = 0; bx < cs; bx++) {
+    if (write) for (int by = 0; by < extent.y; by++) for (int bx = 0; bx < extent.x; bx++) {
         ivec2 pp = p + ivec2(bx, by); // the block's pixel (p itself at full resolution)
         uint dst = imageLoad(DST, pp).r;
-        if (hiKeeps(dst, mode)) {
-            imageStore(DST, pp, uvec4(hiPixel(dst, pp, q, mode, resolved, fill, raw, semi, semiMode, dithered,
-                                              front8, front5, maskOut)));
-#ifdef DEPTH
-            // A fragment that replaces the pixel owns its depth; one that
-            // blends (semi) or only smooths a text edge leaves it.
-            ivec2 dp = pp - pc.depthOrigin;
-            if (vInvZ != 0.0 && !semi && textCover >= 1.0 &&
-                all(greaterThanEqual(dp, ivec2(0))) && all(lessThan(dp, pc.depthSize))) {
-                imageStore(sceneDepth, dp, uvec4(depthWord()));
+        bool ownsDepth = hiKeeps(dst, mode);
+#ifdef MSAA
+        uint allSamples = (1u << sampleCount) - 1u;
+        uint coverageMask = uint(gl_SampleMaskIn[0]) & allSamples;
+        ivec2 sp = pp + vRasterShift - ivec2(pc.sampleX, pc.sampleY);
+        uint point = uint(sp.y * pc.sampleStride + sp.x);
+        uint at = point * sampleCount;
+        bool split = sampleStamps[point] == pc.sampleEpoch;
+
+        // An opaque surface covering every sample replaces the whole pixel.
+        // Uniform pixels can otherwise take the usual path when fully covered.
+        bool opaqueSurface = !semi && textCover >= 1.0 &&
+            (mode & (DRAW_SURFACE | DRAW_FRINGE | DRAW_CHECK_MASK)) == DRAW_SURFACE;
+        if (coverageMask == allSamples && (!split || opaqueSurface)) {
+            if (split) sampleStamps[point] = 0u;
+            if (opaqueSurface) ownsDepth = true;
+            if (ownsDepth) {
+                imageStore(DST, pp, uvec4(hiPixel(dst, pp, q, mode, resolved, fill, raw, semi, semiMode,
+                                                  dithered, front8, front5, maskOut, emission)));
             }
-#endif
+        } else {
+            ivec3 sum = ivec3(0);
+            uint energy = 0u, flags = 0u;
+            for (uint s = 0u; s < sampleCount; ++s) {
+                uint word = split ? sceneSamples[at + s] : dst;
+                bool replace = (coverageMask & (1u << s)) != 0u && hiKeeps(word, mode);
+                if (replace)
+                    word = hiPixel(word, pp, q, mode, resolved, fill, raw, semi, semiMode,
+                                   dithered, front8, front5, maskOut, emission);
+                sceneSamples[at + s] = word;
+                sum += rgb8(word);
+                energy += word >> HDR_SHIFT;
+                // Mask, seam coverage and scene depth are categorical.
+                // Use the same reference sample for all three at resolve.
+                if (s == 0u) {
+                    flags = word & (MASK | COVERED);
+                    ownsDepth = replace;
+                }
+            }
+            sampleStamps[point] = pc.sampleEpoch;
+            uint hdr = ((energy + sampleCount / 2u) / sampleCount) << HDR_SHIFT;
+            imageStore(DST, pp, uvec4(pack8((sum + int(sampleCount / 2u)) / int(sampleCount)) | flags | hdr));
         }
+#else
+        if (ownsDepth) {
+            imageStore(DST, pp, uvec4(hiPixel(dst, pp, q, mode, resolved, fill, raw, semi, semiMode, dithered,
+                                              front8, front5, maskOut, emission)));
+        }
+#endif
+#ifdef DEPTH
+        // A fragment that replaces the pixel owns its depth; one that
+        // blends (semi) or only smooths a text edge leaves it.
+        ivec2 dp = pp - pc.depthOrigin;
+        if (ownsDepth && vInvZ != 0.0 && !semi && textCover >= 1.0 &&
+            all(greaterThanEqual(dp, ivec2(0))) && all(lessThan(dp, pc.depthSize))) {
+            imageStore(sceneDepth, dp, uvec4(depthWord()));
+        }
+#endif
     }
     END_ORDERED();
 #endif

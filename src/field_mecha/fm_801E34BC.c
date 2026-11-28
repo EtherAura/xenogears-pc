@@ -3,6 +3,7 @@
  * cloth builder through a short-parameter prototype. .rodata from 0x801DC040.
  * GCC 2.6.3, -O2 -G0, ASPSX 2.34 with divide checks. */
 #include "common.h"
+#include "pc_interpolation.h"
 #include "pc_retail_heap.h"
 #include "psyq.h"
 #include "gte.h"
@@ -168,6 +169,10 @@ void initMechaAnimation(sLoadedMechas* arg0, sLoadedMechas* arg1, sMechaInitVar2
     }
 }
 
+#ifdef PLATFORM_PC
+void pcGearPoseFrame(void);
+void pcGearPoseReplayBefore(const sLoadedMechas* m);
+#endif
 s32 updateMechAnim(sLoadedMechas* arg0, sMechaInitVar2* arg1, s32 iterations, s32 oddOrEven, s32 arg4) {
     s32 updateFlag;
     s32 i;
@@ -181,6 +186,9 @@ s32 updateMechAnim(sLoadedMechas* arg0, sMechaInitVar2* arg1, s32 iterations, s3
             } else {
                 updateMechAnimSub1(arg0->m4_bones, arg0->m1C_scale);
             }
+#ifdef PLATFORM_PC
+            pcGearPoseReplayBefore(arg0);
+#endif
             for (i = 0; i < iterations; i++) {
                 updateFlag |= updateMechAnimSub3(arg1, arg0->m4_bones, arg0->m3C_trackTag, arg0->m1C_scale);
                 updateMechAnimSub4(arg0, arg1, oddOrEven);
@@ -2078,6 +2086,9 @@ void renderMechas(MATRIX* pMatrix, MATRIX* pArgs, OTag* ot, s32 oddOrEven, s32 f
     s32 i;
     SVECTOR unused; /* reserves the retail stack slot */
 
+#ifdef PLATFORM_PC
+    if (pcInterpolationHighRate()) pcGearPoseFrame();
+#endif
     iterations = 0;
     mechaInitVar0 += 1 + flag;
     if (mechaInitVar0 > 6) {

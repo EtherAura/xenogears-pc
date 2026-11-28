@@ -677,8 +677,10 @@ static int isEnd(OTag tag) {
 }
 
 /* Feed a linked list of packets to GP0, as the DMA's linked-list mode does. */
-static void walk(const OTag* p) {
+static void walk(const OTag* p, const void* uiTag) {
     long guard = 0;
+    int markScene = uiTag != NULL && (hiresSceneScaleNow() < hiresScaleNow() || hiresSceneMsaaNow() || hiresAnisotropyNow());
+    if (markScene) gp0SceneRaster(1);
     if (traceOut() != NULL) {
         fputc('O', traceFile);
     }
@@ -686,6 +688,7 @@ static void walk(const OTag* p) {
      * the packets their depth, and the tag after it ends it. */
     if (sceneWalkOn) sceneWalkBegin();
     while (p != NULL) {
+        if (markScene && p == uiTag) gp0SceneRaster(0);
         OTag tag = *p;
         int len = (int)(tag >> 56);
         if (sceneWalkOn) sceneWalkTag(p);
@@ -711,6 +714,7 @@ static void walk(const OTag* p) {
             break;
         }
     }
+    if (markScene) gp0SceneRaster(0);
     if (sceneWalkOn) sceneWalkEnd();
     if (traceFile != NULL) {
         fputc('\n', traceFile);
@@ -753,21 +757,25 @@ static void walkCaptured(const OTag* p) {
     }
 }
 
-void DrawOTag(OTag* p) {
+static void drawOTag(OTag* p, const void* uiTag) {
     hwSafePoint();
     if (capture != NULL) {
         walkCaptured(p);
         return;
     }
     g.otags++;
-    walk(p);
+    walk(p, uiTag);
     widePacketsDone();
     interpolationPacketsDone();
     queued('O');
     requestDone();
 }
 
-void DrawOTagEnv(void* ot, DRAWENV* env) {
+void DrawOTag(OTag* p) { drawOTag(p, NULL); }
+
+void pcDrawSceneOTag(void* first, const void* uiTag) { drawOTag(first, uiTag); }
+
+static void drawOTagEnv(void* ot, DRAWENV* env, const void* uiTag) {
     hwSafePoint();
     int n = drawEnvWords(env->dr_env.code, env, 1);
     setlen(&env->dr_env, n);
@@ -778,7 +786,7 @@ void DrawOTagEnv(void* ot, DRAWENV* env) {
     }
     g.otags++;
     sceneWalkEnvTag = &env->dr_env.tag;
-    walk(&env->dr_env.tag);
+    walk(&env->dr_env.tag, uiTag);
     sceneWalkEnvTag = NULL;
     widePacketsDone();
     interpolationPacketsDone();
@@ -786,6 +794,10 @@ void DrawOTagEnv(void* ot, DRAWENV* env) {
     queued('O');
     requestDone();
 }
+
+void DrawOTagEnv(void* ot, DRAWENV* env) { drawOTagEnv(ot, env, NULL); }
+
+void pcDrawSceneOTagEnv(void* ot, void* env, const void* uiTag) { drawOTagEnv(ot, env, uiTag); }
 
 void DrawPrim(void* p) {
     hwSafePoint();

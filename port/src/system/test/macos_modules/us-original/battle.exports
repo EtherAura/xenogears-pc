@@ -201,6 +201,9 @@ party1C_InitialValues
 partyMemberSpritesOffset
 pcBattleMechaData2
 pcGauntletSpaceGears
+pcGearPoseDraw
+pcGearPoseFrame
+pcGearPoseReplayBefore
 pcVersusChoosing
 pcVersusDeployEnemyGear
 pcVersusDeployMirrorGears

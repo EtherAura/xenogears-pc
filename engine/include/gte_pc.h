@@ -30,6 +30,9 @@ typedef struct {
     double x, y, z;
     u32 word;
     int valid;
+    s16 local[3];
+    u16 screen;
+    s32 center[2];
 } GtePrecise;
 typedef struct {
     u32 data[32];

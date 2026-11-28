@@ -23,7 +23,9 @@ static const char* const labels[PC_TEX_CLASSES]={
     "3D textures","Sprites","HUD","Text","Dialogue portraits","Battle portraits","Battle icons","Battle HUD",NULL,"Menu portraits"
 };
 static const char* const hudKeys[]={"hud_upscale","battle_hud_upscale"};
+static const char interfaceKey[] = "texture_filter_interface";
 static int loaded,filters[PC_TEX_CLASSES],appearance[PC_TEX_CLASSES],hudUpscale[2];
+static int interfaceFilter;
 /* A legacy category frozen with more than one enhancement keeps all of them
  * (xg-j85.9): the pack ahead of its upscale or glyphs, its filter, and for
  * text a battle upscale other than the field one. Written after the choice,
@@ -52,6 +54,14 @@ static void parseStyle(int k,const char* s) {
 static int packChosen(void);
 static int filterClass(int k) {return k==PC_TEX_BATTLE_TEXT?PC_TEX_TEXT:k==PC_TEX_MENU_THUMB_PORTRAIT?PC_TEX_MENU_PORTRAIT:k;}
 static int textUsesGlyphs(void) {return textureUseGlyphs(PC_TEX_TEXT);}
+static int readFilter(const char* key) {
+    const char* value = settingsGet(key);
+    for (int f = 0; value && f < TEXTURE_FILTER_COUNT; f++) {
+        if (!SDL_strcasecmp(value, names[f])) return f;
+    }
+    return TEXTURE_FILTER_NEAREST;
+}
+
 static void load(void) {
     if(loaded)return;
     loaded=1;
@@ -63,8 +73,7 @@ static void load(void) {
         snprintf(about,sizeof(about),"%s filter%s%s: nearest (default), linear (transparent edges) or edge (resolution-aware "
                  "pixel-art edges); enhanced display copy only",labels[k],choiceKeys[k]?" while absent from ":"",choiceKeys[k]?choiceKeys[k]:"");
         settingsDescribe(keys[k],about);
-        const char* s=settingsGet(keys[k]);
-        for(int f=0;s && f<TEXTURE_FILTER_COUNT;f++)if(!SDL_strcasecmp(s,names[f]))filters[k]=f;
+        filters[k] = readFilter(keys[k]);
         if(choiceKeys[k]) {
             int hud=k==PC_TEX_HUD || k==PC_TEX_BATTLE_HUD || k==PC_TEX_ICON;
             /* settings.c keeps a comment's first 297 characters */
@@ -81,6 +90,18 @@ static void load(void) {
         settingsDescribe(hudKeys[i],"Legacy faithful HUD upscale: 0 original (default), 2 or 4");
         int n=settingsInt(hudKeys[i],0);hudUpscale[i]=n==2 || n==4?n:0;
     }
+    settingsDescribe(interfaceKey, "In-game interface artwork filter: nearest (default), linear or edge");
+    interfaceFilter = readFilter(interfaceKey);
+}
+
+int textureInterfaceFilter(void) { load(); return interfaceFilter; }
+
+void textureSetInterfaceFilter(int filter) {
+    if (filter < 0 || filter >= TEXTURE_FILTER_COUNT) return;
+    load();
+    interfaceFilter = filter;
+    settingsSet(interfaceKey, names[filter]);
+    settingsSave();
 }
 static int legacyHudScale(int k) {
     if(k==PC_TEX_HUD || k==PC_TEX_TEXT)return hudUpscale[0];

@@ -1609,6 +1609,11 @@ void pcTextureClass(void* prim, int kind) {
     if (p) { p->texClass = kind; p->classified = 1; }
 }
 
+void pcTextureInterface(void* prim) {
+    WidePacket* p = packetSlot(prim);
+    if (p) p->interfaceArt = 1;
+}
+
 void pcFadePrim(void* prim) {
     WidePacket* p = packetSlot(prim);
     if (p) p->fade = 1;

@@ -2097,7 +2097,7 @@ void drawMenu_348_cursor(void) {
 #endif
     AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m348_cursor->m128_drawMode[gMenuContext->m348_cursor->m159_oddOrEven]);
     if (gMenuContext->m33C_drawFlags->m4_drawCursor != 0) {
-        AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m348_cursor->m0_cursor[gMenuContext->m348_cursor->m158_oddOrEven]);
+        AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m348_cursor->m0_cursor[gMenuContext->m348_cursor->m158_oddOrEven]);
     }
 }
 
@@ -2156,7 +2156,12 @@ void drawCharacterInfoCardExtended(void) {
         { int k; for (k = 0; k < 1; ++k) pcTextureClass(&(gMenuContext->m358_selectedInfoCard->m0_portrait)[k * 2 + gMenuContext->m358_selectedInfoCard->m2AE0_oddOrEven], PC_TEX_MENU_PORTRAIT); }
         transformAndAddPrim(1, gMenuContext->m358_selectedInfoCard->m1EA0_portraitVerts, gMenuContext->m358_selectedInfoCard->m0_portrait, gMenuContext->m358_selectedInfoCard->m2AE0_oddOrEven);
         transformAndAddPrim(1, gMenuContext->m358_selectedInfoCard->m1EC0_nameVerts, gMenuContext->m358_selectedInfoCard->m50_name, gMenuContext->m358_selectedInfoCard->m2AE0_oddOrEven);
-        { int k; for (k = 0; k < gMenuContext->m358_selectedInfoCard->m2AED_1E00Length; ++k) pcTextureClass(&(gMenuContext->m358_selectedInfoCard->m1E00_polys[0])[k * 2 + gMenuContext->m358_selectedInfoCard->m2AEE_1E00OddOrEven], PC_TEX_HUD); }
+        int k;
+        for (k = 0; k < gMenuContext->m358_selectedInfoCard->m2AED_1E00Length; ++k) {
+            void* prim = &(gMenuContext->m358_selectedInfoCard->m1E00_polys[0])[k * 2 + gMenuContext->m358_selectedInfoCard->m2AEE_1E00OddOrEven];
+            pcTextureClass(prim, PC_TEX_HUD);
+            pcTextureInterface(prim);
+        }
         transformAndAddPrim(gMenuContext->m358_selectedInfoCard->m2AED_1E00Length, gMenuContext->m358_selectedInfoCard->m2AA0_onGearIconVerts[0], gMenuContext->m358_selectedInfoCard->m1E00_polys[0], gMenuContext->m358_selectedInfoCard->m2AEE_1E00OddOrEven);
         transformAndAddPrim(gMenuContext->m358_selectedInfoCard->m2AEC_labelLength, gMenuContext->m358_selectedInfoCard->m1EE0_labelVerts[0], gMenuContext->m358_selectedInfoCard->mA0_labels[0], gMenuContext->m358_selectedInfoCard->m2AE0_oddOrEven);
         transformAndAddPrim(gMenuContext->m358_selectedInfoCard->m2AE7_hpLength, gMenuContext->m358_selectedInfoCard->m2780_hpVerts[0], gMenuContext->m358_selectedInfoCard->m1630_hp[0], gMenuContext->m358_selectedInfoCard->m2AE0_oddOrEven);
@@ -2331,7 +2336,8 @@ void drawMenuMemoryCard_sub0(s32 start, s32 firstTile, s32 end) {
                        i * 16, gMenuContext->m32C_memoryCardContext->m0_files[i].m0_iconV[gMenuContext->m4CC_iconFrame] + 16,
                        i * 16 + 16, gMenuContext->m32C_memoryCardContext->m0_files[i].m0_iconV[gMenuContext->m4CC_iconFrame] + 16);
                 tile->m0_memoryCardTransparentPolys[gMenuContext->m308_oddOrEven].clut = GetClut(i * 16, i / 16 + 0x1C1);
-                { int k; for (k = 0; k < 1; ++k) pcTextureClass(&(tile->m0_memoryCardTransparentPolys)[k * 2 + gMenuContext->m308_oddOrEven], PC_TEX_HUD); }
+                pcTextureClass(&(tile->m0_memoryCardTransparentPolys)[gMenuContext->m308_oddOrEven], PC_TEX_HUD);
+                pcTextureInterface(&(tile->m0_memoryCardTransparentPolys)[gMenuContext->m308_oddOrEven]);
                 transformAndAddPrim(1, tile->mE0_vertices, tile->m0_memoryCardTransparentPolys, gMenuContext->m308_oddOrEven);
             }
         }
@@ -2501,7 +2507,7 @@ void drawMenu_34C(void) {
             gMenuContext->m34C_saveScreen->mA00_icon[gMenuContext->m308_oddOrEven].clut =
                 GetClut(gMenuContext->m32C_memoryCardContext->m4FAE_tileFiles[saveCursorToSlot[gMenuContext->m32C_memoryCardContext->m4F7C_cursor]] * 16,
                         gMenuContext->m32C_memoryCardContext->m4FAE_tileFiles[saveCursorToSlot[gMenuContext->m32C_memoryCardContext->m4F7C_cursor]] / 16 + 0x1C1);
-            AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m34C_saveScreen->mA00_icon[gMenuContext->m308_oddOrEven]);
+            AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m34C_saveScreen->mA00_icon[gMenuContext->m308_oddOrEven]);
         } else {
             for (i = 0; i < 3; i++) {
                 if (gMenuContext->m34C_saveScreen->mA98_slots[i].m878_enabled != 0) {
@@ -2546,7 +2552,7 @@ void transformAndDrawPolyFT4(SVECTOR* verts, POLY_FT4* polys, s32 oddOrEven, s32
     p = &polys[oddOrEven];
     RotTransPers4(&verts[0], &verts[1], &verts[2], &verts[3], (s32*)&p->x0, (s32*)&p->x1, (s32*)&p->x2, (s32*)&p->x3,
                   &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[otIndex], p);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[otIndex], p);
 }
 
 /* Noah drawMenuContext364_menuBox */
@@ -2793,7 +2799,8 @@ void drawMenu_1E08(void) {
 /* Noah FUN_Menu2__801d1464 (m43C) */
 void drawScrollBarThumb(void) {
     if (gMenuContext->m33C_drawFlags->m49_draw43C != 0) {
-        { int k; for (k = 0; k < 1; ++k) pcTextureClass(&(gMenuContext->m43C_scrollBarThumb->m0_polys)[k * 2 + gMenuContext->m43C_scrollBarThumb->m70_oddOrEven], PC_TEX_HUD); }
+        pcTextureClass(&(gMenuContext->m43C_scrollBarThumb->m0_polys)[gMenuContext->m43C_scrollBarThumb->m70_oddOrEven], PC_TEX_HUD);
+        pcTextureInterface(&(gMenuContext->m43C_scrollBarThumb->m0_polys)[gMenuContext->m43C_scrollBarThumb->m70_oddOrEven]);
         transformAndAddPrim(1, gMenuContext->m43C_scrollBarThumb->m50_vertex, gMenuContext->m43C_scrollBarThumb->m0_polys, gMenuContext->m43C_scrollBarThumb->m70_oddOrEven);
     }
 }
@@ -2801,7 +2808,12 @@ void drawScrollBarThumb(void) {
 /* Noah FUN_Menu2__801d14b0 (m440) */
 void drawCharacterSwitchArrows(void) {
     if (gMenuContext->m33C_drawFlags->m53_draw440 != 0) {
-        { int k; for (k = 0; k < 4; ++k) pcTextureClass(&(gMenuContext->m440_arrows->m0_polys)[k * 2 + gMenuContext->m440_arrows->m1C0_oddOrEven], PC_TEX_HUD); }
+        int k;
+        for (k = 0; k < 4; ++k) {
+            void* prim = &(gMenuContext->m440_arrows->m0_polys)[k * 2 + gMenuContext->m440_arrows->m1C0_oddOrEven];
+            pcTextureClass(prim, PC_TEX_HUD);
+            pcTextureInterface(prim);
+        }
         transformAndAddPrim(4, gMenuContext->m440_arrows->m140_vertex[0], gMenuContext->m440_arrows->m0_polys, gMenuContext->m440_arrows->m1C0_oddOrEven);
     }
 }

@@ -178,7 +178,20 @@ void presentSetExpandedVertical(int on);
 int presentSetFullscreen(int on);          /* 0 if the window could not change */
 void presentSetWindowSize(int w, int h);   /* the window when not fullscreen */
 struct SDL_Window* presentWindow(void);
-int gpuPresentFormat(void); /* the VkFormat the present pass draws in (the swapchain's); 0 before there is one */
+int gpuPresentFormat(void); /* the VkFormat of the composition pass; 0 before there is one */
+int gpuHdrRequested(void);
+void gpuSetHdrRequested(int on);
+int gpuHdrAvailable(void);
+int gpuHdrActive(void);
+void gpuHdrDisplayChanged(void);
+#define GPU_HDR_PAPER_WHITE_MIN 80
+#define GPU_HDR_PAPER_WHITE_MAX 600
+#define GPU_HDR_PAPER_WHITE_DEFAULT 200
+#define GPU_HDR_HIGHLIGHT_DEFAULT 25
+int gpuHdrPaperWhite(void);
+void gpuSetHdrPaperWhite(int nits);
+int gpuHdrHighlightStrength(void);
+void gpuSetHdrHighlightStrength(int percent);
 /* A point of the window's target (pixels) in the last picture's display
  * area: 0,0 its top left, its width x height the 4:3 picture; a wide
  * picture's margins below 0 and beyond the width (mouse.c). 0: no picture. */
@@ -227,6 +240,20 @@ void hiresToggleUpscale(void);   /* Shift+F4: exact 1x <-> the upscaled choice (
 int hiresColor(void);            /* 0 true colour, 1 15-bit PS1 dither, 2 15-bit fine dither, 3 raw 8-bit */
 void hiresSetColor(int c);
 int hiresScaleNow(void);         /* the copy's N now; 1: the exact picture */
+int hiresSceneScale(void);       /* 0 matches the copy, 1..12 caps the 3D scene's raster */
+void hiresSetSceneScale(int scale);
+int hiresSceneScaleNow(void);
+const char* hiresSceneScaleStatus(void);
+int hiresSceneMsaa(void);
+void hiresSetSceneMsaa(int samples);
+int hiresSceneMsaaSupported(int samples);
+int hiresSceneMsaaNow(void);
+const char* hiresSceneMsaaStatus(void);
+int hiresAnisotropy(void);
+void hiresSetAnisotropy(int value);
+int hiresAnisotropyNow(void);
+const char* hiresAnisotropyStatus(void);
+void hiresSceneSize(int* width, int* height);
 int hiresSlivers(void);
 void hiresSetSlivers(int on);
 int hiresPrecision(void);
@@ -298,6 +325,8 @@ const char* sceneLightingStatus(void);
 int textureFilter(int kind);
 void textureSetFilter(int kind, int filter);
 const char* textureFilterKey(int kind);
+int textureInterfaceFilter(void);
+void textureSetInterfaceFilter(int filter);
 int textureHudUpscale(int battle);
 void textureSetHudUpscale(int battle, int scale);
 int textureHudScale(int kind);

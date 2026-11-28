@@ -7,7 +7,10 @@
 #include "main/debug_font.h"
 #ifdef PLATFORM_PC
 #include "pc_wide.h"
+#include "pc_interpolation.h"
+#include "field_mecha/mecha.h"
 #include "pc_speedup.h"
+#include "pc_scene.h"
 #endif
 #include "psyq.h"
 #include "main/sprite.h"
@@ -817,6 +820,17 @@ void battleRender(void) {
         POLLHOST();
         updateBattleDebugger();
     }
+#ifdef PLATFORM_PC
+    if (pcInterpolationHighRate()) {
+        for (i = 0; i < BATTLE_MECHA_COUNT; i++) {
+            if (battleMechas[i] != NULL && battleMechas[i]->m34_visible && battleMechas[i]->m0_model != NULL) {
+                const RECT* clip = &battleBssBlock.m8C50_currentRenderStruct->m0_drawEnv.clip;
+                pcInterpolationFrameBegin(PC_INTERP_BATTLE, clip->x, clip->y, clip->w, clip->h);
+                break;
+            }
+        }
+    }
+#endif
     clearShapeTransfertTableEntry(battleBssBlock.m8C84_oddOrEven);
     updateBattleCamera();
     renderBattleScene();
@@ -864,9 +878,12 @@ void battleRender(void) {
     PutDispEnv(&battleBssBlock.m8C50_currentRenderStruct->m5C_dispEnv);
     PutDrawEnv(&battleBssBlock.m8C50_currentRenderStruct->m0_drawEnv);
     shapeTransfert();
-    DrawOTag(&battleBssBlock.m8C50_currentRenderStruct->m70_ot[0xFFF]);
 #ifdef PLATFORM_PC
+    pcDrawSceneOTag(&battleBssBlock.m8C50_currentRenderStruct->m70_ot[0xFFF], &battleBssBlock.m8C50_currentRenderStruct->m70_ot[2]);
+    pcInterpolationFrameEnd();
     battlePreviewEndFrame();
+#else
+    DrawOTag(&battleBssBlock.m8C50_currentRenderStruct->m70_ot[0xFFF]);
 #endif
     battleLoadFileFrom0xC();
     if (battleRenderCount == 1) {

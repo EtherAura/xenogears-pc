@@ -495,9 +495,11 @@ uint64_t texturePaletteKeyIn(const uint16_t* vram, uint16_t clut, int size) {
  * revision as before. Every variant has a revision of its own, never reused
  * (not even after a reset or a state load), so the GPU's copies and smooth
  * motion tell an Edge variant from an Upscaled one of the same patch. */
-#define EDGE_SLOTS 1024
+#define EDGE_SLOTS 4096
 #define EDGE_HASH (EDGE_SLOTS * 2)
 #define EDGE_BYTES (64u << 20)
+#define PACK_MIP_EXTRA_BYTES (32u << 20)
+enum { EDGE_PACK_MIP = 2 }; /* distinct from the native label variants (0 and 1) */
 typedef struct {
     uint64_t a, b; /* texel and palette keys, or the decode revision and 0 */
     int content, reqW, reqH, depth, u, v, w, h, scale, labels;
@@ -512,7 +514,7 @@ typedef struct {
 } EdgeEntry;
 static EdgeEntry edges[EDGE_SLOTS];
 static int32_t edgeBucket[EDGE_HASH], edgeOldest, edgeNewest, edgeFree, edgeTop, edgeCount;
-static size_t edgeBytes;
+static size_t edgeBytes, edgePackMipBytes;
 static uint64_t edgeSerial;
 static TextureSampleStats edgeStats;
 /* The game's vblank count (system/hw.c); tests without that clock see 0. */
@@ -520,7 +522,8 @@ __attribute__((weak)) uint32_t hwVSyncCount(void) { return 0; }
 void textureSampleReset(void) {
     for (int i = 0; i < EDGE_SLOTS; ++i) free(edges[i].pixels);
     memset(edges, 0, sizeof(edges)); memset(edgeBucket, 0, sizeof(edgeBucket));
-    edgeOldest = edgeNewest = edgeFree = edgeTop = edgeCount = 0; edgeBytes = 0;
+    edgeOldest = edgeNewest = edgeFree = edgeTop = edgeCount = 0;
+    edgeBytes = edgePackMipBytes = 0;
     memset(&edgeStats, 0, sizeof(edgeStats));
 }
 void textureSampleStats(TextureSampleStats* out) { *out = edgeStats; out->bytes = edgeBytes; out->entries = edgeCount; }
@@ -564,6 +567,7 @@ static void edgeDrop(EdgeEntry* e) {
     while (*at && *at != idx) at = &edges[*at - 1].chain;
     if (*at == idx) *at = e->chain;
     edgeUnlink(e);
+    if (e->key.labels == EDGE_PACK_MIP) edgePackMipBytes -= e->bytes;
     edgeBytes -= e->bytes; free(e->pixels); --edgeCount;
     memset(e, 0, sizeof(*e));
     e->chain = edgeFree; edgeFree = idx;
@@ -622,11 +626,7 @@ static void edgeLog(uint32_t frame) {
     }
     before = now; logged = frame;
 }
-static int scaledSample(const DecodedTexture* d,TextureRequest p,int scale,int nativeLabels,TextureSample* out) {
-    if(!patchFits(d,p) || (scale!=2 && scale!=4))return 0;
-    uint32_t frame = hwVSyncCount();
-    edgeLog(frame);
-    EdgeKey key = edgeKey(d, p, scale, nativeLabels);
+static int findVariant(EdgeKey key, TextureRequest p, uint32_t frame, TextureSample* out) {
     uint32_t hash = edgeHash(&key);
     for (int32_t i = edgeBucket[hash]; i; i = edges[i - 1].chain) {
         EdgeEntry* e = &edges[i - 1];
@@ -637,10 +637,44 @@ static int scaledSample(const DecodedTexture* d,TextureRequest p,int scale,int n
         *out = e->sample; out->u = p.u; out->v = p.v; /* equal content may lie elsewhere */
         return 1;
     }
+    return 0;
+}
+
+static void keepVariant(EdgeKey key, TextureRequest p, uint32_t frame, uint8_t* pixels,
+                        size_t bytes, int resident, TextureSample* out) {
+    size_t packBytes = key.labels == EDGE_PACK_MIP ? bytes : 0;
+    while (edgeOldest) {
+        /* A room can use over 64 MiB of indexed replacement mip patches on
+         * every draw pass. Keep those hot patches without growing the
+         * original budget for native mips and upscaled UI textures. */
+        int nativeFull = edgeBytes - edgePackMipBytes + bytes - packBytes > EDGE_BYTES;
+        int full = edgeBytes + bytes > EDGE_BYTES + PACK_MIP_EXTRA_BYTES;
+        if (!nativeFull && !full && (edgeFree || edgeTop < EDGE_SLOTS)) break;
+        int32_t victim = edgeOldest;
+        if (nativeFull) while (edges[victim - 1].key.labels == EDGE_PACK_MIP)
+            victim = edges[victim - 1].newer;
+        edgeDrop(&edges[victim - 1]);
+    }
+    int32_t idx = edgeFree ? edgeFree : ++edgeTop;
+    EdgeEntry* e = &edges[idx - 1];
+    if (edgeFree) edgeFree = e->chain;
+    e->key = key; e->pixels = pixels; e->bytes = bytes; e->frame = frame;
+    e->sample = (TextureSample){pixels,UINT64_C(0x5000000000000000)|++edgeSerial,p.u,p.v,p.w,p.h,key.scale,NULL,resident};
+    uint32_t hash = edgeHash(&key);
+    e->chain = edgeBucket[hash]; edgeBucket[hash] = idx;
+    edgePush(e);
+    edgeBytes += bytes; edgePackMipBytes += packBytes;
+    ++edgeCount; ++edgeStats.made; edgeStats.madeBytes += bytes; edgeStats.frameBytes += bytes;
+    *out = e->sample;
+}
+
+static int scaledSample(const DecodedTexture* d,TextureRequest p,int scale,int nativeLabels,TextureSample* out) {
+    if(!patchFits(d,p) || (scale!=2 && scale!=4))return 0;
+    uint32_t frame = hwVSyncCount();
+    edgeLog(frame);
+    EdgeKey key = edgeKey(d, p, scale, nativeLabels);
+    if (findVariant(key, p, frame, out)) return 1;
     size_t bytes = (size_t)p.w*p.h*scale*scale*4;
-    /* The least recently used variants make room (slots and bytes). */
-    while (edgeOldest && ((!edgeFree && edgeTop == EDGE_SLOTS) || edgeBytes + bytes > EDGE_BYTES))
-        edgeDrop(&edges[edgeOldest - 1]);
     uint8_t* pixels=malloc(bytes);
     uint8_t* mid=scale==4?malloc((size_t)p.w*p.h*16):NULL;
     if(!pixels || (scale==4 && !mid)) {free(pixels);free(mid);return 0;}
@@ -655,15 +689,105 @@ static int scaledSample(const DecodedTexture* d,TextureRequest p,int scale,int n
         DecodedTexture twice={.request={.w=p.w*2,.h=p.h*2},.rgba=mid};
         edgePass(&twice,twice.request,pixels);free(mid);
     }
-    int32_t idx = edgeFree ? edgeFree : ++edgeTop;
-    EdgeEntry* e = &edges[idx - 1];
-    if (edgeFree) edgeFree = e->chain;
-    e->key = key; e->pixels = pixels; e->bytes = bytes; e->frame = frame;
-    e->sample = (TextureSample){pixels,UINT64_C(0x5000000000000000)|++edgeSerial,p.u,p.v,p.w,p.h,scale,NULL,0};
-    e->chain = edgeBucket[hash]; edgeBucket[hash] = idx;
-    edgePush(e);
-    edgeBytes += bytes; ++edgeCount; ++edgeStats.made; edgeStats.madeBytes += bytes; edgeStats.frameBytes += bytes;
-    *out=e->sample;return 1;
+    keepVariant(key, p, frame, pixels, bytes, 0, out);
+    return 1;
+}
+
+size_t textureMipmapPixels(int w, int h) {
+    size_t total = (size_t)w * h;
+    while (w > 1 || h > 1) {
+        w = (w + 1) / 2;
+        h = (h + 1) / 2;
+        total += (size_t)w * h;
+    }
+    return total;
+}
+
+/* Lower levels contain premultiplied RGB and coverage. Level zero carries
+ * either exact STP/clear flags or live palette indices in the input. */
+static void mipTail(uint8_t* level, const uint8_t* source, const uint16_t* palette, int pitch, int w, int h) {
+    uint8_t colors[256][4];
+    if (palette) for (int i = 0; i < 256; ++i) rgba(colors[i], palette[i]);
+    int levelZero = 1;
+    while (w > 1 || h > 1) {
+        int nextW = (w + 1) / 2, nextH = (h + 1) / 2;
+        for (int y = 0; y < nextH; y++) for (int x = 0; x < nextW; x++) {
+            int sum[4] = {0};
+            for (int dy = 0; dy < 2; dy++) for (int dx = 0; dx < 2; dx++) {
+                int sx = 2 * x + dx < w ? 2 * x + dx : w - 1;
+                int sy = 2 * y + dy < h ? 2 * y + dy : h - 1;
+                size_t at = (size_t)sy * pitch + sx;
+                const uint8_t* tap = palette ? colors[source[at]] : source + at * 4;
+                if (tap[3]) {
+                    for (int c = 0; c < 3; c++) sum[c] += tap[c];
+                    sum[3] += levelZero ? 255 : tap[3];
+                }
+            }
+            uint8_t* outPixel = level + ((size_t)y * nextW + x) * 4;
+            for (int c = 0; c < 4; c++) outPixel[c] = (uint8_t)((sum[c] + 2) / 4);
+        }
+        source = level;
+        level += (size_t)nextW * nextH * 4;
+        palette = NULL;
+        levelZero = 0;
+        w = nextW;
+        h = nextH;
+        pitch = nextW;
+    }
+}
+
+int textureMipmapSample(const DecodedTexture* d, TextureRequest p, TextureSample* out) {
+    if (!patchFits(d, p)) return 0;
+    uint32_t frame = hwVSyncCount();
+    edgeLog(frame);
+    EdgeKey key = edgeKey(d, p, 1, 0);
+    if (findVariant(key, p, frame, out)) return 1;
+    size_t bytes = textureMipmapPixels(p.w, p.h) * 4;
+    uint8_t* pixels = malloc(bytes);
+    if (!pixels) return 0;
+    for (int y = 0; y < p.h; ++y)
+        memcpy(pixels + (size_t)y * p.w * 4, patchPixel(d, p, 0, y), (size_t)p.w * 4);
+    mipTail(pixels + (size_t)p.w * p.h * 4, pixels, NULL, p.w, p.w, p.h);
+    keepVariant(key, p, frame, pixels, bytes, 1, out);
+    return 1;
+}
+
+int textureMipmapReplacement(const TextureSample* sample, TextureRequest p, const DecodedTexture* original,
+                             TextureSample* out) {
+    int scale = sample->scale;
+    if (scale < 1 || scale > 8 || sample->w < 1 || sample->h < 1 || sample->w > 256 || sample->h > 256 ||
+        (sample->indices && (!original || !original->paletteSize))) return 0;
+    int right = p.u + p.w < sample->u + sample->w ? p.u + p.w : sample->u + sample->w;
+    int bottom = p.v + p.h < sample->v + sample->h ? p.v + p.h : sample->v + sample->h;
+    if (p.u < sample->u) p.u = sample->u;
+    if (p.v < sample->v) p.v = sample->v;
+    p.w = right - p.u;
+    p.h = bottom - p.v;
+    if (p.w < 1 || p.h < 1) return 0;
+    /* Share a chain for fixed-colour pages. An index map can use many
+     * different CLUTs on a single page in one scene. Cache just each draw's
+     * rectangle with its own palette to avoid recolouring the whole atlas. */
+    if (!sample->indices) {
+        p.u = sample->u; p.v = sample->v;
+        p.w = sample->w; p.h = sample->h;
+    }
+    int w = p.w * scale, h = p.h * scale;
+    size_t bytes = (textureMipmapPixels(w, h) - (size_t)w * h) * 4;
+    if (!bytes) return 0;
+    EdgeKey key = {.a = sample->revision, .b = sample->indices ? original->paletteKey : 0,
+                   .u = p.u - sample->u, .v = p.v - sample->v,
+                   .w = p.w, .h = p.h, .scale = scale, .labels = EDGE_PACK_MIP};
+    uint32_t frame = hwVSyncCount();
+    edgeLog(frame);
+    if (findVariant(key, p, frame, out)) return 1;
+    uint8_t* pixels = malloc(bytes);
+    if (!pixels) return 0;
+    int pitch = sample->w * scale;
+    size_t start = (size_t)key.v * scale * pitch + key.u * scale;
+    const uint8_t* data = sample->indices ? sample->indices + start : sample->rgba + start * 4;
+    mipTail(pixels, data, sample->indices ? original->palette : NULL, pitch, w, h);
+    keepVariant(key, p, frame, pixels, bytes, 1, out);
+    return 1;
 }
 int textureUpscaleSample(const DecodedTexture* d,TextureRequest p,int scale,TextureSample* out) {
     return scaledSample(d,p,scale,1,out);

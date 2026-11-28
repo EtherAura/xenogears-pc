@@ -154,6 +154,9 @@ gpu/gp0.c exact host the XG_CACHE_WALK_READS switch, read once
 gpu/gp0.c gp state the drawing state, a command or load in progress, the texture and CLUT caches
 gpu/gp0.c l derived per-line scratch
 gpu/gp0.c margin host the XG_DOF_OWN_MARGIN setting, read once
+gpu/gp0.c packetProjection derived validated vertices for the current GP0 command
+gpu/gp0.c packetProjectionChecked derived per-command projection lookup mask
+gpu/gp0.c packetProjectionValid derived per-command projection validity mask
 gpu/gp0.c probe host debug switches
 gpu/gp0.c probeSolid host debug switches
 gpu/gp0.c probeX host debug switches

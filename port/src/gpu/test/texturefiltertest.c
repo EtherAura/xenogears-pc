@@ -129,6 +129,7 @@ int main(int argc, char** argv) {
         CHECK(textureHudUpscale(0)==2 && textureHudUpscale(1)==4);
         CHECK(textureAppearance(PC_TEX_ICON)==4 && textureHudScale(PC_TEX_ICON)==4);
         CHECK(textureAppearance(PC_TEX_MENU_PORTRAIT)==2);
+        CHECK(textureInterfaceFilter() == TEXTURE_FILTER_EDGE);
         SDL_Quit(); puts("texture filter settings reloaded"); return 0;
     }
     for (int k = 0; k < PC_TEX_CLASSES; ++k) CHECK(textureFilter(k)==0);
@@ -324,6 +325,32 @@ int main(int argc, char** argv) {
     }
     DrawOTag(&table);
     CHECK(pixel(302,82)==0x1ff0000 && pixel(342,82)==0x10000ff);
+
+    // The same texture and artwork class can have a different interface filter.
+    CHECK(textureSetAppearance(PC_TEX_HUD, 0));
+    textureSetInterfaceFilter(TEXTURE_FILTER_EDGE);
+    CHECK(textureInterfaceFilter() == TEXTURE_FILTER_EDGE && textureFilter(PC_TEX_HUD) == TEXTURE_FILTER_NEAREST);
+    ClearOTagR(&table, 1);
+    for (int i = 0; i < 2; ++i) {
+        pcTextureClass(&pair[i], PC_TEX_HUD);
+        if (i == 1) pcTextureInterface(&pair[i]);
+        AddPrim(&table, &pair[i]);
+    }
+    DrawOTag(&table);
+    CHECK(pixel(302,82) == 0x1ff0000 && pixel(342,82) == 0x10000ff);
+    uint32_t menuWords[2][2] = {{0}};
+    for (int i = 0; i < 2; ++i) {
+        RECT rect = {pair[i].x0, pair[i].y0 + 1, 2, 2};
+        StoreImage(&rect, menuWords[i]);
+    }
+    CHECK(menuWords[0][0] != 0 && !memcmp(menuWords[0], menuWords[1], sizeof(menuWords[0])));
+    textureSetInterfaceFilter(TEXTURE_FILTER_NEAREST);
+    pcTextureClass(&pair[1], PC_TEX_HUD);
+    pcTextureInterface(&pair[1]);
+    DrawPrim(&pair[1]);
+    CHECK(pixel(302,82) == pixel(342,82));
+    textureSetInterfaceFilter(TEXTURE_FILTER_EDGE);
+    CHECK(textureSetAppearance(PC_TEX_HUD, 3));
     printf("GPU texture filters: %d checks passed\n",checks);
     gpuShutdown(); SDL_Quit(); return 0;
 }

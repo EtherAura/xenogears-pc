@@ -384,7 +384,7 @@ void updateAndRenderMechaCloth(sLoadedMechas_114* arg0, SVECTOR* arg1, MATRIX* a
             gte_nccs();
             gte_strgb(&tri->m8_poly[oddOrEven].r2);
 #ifdef PLATFORM_PC
-            pcInterpolationObjectType(arg0, arg0->m20_triangles, PC_INTERP_MECHA);
+            pcInterpolationObjectType(arg0, arg0->m20_triangles, pcInterpolationGearFrame(1) ? PC_INTERP_HELD : PC_INTERP_MECHA);
             pcInterpolationModel(&arg0->m20_triangles->m8_poly[oddOrEven]);
             pcInterpolationPrim(&tri->m8_poly[oddOrEven]);
             pcInterpolationObject(0, 0);

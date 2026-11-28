@@ -26,15 +26,27 @@
 #define IDENTITY_SLOTS 1024
 #define IDENTITY_BYTES (256u << 20)
 typedef struct { const void* owner; const void* model; uint64_t identity; } Owner;
-typedef struct { const void* address; const void* transitionOwner; uint64_t object, face; int discrete, kind, placement, capture, frozen, sourceX, sourceY, collapse, u0, u1, dx0, dx1; float anchor[3]; } Packet;
+typedef struct { const void* address; const void* transitionOwner; uint64_t object, face; int discrete, kind, placement, capture, frozen, sourceX, sourceY, collapse, u0, u1, dx0, dx1; float anchor[3]; unsigned gear, bone; } Packet;
 typedef struct { uint64_t revision; TextureRequest request; uint32_t offset, format; uint64_t material; int scale; uint32_t nextContent, words; } Texture;
-/* Reusable encoding only: every frame still owns its immutable copy. The
- * key selects a candidate; exact RGBA equality is required before reuse. */
+#define MIP_SLOTS 2048
+typedef struct { uint64_t revision, palette; uint32_t origin, size; } MipKey;
+typedef struct { MipKey key; uint32_t offset, format; } MipTexture;
+#define PACK_PAGE_BYTES (96u << 20)
+typedef struct {
+    TextureSample sample;
+    uint8_t* data;
+    size_t bytes;
+    uint64_t touched;
+    uint8_t used[256];
+} PackPage;
+/* Every frame owns its encoding. A verified native decode identifies the
+ * whole RGBA image for its cache lifetime. Other candidates compare pixels. */
 typedef struct {
     uint8_t* rgba;
     size_t count, words;
     uint32_t format;
     uint64_t key, material, touched;
+    uint64_t nativeRevision, scene;
 } SampleEncoding;
 typedef struct {
     uint32_t* words;
@@ -55,10 +67,14 @@ static struct {
     int packetCount;
     const Packet* packet;
     const void* address;
+    unsigned gear, bone;
     Texture textures[TEXTURES];
     uint32_t textureSlots[TEXTURE_SLOTS];
     uint32_t contentSlots[TEXTURE_SLOTS];
     int textureCount;
+    MipTexture mips[MIP_SLOTS];
+    PackPage pages[INTERP_PACK_PAGES];
+    size_t pageBytes, pagePeak;
     SampleEncoding samples[SAMPLE_SLOTS];
     size_t sampleBytes;
     IdentityEncoding identities[IDENTITY_SLOTS];
@@ -83,6 +99,11 @@ static void identityDrop(IdentityEncoding* e) {
 static void sampleClear(void) {
     for (int i = 0; i < SAMPLE_SLOTS; i++) sampleDrop(&ip.samples[i]);
     for (int i = 0; i < IDENTITY_SLOTS; i++) identityDrop(&ip.identities[i]);
+}
+static void packPagesClear(void) {
+    for (int i = 0; i < INTERP_PACK_PAGES; ++i) free(ip.pages[i].data);
+    memset(ip.pages, 0, sizeof(ip.pages));
+    ip.pageBytes = 0;
 }
 static IdentityEncoding* identitySet(uint64_t key) {
     unsigned slot = (unsigned)((key ^ (key >> 29)) * UINT64_C(0xbf58476d1ce4e5b9) >> 40) & (IDENTITY_SLOTS / SAMPLE_WAYS - 1);
@@ -120,18 +141,24 @@ static SampleEncoding* sampleSlot(uint64_t key) {
     unsigned slot = (unsigned)((key ^ (key >> 32)) * UINT64_C(0x9e3779b97f4a7c15)) & (SAMPLE_SLOTS / SAMPLE_WAYS - 1);
     return &ip.samples[slot * SAMPLE_WAYS];
 }
-static SampleEncoding* sampleFind(uint64_t key, const uint8_t* rgba, size_t count) {
+static SampleEncoding* sampleFind(uint64_t key, const uint8_t* rgba, size_t count, uint64_t nativeRevision) {
     SampleEncoding* set = sampleSlot(key);
     for (int i = 0; i < SAMPLE_WAYS; i++) {
         SampleEncoding* e = &set[i];
-        if (e->rgba && e->key == key && e->count == count && !memcmp(e->rgba, rgba, count * 4)) {
-            e->touched = ++ip.sampleClock; ++ip.sampleHits; return e;
+        if (!e->rgba || e->key != key || e->count != count) continue;
+        int sameDecode = nativeRevision && e->nativeRevision == nativeRevision && e->scene == ip.scene;
+        if (sameDecode || !memcmp(e->rgba, rgba, count * 4)) {
+            e->nativeRevision = nativeRevision;
+            e->scene = ip.scene;
+            e->touched = ++ip.sampleClock;
+            ++ip.sampleHits;
+            return e;
         }
     }
     ++ip.sampleMisses; return NULL;
 }
 static void sampleKeep(uint64_t key, const uint8_t* rgba, size_t count, const uint32_t* words,
-                       size_t n, uint32_t format, uint64_t material) {
+                       size_t n, uint32_t format, uint64_t material, uint64_t nativeRevision) {
     size_t bytes = (count + n) * 4;
     if (bytes > SAMPLE_BYTES) return;
     SampleEncoding* e = sampleSlot(key);
@@ -150,7 +177,7 @@ static void sampleKeep(uint64_t key, const uint8_t* rgba, size_t count, const ui
     uint8_t* data = malloc(bytes);
     if (!data) return; /* caching is optional, the frame already owns its data */
     memcpy(data, rgba, count * 4); memcpy(data + count * 4, words, n * 4);
-    *e = (SampleEncoding){data, count, n, format, key, material, ++ip.sampleClock};
+    *e = (SampleEncoding){data, count, n, format, key, material, ++ip.sampleClock, nativeRevision, ip.scene};
     ip.sampleBytes += bytes;
 }
 
@@ -193,8 +220,13 @@ int interpolationStandsAside(void) {
 #endif
 }
 int interpolationEnabled(void) { return interpolationSetting() && !interpolationStandsAside(); }
+int pcInterpolationHighRate(void) { return presentationRate() > 60 && interpolationSetting(); }
 int interpolationCapturing(void) { return ip.loaded && ip.building >= 0 && ip.captureReady && ip.frames[ip.building].valid; }
 int pcInterpolationBuilding(void) { return interpolationCapturing(); }
+int pcInterpolationGearFrame(int field) {
+    return interpolationCapturing() && pcInterpolationHighRate() &&
+           (field ? ip.field >= 0 && ip.field < PC_INTERP_WORLDMAP : ip.field == PC_INTERP_BATTLE);
+}
 const char* interpolationStatus(void) { load(); return ip.status; }
 void interpolationReport(const char* event, const char* reason, double vblank, double alpha) {
     if (ip.log && ip.enabled) gpuLog("interpolation-coverage: field=%d event=%s reason=%s vblank=%.3f alpha=%.6f",
@@ -211,17 +243,21 @@ void interpolationReset(void) {
     ip.base = NULL;
     ip.packet = NULL;
     interpolationPacketsDone();
-    /* Encodings own their pixels and are rechecked byte for byte on reuse.
-     * A scene reset invalidates identities, not these bounded candidates. */
+    /* Advancing the scene invalidates decode identities. The encodings
+     * still own their pixels and can be reused after an exact comparison. */
     ip.ownerCount = ip.textureCount = 0;
-    for (int i = 0; i < INTERP_FRAMES; i++) ip.frames[i].serial = 0;
+    for (int i = 0; i < INTERP_FRAMES; i++) {
+        ip.frames[i].serial = 0;
+        ip.frames[i].packPages = 0;
+    }
     interpTimelineReset(&ip.timeline);
     ip.status = interpolationEnabled() ? "Waiting for compatible field frames" : "Original presentation";
-    gtePrecisionEnable(interpolationEnabled() || hiresPrecision() || sceneWantsCopy());
+    hiresPrecisionTable();
 }
 void interpolationSetEnabled(int enabled) {
     load(); ip.enabled = enabled != 0;
     interpolationReset();
+    if (!ip.enabled) packPagesClear();
     settingsSetInt("interpolation", ip.enabled); settingsSave();
 }
 void interpolationShutdown(void) {
@@ -229,6 +265,8 @@ void interpolationShutdown(void) {
         (unsigned long long)ip.sampleHits, (unsigned long long)ip.sampleMisses, ip.sampleBytes,
         (unsigned long long)ip.identityHits, ip.identityBytes);
     sampleClear();
+    if (ip.log && ip.pagePeak) gpuLog("interpolation: retained texture pack pages peak %zu bytes", ip.pagePeak);
+    packPagesClear();
     for (int i = 0; i < INTERP_FRAMES; i++) interpFrameFree(&ip.frames[i]);
     free(ip.rgba);
     memset(&ip, 0, sizeof(ip));
@@ -261,7 +299,7 @@ void pcInterpolationFrameBegin(int field, int x, int y, int w, int h) {
     if (ip.building < 0) return;
     InterpFrame* f = &ip.frames[ip.building];
     interpFrameClear(f);
-    f->scene = ip.scene; f->serial = 0;
+    f->scene = (ip.scene << 1) | (field == PC_INTERP_BATTLE); f->serial = 0;
     f->x = x; f->y = y; f->w = w; f->h = h;
     ip.captureReady = gvkInterpolationReady();
     if (!ip.captureReady) interpFrameReject(f, "capture-workspace-unavailable");
@@ -269,7 +307,19 @@ void pcInterpolationFrameBegin(int field, int x, int y, int w, int h) {
     ip.textureCount = 0;
     memset(ip.textureSlots, 0, sizeof(ip.textureSlots));
     memset(ip.contentSlots, 0, sizeof(ip.contentSlots));
+    memset(ip.mips, 0, sizeof(ip.mips));
 }
+/* Some battle arenas paint their own sky and ground in the farthest OT
+ * slot instead of clearing through the draw environment. The replay starts
+ * there and uses the same opaque backdrop draws. */
+void pcInterpolationBattleBackdrop(void) {
+    if (ip.field == PC_INTERP_BATTLE && interpolationCapturing()) {
+        InterpFrame* f = &ip.frames[ip.building];
+        f->background = 0;
+        f->cleared = 1;
+    }
+}
+
 static int viewport(InterpFrame* f) {
     WideView view;
     int wide = wideFrameView((VRect){f->x, f->y, f->x + f->w - 1, f->y + f->h - 1}, &view);
@@ -322,6 +372,8 @@ void pcInterpolationFrameEnd(void) {
             if (f->draws[i].object && (unsigned)f->draws[i].kind < 7) kinds[f->draws[i].kind]++;
         gpuLog("interpolation: families model=%u mecha=%u particle=%u sprite=%u shadow=%u transition=%u wave=%u",
                kinds[0], kinds[1], kinds[2], kinds[3], kinds[4], kinds[5], kinds[6]);
+        if (f->gearCount)
+            gpuLog("interpolation: Gear rigs %u, local vertices %u", f->gearCount, f->gearVertexCount);
     }
     interpolationReport("snapshot", f->valid ? "valid" : f->rejection ? f->rejection : "unknown-capture", -1, -1);
     if (f->valid) gvkInterpolationCapture(ip.building, f);
@@ -330,6 +382,7 @@ void pcInterpolationFrameEnd(void) {
 void pcInterpolationObject(const void* owner, const void* model) {
     ip.object = 0; ip.base = NULL;
     ip.kind = PC_INTERP_MODEL;
+    ip.gear = 0;
     if (ip.building < 0 || !owner || !model) return;
     for (int i = 0; i < ip.ownerCount; i++) {
         Owner* p = &ip.owners[i];
@@ -344,6 +397,35 @@ void pcInterpolationObject(const void* owner, const void* model) {
 void pcInterpolationObjectType(const void* owner, const void* model, int kind) {
     pcInterpolationObject(owner, model); ip.kind = kind;
 }
+unsigned pcInterpolationGear(const void* owner, const void* model, const void* pose, unsigned size,
+                             InterpGearEval* evaluate) {
+    if (!interpolationCapturing()) return INTERP_GEAR_HOLD;
+    InterpFrame* f = &ip.frames[ip.building];
+    if (f->gearCount == INTERP_GEAR_RIGS) return INTERP_GEAR_HOLD;
+    pcInterpolationObject(owner, model);
+    uint64_t identity = ip.object;
+    pcInterpolationObject(NULL, NULL);
+    if (!identity) return INTERP_GEAR_HOLD;
+    InterpGearRig* rig = &f->gears[f->gearCount];
+    if (rig->capacity < size) {
+        void* owned = realloc(rig->pose, size);
+        if (!owned) return INTERP_GEAR_HOLD;
+        rig->pose = owned;
+        rig->capacity = size;
+    }
+    memcpy(rig->pose, pose, size);
+    rig->size = size;
+    rig->identity = identity;
+    rig->evaluate = evaluate;
+    return ++f->gearCount;
+}
+
+void pcInterpolationGearObject(const void* bone, const void* model, unsigned rig, unsigned index) {
+    pcInterpolationObjectType(bone, model, PC_INTERP_MECHA);
+    ip.gear = rig > INTERP_GEAR_RIGS ? INTERP_GEAR_HOLD : rig;
+    ip.bone = index;
+}
+
 void pcInterpolationModel(const void* primitives) { if (ip.object) ip.base = primitives; }
 static unsigned packetHash(const void* p) {
     uintptr_t h = (uintptr_t)p >> 3;
@@ -368,12 +450,12 @@ void pcInterpolationPrim(void* primitive) {
     uintptr_t addr = (uintptr_t)primitive, base = (uintptr_t)ip.base;
     if (addr < base || addr - base > UINT32_MAX) { interpolationReject("primitive-offset"); return; }
     Packet* p = packetSlot(primitive);
-    if (p) { p->object = ip.object; p->face = addr - base + 1; p->discrete = 0; p->kind = ip.kind; p->placement = 0; }
+    if (p) { p->object = ip.object; p->face = addr - base + 1; p->discrete = 0; p->kind = ip.kind; p->placement = 0; p->gear = ip.gear; p->bone = ip.bone; }
 }
 void pcInterpolationDiscretePrim(void* primitive) {
     if (ip.building < 0 || !ip.loaded || !primitive) return;
     Packet* p = packetSlot(primitive);
-    if (p) { p->object = p->face = 0; p->discrete = 1; p->placement = 0; }
+    if (p) { p->object = p->face = 0; p->discrete = 1; p->placement = 0; p->gear = 0; }
 }
 void pcInterpolationHeapFree(const void* start, int bytes) {
     if (!ip.enabled || bytes <= 0) return;
@@ -392,14 +474,15 @@ void pcInterpolationKeyType(const void* owner, const void* resource, unsigned pa
     if (ip.building < 0 || !primitive) return;
     uint64_t object = ip.object;
     int savedKind = ip.kind;
+    unsigned savedGear = ip.gear;
     const uint8_t* base = ip.base;
     pcInterpolationObject(owner, resource);
     if (kind == PC_INTERP_WAVE) ip.waveFrame = 1;
     if (ip.object) {
         Packet* p = packetSlot(primitive);
-        if (p) { p->object = ip.object; p->face = (uint64_t)part + 1; p->discrete = 0; p->kind = kind; p->placement = 0; }
+        if (p) { p->object = ip.object; p->face = (uint64_t)part + 1; p->discrete = 0; p->kind = kind; p->placement = 0; p->gear = 0; }
     }
-    ip.object = object; ip.base = base; ip.kind = savedKind;
+    ip.object = object; ip.base = base; ip.kind = savedKind; ip.gear = savedGear;
 }
 void pcInterpolationKey(const void* owner, const void* resource, unsigned part, void* primitive) {
     pcInterpolationKeyType(owner, resource, part, primitive, PC_INTERP_SPRITE);
@@ -471,6 +554,7 @@ int interpolationCaptureSample(void) {
 }
 int interpolationWaveFrame(void) { return ip.waveFrame; }
 int interpolationWavePacket(void) { return ip.packet && ip.packet->kind == PC_INTERP_WAVE && ip.packet->capture; }
+int interpolationGearPacket(void) { return ip.packet && ip.packet->gear && ip.packet->gear != INTERP_GEAR_HOLD; }
 int interpolationGeometryPacket(void) { return ip.packet && ip.packet->object != 0; }
 void interpolationPacketsDone(void) {
     if (ip.capture && ip.packet && (ip.packet->capture & PC_INTERP_CAPTURE_END)) --ip.capture;
@@ -486,11 +570,6 @@ void interpolationReject(const char* reason) {
 }
 void interpolationUnsupported(void) { interpolationReject("unsupported-draw"); }
 
-static uint64_t hashPixels(const uint8_t* p, size_t bytes) {
-    uint64_t h = UINT64_C(14695981039346656037);
-    for (size_t i = 0; i < bytes; i++) h = (h ^ p[i]) * UINT64_C(1099511628211);
-    return h;
-}
 /* Content candidates are still verified pixel for pixel before storage is
  * shared. Hash whole words here: serial byte hashing of the large textures
  * in the opening flashback otherwise dominates snapshot construction.
@@ -512,11 +591,193 @@ static uint64_t hashContent(const uint8_t* p, size_t bytes) {
 }
 /* interpolationPoseDraw: the sample texture() takes instead of a lookup. */
 static struct { int on; const DecodedTexture* d; TextureSample s; } poseOverride;
-static int texture(InterpFrame* f, HiVertex* v, int count, int kind, uint64_t* material) {
+
+const TextureSample* interpolationPackPage(unsigned index) {
+    return &ip.pages[index].sample;
+}
+
+/* Full-resolution pages are shared by snapshots, with exact ownership
+ * even if the pack reloads. Only pages absent from every valid snapshot
+ * can be reused for different artwork. */
+static int keepPackPage(InterpFrame* f, const TextureSample* sample, size_t count) {
+    int slot = -1;
+    for (int i = 0; i < INTERP_PACK_PAGES; ++i) {
+        if (ip.pages[i].data && ip.pages[i].sample.revision == sample->revision) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        size_t bytes = count * (sample->indices ? 1 : 4);
+        uint64_t inUse = 0;
+        for (int i = 0; i < INTERP_FRAMES; ++i)
+            if (ip.frames[i].valid) inUse |= ip.frames[i].packPages;
+        do {
+            slot = -1;
+            int needBytes = ip.pageBytes + bytes > PACK_PAGE_BYTES;
+            for (int i = 0; i < INTERP_PACK_PAGES; ++i) {
+                if ((inUse & (UINT64_C(1) << i)) || (needBytes && !ip.pages[i].data)) continue;
+                if (slot < 0 || ip.pages[i].touched < ip.pages[slot].touched) slot = i;
+            }
+            if (slot < 0) return -1;
+            PackPage* old = &ip.pages[slot];
+            ip.pageBytes -= old->bytes;
+            free(old->data);
+            *old = (PackPage){0};
+        } while (ip.pageBytes + bytes > PACK_PAGE_BYTES);
+        PackPage* page = &ip.pages[slot];
+        page->data = malloc(bytes);
+        if (!page->data) return -1;
+        memcpy(page->data, sample->indices ? sample->indices : sample->rgba, bytes);
+        page->sample = *sample;
+        if (sample->indices) {
+            page->sample.indices = page->data;
+            page->sample.rgba = NULL;
+            for (size_t i = 0; i < count; ++i) page->used[page->data[i]] = 1;
+        } else {
+            page->sample.rgba = page->data;
+        }
+        page->bytes = bytes;
+        ip.pageBytes += bytes;
+        if (ip.pageBytes > ip.pagePeak) ip.pagePeak = ip.pageBytes;
+    }
+    ip.pages[slot].touched = ++ip.sampleClock;
+    f->packPages |= UINT64_C(1) << slot;
+    return slot;
+}
+
+static int storePackTexture(InterpFrame* f, Texture* t, const TextureSample* sample,
+                            const DecodedTexture* palette, size_t count) {
+    int slot = keepPackPage(f, sample, count);
+    if (slot < 0) return 0;
+    t->format = INTERP_SAMPLE_RESIDENT;
+    t->offset = (uint32_t)slot;
+    t->material = sample->revision;
+    if (!sample->indices) return 1;
+
+    uint32_t words[257] = {(uint32_t)slot};
+    uint16_t used[256] = {0};
+    for (int i = 0; i < palette->paletteSize; ++i) {
+        uint16_t c = palette->palette[i];
+        if (ip.pages[slot].used[i]) used[i] = c;
+        if (!c) continue;
+        uint32_t rgba = (c & 0x8000 ? 128u : 255u) << 24;
+        for (int k = 0; k < 3; ++k) {
+            unsigned channel = (c >> (k * 5)) & 31;
+            rgba |= ((channel << 3) | (channel >> 2)) << (k * 8);
+        }
+        words[1 + i] = rgba;
+    }
+    t->material ^= hashContent((const uint8_t*)used, (size_t)palette->paletteSize * sizeof(*used));
+    t->format |= INTERP_SAMPLE_INDEXED | INTERP_SAMPLE_PALETTE | (uint32_t)(palette->paletteSize - 1) << 24;
+    return interpFrameWords(f, words, 1 + (uint32_t)palette->paletteSize, &t->offset);
+}
+
+static MipTexture* replayMip(MipKey key, int* fresh) {
+    uint64_t hash = key.revision * UINT64_C(0x9e3779b97f4a7c15) ^ key.palette;
+    hash ^= ((uint64_t)key.origin << 32 | key.size) * UINT64_C(0xbf58476d1ce4e5b9);
+    unsigned slot = (unsigned)((hash ^ (hash >> 32)) >> 12) & (MIP_SLOTS - 1);
+    *fresh = 0;
+    for (int i = 0; i < 8; ++i, slot = (slot + 1) & (MIP_SLOTS - 1)) {
+        MipTexture* m = &ip.mips[slot];
+        if (m->key.revision == key.revision && m->key.palette == key.palette &&
+            m->key.origin == key.origin && m->key.size == key.size) return m;
+        if (m->key.revision) continue;
+        *m = (MipTexture){.key = key, .offset = INTERP_MIP_BASE_ONLY};
+        *fresh = 1;
+        return m;
+    }
+    return NULL;
+}
+
+static void storeMip(InterpFrame* f, MipTexture* m, const TextureSample* chain, int includesBase, size_t count) {
+    if (!count) return;
+    uint64_t key = chain->revision ^ UINT64_C(0x8e4c110d12875a91);
+    IdentityEncoding* known = identityFind(key, count);
+    size_t baseBytes = includesBase ? (size_t)chain->w * chain->h * chain->scale * chain->scale * 4 : 0;
+    if (known) {
+        if (interpFrameMipWords(f, known->words, (uint32_t)known->n, &m->offset)) m->format = known->format;
+    } else if (interpFrameMipSample(f, chain->rgba + baseBytes, count, &m->offset, &m->format)) {
+        identityKeep(key, count, f->mipWords + m->offset, f->mipCount - m->offset, m->format, 0);
+    }
+}
+
+static MipTexture* packMip(InterpFrame* f, const TextureSample* sample, TextureRequest patch, const DecodedTexture* palette) {
+    MipKey key = {.revision = sample->revision};
+    int w = sample->w, h = sample->h;
+    if (sample->indices) {
+        key.palette = palette->paletteKey;
+        key.origin = (uint32_t)(patch.u - sample->u) | (uint32_t)(patch.v - sample->v) << 16;
+        w = patch.w; h = patch.h;
+        key.size = (uint32_t)w | (uint32_t)h << 16;
+    }
+    int fresh;
+    MipTexture* m = replayMip(key, &fresh);
+    if (!fresh) return m;
+    w *= sample->scale; h *= sample->scale;
+    size_t count = textureMipmapPixels(w, h) - (size_t)w * h;
+    /* Even a single-colour palette needs a byte per lower texel. Avoid
+     * building a large tail that cannot fit, while reusing earlier tails. */
+    if ((count + 3) / 4 > INTERP_MAX_MIP_WORDS - f->mipCount) return m;
+    TextureSample chain;
+    if (textureMipmapReplacement(sample, patch, palette, &chain)) storeMip(f, m, &chain, 0, count);
+    return m;
+}
+
+static MipTexture* nativeMip(InterpFrame* f, TextureRequest patch) {
+    TextureSample chain;
+    if (!textureMipmapSample(textureCacheGet(textureRequestSnap(patch)), patch, &chain)) return NULL;
+    int fresh;
+    MipTexture* m = replayMip((MipKey){.revision = chain.revision}, &fresh);
+    if (fresh) storeMip(f, m, &chain, 1, textureMipmapPixels(chain.w, chain.h) - (size_t)chain.w * chain.h);
+    return m;
+}
+
+static void textureAnisotropic(InterpFrame* f, HiVertex* v, int count, const TextureSample* sample,
+                               const DecodedTexture* decoded, int filter, int pack,
+                               const InterpTextureFootprint* footprints) {
+    int taps = hiresAnisotropyNow();
+    for (int first = 0; first < count; first += 3) {
+        const InterpTextureFootprint* fp = &footprints[first / 3];
+        if (fp->footprint2 <= 0) continue;
+        /* Keep the same authored bounds for this half across native
+         * frames, even when it crosses the minification threshold. */
+        for (int k = first; k < first + 3; ++k) {
+            v[k].uvMin = fp->uvMin;
+            v[k].uvMax = fp->uvMax;
+        }
+        if (fp->footprint2 * sample->scale * sample->scale < 1.0f || fp->uvMin == fp->uvMax) continue;
+        int left = (int16_t)fp->uvMin, top = (int16_t)(fp->uvMin >> 16);
+        int right = (int16_t)fp->uvMax + 1, bottom = (int16_t)(fp->uvMax >> 16) + 1;
+        if (left < sample->u) left = sample->u;
+        if (top < sample->v) top = sample->v;
+        if (right > sample->u + sample->w) right = sample->u + sample->w;
+        if (bottom > sample->v + sample->h) bottom = sample->v + sample->h;
+        if (left >= right || top >= bottom) continue;
+        TextureRequest patch = {.tpage = (uint16_t)v[first].tex, .clut = (uint16_t)(v[first].tex >> 16),
+                                .window = v[first].texWindow, .u = left, .v = top,
+                                .w = right - left, .h = bottom - top};
+        const MipTexture* mip = pack ? packMip(f, sample, patch, decoded) : nativeMip(f, patch);
+        unsigned sampling = TEXTURE_FILTER_ANISOTROPIC | taps |
+            (filter == TEXTURE_FILTER_LINEAR ? TEXTURE_FILTER_ANISOTROPIC_LINEAR : 0) |
+            (pack ? TEXTURE_FILTER_ANISOTROPIC_PACK : 0);
+        for (int k = first; k < first + 3; ++k) {
+            v[k].sample[3] = (v[k].sample[3] & ~255u) | (sampling + 1) | INTERP_SAMPLE_MIPS;
+            v[k].wideEdge = (mip ? mip->offset : INTERP_MIP_BASE_ONLY) | (pack && !sample->indices ? INTERP_MIP_SHARED : 0);
+            v[k].wideTex = mip ? mip->format : 0;
+        }
+    }
+}
+
+static int texture(InterpFrame* f, HiVertex* v, int count, int kind, uint64_t* material,
+                   const InterpTextureFootprint* footprints) {
     uint32_t tex = v[0].tex;
     const DecodedTexture* d;
     TextureSample sample;
     int filter;
+    int pack = 0, aniso = 0;
+    uint64_t nativeRevision = 0;
+    const DecodedTexture* packPalette = NULL;
     if (poseOverride.on) {
         d = poseOverride.d; sample = poseOverride.s;
         filter = gvkHiScale() ? textureFilter(kind) : TEXTURE_FILTER_NEAREST;
@@ -530,7 +791,8 @@ static int texture(InterpFrame* f, HiVertex* v, int count, int kind, uint64_t* m
     }
     /* Tagged face snapshots already carry the complete canvas. A later
      * upload may cover multiple faces, or evict their upload provenance. */
-    d = textureCacheGet(PC_TEX_IS_PORTRAIT(kind) ? patch : textureRequestSnap(patch));
+    TextureRequest native = PC_TEX_IS_PORTRAIT(kind) ? patch : textureRequestSnap(patch);
+    d = textureCacheGet(native);
     const char* reason = !d || !d->rgba ? "unavailable-texture" : gp0InterpolationTextureReason(d);
     if (reason) {
         interpolationReject(reason);
@@ -539,12 +801,18 @@ static int texture(InterpFrame* f, HiVertex* v, int count, int kind, uint64_t* m
     } /* rendered captures/feedback are unsupported */
     sample = (TextureSample){.rgba = d->rgba, .revision = d->revision, .u = d->request.u, .v = d->request.v,
                              .w = d->request.w, .h = d->request.h, .scale = 1};
+    nativeRevision = d->revision;
     filter = gvkHiScale() ? textureFilter(kind) : TEXTURE_FILTER_NEAREST;
     if (gvkHiScale()) {
-        const DecodedTexture* enhanced = PC_TEX_IS_PORTRAIT(kind) ? d :
-            textureCacheGet(kind == PC_TEX_3D ? textureRequestSnapStable(patch) : textureRequestSnap(patch));
+        const DecodedTexture* enhanced = d;
+        if (kind == PC_TEX_3D) {
+            TextureRequest stable = textureRequestSnapStable(patch);
+            if (memcmp(&stable, &native, sizeof(stable))) enhanced = textureCacheGet(stable);
+        }
         int sampled = PC_TEX_IS_PORTRAIT(kind) && !textureUsePack(kind) ? portraitPackClassSample(enhanced,patch,kind,&sample) :
             (textureUsePack(kind)?texturePackSample(enhanced,patch,filter,&sample):textureUseSpriteCel(kind)?textureSpriteCelSample(enhanced,patch,filter,&sample):0);
+        pack = sampled && textureUsePack(kind);
+        packPalette = enhanced;
         int hudScale=textureHudScale(kind);
         int celScale=textureCelScale(kind);
         /* Unmatched Cel graphics take the native decode below: the same
@@ -557,10 +825,14 @@ static int texture(InterpFrame* f, HiVertex* v, int count, int kind, uint64_t* m
             if (sampled && textureGlyphSmooth()) filter = TEXTURE_FILTER_TEXT_SMOOTH;
         }
         if (!sampled && hudScale) sampled=textureUpscaleSample(enhanced,patch,hudScale,&sample);
-        if (!sampled && enhanced && enhanced->rgba) {
+        if (sampled) nativeRevision = 0;
+        else if (enhanced && enhanced->rgba) {
+            nativeRevision = enhanced->revision;
             sample=(TextureSample){enhanced->rgba,enhanced->revision,enhanced->request.u,enhanced->request.v,
                 enhanced->request.w,enhanced->request.h,1,NULL,0};
         }
+        aniso = (pack || !sampled) && footprints && kind == PC_TEX_3D && filter <= TEXTURE_FILTER_LINEAR &&
+            (footprints[0].footprint2 > 0 || (count == 6 && footprints[1].footprint2 > 0));
         /* Replay evaluates Scale2x from the shared original texels. Keeping
          * a separate enlarged, edge-clamped image for every face duplicates
          * the same upload hundreds of times in complex Gear/story scenes. */
@@ -570,13 +842,15 @@ sampled:
         interpolationReject("replacement-size"); return 0;
     }
     size_t pixels = (size_t)sample.w * sample.h * sample.scale * sample.scale;
-    if (pixels > INTERP_MAX_PIXELS) { interpolationReject("texture-capacity"); return 0; }
     if (!sample.indices && !sample.rgba) { interpolationReject("unavailable-replacement"); return 0; }
+    /* Share large, complete 3D pages with the live GPU cache. Sprites, HUD
+     * and the smaller samples still use the compact snapshot encoding. */
+    int resident = pack && kind == PC_TEX_3D && sample.keep && pixels >= 256u * 1024u;
     TextureRequest request = d->request;
     request.u = sample.u; request.v = sample.v; request.w = sample.w; request.h = sample.h;
-    uint64_t revision = sample.revision ^ (sample.indices ? d->paletteKey : 0);
+    uint64_t revision = sample.revision ^ (sample.indices ? (resident ? packPalette : d)->paletteKey : 0);
     Texture* t = NULL;
-    uint64_t requestKey = hashPixels((const uint8_t*)&request, sizeof(request)) ^ (uint64_t)sample.scale;
+    uint64_t requestKey = hashContent((const uint8_t*)&request, sizeof(request)) ^ (uint64_t)sample.scale;
     uint64_t key = requestKey ^ revision;
     unsigned slot = (unsigned)((key ^ (key >> 32)) * UINT64_C(0x9e3779b97f4a7c15)) & (TEXTURE_SLOTS - 1);
     while (ip.textureSlots[slot]) {
@@ -584,6 +858,16 @@ sampled:
         if (p->revision == revision && p->scale == sample.scale && !memcmp(&p->request, &request, sizeof(p->request))) { t = p; break; }
         slot = (slot + 1) & (TEXTURE_SLOTS - 1);
     }
+    if (!t && resident) {
+        if (ip.textureCount == TEXTURES) { interpolationReject("texture-count"); return 0; }
+        t = &ip.textures[ip.textureCount];
+        *t = (Texture){.revision = revision, .request = request, .scale = sample.scale};
+        if (!storePackTexture(f, t, &sample, packPalette, pixels)) {
+            interpolationReject("pack-page-capacity"); return 0;
+        }
+        ip.textureSlots[slot] = (uint32_t)++ip.textureCount;
+    }
+    if (!t && pixels > INTERP_MAX_PIXELS) { interpolationReject("texture-capacity"); return 0; }
     IdentityEncoding* known = !t && sample.indices ? identityFind(key, pixels) : NULL;
     if (known) {   /* an indexed replacement seen in an earlier frame: its encoding as kept */
         if (ip.textureCount == TEXTURES) { interpolationReject("texture-count"); return 0; }
@@ -616,11 +900,10 @@ sampled:
             }
             sample.rgba = ip.rgba;
         }
-        /* Location selects candidates across decode/CLUT revisions; exact
-         * pixels decide reuse. Unused palette changes no longer force a
-         * large rehash, while different used colours still miss at once. */
+        /* The exact fallback also finds matching pixels across different
+         * CLUT revisions, such as when only an unused entry changed. */
         uint64_t sampleKey = requestKey;
-        SampleEncoding* encoded = sampleFind(sampleKey, sample.rgba, pixels);
+        SampleEncoding* encoded = sampleFind(sampleKey, sample.rgba, pixels, nativeRevision);
         uint64_t content = encoded ? encoded->material : hashContent(sample.rgba, pixels * 4);
         uint32_t offset = f->pixelCount, format = 0, words = 0;
         /* Different palettes, page locations and decode revisions can yield
@@ -646,7 +929,7 @@ sampled:
         }
         /* An alias that shared this frame's storage still needs its own
          * candidate next frame, otherwise it rehashes the same pixels. */
-        if (!encoded) sampleKeep(sampleKey, sample.rgba, pixels, f->pixels + offset, words, format, content);
+        if (!encoded) sampleKeep(sampleKey, sample.rgba, pixels, f->pixels + offset, words, format, content, nativeRevision);
         if (sample.indices) identityKeep(key, pixels, f->pixels + offset, words, format, content);
         t = &ip.textures[ip.textureCount++];
         *t = (Texture){revision, request, offset, format, content, sample.scale, ip.contentSlots[contentSlot], words};
@@ -660,10 +943,12 @@ sampled:
         v[i].sample[2] = (uint32_t)t->request.w | (uint32_t)t->request.h << 16;
         v[i].sample[3] = t->format | (uint32_t)(filter + 1) | (uint32_t)t->scale << 8;
     }
+    if (aniso) textureAnisotropic(f, v, count, &sample, packPalette, filter, pack, footprints);
     return 1;
 }
-void interpolationDraw(const HiVertex* vertices, int count, int kind,
-                       int wide, int shiftX, int shiftY, unsigned piece) {
+void interpolationDrawPolygons(const HiVertex* vertices, int count, int kind,
+                               int wide, int shiftX, int shiftY, unsigned piece,
+                               const InterpTextureFootprint* footprints, InterpGearVertex* gearVertices) {
     if (ip.building < 0 || count < 1 || count > 6) return;
     InterpFrame* f = &ip.frames[ip.building];
     if (!f->valid) return;
@@ -710,7 +995,7 @@ void interpolationDraw(const HiVertex* vertices, int count, int kind,
     if (!capture && !frozen && v[0].wideTex) { interpFrameReject(f, "texture-feedback"); return; }
     /* Untagged projected geometry is not safely identifiable. Screen-aligned
      * quads, sprite/HUD/text layers and line blocks remain discrete. */
-    if (!capture && !object && kind == PC_TEX_3D && !(v[0].mode & DRAW_FILL)) {
+    if (ip.field != PC_INTERP_BATTLE && !capture && !object && kind == PC_TEX_3D && !(v[0].mode & DRAW_FILL)) {
         int flat = count == 6 && v[0].x == v[2].x && v[1].x == v[5].x && v[0].y == v[1].y && v[2].y == v[5].y;
         if (!flat) {
             if (ip.log) gpuLog("interpolation: unidentified geometry count %d mode %x at %.1f,%.1f packet %p", count, v[0].mode, v[0].x, v[0].y, ip.address);
@@ -787,14 +1072,25 @@ void interpolationDraw(const HiVertex* vertices, int count, int kind,
         v[i].sample[0] = (uint32_t)(uint16_t)sourceX | (uint32_t)(uint16_t)sourceY << 16;
         v[i].sample[3] = INTERP_SAMPLE_CAPTURE | (uint32_t)version<<24;
     }
-    if (!capture && !frozen && (v[0].mode & DRAW_TEXTURED) && !texture(f, v, count, kind, &material)) { interpFrameReject(f, "unsupported-texture"); return; }
+    if (!capture && !frozen && (v[0].mode & DRAW_TEXTURED) && !texture(f, v, count, kind, &material, footprints)) { interpFrameReject(f, "unsupported-texture"); return; }
     if (interpFrameDraw(f, v, count, object, face, material)) {
         f->draws[f->drawCount - 1].kind = ip.packet ? ip.packet->kind : PC_INTERP_MODEL;
         f->draws[f->drawCount - 1].collapse = ip.packet && ip.packet->collapse;
+        if (ip.packet && ip.packet->gear) {
+            if (gearVertices) for (int i = 0; i < count; i++) {
+                gearVertices[i].center[0] -= f->viewX;
+                gearVertices[i].center[1] -= f->viewY;
+            }
+            interpFrameGearDraw(f, ip.packet->gear, ip.packet->bone, gearVertices);
+        }
         if (ip.packet && ip.packet->placement)
             interpFramePlacement(f, ip.packet->anchor[0] + f->x + shiftX - f->viewX,
                                  ip.packet->anchor[1] + f->y + shiftY - f->viewY, ip.packet->anchor[2]);
     }
+}
+void interpolationDraw(const HiVertex* vertices, int count, int kind,
+                       int wide, int shiftX, int shiftY, unsigned piece) {
+    interpolationDrawPolygons(vertices, count, kind, wide, shiftX, shiftY, piece, NULL, NULL);
 }
 void interpolationPoseDraw(const HiVertex* vertices, int count, int wide, int shiftX, int shiftY,
                            const DecodedTexture* palette, const TextureSample* sample) {
@@ -808,10 +1104,13 @@ void interpolationClear(VRect r, uint32_t rgb) {
     if (ip.building < 0) return;
     InterpFrame* f = &ip.frames[ip.building];
     if (r.x0 <= f->x && r.y0 <= f->y && r.x1 >= f->x + f->w - 1 && r.y1 >= f->y + f->h - 1) {
+        unsigned gears = f->gearCount;
         interpFrameClear(f);
+        f->gearCount = gears;
         if (!ip.captureReady) interpFrameReject(f, "capture-workspace-unavailable");
         ip.textureCount = 0; memset(ip.textureSlots, 0, sizeof(ip.textureSlots));
         memset(ip.contentSlots, 0, sizeof(ip.contentSlots));
+        memset(ip.mips, 0, sizeof(ip.mips));
         f->background = rgb; f->cleared = 1; ip.replayFrozen=-1;
     } else if (r.x0 < f->x + f->w && r.x1 >= f->x && r.y0 < f->y + f->h && r.y1 >= f->y) {
         interpFrameReject(f, "partial-clear");
@@ -896,7 +1195,7 @@ static const InterpFrame* picture(const GpuDisplay* d, double vblank, int* befor
         ip.status = "Native: waiting for compatible geometry"; return NULL;
     }
     *before = prev; *after = slot; *alpha = interpTimelineAlpha(&ip.timeline, vblank);
-    ip.status = "Interpolated field geometry (one native frame delay)";
+    ip.status = "Interpolated geometry (one native frame delay)";
     return &ip.frames[prev];
 }
 const InterpFrame* interpolationPicture(const GpuDisplay* d, double vblank, int* before, int* after, double* alpha) {

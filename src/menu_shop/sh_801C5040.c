@@ -1215,7 +1215,7 @@ void drawMenu_348_cursor(void) {
 #endif
     AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m348_cursor->m128_drawMode[gMenuContext->m348_cursor->m159_oddOrEven]);
     if (gMenuContext->m33C_drawFlags->m4_drawCursor != 0) {
-        AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m348_cursor->m0_cursor[gMenuContext->m348_cursor->m158_oddOrEven]);
+        AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[4], &gMenuContext->m348_cursor->m0_cursor[gMenuContext->m348_cursor->m158_oddOrEven]);
     }
 }
 
@@ -1228,11 +1228,11 @@ void drawMenuBoxTopFrame(s32 box) {
     RotTransPers4(&b->m590_topEdgeLeftVerts[0], &b->m590_topEdgeLeftVerts[1], &b->m590_topEdgeLeftVerts[2], &b->m590_topEdgeLeftVerts[3], (s32*)&b->m140_topEdge[0][b->m71C_oddOrEven].x0,
                   (s32*)&b->m140_topEdge[0][b->m71C_oddOrEven].x1, (s32*)&b->m140_topEdge[0][b->m71C_oddOrEven].x2,
                   (s32*)&b->m140_topEdge[0][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m140_topEdge[0][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m140_topEdge[0][b->m71C_oddOrEven]);
     RotTransPers4(&b->m5B0_topEdgeRightVerts[0], &b->m5B0_topEdgeRightVerts[1], &b->m5B0_topEdgeRightVerts[2], &b->m5B0_topEdgeRightVerts[3], (s32*)&b->m140_topEdge[1][b->m71C_oddOrEven].x0,
                   (s32*)&b->m140_topEdge[1][b->m71C_oddOrEven].x1, (s32*)&b->m140_topEdge[1][b->m71C_oddOrEven].x2,
                   (s32*)&b->m140_topEdge[1][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m140_topEdge[1][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m140_topEdge[1][b->m71C_oddOrEven]);
 }
 
 void drawMenuBoxBottomFrame(s32 box) {
@@ -1244,11 +1244,11 @@ void drawMenuBoxBottomFrame(s32 box) {
     RotTransPers4(&b->m5D0_bottomEdgeLeftVerts[0], &b->m5D0_bottomEdgeLeftVerts[1], &b->m5D0_bottomEdgeLeftVerts[2], &b->m5D0_bottomEdgeLeftVerts[3], (s32*)&b->m1E0_bottomEdge[0][b->m71C_oddOrEven].x0,
                   (s32*)&b->m1E0_bottomEdge[0][b->m71C_oddOrEven].x1, (s32*)&b->m1E0_bottomEdge[0][b->m71C_oddOrEven].x2,
                   (s32*)&b->m1E0_bottomEdge[0][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m1E0_bottomEdge[0][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m1E0_bottomEdge[0][b->m71C_oddOrEven]);
     RotTransPers4(&b->m5F0_bottomEdgeRightVerts[0], &b->m5F0_bottomEdgeRightVerts[1], &b->m5F0_bottomEdgeRightVerts[2], &b->m5F0_bottomEdgeRightVerts[3], (s32*)&b->m1E0_bottomEdge[1][b->m71C_oddOrEven].x0,
                   (s32*)&b->m1E0_bottomEdge[1][b->m71C_oddOrEven].x1, (s32*)&b->m1E0_bottomEdge[1][b->m71C_oddOrEven].x2,
                   (s32*)&b->m1E0_bottomEdge[1][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m1E0_bottomEdge[1][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m1E0_bottomEdge[1][b->m71C_oddOrEven]);
 }
 
 void drawMenuBoxLeftFrame(s32 box) {
@@ -1260,11 +1260,11 @@ void drawMenuBoxLeftFrame(s32 box) {
     RotTransPers4(&b->m610_leftEdgeTopVerts[0], &b->m610_leftEdgeTopVerts[1], &b->m610_leftEdgeTopVerts[2], &b->m610_leftEdgeTopVerts[3], (s32*)&b->m280_leftEdge[0][b->m71C_oddOrEven].x0,
                   (s32*)&b->m280_leftEdge[0][b->m71C_oddOrEven].x1, (s32*)&b->m280_leftEdge[0][b->m71C_oddOrEven].x2,
                   (s32*)&b->m280_leftEdge[0][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m280_leftEdge[0][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m280_leftEdge[0][b->m71C_oddOrEven]);
     RotTransPers4(&b->m630_leftEdgeBottomVerts[0], &b->m630_leftEdgeBottomVerts[1], &b->m630_leftEdgeBottomVerts[2], &b->m630_leftEdgeBottomVerts[3], (s32*)&b->m280_leftEdge[1][b->m71C_oddOrEven].x0,
                   (s32*)&b->m280_leftEdge[1][b->m71C_oddOrEven].x1, (s32*)&b->m280_leftEdge[1][b->m71C_oddOrEven].x2,
                   (s32*)&b->m280_leftEdge[1][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m280_leftEdge[1][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m280_leftEdge[1][b->m71C_oddOrEven]);
 }
 
 void drawMenuBoxRightFrame(s32 box) {
@@ -1276,11 +1276,11 @@ void drawMenuBoxRightFrame(s32 box) {
     RotTransPers4(&b->m650_rightEdgeTopVerts[0], &b->m650_rightEdgeTopVerts[1], &b->m650_rightEdgeTopVerts[2], &b->m650_rightEdgeTopVerts[3], (s32*)&b->m320_rightEdge[0][b->m71C_oddOrEven].x0,
                   (s32*)&b->m320_rightEdge[0][b->m71C_oddOrEven].x1, (s32*)&b->m320_rightEdge[0][b->m71C_oddOrEven].x2,
                   (s32*)&b->m320_rightEdge[0][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m320_rightEdge[0][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m320_rightEdge[0][b->m71C_oddOrEven]);
     RotTransPers4(&b->m670_rightEdgeBottomVerts[0], &b->m670_rightEdgeBottomVerts[1], &b->m670_rightEdgeBottomVerts[2], &b->m670_rightEdgeBottomVerts[3], (s32*)&b->m320_rightEdge[1][b->m71C_oddOrEven].x0,
                   (s32*)&b->m320_rightEdge[1][b->m71C_oddOrEven].x1, (s32*)&b->m320_rightEdge[1][b->m71C_oddOrEven].x2,
                   (s32*)&b->m320_rightEdge[1][b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m320_rightEdge[1][b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m320_rightEdge[1][b->m71C_oddOrEven]);
 }
 
 void drawMenuBoxBackground(s32 box) {
@@ -1308,7 +1308,7 @@ void drawMenuBoxCorners(s32 box) {
                       (s32*)&b->m0_corners[0][i * 2 + b->m71C_oddOrEven].x0, (s32*)&b->m0_corners[0][i * 2 + b->m71C_oddOrEven].x1,
                       (s32*)&b->m0_corners[0][i * 2 + b->m71C_oddOrEven].x2, (s32*)&b->m0_corners[0][i * 2 + b->m71C_oddOrEven].x3,
                       &depth, &flag);
-        AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m0_corners[0][i * 2 + b->m71C_oddOrEven]);
+        AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m0_corners[0][i * 2 + b->m71C_oddOrEven]);
     }
 }
 
@@ -1324,12 +1324,12 @@ void drawMenuBoxInnerFrame(s32 box) {
                       (s32*)&b->m410_innerCorners[0][i * 2 + b->m71C_oddOrEven].x0, (s32*)&b->m410_innerCorners[0][i * 2 + b->m71C_oddOrEven].x1,
                       (s32*)&b->m410_innerCorners[0][i * 2 + b->m71C_oddOrEven].x2, (s32*)&b->m410_innerCorners[0][i * 2 + b->m71C_oddOrEven].x3,
                       &depth, &flag);
-        AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m410_innerCorners[0][i * 2 + b->m71C_oddOrEven]);
+        AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m410_innerCorners[0][i * 2 + b->m71C_oddOrEven]);
     }
     RotTransPers4(&b->m6B0_innerEdgeVerts[0], &b->m6B0_innerEdgeVerts[1], &b->m6B0_innerEdgeVerts[2], &b->m6B0_innerEdgeVerts[3], (s32*)&b->m3C0_innerEdge[b->m71C_oddOrEven].x0,
                   (s32*)&b->m3C0_innerEdge[b->m71C_oddOrEven].x1, (s32*)&b->m3C0_innerEdge[b->m71C_oddOrEven].x2,
                   (s32*)&b->m3C0_innerEdge[b->m71C_oddOrEven].x3, &depth, &flag);
-    AddPrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m3C0_innerEdge[b->m71C_oddOrEven]);
+    AddInterfacePrim(&gMenuContext->m1D4_currentDrawContext->m70_ot[b->m718_otIndex], &b->m3C0_innerEdge[b->m71C_oddOrEven]);
 }
 
 void drawMenuBoxCorners(s32 box);

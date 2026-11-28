@@ -1,7 +1,11 @@
 #ifndef PC_INTERPOLATION_H
 #define PC_INTERPOLATION_H
 enum { PC_INTERP_MODEL, PC_INTERP_MECHA, PC_INTERP_PARTICLE, PC_INTERP_SPRITE, PC_INTERP_SHADOW, PC_INTERP_TRANSITION, PC_INTERP_WAVE,
-       PC_INTERP_TERRAIN /* depth-cued (the world map's ground, billboards): a palette change keeps the face moving */ };
+       PC_INTERP_TERRAIN, /* depth-cued terrain can move across a palette step */
+       PC_INTERP_HELD /* owned geometry that holds its authored pose */ };
+#define INTERP_GEAR_BONES 64
+typedef struct { float m[3][3], t[3]; } InterpGearMatrix;
+typedef int InterpGearEval(const void* before, const void* after, double alpha, InterpGearMatrix* out);
 #ifdef PLATFORM_PC
 /* Display metadata only: these never wait, deliver events or update game C. */
 void pcInterpolationScene(void);
@@ -19,9 +23,15 @@ void pcInterpolationWaveEdgePrim(void* primitive, int u0, int u1, int dx0, int d
  * Only these authored packets may sample the separately owned capture. */
 void pcInterpolationTransitionPrim(const void* owner, unsigned part, void* primitive);
 void pcInterpolationFrameBegin(int field, int x, int y, int w, int h);
-/* FrameBegin's scene tag for the world map (fields are 0..0xFFF). */
-enum { PC_INTERP_WORLDMAP = 0x1000 };
+/* FrameBegin's scene tags outside the field map range. */
+enum { PC_INTERP_WORLDMAP = 0x1000, PC_INTERP_BATTLE };
+int pcInterpolationHighRate(void);
+int pcInterpolationGearFrame(int field);
+void pcInterpolationBattleBackdrop(void);
 void pcInterpolationFrameEnd(void);
+unsigned pcInterpolationGear(const void* owner, const void* model, const void* pose, unsigned size,
+                             InterpGearEval* evaluate);
+void pcInterpolationGearObject(const void* bone, const void* model, unsigned rig, unsigned index);
 void pcInterpolationObject(const void* owner, const void* model);
 void pcInterpolationObjectType(const void* owner, const void* model, int kind);
 void pcInterpolationModel(const void* primitives);

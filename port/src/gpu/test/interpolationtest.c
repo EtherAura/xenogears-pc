@@ -141,9 +141,46 @@ static int feedback(void) {
     return 0;
 }
 
+/* A perspective depth change separates mesh projection from a lerp of
+ * screen positions, even when the endpoints have the same topology. */
+static int testGearMatrix(const void* before, const void* after, double alpha, InterpGearMatrix* out) {
+    int a = *(const int*)before, b = *(const int*)after;
+    if (b == 0) return 0;
+    out[1] = (InterpGearMatrix){.m = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}},
+                                .t = {80, 0, (float)(a + (b - a) * alpha)}};
+    return 1;
+}
+static int gearProjection(void) {
+    frame(&a, 0);
+    frame(&b, -20);
+    int* near = malloc(sizeof(*near));
+    int* far = malloc(sizeof(*far));
+    CHECK(near && far);
+    *near = 128;
+    *far = 256;
+    a.gears[0] = (InterpGearRig){.identity=1, .pose=near, .size=sizeof(*near), .evaluate=testGearMatrix};
+    b.gears[0] = (InterpGearRig){.identity=1, .pose=far, .size=sizeof(*far), .evaluate=testGearMatrix};
+    a.gearCount = b.gearCount = 1;
+    InterpGearVertex local[3] = {
+        {.local={0, 0, 0}, .screen=64, .center={0, 40}, .perspective=1},
+        {.local={40, 0, 0}, .screen=64, .center={0, 40}, .perspective=1},
+        {.local={0, 40, 0}, .screen=64, .center={0, 40}, .perspective=1}
+    };
+    interpFrameGearDraw(&a, 1, 1, local);
+    CHECK(interpFrameVertices(&a, &b, 0.0, output, 12) == 3 && output[0].x == 40);
+    CHECK(interpFrameVertices(&a, &b, 0.5, output, 12) == 3);
+    CHECK(fabsf(output[0].x - (80 * 64.0f / 192)) < 0.004f && output[0].w == 192.0f / 4096);
+    *far = 0;
+    CHECK(interpFrameVertices(&a, &b, 0.5, output, 12) == 3 && output[0].x == 40);
+    interpFrameFree(&a);
+    interpFrameFree(&b);
+    return 0;
+}
+
 int main(void) {
     CHECK(!diagnostics());
     CHECK(!feedback());
+    CHECK(!gearProjection());
     /* Odd-length packed samples, all palette sizes and the 257-colour
      * RGBA fallback preserve transparent/STP/opaque bytes exactly. */
     uint8_t rgba[1003 * 4];

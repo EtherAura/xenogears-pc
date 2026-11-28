@@ -9,6 +9,7 @@
 #include "pc_interpolation.h"
 #include "pc_geometry.h"
 #include "pc_glyph.h"
+#include "pc_scene.h"
 #include "gte_pc.h"
 #include "gpu/gpu.h"
 #include "gpu/gpu_internal.h"
@@ -160,6 +161,21 @@ static int resources(void) {
     gpuLoad(pal.x, pal.y, pal.w, pal.h, palette); /* cached CLUT remains red */
     texturedDraw(60); CHECK(shot(124)); CHECK(red(65));
     CHECK(!interpolationPicture(&display, base + 124, &before, &after, &alpha));
+    /* A state load restarts decode revisions. The same request and revision
+     * in the new scene can name different pixels. */
+    texturePage = -1;
+    textureClut = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        gpuStateLoaded();
+        for (int i = 0; i < 256; i++) pixels[i] = pass ? 31 << 10 : 31;
+        LoadImage(&rect, (u32*)pixels);
+        unsigned vb = 130 + pass * 10;
+        texturedDraw(40); CHECK(shot(vb));
+        texturedDraw(50); CHECK(shot(vb + 2));
+        CHECK(interpolationPicture(&display, base + vb + 3, &before, &after, &alpha));
+        CHECK(shot(vb + 3));
+        CHECK(pass ? picture[(50 * 320 + 48) * 3 + 2] > 240 && !red(48) : red(48));
+    }
     interpolationSetEnabled(0);
     return 0;
 }
@@ -866,6 +882,339 @@ static int scratchGrowth(void) {
     return 0;
 }
 
+static void rasterPanel(POLY_G4* panel, int x) {
+    SetPolyG4(panel);
+    setXYWH(panel, x, 80, 24, 20);
+    setRGB0(panel, 16, 0, 0); setRGB1(panel, 240, 0, 0);
+    setRGB2(panel, 16, 0, 0); setRGB3(panel, 240, 0, 0);
+    s16* xy[] = {&panel->x0, &panel->x1, &panel->x2, &panel->x3};
+    for (int i = 0; i < 4; i++) {
+        GtePrecise p = {.valid = 1, .x = xy[i][0], .y = xy[i][1], .z = 4096};
+        memcpy(&p.word, xy[i], sizeof(p.word));
+        gtePrecisionRecord(xy[i], &p);
+    }
+}
+
+static void sceneRasterFrame(int x, int y) {
+    static POLY_G4 scene, hud;
+    DRAWENV env; SetDefDrawEnv(&env, 0, y, 320, 224); PutDrawEnv(&env);
+    display.y = y;
+    pcInterpolationFrameBegin(8, 0, y, 320, 224);
+    RECT r = {0, y, 320, 224}; ClearImage(&r, 0, 0, 0);
+    rasterPanel(&scene, 100);
+    rasterPanel(&hud, 150); /* projected, but linked after the scene's UI tag */
+    SetPolyF4(&quad); setRGB0(&quad, 248, 0, 0);
+    setXYWH(&quad, x, 40, 20, 20);
+    pcInterpolationObject(&owner, &quad); pcInterpolationModel(&quad); pcInterpolationPrim(&quad);
+    pcInterpolationObject(NULL, NULL);
+    OTag tags[3]; ClearOTagR(tags, 3);
+    AddPrim(&tags[2], &scene); AddPrim(&tags[2], &quad);
+    AddPrim(&tags[1], &hud);
+    pcDrawSceneOTag(&tags[2], &tags[1]);
+    pcInterpolationFrameEnd();
+}
+
+static int sceneRasterReplay(SDL_Window* window) {
+    base += 1000;
+    CHECK(!resizeWindow(window, 1280, 896));
+    CHECK(presentSetAspectText("1:1")); presentSetExpandedVertical(0);
+    wideReset(); pcWideSetMode(PC_WIDE_FIELD);
+    display = (GpuDisplay){.w = 320, .h = 224, .enabled = 1};
+    hiresSetUpscale(4); hiresSetPrecision(1); hiresSetColor(HIRES_COLOR_RAW);
+    CHECK(gvkHiConfigure(4, HIRES_COLOR_RAW) == 4);
+    interpolationSetEnabled(1);
+    hiresSetSceneScale(3);
+    int reduced = gvkOrderedWrites();
+    CHECK(hiresSceneScaleNow() == (reduced ? 3 : 4));
+    sceneRasterFrame(40, 0); sceneRasterFrame(40, 0);
+    CHECK(shot(100));
+    sceneRasterFrame(50, 256);
+    CHECK(shot(102));
+    size_t redScene = ((90 * 4) * (size_t)pictureW + 108 * 4) * 3;
+    size_t redHud = ((90 * 4) * (size_t)pictureW + 158 * 4) * 3;
+    uint8_t endpoint[12], hud[12];
+    memcpy(endpoint, &picture[redScene], sizeof(endpoint));
+    memcpy(hud, &picture[redHud], sizeof(hud));
+    CHECK(hud[0] < hud[3] && hud[3] < hud[6] && hud[6] < hud[9]);
+    CHECK((endpoint[0] == endpoint[3]) == reduced);
+    CHECK(endpoint[3] < endpoint[6] && endpoint[6] < endpoint[9]);
+    int before, after; double alpha;
+    const InterpFrame* f = interpolationPicture(&display, base + 103, &before, &after, &alpha);
+    CHECK(f && alpha == 0.5 && f->drawCount == 3);
+    CHECK(!!(f->vertices[f->draws[1].first].mode & DRAW_SCENE_RASTER) == reduced);
+    CHECK(!(f->vertices[f->draws[2].first].mode & DRAW_SCENE_RASTER));
+    static uint16_t native[320 * 224], afterReplay[320 * 224];
+    VRect rect = {0, display.y, 319, display.y + 223};
+    gvkReadback(rect, native, 320);
+    CHECK(shot(103));
+    CHECK(picture[((50 * 4) * (size_t)pictureW + 46 * 4) * 3] > 240);
+    CHECK(picture[((50 * 4) * (size_t)pictureW + 44 * 4) * 3] == 0);
+    CHECK(!memcmp(endpoint, &picture[redScene], sizeof(endpoint)));
+    CHECK(!memcmp(hud, &picture[redHud], sizeof(hud)));
+    gvkReadback(rect, afterReplay, 320);
+    CHECK(!memcmp(native, afterReplay, sizeof(native)));
+    CHECK(shot(104) && !memcmp(endpoint, &picture[redScene], sizeof(endpoint)));
+    hiresSetSceneScale(0);
+    if (reduced) CHECK(!interpolationPicture(&display, base + 105, &before, &after, &alpha));
+    interpolationSetEnabled(0);
+    return 0;
+}
+
+static void msaaTriangle(POLY_F3* face, int x) {
+    SetPolyF3(face);
+    face->x0 = face->x2 = x; face->x1 = x + 20;
+    face->y0 = face->y1 = 52; face->y2 = 72;
+    setRGB0(face, 240, 0, 0);
+    s16* xy[] = {&face->x0, &face->x1, &face->x2};
+    for (int i = 0; i < 3; ++i) {
+        GtePrecise p = {.valid = 1, .x = xy[i][0], .y = xy[i][1], .z = 4096};
+        memcpy(&p.word, xy[i], sizeof(p.word));
+        gtePrecisionRecord(xy[i], &p);
+    }
+}
+
+static void sceneMsaaFrame(int x, int y) {
+    static POLY_F3 model, hud;
+    DRAWENV env; SetDefDrawEnv(&env, 0, y, 320, 224); PutDrawEnv(&env);
+    display.y = y;
+    pcInterpolationFrameBegin(8, 0, y, 320, 224);
+    RECT r = {0, y, 320, 224}; ClearImage(&r, 0, 0, 0);
+    msaaTriangle(&model, x);
+    msaaTriangle(&hud, 150);
+    pcInterpolationObject(&owner, &model); pcInterpolationModel(&model); pcInterpolationPrim(&model);
+    pcInterpolationObject(&hud, &hud); pcInterpolationModel(&hud); pcInterpolationPrim(&hud);
+    pcInterpolationObject(NULL, NULL);
+    OTag tags[3]; ClearOTagR(tags, 3);
+    AddPrim(&tags[2], &model); AddPrim(&tags[1], &hud);
+    pcDrawSceneOTag(&tags[2], &tags[1]);
+    pcInterpolationFrameEnd();
+}
+
+/* Compare the same shape after shifting it by an integer native pixel
+ * distance. A diagonal crosses the hardware samples on both raster grids. */
+#define AA_PATCH (24 * 4)
+static int msaaPatch(int x, uint8_t out[AA_PATCH * AA_PATCH]) {
+    int partial = 0;
+    for (int row = 0; row < AA_PATCH; ++row) for (int col = 0; col < AA_PATCH; ++col) {
+        size_t at = ((50 * 4 + row) * (size_t)pictureW + (x - 2) * 4 + col) * 3;
+        uint8_t red = picture[at];
+        out[row * AA_PATCH + col] = red;
+        partial += red > 0 && red < 240;
+    }
+    return partial;
+}
+
+static int sceneMsaaReplay(void) {
+    int seam = hiresSeamGuard();
+    hiresSetSeamGuard(0);
+    interpolationSetEnabled(1);
+    for (int samples = 2; samples <= 4; samples *= 2) {
+        for (int raster = 3; raster <= 4; ++raster) {
+            base += 1000;
+            hiresSetSceneScale(raster);
+            hiresSetSceneMsaa(samples);
+            int available = hiresSceneMsaaSupported(samples);
+            CHECK(hiresSceneMsaaNow() == (available ? samples : 0));
+            sceneMsaaFrame(60, 0); sceneMsaaFrame(60, 0);
+            CHECK(shot(100));
+            sceneMsaaFrame(68, 256);
+            CHECK(shot(102));
+            uint8_t endpoint[AA_PATCH * AA_PATCH], hud[AA_PATCH * AA_PATCH], patch[AA_PATCH * AA_PATCH];
+            CHECK((msaaPatch(60, endpoint) > 0) == available);
+            CHECK(msaaPatch(150, hud) == 0);
+            int before, after; double alpha;
+            CHECK(interpolationPicture(&display, base + 103, &before, &after, &alpha) && alpha == .5);
+            CHECK(shot(103));
+            CHECK((msaaPatch(64, patch) > 0) == available && !memcmp(endpoint, patch, sizeof(patch)));
+            CHECK(msaaPatch(150, patch) == 0 && !memcmp(hud, patch, sizeof(patch)));
+            CHECK(shot(104) && (msaaPatch(68, patch) > 0) == available && !memcmp(endpoint, patch, sizeof(patch)));
+            if (!gvkHasInterlock() && available && samples == 4 && raster == 4) {
+                int mode = gpuOrderingMode();
+                gpuSetOrderingMode(GPU_ORDERING_SPLIT);
+                CHECK(hiresSceneMsaaNow() == 0);
+                CHECK(!interpolationPicture(&display, base + 105, &before, &after, &alpha));
+                gpuSetOrderingMode(mode);
+                CHECK(hiresSceneMsaaNow() == samples);
+            }
+            hiresSetSceneMsaa(0);
+            if (available) CHECK(!interpolationPicture(&display, base + 105, &before, &after, &alpha));
+        }
+    }
+    hiresSetSceneScale(0);
+    interpolationSetEnabled(0);
+    hiresSetSeamGuard(seam);
+    return 0;
+}
+#undef AA_PATCH
+
+static void anisoPanel(POLY_FT4* panel, int x, int tpage, int clut) {
+    SetPolyFT4(panel);
+    SetShadeTex(panel, 1);
+    setXYWH(panel, x, 80, 16, 5);
+    setUVWH(panel, 0, 0, 15, 127);
+    panel->tpage = tpage;
+    panel->clut = clut;
+    s16* xy[] = {&panel->x0, &panel->x1, &panel->x2, &panel->x3};
+    for (int i = 0; i < 4; ++i) {
+        GtePrecise p = {.valid = 1, .x = xy[i][0], .y = xy[i][1], .z = 4096};
+        memcpy(&p.word, xy[i], sizeof(p.word));
+        gtePrecisionRecord(xy[i], &p);
+    }
+}
+
+static void anisoFrame(int x, int tpage, int clut, int semi) {
+    static POLY_FT4 scene, hud;
+    DRAWENV env; SetDefDrawEnv(&env, 0, 0, 320, 224); PutDrawEnv(&env);
+    pcInterpolationFrameBegin(8, 0, 0, 320, 224);
+    RECT rect = {0, 0, 320, 224}; ClearImage(&rect, 0, 0, 0);
+    anisoPanel(&scene, x, tpage, clut);
+    anisoPanel(&hud, 150, tpage, clut);
+    if (semi) SetSemiTrans(&scene, 1);
+    pcInterpolationObject(&owner, &scene); pcInterpolationModel(&scene); pcInterpolationPrim(&scene);
+    pcInterpolationObject(NULL, NULL);
+    OTag tags[3]; ClearOTagR(tags, 3);
+    AddPrim(&tags[2], &scene); AddPrim(&tags[1], &hud);
+    pcDrawSceneOTag(&tags[2], &tags[1]);
+    pcInterpolationFrameEnd();
+}
+
+static int sceneAnisoReplay(void) {
+    int seam = hiresSeamGuard();
+    hiresSetSeamGuard(0);
+    interpolationSetEnabled(1);
+    display.y = 0;
+    size_t row = (size_t)(82 * 4) * pictureW;
+    RECT paletteRect = {960, 480, 16, 1};
+    uint16_t palette[16] = {0, 31, 31 << 5};
+    LoadImage(&paletteRect, (u32*)palette);
+    char root[1200]; snprintf(root, sizeof(root), "%s/aniso-pack", directory);
+    CHECK(packDir(root));
+    for (int format = 0; format < 3; ++format) {
+        int pack = format != 0, indexed = format == 1;
+        base += 1000;
+        int tpage = GetTPage(pack ? 0 : 2, 0, 640, 0), clut = GetClut(960, 480);
+        uint16_t pixels[16 * 128];
+        int width = pack ? 4 : 16;
+        RECT image = {640, 0, width, 128};
+        for (int i = 0; i < width * 128; ++i) pixels[i] = pack ? 0x1111 : palette[1 + (i / width & 1)];
+        LoadImage(&image, (u32*)pixels);
+        char path[3400];
+        if (pack) {
+            TextureRequest req = {.tpage = tpage, .clut = clut, .w = 16, .h = 128};
+            const DecodedTexture* d = textureCacheGet(req); CHECK(d);
+            uint8_t rgba[32 * 256 * 4];
+            for (int i = 0; i < 32 * 256; ++i) {
+                int green = i / 32 & 1;
+                rgba[i * 4] = indexed ? 1 + green : green ? 0 : 255;
+                rgba[i * 4 + 1] = indexed ? 1 + green : green ? 255 : 0;
+                rgba[i * 4 + 2] = indexed ? 1 + green : 0;
+                rgba[i * 4 + 3] = 255;
+            }
+            CHECK(packPng(root, d, indexed, 32, 256, rgba));
+            packPath(path, sizeof(path), root, d, indexed);
+            texturePackSetRoot(root);
+        }
+        hiresSetAnisotropy(0);
+        anisoFrame(60, tpage, clut, 0); anisoFrame(60, tpage, clut, 0); CHECK(shot(100));
+        uint8_t hud[12]; memcpy(hud, &picture[(row + 152 * 4) * 3], sizeof(hud));
+        CHECK(picture[(row + 62 * 4) * 3] == 0 || picture[(row + 62 * 4) * 3 + 1] == 0);
+        hiresSetAnisotropy(2);
+        int before, after; double alpha;
+        CHECK(!interpolationPicture(&display, base + 101, &before, &after, &alpha));
+        anisoFrame(60, tpage, clut, 0); anisoFrame(60, tpage, clut, 0); CHECK(shot(102));
+        uint8_t endpoint[12]; memcpy(endpoint, &picture[(row + 62 * 4) * 3], sizeof(endpoint));
+        CHECK(endpoint[0] >= 126 && endpoint[0] <= 129 && endpoint[1] >= 126 && endpoint[1] <= 129);
+        anisoFrame(68, tpage, clut, 0); CHECK(shot(104));
+        const InterpFrame* f = interpolationPicture(&display, base + 105, &before, &after, &alpha);
+        CHECK(f && alpha == .5 && f->drawCount == 2 && f->mipCount > 0);
+        const HiVertex* v = &f->vertices[f->draws[0].first];
+        CHECK((v->sample[3] & INTERP_SAMPLE_MIPS) && !(v->wideEdge & INTERP_MIP_BASE_ONLY));
+        CHECK(!!((v->sample[3] - 1u) & TEXTURE_FILTER_ANISOTROPIC_PACK) == pack);
+        CHECK(!!(v->wideEdge & INTERP_MIP_SHARED) == (pack && !indexed));
+        CHECK(!(f->vertices[f->draws[1].first].sample[3] & INTERP_SAMPLE_MIPS));
+        static uint16_t native[320 * 224], next[320 * 224];
+        VRect rect = {0, 0, 319, 223};
+        gvkReadback(rect, native, 320);
+        if (indexed) {
+            palette[2] = 31 << 10;
+            LoadImage(&paletteRect, (u32*)palette);
+        }
+        CHECK(shot(105));
+        CHECK(!memcmp(endpoint, &picture[(row + 66 * 4) * 3], sizeof(endpoint)));
+        CHECK(!memcmp(hud, &picture[(row + 152 * 4) * 3], sizeof(hud)));
+        gvkReadback(rect, next, 320);
+        CHECK(!memcmp(native, next, sizeof(native)));
+        if (indexed) {
+            palette[2] = 31 << 5;
+            LoadImage(&paletteRect, (u32*)palette);
+        }
+        texturePackSetRoot("none");
+        if (pack) CHECK(SDL_RemovePath(path));
+    }
+    hiresSetAnisotropy(0);
+    interpolationSetEnabled(0);
+    hiresSetSeamGuard(seam);
+    return 0;
+}
+
+/* A full 8x page has twice as many texels as the entire snapshot arena has
+ * words. Its artwork can outlive the pack and the palette used by live VRAM. */
+static int fullPackReplay(void) {
+    interpolationSetEnabled(1);
+    display.y = 0;
+    int tpage = GetTPage(0, 0, 640, 0), clut = GetClut(960, 480);
+    static uint16_t native[64 * 256];
+    for (size_t i = 0; i < sizeof(native) / sizeof(*native); ++i) native[i] = 0x1111;
+    RECT image = {640, 0, 64, 256}, paletteRect = {960, 480, 16, 1};
+    uint16_t palette[16] = {0, 31, 0x8000 | (31 << 5), 0};
+    LoadImage(&image, (u32*)native);
+    char root[1200]; snprintf(root, sizeof(root), "%s/full-pack", directory);
+    CHECK(packDir(root));
+    for (int indexed = 1; indexed >= 0; --indexed) {
+        base += 1000;
+        palette[1] = 31; LoadImage(&paletteRect, (u32*)palette);
+        TextureRequest req = {.tpage = tpage, .clut = clut, .w = 256, .h = 256};
+        const DecodedTexture* d = textureCacheGet(req); CHECK(d);
+        uint8_t* rgba = malloc(2048u * 2048u * 4); CHECK(rgba);
+        uint8_t row[2048 * 4];
+        for (int x = 0; x < 2048; ++x) {
+            int stripe = (x / 32) % 3;
+            row[x * 4] = indexed ? stripe + 1 : stripe == 0 ? 255 : 0;
+            row[x * 4 + 1] = indexed ? stripe + 1 : stripe == 1 ? 255 : 0;
+            row[x * 4 + 2] = indexed ? stripe + 1 : 0;
+            row[x * 4 + 3] = indexed || stripe == 0 ? 255 : stripe == 1 ? 128 : 0;
+        }
+        for (int y = 0; y < 2048; ++y) memcpy(rgba + y * sizeof(row), row, sizeof(row));
+        int saved = packPng(root, d, indexed, 2048, 2048, rgba);
+        free(rgba); CHECK(saved);
+        char path[3400]; packPath(path, sizeof(path), root, d, indexed);
+        texturePackSetRoot(root);
+        anisoFrame(60, tpage, clut, 1); anisoFrame(60, tpage, clut, 1); CHECK(shot(100));
+        size_t y = (size_t)(82 * 4) * pictureW;
+        CHECK(picture[(y + 61 * 4) * 3] == 255);
+        uint8_t green = picture[(y + 66 * 4) * 3 + 1];
+        CHECK(green >= 125 && green <= 129);
+        CHECK(!picture[(y + 70 * 4) * 3] && !picture[(y + 70 * 4) * 3 + 1]);
+        uint8_t colors[16 * 4 * 3]; memcpy(colors, &picture[(y + 60 * 4) * 3], sizeof(colors));
+        anisoFrame(68, tpage, clut, 1); CHECK(shot(102));
+        int before, after; double alpha;
+        const InterpFrame* f = interpolationPicture(&display, base + 103, &before, &after, &alpha);
+        CHECK(f && alpha == .5 && f->packPages && f->pixelCount < 1024);
+        const HiVertex* v = &f->vertices[f->draws[0].first];
+        CHECK(v->sample[3] & INTERP_SAMPLE_RESIDENT);
+        CHECK(!!(v->sample[3] & INTERP_SAMPLE_PALETTE) == indexed);
+        uint32_t exact, again;
+        RECT line = {70, 82, 2, 1}; StoreImage(&line, &exact);
+        palette[1] = 31 << 10; LoadImage(&paletteRect, (u32*)palette);
+        texturePackSetRoot("none"); CHECK(SDL_RemovePath(path));
+        CHECK(shot(103));
+        CHECK(!memcmp(colors, &picture[(y + 64 * 4) * 3], sizeof(colors)));
+        StoreImage(&line, &again); CHECK(exact == again);
+    }
+    interpolationSetEnabled(0);
+    return 0;
+}
+
 int main(int argc, char** argv) {
     SDL_setenv_unsafe("XG_SPEEDUP", "1", 1);
     if (argc != 2) return 1;
@@ -901,6 +1250,10 @@ int main(int argc, char** argv) {
     if (!failed) failed = projectedHudReplay(w);
     if (!failed) failed = allocationPressure(w);
     if (!failed) failed = scratchGrowth();
+    if (!failed) failed = sceneRasterReplay(w);
+    if (!failed) failed = sceneMsaaReplay();
+    if (!failed) failed = sceneAnisoReplay();
+    if (!failed) failed = fullPackReplay();
     free(picture); gpuShutdown(); SDL_DestroyWindow(w); SDL_Quit();
     if (!failed) printf("Interpolation GPU: %d checks passed\n", checks);
     return failed;

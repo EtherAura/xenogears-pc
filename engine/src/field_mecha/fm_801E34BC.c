@@ -3,6 +3,7 @@
  * cloth builder through a short-parameter prototype. .rodata from 0x801DC040.
  * GCC 2.6.3, -O2 -G0, ASPSX 2.34 with divide checks. */
 #include "common.h"
+#include "pc_interpolation.h"
 #include "pc_retail_heap.h"
 #include "psyq.h"
 #include "gte.h"
@@ -172,6 +173,7 @@ int pcGearPoseFieldActive(void);
 #define pcGearPoseFieldOn pcGearPoseFieldActive()
 void pcGearPoseFrame(void);
 void pcGearPoseBefore(const sLoadedMechas* m, s32 iterations);
+void pcGearPoseReplayBefore(const sLoadedMechas* m);
 void pcGearPoseFieldAfter(const sLoadedMechas* m, s32 shiftX, s32 shiftZ, s32 k, s32 parts);
 s32 pcFieldSubIndex(void);
 s32 pcFieldSubFrames(void); /* engine/src/field/f_80072140.c */
@@ -192,6 +194,8 @@ s32 updateMechAnim(sLoadedMechas* arg0, sMechaInitVar2* arg1, s32 iterations, s3
             }
             if (pcGearPoseFieldOn) {
                 pcGearPoseBefore(arg0, iterations); /* Enhanced, the 60 Hz field: the pose drawn (port/src/game/battle/gearpose.c) */
+            } else {
+                pcGearPoseReplayBefore(arg0);
             }
             for (i = 0; i < iterations; i++) {
                 updateFlag |= updateMechAnimSub3(arg1, arg0->m4_bones, arg0->m3C_trackTag, arg0->m1C_scale);
@@ -2064,7 +2068,7 @@ void renderMechas(MATRIX* pMatrix, MATRIX* pArgs, OTag* ot, s32 oddOrEven, s32 f
     SVECTOR unused; /* reserves the retail stack slot */
 
     iterations = 0;
-    if (pcGearPoseFieldOn) {
+    if (pcGearPoseFieldOn || pcInterpolationHighRate()) {
         pcGearPoseFrame();
     }
     mechaInitVar0 += 1 + flag;

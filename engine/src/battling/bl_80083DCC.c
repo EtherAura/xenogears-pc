@@ -6,6 +6,7 @@
 #include "psyq.h"
 #include "gte.h"
 #include "pc_geometry.h"
+#include "pc_scene.h"
 #include "main/dialog.h"
 #include "main/filesystem.h"
 #include "main/memory.h"
@@ -2373,8 +2374,12 @@ loop:
         startBattlingFrameTimer();
         DrawSync(0);
         PutDispEnv(&disp);
-        if (pcBattlingDrawn != NULL) pcBattlingSceneDepth(pcBattlingDrawn); /* after the picture between's draw */
+        const void* uiTag = NULL;
+        if (pcBattlingDrawn != NULL) {
+            pcBattlingSceneDepth(pcBattlingDrawn); /* after the picture between's draw */
+            uiTag = pcBattlingDrawn->m284_layer->m4_ot[battlingBufferIndex];
+        }
         pcBattlingDrawn = NULL;
-        DrawOTagEnv(battlingCurrentOt, &battlingDisplayBuffer->m0_drawEnv);
+        pcDrawSceneOTagEnv(battlingCurrentOt, &battlingDisplayBuffer->m0_drawEnv, uiTag);
         goto loop;
 }

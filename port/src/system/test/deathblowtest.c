@@ -44,6 +44,15 @@ void (*startGearAttackAnimationVar8[8])(void) = {noEffect, noEffect, noEffect, n
 void spendBillyGearAmmo(void) {}
 void setGearStatusEffectMessage(u8 type, u16 mask) { (void)type; (void)mask; }
 
+/* This fixture runs story battles. No entity uses the Versus stat rows. */
+int pcArenaRosterMixed(void) { return 0; }
+int pcVersusMirrorSlot(int entity) { (void)entity; return 0; }
+sBattle800CDD40Sub* pcVersusMirrorRows(int entity, int gear) {
+    (void)entity;
+    (void)gear;
+    abort();
+}
+
 /* One eligible attack by party slot 0 on combo counter 'combo' with no
  * targets: the native function then only does its bookkeeping. */
 static unsigned attack(int combo) {

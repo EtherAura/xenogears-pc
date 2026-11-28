@@ -1058,4 +1058,12 @@ s32 checkInsertedDisc(s32 disc);
 
 #endif /* !MENU_FAMILY_OVERLAY */
 
+/* The port gives the menu's textured frames and cursors their own filter. */
+#ifdef PLATFORM_PC
+void pcAddInterfacePrim(void* ot, void* prim);
+#define AddInterfacePrim pcAddInterfacePrim
+#else
+#define AddInterfacePrim AddPrim
+#endif
+
 #endif /* MENU_MENU_H */

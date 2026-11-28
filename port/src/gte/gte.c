@@ -355,7 +355,7 @@ static void precisionDataWrite(int reg) {
  *   sz3       SZ3 as stored for this vertex
  *   ofx, ofy  OFX and OFY */
 static void precisionProjected(u32 sxy2, const s64 row[3], s64 sx, s64 sy, int shift, u32 flags, s32 ir1, s32 ir2,
-                               u32 h, u32 sz3, s32 ofx, s32 ofy) {
+                               u32 h, u32 sz3, s32 ofx, s32 ofy, const s32 local[3]) {
     s64 depth = row[2] >> 12;
     precise[0] = precise[1];
     precise[1] = precise[2];
@@ -375,6 +375,10 @@ static void precisionProjected(u32 sxy2, const s64 row[3], s64 sx, s64 sy, int s
         p->y = (double)ofy / 65536.0 + ((double)row[1] / 4096.0 + off[1]) * ratio;
         double dx = p->x - (s16)(u16)p->word, dy = p->y - (s16)(u16)(p->word >> 16);
         p->valid = dx >= -4 && dx <= 4 && dy >= -4 && dy <= 4;
+        for (int i = 0; i < 3; i++) p->local[i] = (s16)local[i];
+        p->screen = (u16)h;
+        p->center[0] = ofx;
+        p->center[1] = ofy;
     }
 }
 
@@ -598,7 +602,7 @@ static void runRtp(int vertices) {
         dataRegs[D_SXY0] = dataRegs[D_SXY1];
         dataRegs[D_SXY1] = dataRegs[D_SXY2];
         dataRegs[D_SXY2] = ((u32)y << 16) | ((u32)x & 0xFFFF);
-        precisionProjected(dataRegs[D_SXY2], sums, sx, sy, cmdShift, flag, ir1, ir2, h, sz, ofx, ofy);
+        precisionProjected(dataRegs[D_SXY2], sums, sx, sy, cmdShift, flag, ir1, ir2, h, sz, ofx, ofy, v);
         /* Depth cueing: MAC0 = n*DQA + DQB, IR0 = MAC0/1000h, 0..1000h.
          * Measured: RTPT does this for V2 only (no FLAG bit comes from the
          * depth cue of V0 or V1). */

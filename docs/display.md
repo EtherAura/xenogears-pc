@@ -203,8 +203,9 @@ Cloud shadows (Off, Subtle, Medium, Strong).
 ![Motion smoothing off and on](img/clip-smooth.webp)
 
 The game runs at 30 fps in most scenes. Motion smoothing draws the
-in-between pictures of fields and the world map, at 60, 120, 144 or 240 Hz.
-Game logic and sound keep their timing; it adds one game frame of delay.
+in-between pictures of fields and the world map at 60, 120, 144 or 240 Hz.
+At 120, 144 and 240 Hz it also smooths Gear poses in fields and battles.
+Host replay adds one game frame of delay. Game logic and sound keep their timing.
 F1 > Gameplay > Speedup, Motion smoothing, Motion display rate.
 
 The Enhanced engine (F1 > System > Engine) runs fields, the world map and

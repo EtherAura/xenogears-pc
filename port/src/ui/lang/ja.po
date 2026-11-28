@@ -1337,9 +1337,9 @@ msgstr "おまけを選ぶと開きます。ゲームは一時停止したまま
 #: port/src/ui/menu.cpp
 #, c-format
 msgid ""
-"Choose a setting, then use Left and Right to change it. %s returns to the "
-"commands."
-msgstr "設定を選び、左右で変えてください。%s でコマンドにもどります。"
+"Up and Down select a setting. Left and Right adjust sliders. %s returns to "
+"the commands."
+msgstr "上下で設定を選び、左右でスライダーを調整します。%s でコマンドにもどります。"
 
 #: port/src/ui/menu.cpp
 msgid "Choose an option for its description."
@@ -1844,6 +1844,42 @@ msgstr "ワイド画面の中の 4:3 の絵(ムービー)の左右: 黒帯、横
 #: port/src/ui/sections.cpp
 msgid "Fullscreen"
 msgstr "フルスクリーン"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "HDR output"
+msgstr "HDR 出力"
+
+#: port/src/ui/sections.cpp
+msgid "HDR output is active."
+msgstr "HDR で出力しています。"
+
+#: port/src/ui/sections.cpp
+msgid "HDR is available on this display."
+msgstr "このディスプレイは HDR 出力に対応しています。"
+
+#: port/src/ui/sections.cpp
+msgid "SDR output. HDR requires support from the display, operating system and graphics driver."
+msgstr "SDR で出力します。HDR には対応するディスプレイ、OS、グラフィックスドライバーが必要です。"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "HDR paper white"
+msgstr "HDR 基準白"
+
+#: port/src/ui/sections.cpp
+msgid "%d nits"
+msgstr "%d ニト"
+
+#: port/src/ui/sections.cpp
+msgid "Brightness for ordinary artwork, menus and movies in HDR."
+msgstr "HDR で表示する通常の画像、メニュー、ムービーの明るさ。"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "HDR highlight strength"
+msgstr "HDR ハイライトの強さ"
+
+#: port/src/ui/sections.cpp
+msgid "Extra brightness for effects. At zero, all content stays at or below paper white."
+msgstr "エフェクトの明るさを引き上げます。ゼロではすべての表示が基準白以下になります。"
 
 #: port/src/ui/sections.cpp
 msgid "Use the whole screen."
@@ -8530,6 +8566,14 @@ msgstr "シカク / Delete"
 msgid "Textures and art"
 msgstr "テクスチャと画像"
 
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Interface art"
+msgstr "メニュー画像"
+
+#: port/src/ui/sections.cpp
+msgid "Smoothing for textured artwork in the in-game menus. Applies with upscaling or subpixel geometry."
+msgstr "ゲーム内メニューの画像を滑らかにします。高解像度描画またはサブピクセルジオメトリの使用時に適用されます。"
+
 #: port/src/ui/sections.cpp
 msgid "The GPU memory texture pack images may take (at most a quarter of the GPU's). 512 MB by default; more keeps more of a large pack ready, less leaves room on a small or shared GPU."
 msgstr "テクスチャパックの画像が使える GPU メモリーです(最大で GPU のメモリーの 4 分の 1)。初期設定は 512 MB です。多くすると大きなパックをより多く用意しておけ、少なくすると小さな GPU や共有の GPU に空きを残せます。"
@@ -8946,6 +8990,58 @@ msgstr "顔グラフィックセット"
 #: port/src/ui/sections.cpp
 msgid "Quality"
 msgstr "画質"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Scene render scale"
+msgstr "3D シーンの描画倍率"
+
+#: port/src/ui/options.cpp
+msgid "Match Resolution"
+msgstr "解像度に合わせる"
+
+#: port/src/ui/sections.cpp
+msgid "Scene %dx%d (%dx), output %dx%d."
+msgstr "シーン %dx%d (%d 倍)、出力 %dx%d。"
+
+#: port/src/ui/sections.cpp
+msgid "Display copy %dx. Auto and its GPU budget still set its resolution."
+msgstr "表示用画像 %d 倍。解像度は自動設定と GPU の時間上限に従います。"
+
+#: port/src/gpu/hires.c
+msgid "Reduced scene scale requires GPU ordering."
+msgstr "シーンの描画倍率を下げるには GPU による描画順序制御が必要です。"
+
+#: port/src/ui/sections.cpp
+msgid "Available when Scene render scale is set to Match Resolution."
+msgstr "3D シーンの描画倍率を「解像度に合わせる」にすると使えます。"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Scene MSAA"
+msgstr "3D シーンの MSAA"
+
+#: port/src/ui/sections.cpp
+msgid "Scene MSAA is unavailable on this renderer."
+msgstr "現在のレンダラーは 3D シーンの MSAA に対応していません。"
+
+#: port/src/gpu/hires.c
+msgid "MSAA is available above 1x Resolution."
+msgstr "MSAA は解像度が 1 倍より高い設定で使えます。"
+
+#: port/src/gpu/hires.c
+msgid "The current renderer cannot use this MSAA setting."
+msgstr "現在のレンダラーではこの MSAA 設定を使えません。"
+
+#: port/src/ui/options.cpp port/src/ui/sections.cpp
+msgid "Anisotropic filtering"
+msgstr "異方性フィルタリング"
+
+#: port/src/ui/sections.cpp
+msgid "Reduces shimmer on angled 3D textures, including texture packs."
+msgstr "テクスチャーパックを含め、斜めから見た 3D テクスチャーのちらつきを抑えます。"
+
+#: port/src/gpu/hires.c
+msgid "Anisotropic filtering is available above 1x Resolution."
+msgstr "異方性フィルタリングは解像度が 1 倍より高い設定で使えます。"
 
 #: port/src/ui/sections.cpp
 msgid "Rates above your monitor's refresh can be discarded. VRR availability depends on your display and desktop; submission rate does not measure visible refreshes."

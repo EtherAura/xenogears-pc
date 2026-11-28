@@ -58,6 +58,7 @@ void hwGameStart(void);
 int cdOpenDisc(const char* cuePath);
 int gpuInit(SDL_Window* window);
 SDL_Window* presentCreateWindow(const char* title);
+void gpuPrepareSceneMsaa(void);
 void gpuShutdown(void);
 void portSoftReset(void);
 int cardCommand(int argc, char** argv);
@@ -377,6 +378,7 @@ int main(int argc, char** argv) {
     }
     if (!netplay) stateRememberBoot();
     if (extras) {
+        gpuPrepareSceneMsaa();
         int game = 0;
         if (extrasMain == NULL) {
             fprintf(stderr, "xenogears: this build has no extras\n");
@@ -406,6 +408,7 @@ int main(int argc, char** argv) {
         }
     }
     uiPrepare(); /* the touch pad's first picture's set-up now, not in that vblank */
+    gpuPrepareSceneMsaa();
     fprintf(stderr, "xenogears: entering kernelMain\n");
     coresPinGameThread(); /* on a hybrid CPU, the game thread on the fast cores (system/cores.h) */
     hwGameStart(); /* the boot is out of the clock: no vblank backlog at the start */

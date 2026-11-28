@@ -104,7 +104,7 @@ F1 で設定メニューが開きます（ゲームパッドでは Guide ボタ�
 
 ![Motion smoothing のオフとオン](img/clip-smooth.webp)
 
-ゲームはほとんどの場面で 30 fps で動きます。Motion smoothing は、フィールドとワールドマップのコマとコマの間の画像を、60、120、144、240 Hz のいずれかで描きます。ゲームの処理と音のタイミングは変わりませんが、ゲームの 1 フレーム分の遅れが加わります。**F1 → ゲームプレイ（Gameplay） → 高速化（Speedup）、Motion smoothing、Motion display rate**。
+ゲームはほとんどの場面で 30 fps で動きます。Motion smoothing は、フィールドとワールドマップのコマとコマの間の画像を、60、120、144、240 Hz のいずれかで描きます。120、144、240 Hz では、フィールドと戦闘でギアの動きも滑らかになります。表示にはゲームの 1 フレーム分の遅れが加わります。ゲームの処理と音のタイミングは変わりません。**F1 → ゲームプレイ（Gameplay） → 高速化（Speedup）、Motion smoothing、Motion display rate**。
 
 強化エンジン（**F1 → システム（System） → Engine**）では、代わりにフィールド、ワールドマップ、バトルそのものが 60 fps で動きます。
 

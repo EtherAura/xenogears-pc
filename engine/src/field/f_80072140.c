@@ -2382,7 +2382,8 @@ void updateAndRenderField(void) {
         pcFieldWideCover(&pCurrentFieldRenderingContext->m80D4_uiOT[7], &pCurrentFieldRenderingContext->m0_drawEnv,
                          &pCurrentFieldRenderingContext->m5C_backgroundRect, &pCurrentFieldRenderingContext->mB8_displayEnv);
     }
-    DrawOTag(&pCurrentFieldRenderingContext->m80D4_uiOT[7]);
+    pcDrawSceneOTag(&pCurrentFieldRenderingContext->m80D4_uiOT[7],
+                   g_updateAllEntitiesSub2Var0 == 0 ? &pCurrentFieldRenderingContext->m80D4_uiOT[6] : NULL);
     pcInterpolationFrameEnd();
     gtePrecisionEndDraw();
     do {

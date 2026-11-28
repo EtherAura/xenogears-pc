@@ -22,6 +22,65 @@ static void quad(POLY_FT4* p,int x,int y,int tp,int clut,int uv) {
     p->u0=p->u2=p->v0=p->v1=0; p->u1=p->u3=uv; p->v2=p->v3=4;
     p->tpage=tp; p->clut=clut;
 }
+
+static int testPackMipmaps(const char* root) {
+    RECT image = {768, 256, 4, 32}, paletteRect = {976, 450, 16, 1};
+    uint16_t data[4 * 32], palette[16] = {0, 0x001f, 0x801f, 0x03e0, 0x7c00};
+    for (int i = 0; i < 4 * 32; ++i) data[i] = 0x1111;
+    LoadImage(&image, data);
+    LoadImage(&paletteRect, palette);
+    int tpage = GetTPage(0, 0, 768, 256), clut = GetClut(976, 450);
+    TextureRequest request = {tpage, clut, 0, 0, 0, 16, 32, 0, 0};
+    TextureRequest patch = request;
+    patch.w = 8;
+    const DecodedTexture* native = textureCacheGet(request);
+    CHECK(native);
+    uint8_t indices[64 * 128 * 4];
+    for (int y = 0; y < 128; ++y) for (int x = 0; x < 64; ++x) {
+        uint8_t* p = indices + (y * 64 + x) * 4;
+        memset(p, x >= 32 ? 4 : x < 8 ? 2 : x < 12 ? 3 : 2 + (y & 1), 3);
+        p[3] = 255;
+    }
+    CHECK(packPng(root, native, 1, 64, 128, indices));
+    texturePackReload();
+    static const int corners[6][2] = {{0, 0}, {1, 0}, {0, 1}, {1, 0}, {1, 1}, {0, 1}};
+    uint64_t firstRevision = 0;
+    for (int i = 0; i < 3; i++) {
+        TextureSample base, mips;
+        native = textureCacheGet(request);
+        if (i == 2) {
+            static const uint8_t colors[3][4] = {{255, 0, 0, 128}, {0, 255, 0, 255}, {0, 0, 255, 255}};
+            for (int j = 0; j < 64 * 128; ++j) memcpy(indices + j * 4, colors[indices[j * 4] - 2], 4);
+            CHECK(packPng(root, native, 0, 64, 128, indices));
+            texturePackReload();
+        }
+        CHECK(texturePackSample(native, patch, TEXTURE_FILTER_NEAREST, &base) && base.scale == 4);
+        CHECK((base.indices != NULL) == (i != 2));
+        CHECK(textureMipmapReplacement(&base, patch, native, &mips));
+        CHECK(mips.w == (base.indices ? patch.w : base.w) && mips.h == patch.h && mips.scale == base.scale);
+        CHECK(mips.revision != firstRevision);
+        firstRevision = mips.revision;
+        // Exercise both resident and frame-staged base/mip pairs.
+        base.keep = mips.keep = !i;
+        HiVertex face[6] = {0};
+        for (int j = 0; j < 6; j++) {
+            int x = corners[j][0], y = corners[j][1];
+            face[j] = (HiVertex){.x = 20 + i * 24 + x * 16, .y = 168 + y * 8, .u = x * 8, .v = y * 32, .w = 1,
+                                .mode = DRAW_TEXTURED | DRAW_RAW | DRAW_PRECISE,
+                                .tex = (uint32_t)tpage | (uint32_t)clut << 16, .clipMax = 319u | 223u << 16,
+                                .uvMax = 7u | 31u << 16};
+        }
+        gvkHiDrawFace(face, 6, 0, &base, TEXTURE_FILTER_ANISOTROPIC | TEXTURE_FILTER_ANISOTROPIC_PACK | 2, &mips);
+        palette[3] = 0; // the same packed indices now have a transparent row
+        if (!i) LoadImage(&paletteRect, palette);
+    }
+    CHECK((pixel(139, 690) & 0xffffffu) == 0x008080u); // bilinear tap on the neighboring atlas cell is clamped
+    CHECK(pixel(182, 690) == 0x10000ffu);
+    CHECK(pixel(193, 690) == 0);
+    CHECK((pixel(331, 690) & 0xffffffu) == 0x008080u); // shared RGBA mip must also avoid the blue neighboring cell
+    return 0;
+}
+
 int main(int argc,char** argv) {
     CHECK(argc>=2); CHECK(testSetEnv("XG_SETTINGS","none")==0); CHECK(SDL_Init(SDL_INIT_VIDEO));
     CHECK(packDir(argv[1])); CHECK(gpuInit(NULL));
@@ -155,6 +214,7 @@ int main(int argc,char** argv) {
     quad(&p,180,20,dtp,0,4);pcTextureClass(&p,PC_TEX_SPRITE);DrawPrim(&p);
     CHECK(pixel(640,80)==0xff00 && pixel(680,80)==0xff0000 && pixel(720,80)==0xff00);
     one=(RECT){170,20,1,1};StoreImage(&one,&exact);CHECK((exact&65535)==31<<5);
+    if (testPackMipmaps(argv[1])) return 1;
     textureDumpSetRoot(argv[1]); CHECK(textureDumpEnabled()); textureDumpSetRoot(""); CHECK(!textureDumpEnabled());
     printf("GPU texture packs: %d checks passed\n",checks);
     gpuShutdown(); SDL_Quit(); return 0;

@@ -22,6 +22,7 @@
 #include "psyq.h"
 #include "field_mecha/mecha.h"
 #include "gte_pc.h"
+#include "pc_interpolation.h"
 
 /* The halfway pose's own work is the PC's: the game's GTE registers and
  * scratchpad as the game left them, and no time on the stepped clock (the
@@ -62,7 +63,7 @@ int pcGearPoseFieldActive(void) {
 }
 
 #define GEAR_SLOTS 32
-#define GEAR_BONES 64
+#define GEAR_BONES INTERP_GEAR_BONES
 #define JUMP_ANGLE 0x200      /* an eighth of a turn in one step */
 #define JUMP_TRANSLATION 0x800
 
@@ -79,6 +80,9 @@ static struct {
     u32 kept;   /* the field: the frame that last kept the pose (a frame between keeps the tick's) */
     s32 n;
     BonePose before[GEAR_BONES];
+    u32 nativeFrame, drawnFrame;
+    BonePose native[GEAR_BONES];
+    BonePose drawn[GEAR_BONES];
     MATRIX root; /* the root's local matrix */
     MATRIX final[GEAR_BONES];
 } slots[GEAR_SLOTS];
@@ -96,14 +100,23 @@ static s32 slotFor(const sLoadedMechas* m, s32 add) {
 
     for (i = 0; i < GEAR_SLOTS; i++) {
         if (slots[i].mecha == m) return i;
-        if (free_ < 0 && (slots[i].mecha == NULL || (frame - slots[i].saved > 2 && frame - slots[i].built > 2))) {
+        if (free_ < 0 && (slots[i].mecha == NULL || (frame - slots[i].saved > 2 && frame - slots[i].built > 2 && frame - slots[i].nativeFrame > 2))) {
             free_ = i;
         }
     }
     if (!add || free_ < 0) return -1;
     slots[free_].mecha = m;
-    slots[free_].saved = slots[free_].built = 0;
+    slots[free_].saved = slots[free_].built = slots[free_].kept = 0;
+    slots[free_].nativeFrame = slots[free_].drawnFrame = 0;
     return free_;
+}
+
+static BonePose bonePose(const sMechaBone* b) {
+    BonePose p = {0};
+    p.angles = b->m54_rotationAngles;
+    memcpy(p.translation, b->m5C_translation, sizeof(p.translation));
+    memcpy(p.scale, b->m4C_scale, sizeof(p.scale));
+    return p;
 }
 
 /* Before the frame's steps (iterations > 0): the pose the frame draws. */
@@ -113,9 +126,17 @@ void pcGearPoseBefore(const sLoadedMechas* m, s32 iterations) {
     s32 i;
     s32 n;
 
-    if (b == NULL || (!fieldMode && (iterations <= 0 || !(interpolationEnabled() || pcGameplayBattle60())))) return;
+    int replay = pcInterpolationHighRate() && pcInterpolationBuilding();
+    int halfway = fieldMode || (iterations > 0 && (interpolationEnabled() || pcGameplayBattle60()));
+
+    if (b == NULL || (!halfway && !replay)) return;
     n = b->mA_numBones;
     if (n <= 0 || n > GEAR_BONES || (s = slotFor(m, 1)) < 0) return;
+    if (replay) {
+        for (i = 0; i < n; i++) slots[s].native[i] = bonePose(&b[i]);
+        slots[s].nativeFrame = frame;
+    }
+    if (!halfway) return;
     if (fieldMode && iterations <= 0 && slots[s].saved != 0 && frame - slots[s].saved < 8) {
         /* the field, a frame between: the pose before the tick's step stays (drawn through it) */
         slots[s].kept = frame;
@@ -133,6 +154,19 @@ void pcGearPoseBefore(const sLoadedMechas* m, s32 iterations) {
     }
     slots[s].n = n;
     slots[s].saved = frame;
+}
+
+/* The Original field has no native half-step. Capture only the actual bone
+ * channels the game just supplied to the matrix builder. */
+void pcGearPoseReplayBefore(const sLoadedMechas* m) {
+    if (!pcInterpolationHighRate() || !pcInterpolationBuilding()) return;
+    const sMechaBone* b = m->m4_bones;
+    if (!b || b->mA_numBones == 0 || b->mA_numBones > GEAR_BONES) return;
+    s32 s = slotFor(m, 1);
+    int i;
+    if (s < 0) return;
+    for (i = 0; i < b->mA_numBones; i++) slots[s].native[i] = bonePose(&b[i]);
+    slots[s].nativeFrame = frame;
 }
 
 static s32 halfAngle(s16 from, s16 to, s16* out) {
@@ -222,6 +256,10 @@ static void build(const sLoadedMechas* m, s32 s, s32 shiftX, s32 shiftZ, s32 k, 
     if (jump) return;
     copy[0].m5C_translation[0] += shiftX;
     copy[0].m5C_translation[2] += shiftZ;
+    if (slots[s].nativeFrame == frame) {
+        for (i = 0; i < n; i++) slots[s].drawn[i] = bonePose(&copy[i]);
+        slots[s].drawnFrame = frame;
+    }
     keep();
     if (m->m37_useBoneScale != 0) {
         (fieldMode ? updateMechAnimSub2 : updateMechAnimSub2_battle)(copy, m->m1C_scale);
@@ -288,4 +326,203 @@ void pcGearPoseAttach(const sLoadedMechas* m, const sLoadedMechas* parent) {
                                at.m[k][2] * m->m6A_attachOffset[2]) >> 12) + at.t[k];
     }
     putBack();
+}
+
+/* Recipe for a displayed endpoint. No game pointers cross into the frame.
+ * Root offsets from field scripts are already included in the drawn channels. */
+typedef struct {
+    BonePose channels;
+    signed char parent;
+    u8 yxz, billboard;
+} ReplayBone;
+
+typedef struct {
+    s32 scale;
+    u16 first;
+    u8 count, useBoneScale, attachBone, attachRotation, attachSlot;
+    s16 attachOffset[3];
+} ReplaySkeleton;
+
+typedef struct {
+    MATRIX view;
+    float viewOffset[3];
+    u8 field, depth;
+    ReplaySkeleton skeletons[GEAR_SLOTS]; /* from the drawn Gear up to its root attachment */
+    ReplayBone bones[GEAR_SLOTS * GEAR_BONES];
+} ReplayPose;
+
+#define REPLAY_PARTS 65536
+
+static int blendSkeleton(const ReplayPose* a, const ReplayPose* b, int level, int k) {
+    const ReplaySkeleton* sa = &a->skeletons[level];
+    const ReplaySkeleton* sb = &b->skeletons[level];
+    int i, axis;
+    if (sa->count != sb->count || sa->useBoneScale != sb->useBoneScale ||
+        sa->attachBone != sb->attachBone || sa->attachRotation != sb->attachRotation ||
+        sa->attachSlot != sb->attachSlot) return 0;
+    memset(copy, 0, sa->count * sizeof(*copy));
+    copy[0].mA_numBones = sa->count;
+    for (i = 0; i < sa->count; i++) {
+        const ReplayBone* from = &a->bones[sa->first + i];
+        const ReplayBone* to = &b->bones[sb->first + i];
+        sMechaBone* bone = &copy[i];
+        if (from->parent != to->parent || from->yxz != to->yxz || from->billboard != to->billboard) return 0;
+        if (from->parent >= 0) bone->m0_parentBone = &copy[(unsigned)from->parent];
+        bone->m6_useYXZRotation = from->yxz;
+        bone->m4_needTranslationUpdate = bone->m5_needRotationUpdate = 1;
+        if (partAngle(from->channels.angles.vx, to->channels.angles.vx, &bone->m54_rotationAngles.vx, k, REPLAY_PARTS) ||
+            partAngle(from->channels.angles.vy, to->channels.angles.vy, &bone->m54_rotationAngles.vy, k, REPLAY_PARTS) ||
+            partAngle(from->channels.angles.vz, to->channels.angles.vz, &bone->m54_rotationAngles.vz, k, REPLAY_PARTS)) return 0;
+        for (axis = 0; axis < 3; axis++) {
+            s64 delta = (s64)to->channels.translation[axis] - from->channels.translation[axis];
+            if (delta > JUMP_TRANSLATION || delta < -JUMP_TRANSLATION) return 0;
+            bone->m5C_translation[axis] = from->channels.translation[axis] + (s32)(delta * k / REPLAY_PARTS);
+            s32 ds = to->channels.scale[axis] - from->channels.scale[axis];
+            bone->m4C_scale[axis] = (s16)(from->channels.scale[axis] + (s64)ds * k / REPLAY_PARTS);
+            if (sa->useBoneScale && bone->m4C_scale[axis] == 0) return 0;
+        }
+    }
+    return 1;
+}
+
+/* Replay the same binding as pcGearPoseAttach, using the parent's interpolated
+ * root and socket. Offsets are local to that socket. */
+static void replayAttach(const ReplaySkeleton* a, const ReplaySkeleton* b, int k,
+                         const MATRIX* parentRoot, const MATRIX* parentRotation, MATRIX* socket) {
+    MATRIX placement = *parentRoot;
+    if (a->attachRotation) {
+        MATRIX rotation = *parentRotation;
+        if (a->attachBone) MulMatrix0(&rotation, socket, &rotation);
+        MulMatrix2(&rotation, &copy[0].mC_localMatrix);
+        MulMatrix2(&rotation, &copy[0].m2C_boneFinalMatrix);
+    }
+    if (a->attachBone) CompMatrix(&placement, socket, &placement);
+    int axis, col;
+    for (axis = 0; axis < 3; axis++) {
+        s64 delta = 0;
+        for (col = 0; col < 3; col++) {
+            s32 offset = a->attachOffset[col] + (s32)(((s64)b->attachOffset[col] - a->attachOffset[col]) * k / REPLAY_PARTS);
+            delta += (s64)placement.m[axis][col] * offset;
+        }
+        copy[0].mC_localMatrix.t[axis] = placement.t[axis] + (s32)(delta >> 12);
+    }
+}
+
+static int buildReplayPose(const void* before, const void* after, double alpha, InterpGearMatrix* out) {
+    const ReplayPose* a = before;
+    const ReplayPose* b = after;
+    if (a->depth != b->depth || a->field != b->field) return 0;
+    const int k = (int)(alpha * REPLAY_PARTS + 0.5);
+    MATRIX view = a->view, parentRoot, parentRotation, socket, root;
+    s32 scale = 0;
+    int axis, col, i, level;
+    for (axis = 0; axis < 3; axis++) {
+        s64 d = (s64)b->view.t[axis] - a->view.t[axis];
+        view.t[axis] += (s32)(d * k / REPLAY_PARTS);
+        for (col = 0; col < 3; col++)
+            view.m[axis][col] += (s16)((s64)(b->view.m[axis][col] - a->view.m[axis][col]) * k / REPLAY_PARTS);
+    }
+    keep();
+    for (level = a->depth - 1; level >= 0; level--) {
+        const ReplaySkeleton* sa = &a->skeletons[level];
+        const ReplaySkeleton* sb = &b->skeletons[level];
+        if (!blendSkeleton(a, b, level, k)) {
+            putBack();
+            return 0;
+        }
+        scale = sa->scale + (s32)(((s64)sb->scale - sa->scale) * k / REPLAY_PARTS);
+        if (sa->useBoneScale) {
+            (a->field ? updateMechAnimSub2 : updateMechAnimSub2_battle)(copy, scale);
+        } else {
+            (a->field ? updateMechAnimSub1 : updateMechAnimSub1_battle)(copy, scale);
+        }
+        if (level < a->depth - 1) replayAttach(sa, sb, k, &parentRoot, &parentRotation, &socket);
+        if (level > 0) {
+            parentRoot = copy[0].mC_localMatrix;
+            parentRotation = copy[0].m2C_boneFinalMatrix;
+            socket = copy[a->skeletons[level - 1].attachBone].m2C_boneFinalMatrix;
+        }
+    }
+    CompMatrix(&view, &copy[0].mC_localMatrix, &root);
+    for (i = 1; i < a->skeletons[0].count; i++) {
+        MATRIX m;
+        CompMatrix(&root, &copy[i].m2C_boneFinalMatrix, &m);
+        int billboard = a->bones[i].billboard;
+        for (axis = 0; axis < 3; axis++) {
+            for (col = 0; col < 3; col++) {
+                s32 rotation = m.m[axis][col];
+                if (billboard) rotation = col == 1 && billboard == 1 ? root.m[axis][col] : axis == col ? scale : 0;
+                out[i].m[axis][col] = rotation / 4096.0f;
+            }
+            out[i].t[axis] = m.t[axis] + a->viewOffset[axis] +
+                            (float)(alpha * (b->viewOffset[axis] - a->viewOffset[axis]));
+        }
+    }
+    putBack();
+    return 1;
+}
+
+static int captureSkeleton(ReplayPose* recipe, const sLoadedMechas* m, s32 pose, unsigned first) {
+    s32 s = slotFor(m, 0);
+    const sMechaBone* bones = m->m4_bones;
+    if (s < 0 || slots[s].nativeFrame != frame || !bones || bones->mA_numBones > GEAR_BONES) return 0;
+    const BonePose* channels = pose >= 0 && slots[s].drawnFrame == frame ? slots[s].drawn : slots[s].native;
+    ReplaySkeleton* skel = &recipe->skeletons[recipe->depth++];
+    skel->scale = m->m1C_scale;
+    skel->useBoneScale = m->m37_useBoneScale != 0;
+    skel->count = bones->mA_numBones;
+    skel->first = first;
+    skel->attachSlot = m->m5C_attachMecha;
+    if (skel->attachSlot != 0xFF) {
+        skel->attachBone = m->m5E_attachBone;
+        skel->attachRotation = m->m5D_attachRotation;
+        memcpy(skel->attachOffset, m->m6A_attachOffset, sizeof(skel->attachOffset));
+    }
+    int i;
+    for (i = 0; i < skel->count; i++) {
+        ReplayBone* dst = &recipe->bones[first + i];
+        const sMechaBone* bone = &bones[i];
+        memset(dst, 0, sizeof(*dst));
+        dst->channels = channels[i];
+        dst->yxz = bone->m6_useYXZRotation;
+        dst->billboard = bone->m52_billboardMode;
+        dst->parent = bone->m0_parentBone ? bone->m0_parentBone - bones : -1;
+    }
+    return skel->count;
+}
+
+unsigned pcGearPoseDraw(const sLoadedMechas* m, const MATRIX* view, s32 pose, int field,
+                       sLoadedMechas* const* mechas, unsigned count) {
+    if (!pcInterpolationGearFrame(field)) return 0;
+    ReplayPose recipe;
+    int axis;
+    memset(&recipe, 0, offsetof(ReplayPose, bones));
+    memcpy(recipe.view.m, view->m, sizeof(view->m));
+    memcpy(recipe.view.t, view->t, sizeof(view->t));
+    double offset[3] = {0};
+    gtePrecisionViewOffsetGet(offset);
+    for (axis = 0; axis < 3; axis++) recipe.viewOffset[axis] = (float)offset[axis];
+    recipe.field = field;
+
+    u64 visited = 0;
+    unsigned total = 0;
+    const sLoadedMechas* next = m;
+    int half = pose >= 0;
+    for (;;) {
+        int bones = captureSkeleton(&recipe, next, pose, total);
+        if (!bones) return (unsigned)-1;
+        total += bones;
+        unsigned parent = next->m5C_attachMecha;
+        if (parent == 0xFF) break;
+        unsigned socket = next->m5E_attachBone;
+        if (parent >= count || parent >= 64 || (visited & (1ULL << parent)) || recipe.depth >= GEAR_SLOTS) return (unsigned)-1;
+        visited |= 1ULL << parent;
+        next = mechas[parent];
+        if (!next || !next->m4_bones || socket >= next->m4_bones->mA_numBones) return (unsigned)-1;
+        /* A drawn half-step attachment only uses half-step ancestors. */
+        pose = half ? pcGearPoseFor(next) : -1;
+        if (half && pose < 0) return (unsigned)-1;
+    }
+    return pcInterpolationGear(m, m->m0_model, &recipe,
+        offsetof(ReplayPose, bones) + total * sizeof(ReplayBone), buildReplayPose);
 }

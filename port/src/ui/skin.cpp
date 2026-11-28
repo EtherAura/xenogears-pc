@@ -791,6 +791,38 @@ bool comboItem(const char* label, bool selected) {
     return pressed;
 }
 
+static int sliderDirection(const char* label) {
+    ImGuiContext& g = *GImGui;
+    if (g.CurrentWindow->SkipItems || g.ActiveId != 0 || !g.NavCursorVisible || g.NavWindow != g.CurrentWindow ||
+        g.NavId != g.CurrentWindow->GetID(label) || (g.CurrentItemFlags & ImGuiItemFlags_Disabled)) {
+        return 0;
+    }
+    auto pressed = [](ImGuiKey key) {
+        return ImGui::IsKeyPressed(key, (ImGuiInputFlags)ImGuiInputFlags_Repeat | (ImGuiInputFlags)ImGuiInputFlags_RepeatRateNavMove,
+                                   ImGuiKeyOwner_Any);
+    };
+    bool keyboard = g.IO.ConfigFlags & ImGuiConfigFlags_NavEnableKeyboard;
+    bool pad = (g.IO.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad) && (g.IO.BackendFlags & ImGuiBackendFlags_HasGamepad);
+    bool left = (keyboard && pressed(ImGuiKey_LeftArrow)) || (pad && pressed(ImGuiKey_GamepadDpadLeft));
+    bool right = (keyboard && pressed(ImGuiKey_RightArrow)) || (pad && pressed(ImGuiKey_GamepadDpadRight));
+    if ((left || right) && (g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right)) {
+        ImGui::NavMoveRequestCancel();
+    }
+    return int(right) - int(left);
+}
+
+bool sliderInt(const char* label, int* value, int min, int max, const char* format, ImGuiSliderFlags flags, int step) {
+    int before = *value;
+    if (int dir = sliderDirection(label)) *value = std::clamp(*value + dir * step, min, max);
+    return ImGui::SliderInt(label, value, min, max, format, flags) || *value != before;
+}
+
+bool sliderFloat(const char* label, float* value, float min, float max, const char* format, float step) {
+    float before = *value;
+    if (int dir = sliderDirection(label)) *value = std::clamp(*value + dir * step, min, max);
+    return ImGui::SliderFloat(label, value, min, max, format) || *value != before;
+}
+
 bool checkbox(const char* label, bool* v) {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     if (window->SkipItems) {

@@ -19,6 +19,14 @@ void interpolationPacketsDone(void);
 /* Select exactly one authored draw path; expanded snapshots use the wide
  * renderer's coordinates, clipping and HUD treatment. */
 int interpolationRecording(int wide);
+typedef struct {
+    float footprint2;
+    uint32_t uvMin, uvMax;
+} InterpTextureFootprint;
+
+void interpolationDrawPolygons(const HiVertex* vertices, int count, int texClass,
+                              int wide, int shiftX, int shiftY, unsigned piece,
+                              const InterpTextureFootprint* footprints, InterpGearVertex* gearVertices);
 void interpolationDraw(const HiVertex* vertices, int count, int texClass,
                        int wide, int shiftX, int shiftY, unsigned piece);
 /* A field sprite's pose (gp0.c spritePose): this sample (coloured with the
@@ -52,6 +60,8 @@ void gpuHostPoll(uint64_t now, double vblank, uint64_t available);
 void gpuHostReset(void);
 void gpuHostInvalidate(void);
 const InterpFrame* interpolationFrame(int index);
+/* The snapshot's page mask keeps this immutable art alive across pack reloads. */
+const TextureSample* interpolationPackPage(unsigned index);
 const char* interpolationStatus(void);
 
 /* gp0.c: exclude feedback and a stale native cached CLUT. */

@@ -45,6 +45,11 @@ void AddPrim(void* ot, void* p) {
     addPrim(ot, p);
 }
 
+void pcAddInterfacePrim(void* ot, void* p) {
+    pcTextureInterface(p);
+    addPrim(ot, p);
+}
+
 void pcTextureHudPrim(void* ot, void* p) {
     pcTextureClassDefault(p, PC_TEX_HUD);
     addPrim(ot, p);

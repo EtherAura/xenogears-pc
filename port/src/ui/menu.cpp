@@ -133,7 +133,6 @@ struct State {
     bool currentBlockTall; // the cursor's block in the pane is taller than the pane (an open licence)
     unsigned long openedAt; // st.frames when the menu last opened
     ImGuiID lastContentNav;  // the pane's cursor item last frame (scrollToBlock)
-    ImGuiID leftFrom;        // Left was pressed on this item: no move means back to the list
     unsigned long closedAt;
     bool leaving;
     bool resetWanted, quitWanted; // a Reset or Quit chosen on the arc and confirmed: act on it once the menu closes
@@ -1268,33 +1267,12 @@ void drawFrame() {
     // Settings; extras viewers can still use their own list selections.
     ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0, 0, 0, 0));
 
-    // The section pane is a nav scope of its own: Right (or Enter, A) on the
-    // list goes into it, Esc or B comes back out (popping any active submenu
-    // first, then returning to the commands arc).
-    if (!inWizard && st.contentId != 0 && ImGui::GetFocusID() == st.contentId) {
-        if (st.inContent) {
-            stepBack();
-        } else {
-            st.enterContent = true;
-            st.opened = true;
-        }
+    // ImGui moves focus to the pane's parent item when Esc or B leaves the
+    // pane. Pop the active submenu or return to the commands arc.
+    if (!inWizard && st.inContent && st.contentId != 0 && ImGui::GetFocusID() == st.contentId) {
+        stepBack();
     }
-
-    // Left on an option with nothing to its left (ImGui found nowhere to
-    // move) pops a nested submenu or goes back to the section list.
     ImGuiContext& g = *ImGui::GetCurrentContext();
-    bool padNav = (io.BackendFlags & ImGuiBackendFlags_HasGamepad) && (io.ConfigFlags & ImGuiConfigFlags_NavEnableGamepad);
-    if (st.leftFrom != 0) {
-        if (g.NavId == st.leftFrom && st.inContent && !popupOpen() && !ImGui::IsAnyItemActive()) {
-            stepBack();
-        }
-        st.leftFrom = 0;
-    }
-    if (!inWizard && st.inContent && g.NavId != 0 && g.NavCursorVisible && !popupOpen() && !ImGui::IsAnyItemActive() &&
-        !capturing() &&
-        (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || (padNav && ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft)))) {
-        st.leftFrom = g.NavId;
-    }
 
     // Leaving: F1 is taken by uiEvent; Esc, Start and B here, when nothing
     // in the menu uses them (a list open, a field being edited, a capture,
@@ -1383,6 +1361,8 @@ void drawFrame() {
                 st.section = commandFocus;
             }
             st.focusSections = true;
+        } else if (g.NavMoveDir == ImGuiDir_Left || g.NavMoveDir == ImGuiDir_Right) {
+            ImGui::NavMoveRequestCancel();
         }
     }
 
@@ -1534,12 +1514,6 @@ void drawFrame() {
         if (focused && !st.focusSections && !st.enterContent && !st.jumpFocus) {
             if (st.section != i && !inSetup) opt::clearSubmenu(st.section);
             st.section = i; // the section follows the cursor
-            // Right goes into it (ImGui's own move scores the tall pane as below).
-            if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || (pad && ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight))) {
-                st.enterContent = true;
-                st.opened = true;
-                sfx::play(sfx::CHOOSE);
-            }
         }
     }
     // The arrow where the cursor was when this frame began (a move shows
@@ -1703,7 +1677,7 @@ void drawFrame() {
             snprintf(text, sizeof(text), "%s", tr("Choose Presets, Settings, Discs or BIOS, then Start. Quit leaves "
                                                   "without starting the game."));
         } else {
-            snprintf(text, sizeof(text), tr("Choose a setting, then use Left and Right to change it. %s returns to the commands."),
+            snprintf(text, sizeof(text), tr("Up and Down select a setting. Left and Right adjust sliders. %s returns to the commands."),
                      keys.back[0] != '\0' ? keys.back : tr("Back"));
         }
         helpText = text;
@@ -1907,7 +1881,7 @@ void sounds() {
                                           ImGuiKey_RightArrow,      ImGuiKey_GamepadDpadUp,    ImGuiKey_GamepadDpadDown,
                                           ImGuiKey_GamepadDpadLeft, ImGuiKey_GamepadDpadRight};
     bool step = false, held = false;
-    bool other = sfx::plays() != st.playsSeen; // this frame already sounded (Right choosing a section)
+    bool other = sfx::plays() != st.playsSeen; // this frame already sounded
     if (!io.WantTextInput && !capturing() && !st.padQuiet && !other) {
         for (ImGuiKey k : directions) {
             step |= stepped(k);
@@ -2155,7 +2129,6 @@ void run() {
     st.shownSection = -1;
     st.arrowEntry = -1;
     st.arcTop = 0; // the cursor starts on the first section
-    st.leftFrom = 0;
     st.focusSections = !st.wizard;
     st.enterContent = st.wizard;
     st.inContent = false;
@@ -2228,7 +2201,6 @@ void run() {
                 std::copy_n(keys, std::min(count, (int)SDL_SCANCODE_COUNT), keyHeld);
                 feedButtons(true);
                 st.padQuiet = true;
-                st.leftFrom = 0;
                 st.enterContent = st.restoreContent = st.inContent = st.opened = false;
                 st.focusSections = true;
                 if (result > 0) st.closing = true;

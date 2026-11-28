@@ -145,11 +145,13 @@ layout(push_constant) uniform Light {
 
 #include "scene_color.glsl"
 #include "tilt_shift.glsl"
+#include "hdr.glsl"
 
 const uint DEPTH_SHARP = 0u;
 const uint DEPTH_FAR = 0xFFFFFFFFu;
 const uint DEPTH_FIGURE = 0x40000000u;
 const int DEBUG = 1, ALL = 2, CHARACTERS = 4; // CHARACTERS: the sprites take the lighting too (xg-rgcf.5.19)
+const int HDR_HIGHLIGHTS = 8;
 
 // A depth code fits a 16-bit float: the view depth for scenery, its negative
 // for a figure, 0 where there is none (nothing drawn, or a kept picture).
@@ -1434,23 +1436,40 @@ void composite(ivec2 l) {
     if (b >= 0 && block[b + AREA_SLOT].w > 0.0 && raw != DEPTH_SHARP && raw != DEPTH_FAR)
         shown = areaLean(shown, block[b + AREA_SLOT].rgb, block[b + AREA_SLOT].w);
     if (b >= 0 && block[b + DUST_SLOT].x > 0.0) shown = dustOver(shown, at, code, b);
-    if (b >= 0 && block[b + SHAFT_SLOT].x > 0.0) shown = 1.0 - (1.0 - shown) * (1.0 - clamp(shaftLight(at, raw, b), 0.0, 1.0));
-    if (b >= 0 && block[b + SHAFT_SLOT].z > 0.0 && block[b + SHAFT_SLOT].w > 0.0)
-        shown = 1.0 - (1.0 - shown) * (1.0 - clamp(glareLight(at, b), 0.0, 1.0));
+    vec3 shafts = vec3(0.0), glare = vec3(0.0);
+    if (b >= 0 && block[b + SHAFT_SLOT].x > 0.0) {
+        shafts = clamp(shaftLight(at, raw, b), 0.0, 1.0);
+        shown = 1.0 - (1.0 - shown) * (1.0 - shafts);
+    }
+    if (b >= 0 && block[b + SHAFT_SLOT].z > 0.0 && block[b + SHAFT_SLOT].w > 0.0) {
+        glare = clamp(glareLight(at, b), 0.0, 1.0);
+        shown = 1.0 - (1.0 - shown) * (1.0 - glare);
+    }
+    float vignette = 1.0;
     if (pc.vignette > 0) {
         // The vignette: the edges darker by a smooth falloff from the frame's
         // middle (an ellipse, its aspect kept), from 0.45 of the way to the
         // corners; the frame is the one the layers were made from.
         vec2 off = at / vec2(pc.work) * 2.0 - 1.0;
         float far = clamp((length(off) / sqrt(2.0) - VIGNETTE_FROM) / (1.0 - VIGNETTE_FROM), 0.0, 1.0);
-        shown *= 1.0 - float(pc.vignette) / 4096.0 * far * far * (3.0 - 2.0 * far);
+        vignette = 1.0 - float(pc.vignette) / 4096.0 * far * far * (3.0 - 2.0 * far);
+        shown *= vignette;
+    }
+    uint upper = word & 0xFF000000u;
+    if ((pc.flags & HDR_HIGHLIGHTS) != 0) {
+        uint emission = hdrEmission(2.0 * hdrPeak(max(shafts, glare)) * vignette);
+        upper = (upper & ~HDR_MASK) | max(upper & HDR_MASK, emission);
     }
     uvec3 o = uvec3(shown * 255.0 + 0.5);
     uint packed = o.r | o.g << 8 | o.b << 16;
     // A pixel nothing changed is not written: it stays bit for bit what was drawn.
-    if (packed == (word & 0xFFFFFFu)) return;
+    if ((packed | upper) == word) return;
+    if (packed == (word & 0xFFFFFFu)) {
+        imageStore(color, p, uvec4(packed | upper));
+        return;
+    }
     o = sceneColorMode(o, p, pc.n, pc.color, pc.ditherOrigin);
-    imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
+    imageStore(color, p, uvec4(upper | o.r | o.g << 8 | o.b << 16));
 }
 
 // Ambient particles (xg-rgcf.5.10), after the blur: dust where the place is
@@ -1671,6 +1690,7 @@ void particlesDraw(ivec2 l) {
     int k = rel.y * 2 + rel.x;
     float least = 0.6 / float(pc.n);
     vec3 add = vec3(0.0);
+    vec3 emberLight = vec3(0.0);
     for (int half_ = 0; half_ < 2; half_++)
     for (uint used = partWords[k][half_]; used != 0u; ) {
         int w = half_ * 32 + findLSB(used);
@@ -1687,19 +1707,30 @@ void particlesDraw(ivec2 l) {
             float dd = dot(d, d), sigma = max(place.w * 0.6, least);
             float s = exp(-0.5 * dd / (sigma * sigma));
             if (glow.x > 0.0) s += glow.y * exp(-0.5 * dd / (glow.x * glow.x));
-            add += s * colour.a * colour.rgb;
+            vec3 contribution = s * colour.a * colour.rgb;
+            add += contribution;
+            if ((pc.flags & HDR_HIGHLIGHTS) != 0 && i >= PARTICLE_EMBERS) emberLight += contribution;
         }
     }
     if (all(lessThan(add, vec3(0.5 / 255.0)))) return;
     ivec2 p = pc.origin + l;
     uint word = imageLoad(color, p).r;
+    uint upper = word & 0xFF000000u;
+    if ((pc.flags & HDR_HIGHLIGHTS) != 0) {
+        uint emission = hdrEmission(2.0 * hdrPeak(emberLight));
+        upper = (upper & ~HDR_MASK) | max(upper & HDR_MASK, emission);
+    }
     vec3 shown = vec3(float(word & 255u), float((word >> 8) & 255u), float((word >> 16) & 255u)) / 255.0;
     shown = clamp(shown + add * (1.0 - 0.5 * shown), 0.0, 1.0);
     uvec3 o = uvec3(shown * 255.0 + 0.5);
     uint packed = o.r | o.g << 8 | o.b << 16;
-    if (packed == (word & 0xFFFFFFu)) return;
+    if ((packed | upper) == word) return;
+    if (packed == (word & 0xFFFFFFu)) {
+        imageStore(color, p, uvec4(packed | upper));
+        return;
+    }
     o = sceneColorMode(o, p, pc.n, pc.color, pc.ditherOrigin);
-    imageStore(color, p, uvec4((word & 0xFF000000u) | o.r | o.g << 8 | o.b << 16));
+    imageStore(color, p, uvec4(upper | o.r | o.g << 8 | o.b << 16));
 }
 
 void main() {

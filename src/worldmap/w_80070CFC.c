@@ -13,6 +13,7 @@
 #include "worldmap/worldmap.h"
 #include "pc_gameplay.h"
 #include "pc_interpolation.h"
+#include "pc_scene.h"
 #include "pc_camera.h"
 #include "pc_speedup.h"
 
@@ -588,9 +589,11 @@ void worldmapMainLoop(void) {
         updateWorldmapTexAnims1();
         updateWorldmapTexAnims2();
         SetGeomOffset(0xA0, worldmapGeometryOffsetY);
-        DrawOTag(&pCurrentWorldmapRenderingStruct->m70_OT[0x3FF]);
 #ifdef PLATFORM_PC
+        pcDrawSceneOTag(&pCurrentWorldmapRenderingStruct->m70_OT[0x3FF], &pCurrentWorldmapRenderingStruct->m70_OT[0]);
         pcInterpolationFrameEnd();
+#else
+        DrawOTag(&pCurrentWorldmapRenderingStruct->m70_OT[0x3FF]);
 #endif
     } while (continueWorldmapLoop != 0);
     ResetGraph(1);

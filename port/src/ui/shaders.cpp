@@ -116,7 +116,8 @@ void stateAndParams(int which, bool rowShown) {
         ImGui::SetNextItemWidth(-1);
         char format[160];
         snprintf(format, sizeof(format), "%s: %%.3g", p->desc[0] != '\0' ? p->desc : p->name);
-        if (ImGui::SliderFloat("##p", &v, p->min, p->max, format)) {
+        float step = p->step > 0 ? p->step : (p->max - p->min) / 100;
+        if (skin::sliderFloat("##p", &v, p->min, p->max, format, step)) {
             if (p->step > 0) {
                 v = p->min + p->step * (float)(int)((v - p->min) / p->step + 0.5f);
             }

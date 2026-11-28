@@ -1288,7 +1288,7 @@ void worldmapMainLoop(void) {
         pcWorldmapSceneDepth(pCurrentWorldmapRenderingStruct->m70_OT); /* Enhanced (xg-rgcf.5.3): before the next offset */
         /* At 60 Hz the frame between projects halfway in the geometry offset's ease (the minimap's slide) */
         SetGeomOffset(0xA0, pcWm60Active && tick && !pcWm60CameraLive && !pcWm60CutTick && pcWm60Frame != 0 ? pcWm60Mid(pcWm60GeomStart, worldmapGeometryOffsetY, 0x40) : worldmapGeometryOffsetY);
-        DrawOTag(&pCurrentWorldmapRenderingStruct->m70_OT[0x3FF]);
+        pcDrawSceneOTag(&pCurrentWorldmapRenderingStruct->m70_OT[0x3FF], &pCurrentWorldmapRenderingStruct->m70_OT[0]);
         pcInterpolationFrameEnd();
         if (continueWorldmapLoop == 0) {
             pcWm60Settle(); /* leaving: nothing moves on, and the Original's frame took two vblanks */

@@ -147,7 +147,9 @@ int interpCaptureSteps(const HiVertex* v,const int32_t* rows,VRect box,uint32_t*
 }
 
 void interpFrameClear(InterpFrame* f) {
-    f->vertexCount = f->drawCount = f->pixelCount = f->opCount = 0;
+    f->vertexCount = f->drawCount = f->pixelCount = f->mipCount = f->opCount = 0;
+    f->packPages = 0;
+    f->gearCount = f->gearVertexCount = 0;
     if (f->lookup) memset(f->lookup, 0, LOOKUP_SIZE * sizeof(*f->lookup));
     if (f->anchors) memset(f->anchors, 0, LOOKUP_SIZE * sizeof(*f->anchors));
     f->frozen = f->frozenCount = f->frozenDirty = f->frozenWrites = 0;
@@ -167,7 +169,9 @@ void interpFrameReject(InterpFrame* f, const char* reason) {
 }
 
 void interpFrameFree(InterpFrame* f) {
-    free(f->ops); free(f->vertices); free(f->draws); free(f->pixels); free(f->lookup); free(f->anchors);
+    free(f->ops); free(f->vertices); free(f->draws); free(f->pixels); free(f->mipWords); free(f->lookup); free(f->anchors);
+    for (unsigned i = 0; i < INTERP_GEAR_RIGS; i++) free(f->gears[i].pose);
+    free(f->gearVertices);
     memset(f, 0, sizeof(*f));
 }
 
@@ -205,6 +209,17 @@ int interpFrameDraw(InterpFrame* f, const HiVertex* v, int count, uint64_t objec
                                           .first = f->vertexCount, .count = (uint32_t)count};
     f->vertexCount += (uint32_t)count;
     return 1;
+}
+void interpFrameGearDraw(InterpFrame* f, unsigned gear, unsigned bone, const InterpGearVertex* vertices) {
+    InterpDraw* draw = &f->draws[f->drawCount - 1];
+    draw->gear = INTERP_GEAR_HOLD;
+    if (!gear || gear > f->gearCount || bone == 0 || bone >= INTERP_GEAR_BONES || !vertices || !room((void**)&f->gearVertices, &f->gearVertexCapacity,
+        f->gearVertexCount + draw->count, INTERP_MAX_VERTICES, sizeof(*vertices))) return;
+    draw->gear = gear;
+    draw->bone = bone;
+    draw->gearFirst = f->gearVertexCount;
+    memcpy(f->gearVertices + f->gearVertexCount, vertices, draw->count * sizeof(*vertices));
+    f->gearVertexCount += draw->count;
 }
 void interpFramePlacement(InterpFrame* f, float x, float y, float z) {
     if (!f->drawCount) return;
@@ -266,7 +281,7 @@ static int nativeSample(InterpFrame* f,const uint8_t* rgba,size_t count,uint32_t
     f->pixelCount+=(uint32_t)words;
     *format=(1u<<17)|INTERP_SAMPLE_NATIVE_WORD|(opaqueBlack?INTERP_SAMPLE_OPAQUE_BLACK:0);return 1;
 }
-int interpFrameSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_t* offset, uint32_t* format) {
+static int frameSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_t* offset, uint32_t* format, int mip) {
     *format = 0;
     if (!rgba || !count || count > INTERP_MAX_PIXELS || !f->valid)
         return interpFramePixels(f, rgba, count, offset);
@@ -277,13 +292,17 @@ int interpFrameSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_
         unsigned slot = colorSlot(color);
         while (slots[slot] && palette[slots[slot] - 1] != color) slot = (slot + 1) & 511;
         if (slots[slot]) continue;
-        if (colors == 256) return nativeSample(f, rgba, count, offset,format);
+        if (colors == 256) {
+            if (!mip) return nativeSample(f, rgba, count, offset,format);
+            return count <= INTERP_MAX_MIP_WORDS - f->pixelCount && interpFramePixels(f, rgba, count, offset);
+        }
         palette[colors] = color; slots[slot] = ++colors;
     }
     size_t indices = (count + 3) / 4, words = colors + indices;
-    if (words >= count) return interpFramePixels(f, rgba, count, offset);
+    if (words >= count)
+        return (!mip || count <= INTERP_MAX_MIP_WORDS - f->pixelCount) && interpFramePixels(f, rgba, count, offset);
     if (!room((void**)&f->pixels, &f->pixelCapacity, f->pixelCount + (uint32_t)words,
-              INTERP_MAX_PIXELS, sizeof(uint32_t))) {
+              mip ? INTERP_MAX_MIP_WORDS : INTERP_MAX_PIXELS, sizeof(uint32_t))) {
         interpFrameReject(f, "texture-capacity"); return 0;
     }
     *offset = f->pixelCount;
@@ -298,6 +317,31 @@ int interpFrameSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_
     }
     f->pixelCount += (uint32_t)words;
     *format = (1u << 17) | INTERP_SAMPLE_PALETTE | (colors - 1) << 24;
+    return 1;
+}
+
+int interpFrameSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_t* offset, uint32_t* format) {
+    return frameSample(f, rgba, count, offset, format, 0);
+}
+
+int interpFrameMipSample(InterpFrame* f, const uint8_t* rgba, size_t count, uint32_t* offset, uint32_t* format) {
+    /* Mips are optional. Preserve the frame's base textures and validity
+     * if the extra arena runs out of space. */
+    InterpFrame mips = {.valid = 1, .pixels = f->mipWords,
+        .pixelCount = f->mipCount, .pixelCapacity = f->mipCapacity};
+    if (!rgba || !count || count > INTERP_MAX_PIXELS) return 0;
+    int stored = frameSample(&mips, rgba, count, offset, format, 1);
+    f->mipWords = mips.pixels;
+    f->mipCount = mips.pixelCount;
+    f->mipCapacity = mips.pixelCapacity;
+    return stored;
+}
+int interpFrameMipWords(InterpFrame* f, const uint32_t* words, uint32_t count, uint32_t* offset) {
+    if (count > INTERP_MAX_MIP_WORDS - f->mipCount ||
+        !room((void**)&f->mipWords, &f->mipCapacity, f->mipCount + count, INTERP_MAX_MIP_WORDS, sizeof(*words))) return 0;
+    *offset = f->mipCount;
+    memcpy(f->mipWords + f->mipCount, words, (size_t)count * sizeof(*words));
+    f->mipCount += count;
     return 1;
 }
 int interpSampleEqual(const InterpFrame* f, uint32_t offset, uint32_t format, const uint8_t* rgba, size_t count) {
@@ -451,6 +495,34 @@ const char* interpDrawMismatch(const InterpFrame* a, const InterpFrame* b, uint3
     return NULL;
 }
 
+static const InterpGearRig* gearPartner(const InterpFrame* f, const InterpGearRig* rig) {
+    for (unsigned i = 0; i < f->gearCount; i++) {
+        const InterpGearRig* p = &f->gears[i];
+        if (p->identity == rig->identity && p->evaluate == rig->evaluate && p->size == rig->size) return p;
+    }
+    return NULL;
+}
+
+static void projectGearDraw(const InterpFrame* f, const InterpDraw* draw,
+                            const InterpGearMatrix* m, HiVertex* out) {
+    HiVertex projected[6];
+    for (unsigned i = 0; i < draw->count; i++) {
+        const InterpGearVertex* src = &f->gearVertices[draw->gearFirst + i];
+        float xyz[3];
+        for (int axis = 0; axis < 3; axis++)
+            xyz[axis] = m->t[axis] + m->m[axis][0] * src->local[0] +
+                                    m->m[axis][1] * src->local[1] + m->m[axis][2] * src->local[2];
+        if (!isfinite(xyz[2]) || xyz[2] > 65535 || xyz[2] <= src->screen * 0.5f) return;
+        float factor = src->screen / xyz[2];
+        projected[i] = out[i];
+        projected[i].x = floorf((src->center[0] + xyz[0] * factor) * 256.0f + 0.5f) / 256.0f;
+        projected[i].y = floorf((src->center[1] + xyz[1] * factor) * 256.0f + 0.5f) / 256.0f;
+        if (src->perspective) projected[i].w = xyz[2] / 4096.0f;
+        if (SCENE_Z_IS_DEPTH(out[i].z)) projected[i].z = copysignf(xyz[2], out[i].z);
+    }
+    memcpy(out, projected, draw->count * sizeof(*out));
+}
+
 int interpFramesCompatible(const InterpFrame* a, const InterpFrame* b) {
     return interpFramesMismatch(a, b) == NULL;
 }
@@ -458,9 +530,17 @@ int interpFramesCompatible(const InterpFrame* a, const InterpFrame* b) {
 uint32_t interpFramesMotionKinds(const InterpFrame* a, const InterpFrame* b) {
     if (!interpFramesCompatible(a, b)) return 0;
     uint32_t kinds = 0;
+    for (unsigned i = 0; a->gearVertexCount && i < a->gearCount; i++) {
+        const InterpGearRig* rig = &a->gears[i];
+        const InterpGearRig* next = gearPartner(b, rig);
+        if (next && memcmp(rig->pose, next->pose, rig->size)) {
+            kinds |= 1u << PC_INTERP_MECHA;
+            break;
+        }
+    }
     for (uint32_t i = 0; i < a->drawCount; i++) {
         const InterpDraw* x = &a->draws[i];
-        if (!x->object) continue;
+        if (!x->object || x->gear || x->kind == PC_INTERP_HELD) continue;
         const InterpDraw* y = partner(b, x);
         if (interpDrawMismatch(a, b, i)) continue;
         if (x->placement) {
@@ -482,10 +562,25 @@ int interpFramesMove(const InterpFrame* a, const InterpFrame* b) { return interp
 
 int interpFrameVertices(const InterpFrame* a, const InterpFrame* b, double alpha, HiVertex* out, size_t cap) {
     if (!a || !out || cap < a->vertexCount || !isfinite(alpha) || alpha < 0 || alpha > 1 || !interpFramesCompatible(a, b)) return 0;
+    InterpGearMatrix gears[INTERP_GEAR_RIGS][INTERP_GEAR_BONES];
+    signed char gearBuilt[INTERP_GEAR_RIGS] = {0};
     memcpy(out, a->vertices, (size_t)a->vertexCount * sizeof(*out));
     for (uint32_t i = 0; i < a->drawCount; i++) {
         const InterpDraw* x = &a->draws[i];
-        if (!x->object) continue;
+        if (!x->object || x->kind == PC_INTERP_HELD) continue;
+        if (x->gear) {
+            if (x->gear <= a->gearCount && alpha > 0) {
+                unsigned slot = x->gear - 1;
+                if (!gearBuilt[slot]) {
+                    const InterpGearRig* rig = &a->gears[slot];
+                    const InterpGearRig* next = gearPartner(b, rig);
+                    gearBuilt[slot] = next && rig->evaluate(rig->pose, next->pose, alpha, gears[slot]) ? 1 : -1;
+                }
+                if (gearBuilt[slot] > 0)
+                    projectGearDraw(a, x, &gears[slot][x->bone], out + x->first);
+            }
+            continue;
+        }
         const InterpDraw* y = partner(b, x);
         if (interpDrawMismatch(a, b, i)) continue;
         if (x->placement) {
