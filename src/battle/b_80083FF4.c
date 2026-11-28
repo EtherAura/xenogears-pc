@@ -222,9 +222,9 @@ u8 getEntityToFace(u8 arg0) {
         sameSlot[i] = 0;
     }
 #ifdef PLATFORM_PC
-    if (pcArenaRosterEnemyTeams()) {
+    if (pcArenaRosterEnemyTeams() || pcArenaRosterMixed()) {
         count = 0;
-        for (i = 3; i < 11; i++) {
+        for (i = pcArenaRosterMixed() ? 0 : 3; i < 11; i++) {
             if (pcArenaRosterSide(arg0) != pcArenaRosterSide(i) && isTargetValid(arg0, i)) {
                 candidates[count++] = i;
                 numValidTarget++;
@@ -365,12 +365,21 @@ u8 abilityTargetSelectionInitSub1(u8 arg0) {
     abilityTargetBitmask = 0;
     i = 3;
 #ifdef PLATFORM_PC
-    if (pcVersusMirrorSlot(arg0)) {
+    if (pcArenaRosterMixed()) {
+        i = 0;
+        n = 11;
+    } else if (pcVersusMirrorSlot(arg0)) {
         i = 0; /* a mirror match's player 2: player 1's party (mirror.c) */
         n = 3;
     }
 #endif
     while (--n >= 0) {
+#ifdef PLATFORM_PC
+        if (pcArenaRosterMixed() && pcArenaRosterSide(arg0) == pcArenaRosterSide(i)) {
+            i++;
+            continue;
+        }
+#endif
         if (isTargetValid(arg0, i) != 0) {
             u16 mask;
             targetsPerPriority[count] = i;

@@ -30,12 +30,17 @@ int pcArenaRosterStage(void);
 void pcArenaRosterClear(void);
 int pcArenaRosterSide(int entity);
 int pcArenaRosterEnemyTeams(void);
+int pcArenaRosterMixed(void);
+int pcArenaRosterFirstEnemy(void);
 void pcVersusRosterSpaceTeams(void);
 void pcVersusPartySelection(int player); /* 0 outside the party's command loop */
 int pcVersusPrivateSelection(void);
 int pcArenaRosterMultiplier(int slot, int stat);
 const unsigned char* pcArenaRosterBank(int slot, int* bank, int* type);
+#define PC_ARENA_BATTLE_PORTRAIT_SIZE 24
+const unsigned char* pcArenaRosterPortrait(int slot, const unsigned short** palette);
 const unsigned char* pcArenaRosterVisuals(int* bytes);
+int pcArenaRosterSpriteLocation(int type, int* x, int* y);
 void* pcVersusRosterVisuals(void* stock);
 unsigned char* pcVersusEnemyText(int entity, int name);
 unsigned char* pcVersusMoveText(int entity, int idx);

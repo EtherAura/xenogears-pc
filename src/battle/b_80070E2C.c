@@ -930,7 +930,7 @@ void checkWinConditions(void) {
         }
     }
 #ifdef PLATFORM_PC
-    if (pcArenaRosterEnemyTeams()) {
+    if (pcArenaRosterEnemyTeams() || pcArenaRosterMixed()) {
         s32 result = pcVersusRosterResult(allPlayerCharacterBitmask);
         if (result != 0) performAttackSub3_var0.m2_battleRunningVar1 = result;
     } else

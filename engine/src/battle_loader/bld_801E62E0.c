@@ -184,20 +184,34 @@ void loadBattleSpriteVram(sBattleSpriteConfigs* config) {
                 }
             }
         } else {
-            if (entry->m4_spriteDataOffset < 8) {
-                spriteSlot = entry->m4_spriteDataOffset;
-            } else {
-                uploadNpcSpriteSheet((s32*)(entry->m4_spriteDataOffset + (sptr)config), currentSpriteX, 0x100);
-                spriteSlot = currentSpriteSlot++;
-                ids.m0[spriteSlot] = currentSpriteX;
-                currentSpriteX += getSpriteNumVerticalStrides((s32*)(entry->m4_spriteDataOffset + (sptr)config)) << 6;
-                if (currentSpriteX > 0x2C0) {
-                    currentSpriteX = 0;
+#ifdef PLATFORM_PC
+            s32 spriteX, spriteY;
+
+            if (pcArenaRosterSpriteLocation(k, &spriteX, &spriteY)) {
+                if (entry->m4_spriteDataOffset >= 8) {
+                    uploadNpcSpriteSheet((s32*)(entry->m4_spriteDataOffset + (sptr)config), spriteX, spriteY);
                 }
+                battleBssBlock.m8D24_visualBuffers[currentSlot].m0_spriteData = (void*)(entry->m0_spriteControlOffset + base);
+                battleBssBlock.m8D24_visualBuffers[currentSlot].m6_vramY = spriteY;
+                battleBssBlock.m8D24_visualBuffers[currentSlot].m4_vramX = spriteX;
+            } else
+#endif
+            {
+                if (entry->m4_spriteDataOffset < 8) {
+                    spriteSlot = entry->m4_spriteDataOffset;
+                } else {
+                    uploadNpcSpriteSheet((s32*)(entry->m4_spriteDataOffset + (sptr)config), currentSpriteX, 0x100);
+                    spriteSlot = currentSpriteSlot++;
+                    ids.m0[spriteSlot] = currentSpriteX;
+                    currentSpriteX += getSpriteNumVerticalStrides((s32*)(entry->m4_spriteDataOffset + (sptr)config)) << 6;
+                    if (currentSpriteX > 0x2C0) {
+                        currentSpriteX = 0;
+                    }
+                }
+                battleBssBlock.m8D24_visualBuffers[currentSlot].m0_spriteData = (void*)(entry->m0_spriteControlOffset + base);
+                battleBssBlock.m8D24_visualBuffers[currentSlot].m6_vramY = 0x100;
+                battleBssBlock.m8D24_visualBuffers[currentSlot].m4_vramX = ids.m0[spriteSlot];
             }
-            battleBssBlock.m8D24_visualBuffers[currentSlot].m0_spriteData = (void*)(entry->m0_spriteControlOffset + base);
-            battleBssBlock.m8D24_visualBuffers[currentSlot].m6_vramY = 0x100;
-            battleBssBlock.m8D24_visualBuffers[currentSlot].m4_vramX = ids.m0[spriteSlot];
             battleBssBlock.m8D24_visualBuffers[currentSlot].m8_vramParam = entry->mB_vramParam;
         }
         entry++;

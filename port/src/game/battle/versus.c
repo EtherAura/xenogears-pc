@@ -1025,6 +1025,7 @@ int pcVersusPrivateSelection(void) {
 
 /* drawBattleMode1/2 (src/battle/b_800728B8.c), after the dialogue windows. */
 void pcVersusDraw(void) {
+    pcBattleRosterHud();
     pcVersusMirrorLabel(); /* a mirror match: player 2's name label (mirror.c) */
     if (shown) {
         /* The text has to finish printing on both peers before input goes
@@ -1852,21 +1853,25 @@ static s32 chooseEnemyItem(u8 entity, const u8* inventory) {
     finishEnemyMenuPress();
     startCharacterJumpToEnemyVar0 = 1;
     int selected = drawCircleMenuItem_update(entity) == 1;
+    int consumed = 0;
+    int item = battleVar2->m2E6_menuSelection;
     startCharacterJumpToEnemyVar0 = inputSounds;
     enemyItemMenu = 0;
     battleVar1->mCB_drawCommandRing = 0;
     if (selected) {
-        int item = battleVar2->m2E6_menuSelection;
         slot = selectedItemRow * 2 + selectedItemColumn;
         pcArenaLog("  confirmed item %d on target %d (vblank %u)", item, abilitySelectedTarget, hwVSyncCount());
         choosing = 0;
         executeItem(entity);
-        if (battleEffectBF.m12_counts[slot] < inventory[item - 1]) pcArenaRosterUseItem(choosingPort, item);
+        consumed = item > 0 && item <= ARENA_ROSTER_ITEMS && battleEffectBF.m12_counts[slot] < inventory[item - 1];
         enemyTurnResolved = 1;
-        pcArenaLog("  player %d used item %d with slot %d, target %d, %d left",
-                   choosingPort + 1, item, entity, abilitySelectedTarget, inventory[item - 1]);
+        pcArenaLog("  player %d used item %d with slot %d, target %d", choosingPort + 1, item, entity, abilitySelectedTarget);
     }
     battleEffectBF = saved;
+    if (consumed) {
+        if (pcArenaRosterMixed()) pcVersusMixedUseItem(choosingPort, item);
+        else pcArenaRosterUseItem(choosingPort, item);
+    }
     selectedItemRow = savedRow;
     selectedItemColumn = savedColumn;
     return selected;
@@ -1891,6 +1896,11 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
     enemyTurnResolved = 0;
     choosingPort = pcArenaRosterSide(entity);
     const u8* inventory = pcArenaRosterItemCounts(choosingPort);
+    u8 sharedItems[ARENA_ROSTER_ITEMS];
+    if (pcArenaRosterMixed()) {
+        pcVersusMixedItems(choosingPort, sharedItems);
+        inventory = sharedItems;
+    }
     int hasItems = 0;
     if (inventory != NULL && !apConfigArray[entity].m1_gearState) {
         for (i = 0; i < ARENA_ROSTER_ITEMS; i++) hasItems |= inventory[i] != 0;
@@ -2054,6 +2064,7 @@ void pcVersusBattleSetup(void) {
         battleConfigs[requestedBattleConfig * 0x20 + 1] &= ~0x10;
     }
     if (pcArenaRosterConfig(battleConfigs + requestedBattleConfig * 0x20)) {
+        pcVersusMirrorSetup();
         __builtin_memset(enemyGear, 0, sizeof enemyGear);
         int ready = pcArenaRosterStartInGear();
         for (i = 0; i < 3; i++) {
@@ -2093,6 +2104,7 @@ void* pcVersusRosterVisuals(void* stock) {
 
 void pcVersusRosterHideParty(void) {
     s32 i;
+    if (pcArenaRosterActive()) pcBattleRosterHudReset();
     if (!pcArenaRosterEnemyTeams()) return;
     for (i = 0; i < 3; i++) {
         battleVisualEntities[i].m3_hidden = 1;
@@ -2222,12 +2234,12 @@ int pcVersusRosterTargetOp(const u8* op, int actor) {
     s32 countOnly = 0;
     s32 i;
     s32 n = 0;
-    u16 pool[8];
+    u16 pool[11];
     u16 mask = 0;
 
     if (!pcArenaRosterActive()) return 0;
     if (op[0] >= 0x70 && op[0] <= 0x74) return 1;
-    if (!pcArenaRosterEnemyTeams()) return 0;
+    if (!pcArenaRosterEnemyTeams() && !pcArenaRosterMixed()) return 0;
     switch (op[0]) {
     case 0x40: other = 1; break;
     case 0x41: other = 1; rowMode = 1; break;
@@ -2245,7 +2257,7 @@ int pcVersusRosterTargetOp(const u8* op, int actor) {
         return 0;
     }
     if (op[1] >= (countOnly ? 16 : 8)) return 1;
-    for (i = 3; i < 11; i++) {
+    for (i = pcArenaRosterMixed() ? 0 : 3; i < 11; i++) {
         s32 own = pcArenaRosterSide(actor + 3) == pcArenaRosterSide(i);
         s32 sameRow = battleVisualEntities[actor + 3].m0_positionSlot == battleVisualEntities[i].m0_positionSlot;
         s32 inGear = battleVisualEntities[i].m4_isGear != 0;
@@ -2266,7 +2278,7 @@ int pcVersusRosterTargetOp(const u8* op, int actor) {
 int pcVersusRosterResult(unsigned mask) {
     s32 i;
     s32 alive = 0;
-    for (i = 3; i < 11; i++) {
+    for (i = pcArenaRosterMixed() ? 0 : 3; i < 11; i++) {
         if (bitmaskCharacterCheck(mask, i)) alive |= 1 << pcArenaRosterSide(i);
     }
     return (alive & 1) == 0 ? 0x81 : (alive & 2) == 0 ? 1 : 0;

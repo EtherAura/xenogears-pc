@@ -9,6 +9,7 @@
 #include "arena_roster.h"
 #include "cd/cd.h"
 #include "extras/disc.h"
+#include "extras/files.h"
 #include "extras/sprites_enemy.h"
 #include "pc_arena.h"
 
@@ -18,6 +19,9 @@ typedef struct {
     uint8_t* visuals;
     int bankSize, visualSize;
     XgEnemySprite sprite;
+    uint8_t portrait[PC_ARENA_BATTLE_PORTRAIT_SIZE * PC_ARENA_BATTLE_PORTRAIT_SIZE];
+    uint16_t portraitPalette[256];
+    int hasPortrait;
 } RosterType;
 
 typedef struct {
@@ -35,6 +39,9 @@ typedef struct {
     int typeCount;
     unsigned char ids[ARENA_ROSTER_SLOTS];
     unsigned char split, count, activeGears, online;
+    unsigned char extraSheetRow;
+    XgPartyRecord secondParty;
+    unsigned short sheetX[ARENA_ROSTER_SLOTS], sheetY[ARENA_ROSTER_SLOTS];
     unsigned char items[2][ARENA_ROSTER_ITEMS];
 } RosterAssets;
 
@@ -47,9 +54,57 @@ extern void xgDiscClose(XgDisc*) __attribute__((weak));
 extern int xgDiscFileEntry(const XgDisc*, int, int) __attribute__((weak));
 extern uint8_t* xgDiscReadEntry(XgDisc*, int, int*) __attribute__((weak));
 extern int xgEnemySpriteGet(const uint8_t*, int, int, XgEnemySprite*) __attribute__((weak));
+extern int xgTimParse(const uint8_t*, int, XgTim*) __attribute__((weak));
 
 static unsigned u16le(const uint8_t* p) { return p[0] | (unsigned)p[1] << 8; }
 static unsigned u32le(const uint8_t* p) { return u16le(p) | u16le(p + 2) << 16; }
+
+/* Verified retail enemy bank/type IDs and their file numbers in directory 4.
+ * The IDs are shared by US and Japanese discs. */
+static void loadPortrait(XgDisc* disc, RosterType* type) {
+    static const struct {
+        uint8_t bank, type, file;
+    } portraits[] = {
+        {8, 0, 0x98}, {8, 1, 0x77}, {8, 2, 0x77}, /* Dan, Wiseman */
+        {25, 0, 0x60}, /* Margie */
+        {28, 0, 0x5D}, /* Rico */
+        {45, 0, 0x60}, {45, 1, 0x71}, {45, 2, 0x70}, /* Margie, Ramsus, Miang */
+        {47, 0, 0x67}, /* Big Joe */
+        {51, 0, 0x63}, /* Id */
+        {56, 0, 0x6F}, {56, 1, 0x6F}, {56, 2, 0x72}, /* Grahf, Executioner */
+        {57, 0, 0x68}, {57, 1, 0x6B}, {57, 2, 0x6A}, {57, 3, 0x69}, /* Elements */
+        {57, 4, 0x6B}, {57, 5, 0x6A},
+    };
+    enum { FieldSize = 64, BattleSize = PC_ARENA_BATTLE_PORTRAIT_SIZE };
+
+    if (xgTimParse == NULL) return;
+    for (unsigned i = 0; i < sizeof(portraits) / sizeof(portraits[0]); i++) {
+        if (type->enemy.bank != portraits[i].bank || type->enemy.type != portraits[i].type) continue;
+        int entry = xgDiscFileEntry(disc, 4, portraits[i].file);
+        if (entry < 0) return;
+        int bytes = 0;
+        uint8_t* raw = xgDiscReadEntry(disc, entry, &bytes);
+        XgTim t;
+        if (raw != NULL && xgTimParse(raw, bytes, &t) && t.bpp == 8 && t.clutW == 256 &&
+            t.width == FieldSize && t.imgH == FieldSize) {
+            /* The retail dialogue faces look right. Cache them in the
+             * left-facing orientation of the native battle portraits. */
+            for (int y = 0; y < BattleSize; y++) {
+                int sy = (2 * y + 1) * FieldSize / (2 * BattleSize);
+                for (int x = 0; x < BattleSize; x++) {
+                    int sx = (2 * x + 1) * FieldSize / (2 * BattleSize);
+                    type->portrait[y * BattleSize + BattleSize - 1 - x] = t.pixels[sy * FieldSize + sx];
+                }
+            }
+            for (int c = 0; c < 256; c++) {
+                type->portraitPalette[c] = u16le((const uint8_t*)t.clut + 2 * c);
+            }
+            type->hasPortrait = 1;
+        }
+        free(raw);
+        return;
+    }
+}
 
 static void put32(uint8_t* p, unsigned value) {
     p[0] = value;
@@ -129,12 +184,47 @@ static int readGear(XgDisc* disc, ArenaEnemy id, RosterGear* gear) {
     return 1;
 }
 
+/* Anima Relic 1's arena ends before x=0x2C0 in the upper row, and the
+ * battle UI starts at x=0x380 there. Make those three whole pages available
+ * to foot-only enemy matches. Keep every sheet contiguous for its native
+ * animation UVs and leave the lower row's effects and text pages alone. */
+static int placeAnimaSheets(RosterAssets* a, const int* sheetId, const int* widths, int sheets, int columns) {
+    enum { AnimaRelic1 = 32, UpperPages = 3 };
+    int lowerPages = 7 - a->loadout.mixed;
+    if ((!a->split && !a->loadout.mixed) || a->loadout.stage != AnimaRelic1 ||
+        columns > lowerPages + UpperPages) return 0;
+
+    for (unsigned mask = 1; mask < (1u << sheets); mask++) {
+        int upper = 0;
+        for (int s = 0; s < sheets; s++) {
+            if (mask & (1u << s)) upper += widths[s];
+        }
+        if (upper > UpperPages || columns - upper > lowerPages) continue;
+
+        int x[ARENA_ROSTER_SLOTS];
+        int next[2] = {0x140 + a->loadout.mixed * 0x40, 0x2C0};
+        for (int s = 0; s < sheets; s++) {
+            int row = (mask >> s) & 1;
+            x[s] = next[row];
+            next[row] += widths[s] * 0x40;
+        }
+        for (int i = 0; i < a->typeCount; i++) {
+            a->sheetX[i] = x[sheetId[i]];
+            a->sheetY[i] = (mask & (1u << sheetId[i])) ? 0 : 0x100;
+        }
+        a->extraSheetRow = 1;
+        return 1;
+    }
+    return 0;
+}
+
 static int packVisuals(RosterAssets* a, const char** why) {
     int header = 8 + 12 * a->typeCount;
     int controls = header;
     int sheets = 0;
     int columns = 0;
     int source[ARENA_ROSTER_SLOTS], sheetId[ARENA_ROSTER_SLOTS], sheetColumn[ARENA_ROSTER_SLOTS];
+    int widths[ARENA_ROSTER_SLOTS];
     int spriteCount = 0;
     int instances[ARENA_ROSTER_SLOTS] = {0};
     for (int i = 0; i < a->typeCount; i++) {
@@ -157,7 +247,8 @@ static int packVisuals(RosterAssets* a, const char** why) {
         sheetId[i] = spriteCount++;
         sheetColumn[sheetId[i]] = columns;
         sheets += type->sprite.sheetSize;
-        columns += u32le(sheet);
+        widths[sheetId[i]] = u32le(sheet);
+        columns += widths[sheetId[i]];
     }
     for (int i = 0; i < a->count; i++) instances[sheetId[a->ids[i]]]++;
     for (int i = 0; i < a->count; i++) {
@@ -168,11 +259,13 @@ static int packVisuals(RosterAssets* a, const char** why) {
         a->gear[i].replacesFootSheet = instances[id] == 1;
         a->gear[i].column = instances[id] == 1 ? sheetColumn[id] : columns++;
     }
-    if (columns > 7) return refused(why, "The combined sprites and Gear slots exceed this arena's texture space.");
+    if (columns > 7 - a->loadout.mixed && !placeAnimaSheets(a, sheetId, widths, spriteCount, columns))
+        return refused(why, "The combined sprites and Gear slots exceed this arena's texture space.");
     a->visualBytes = controls + sheets;
     a->visuals = calloc(1, (size_t)a->visualBytes);
     if (a->visuals == NULL) return refused(why, "The enemy visuals could not be allocated.");
     a->visuals[0] = a->typeCount;
+    a->visuals[1] = a->loadout.mixed; /* column 0 holds the saved P2 sprites */
     put32(a->visuals + 4, (unsigned)controls);
     int controlAt = header;
     int sheetAt = controls;
@@ -202,7 +295,8 @@ static int validStats(const unsigned short stats[ARENA_ROSTER_STATS]) {
 
 static int prepare(RosterAssets* a, const ArenaLoadout* loadout, const char* path, const char** why) {
     int total = loadout->side[0].count + loadout->side[1].count;
-    if (loadout->side[0].count > 3 || loadout->side[1].count == 0 || total > ARENA_ROSTER_SLOTS ||
+    if (loadout->mixed > 1 || loadout->side[0].count > 3 || (!loadout->mixed && loadout->side[1].count == 0) ||
+        total == 0 || total > ARENA_ROSTER_SLOTS ||
         loadout->side[1].count > 5) return refused(why, "Choose up to three enemies for Player 1 and one to five for Player 2.");
     int validStage = 0;
     for (int i = 0; i < pcArenaStageCount(); i++) {
@@ -220,7 +314,7 @@ static int prepare(RosterAssets* a, const ArenaLoadout* loadout, const char* pat
     if (disc == NULL) return refused(why, "The current Xenogears disc could not be read.");
     a->loadout = *loadout;
     a->split = loadout->side[0].count;
-    if (a->split != 0) {
+    if (a->split != 0 || loadout->mixed) {
         a->loadout.callGear = a->loadout.startInGear = a->loadout.allowExitGear = 0;
     }
     for (int side = 0; side < 2; side++) {
@@ -240,6 +334,9 @@ static int prepare(RosterAssets* a, const ArenaLoadout* loadout, const char* pat
             }
             a->ids[a->count++] = id;
         }
+    }
+    if (a->split != 0 || loadout->mixed) {
+        for (int i = 0; i < a->typeCount; i++) loadPortrait(disc, &a->types[i]);
     }
     xgDiscClose(disc);
     return packVisuals(a, why);
@@ -267,9 +364,11 @@ int pcArenaLoadoutApprove(ArenaLoadoutReview* review, int player, int approve) {
 
 static int validLoadout(const ArenaLoadout* loadout, const int party[3]) {
     int members = 0;
-    if (loadout->side[0].count > 3 || loadout->side[1].count == 0 || loadout->side[1].count > 5 ||
+    if (loadout->mixed > 1 || loadout->side[0].count > 3 || (!loadout->mixed && loadout->side[1].count == 0) ||
+        loadout->side[1].count > 5 ||
         loadout->stage >= 75 || loadout->callGear > 1 || party[0] == 255) return 0;
     if (loadout->startInGear > 1 || loadout->allowExitGear > 1) return 0;
+    if (loadout->mixed && (loadout->callGear || loadout->startInGear || loadout->allowExitGear)) return 0;
     for (int i = 0; i < 3; i++) {
         if (party[i] == 255) continue;
         if (party[i] < 0 || party[i] > 10 || (members & (1 << party[i]))) return 0;
@@ -277,9 +376,9 @@ static int validLoadout(const ArenaLoadout* loadout, const int party[3]) {
     }
     for (int side = 0; side < 2; side++) {
         const ArenaEnemyTeam* team = &loadout->side[side];
-        if (team->gearSlots >= (1u << team->count)) return 0;
+        if (team->gearSlots >= (1u << team->count) || (loadout->mixed && team->gearSlots)) return 0;
         for (int i = 0; i < ARENA_ROSTER_ITEMS; i++) {
-            if (team->items[i] > 99 || (team->count == 0 && team->items[i] != 0)) return 0;
+            if (team->items[i] > 99 || ((team->count == 0 || loadout->mixed) && team->items[i] != 0)) return 0;
         }
         for (int i = 0; i < team->count; i++) {
             if (!validStats(team->multiplier[i])) return 0;
@@ -294,14 +393,14 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
     uint8_t bytes[ARENA_LOADOUT_CODE / 2];
     int n = 0;
     if (!validLoadout(loadout, party)) return 0;
-    unsigned flags = loadout->startInGear | (loadout->allowExitGear << 1);
+    unsigned flags = loadout->startInGear | (loadout->allowExitGear << 1) | (loadout->mixed << 4);
     for (int side = 0; side < 2; side++) {
         for (int i = 0; i < ARENA_ROSTER_ITEMS; i++) {
             if (loadout->side[side].items[i] != 0) flags |= 4u << side;
         }
     }
     int usesAssignedGears = loadout->callGear || loadout->startInGear;
-    bytes[n++] = 3;
+    bytes[n++] = loadout->mixed ? 4 : 3;
     bytes[n++] = loadout->stage;
     bytes[n++] = loadout->callGear;
     for (int i = 0; i < 3; i++) bytes[n++] = party[i];
@@ -356,7 +455,7 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
         bytes[i] = high * 16 + low;
     }
     unsigned version = bytes[at++];
-    if (version < 1 || version > 3) return 0;
+    if (version < 1 || version > 4) return 0;
     decoded.stage = bytes[at++];
     decoded.callGear = bytes[at++];
     for (int i = 0; i < 3; i++) party[i] = bytes[at++];
@@ -393,9 +492,10 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
     if (version >= 2) {
         if (at == length) return 0;
         unsigned flags = bytes[at++];
-        if (flags & ~15u) return 0;
+        if (flags & ~(version >= 4 ? 31u : 15u)) return 0;
         decoded.startInGear = flags & 1;
         decoded.allowExitGear = (flags >> 1) & 1;
+        decoded.mixed = (flags >> 4) & 1;
         for (int side = 0; side < 2; side++) {
             if (!(flags & (4u << side))) continue;
             if (at + ARENA_ROSTER_ITEMS > length) return 0;
@@ -409,7 +509,8 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
     return 1;
 }
 
-int pcArenaRosterPack(const char* code, const XgPartyRecord* party, unsigned char packet[ARENA_ROSTER_PACKET]) {
+int pcArenaRosterPack(const char* code, const XgPartyRecord* party, const XgPartyRecord* second,
+                      unsigned char packet[ARENA_ROSTER_PACKET]) {
     size_t bytes = strlen(code) + 1;
     if (bytes > ARENA_LOADOUT_CODE) return 0;
     memcpy(packet, code, bytes);
@@ -417,11 +518,16 @@ int pcArenaRosterPack(const char* code, const XgPartyRecord* party, unsigned cha
         memcpy(packet + bytes, party, sizeof *party);
         bytes += sizeof *party;
     }
+    if (second != NULL) {
+        if (party == NULL) return 0;
+        memcpy(packet + bytes, second, sizeof *second);
+        bytes += sizeof *second;
+    }
     return (int)bytes;
 }
 
 int pcArenaRosterUnpack(const unsigned char* packet, int bytes, const unsigned char* codes,
-                        char code[ARENA_LOADOUT_CODE], XgPartyRecord* record) {
+                        char code[ARENA_LOADOUT_CODE], XgPartyRecord* record, XgPartyRecord* second) {
     if (bytes <= 0 || bytes > ARENA_ROSTER_PACKET) return 0;
     const unsigned char* end = memchr(packet, 0, (size_t)bytes);
     if (end == NULL || end - packet >= ARENA_LOADOUT_CODE) return 0;
@@ -432,22 +538,58 @@ int pcArenaRosterUnpack(const unsigned char* packet, int bytes, const unsigned c
     memcpy(code, packet, (size_t)textBytes);
     if (!pcArenaLoadoutDecode(code, &roster, party)) return 0;
     memset(record, 0, sizeof *record);
-    if (roster.side[0].count != 0) return recordBytes == 0;
-    if (recordBytes != sizeof *record) return 0;
+    if (second != NULL) memset(second, 0, sizeof *second);
+    if (!roster.mixed && roster.side[0].count != 0) return recordBytes == 0;
+    int finalMixed = roster.mixed && second != NULL;
+    if (recordBytes != (int)sizeof *record * (1 + finalMixed)) return 0;
     memcpy(record, end + 1, sizeof *record);
     if (xgPartyCheck(record, codes, NULL) != XG_PARTY_OK) return 0;
     for (int i = 0; i < 3; i++) {
         if (party[i] != record->m4_members[i]) return 0;
+    }
+    if (finalMixed) {
+        memcpy(second, end + 1 + sizeof *record, sizeof *second);
+        return codes != NULL && pcArenaRosterCheckMixed(&roster, record, second, codes);
     }
     return 1;
 }
 
 int pcArenaRosterOnline(const ArenaLoadout* loadout, const char* disc, const char** why) {
     RosterAssets next = {0};
+    if (loadout->mixed) return refused(why, "Both saved parties are required for a mixed match.");
     if (!prepare(&next, loadout, disc, why)) {
         freeAssets(&next);
         return 0;
     }
+    next.online = 1;
+    freeAssets(&roster);
+    roster = next;
+    return 1;
+}
+
+int pcArenaRosterCheckMixed(const ArenaLoadout* loadout, const XgPartyRecord* first, const XgPartyRecord* second,
+                           const unsigned char* codes) {
+    if (!loadout->mixed || first == NULL || second == NULL) return 0;
+    int ids[3] = {first->m4_members[0], first->m4_members[1], first->m4_members[2]};
+    return validLoadout(loadout, ids) &&
+           xgPartyCheck(first, codes, NULL) == XG_PARTY_OK &&
+           xgPartyCheck(second, codes, NULL) == XG_PARTY_OK &&
+           first->m3_count + loadout->side[0].count <= 3 &&
+           second->m3_count + loadout->side[1].count <= 5 &&
+           loadout->side[0].count + loadout->side[1].count != 0;
+}
+
+int pcArenaRosterMixedOnline(const ArenaLoadout* loadout, const XgPartyRecord* first, const XgPartyRecord* second,
+                            const char* disc, const char** why) {
+    uint8_t codes[XG_PARTY_CODE_TABLE];
+    if (!xgPartyImageCodes(disc, codes) || !pcArenaRosterCheckMixed(loadout, first, second, codes))
+        return refused(why, "The mixed teams need valid saved parties and must fit their battle slots.");
+    RosterAssets next = {0};
+    if (!prepare(&next, loadout, disc, why)) {
+        freeAssets(&next);
+        return 0;
+    }
+    next.secondParty = *second;
     next.online = 1;
     freeAssets(&roster);
     roster = next;
@@ -459,6 +601,13 @@ int pcArenaRosterStart(const ArenaLoadoutReview* review, const char** why) {
     if (!pcArenaMatchAvailable(why)) return 0;
     const ArenaLoadoutChoice* chosen = &review->current;
     RosterAssets next = {0};
+    if (chosen->loadout.mixed) {
+        uint8_t codes[XG_PARTY_CODE_TABLE];
+        if (!xgPartyGameCodes(codes) ||
+            !pcArenaRosterCheckMixed(&chosen->loadout, &chosen->record, &chosen->secondRecord, codes))
+            return refused(why, "The mixed teams need valid saved parties and must fit their battle slots.");
+        next.secondParty = chosen->secondRecord;
+    }
     if (!prepare(&next, &chosen->loadout, cdSwapPath(0), why)) {
         freeAssets(&next);
         return 0;
@@ -482,10 +631,19 @@ int pcArenaRosterActive(void) {
 
 int pcArenaRosterSide(int entity) {
     if (entity < 3) return 0;
-    return !pcArenaRosterActive() || entity - 3 >= roster.split;
+    int first = pcArenaRosterFirstEnemy();
+    return !pcArenaRosterActive() || entity < first || entity - first >= roster.split;
 }
 
-int pcArenaRosterEnemyTeams(void) { return pcArenaRosterActive() && roster.split != 0; }
+int pcArenaRosterMixed(void) { return pcArenaRosterActive() && roster.loadout.mixed; }
+
+int pcArenaRosterFirstEnemy(void) { return 3 + (pcArenaRosterMixed() ? roster.secondParty.m3_count : 0); }
+
+const XgPartyRecord* pcArenaRosterSecondParty(void) {
+    return pcArenaRosterMixed() ? &roster.secondParty : NULL;
+}
+
+int pcArenaRosterEnemyTeams(void) { return pcArenaRosterActive() && !roster.loadout.mixed && roster.split != 0; }
 
 int pcArenaRosterConfig(unsigned char* config) {
     if (!pcArenaRosterActive()) return 0;
@@ -500,10 +658,13 @@ int pcArenaRosterConfig(unsigned char* config) {
     config[2] = roster.loadout.stage;
     config[3] = 0;
     memcpy(config + 4, party, 3);
+    int saved = pcArenaRosterFirstEnemy() - 3;
+    int placeholder = config[8] & 0x7F;
     for (int i = 0; i < ARENA_ROSTER_SLOTS; i++) {
-        config[8+i] = i < roster.count ? roster.ids[i] : 0x7F;
+        int enemy = i - saved;
+        config[8+i] = enemy < 0 ? placeholder : enemy < roster.count ? roster.ids[enemy] : 0x7F;
         config[16+i] = 0;
-        config[24+i] = i < roster.split ? (party[0] & 0x7F) | 0x80 : position;
+        config[24+i] = enemy >= 0 && enemy < roster.split ? (party[0] & 0x7F) | 0x80 : position;
     }
     return 1;
 }
@@ -511,12 +672,21 @@ int pcArenaRosterConfig(unsigned char* config) {
 int pcArenaRosterStage(void) { return pcArenaRosterActive() ? roster.loadout.stage + 1 : 0; }
 
 const unsigned char* pcArenaRosterBank(int slot, int* bank, int* type) {
-    if (!pcArenaRosterActive() || slot < 3 || slot >= roster.count + 3) return NULL;
-    const RosterType* entry = roster.activeGears & (1 << (slot - 3)) ? &roster.gear[slot - 3].type
-                                                                    : &roster.types[roster.ids[slot - 3]];
+    int i = slot - pcArenaRosterFirstEnemy();
+    if (!pcArenaRosterActive() || i < 0 || i >= roster.count) return NULL;
+    const RosterType* entry = roster.activeGears & (1 << i) ? &roster.gear[i].type : &roster.types[roster.ids[i]];
     *bank = entry->enemy.bank;
     *type = entry->enemy.type;
     return entry->bank;
+}
+
+const unsigned char* pcArenaRosterPortrait(int slot, const unsigned short** palette) {
+    int i = slot - pcArenaRosterFirstEnemy();
+    if (!pcArenaRosterActive() || i < 0 || i >= roster.count) return NULL;
+    const RosterType* type = &roster.types[roster.ids[i]];
+    if (!type->hasPortrait) return NULL;
+    if (palette != NULL) *palette = type->portraitPalette;
+    return type->portrait;
 }
 
 const unsigned char* pcArenaRosterVisuals(int* bytes) {
@@ -525,9 +695,16 @@ const unsigned char* pcArenaRosterVisuals(int* bytes) {
     return roster.visuals;
 }
 
+int pcArenaRosterSpriteLocation(int type, int* x, int* y) {
+    if (!roster.extraSheetRow || !pcArenaRosterActive() || type < 0 || type >= roster.typeCount) return 0;
+    *x = roster.sheetX[type];
+    *y = roster.sheetY[type];
+    return 1;
+}
+
 int pcArenaRosterMultiplier(int slot, int stat) {
-    if (!pcArenaRosterActive() || slot < 3 || slot >= roster.count + 3 || stat < 0 || stat >= ARENA_ROSTER_STATS) return 0;
-    int index = slot - 3;
+    int index = slot - pcArenaRosterFirstEnemy();
+    if (!pcArenaRosterActive() || index < 0 || index >= roster.count || stat < 0 || stat >= ARENA_ROSTER_STATS) return 0;
     int side = index >= roster.split;
     return roster.loadout.side[side].multiplier[index - (side ? roster.split : 0)][stat];
 }

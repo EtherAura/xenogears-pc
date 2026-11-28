@@ -432,7 +432,7 @@ const XgBeast* rosterEnemy(const std::vector<XgBeast>& catalog, ArenaEnemy id) {
     return match == catalog.end() ? nullptr : &*match;
 }
 
-bool showRosterReview(const char* code, const XgPartyRecord& record) {
+bool showRosterReview(const char* code, const XgPartyRecord& record, const XgPartyRecord& second = {}) {
     ArenaLoadout loadout = {};
     int party[3];
     if (!pcArenaLoadoutDecode(code, &loadout, party) || !loadRosterCatalog(cdSwapPath(0))) {
@@ -441,7 +441,7 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
     }
     if (const StageName* stage = stageName(loadout.stage)) ImGui::Text("%s %s", tr("Stage"), tr(stage->name));
     else ImGui::Text(tr("Stage %d"), loadout.stage);
-    if (loadout.side[0].count == 0) {
+    if (loadout.mixed || loadout.side[0].count == 0) {
         ImGui::TextUnformatted(tr(loadout.startInGear ? "Start in Gear" : "Start on foot"));
         if (loadout.callGear) ImGui::TextUnformatted(tr("Enable Gear"));
         if (loadout.allowExitGear) ImGui::TextUnformatted(tr("Dismounting allowed"));
@@ -451,20 +451,20 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
     for (int side = 0; side < 2; side++) {
         ImGui::SeparatorText(tr(side == 0 ? "Player 1" : "Player 2"));
         const ArenaEnemyTeam& team = loadout.side[side];
-        if (team.count == 0) {
+        if (loadout.mixed || team.count == 0) {
+            const XgPartyRecord& saved = side == 0 ? record : second;
             ImGui::TextUnformatted(tr("Character party"));
-            if (!record.m3_count) ImGui::TextUnformatted(tr("Player 1 chooses their own save."));
+            if (!saved.m3_count && !loadout.mixed) ImGui::TextUnformatted(tr("Player 1 chooses their own save."));
             XgPartyMember member;
-            for (int i = 0; xgPartyMemberInfo(&record, i, &member); i++) {
+            for (int i = 0; xgPartyMemberInfo(&saved, i, &member); i++) {
                 ImGui::BulletText(tr("%s (level %d)"), tr(memberNames[member.id]), member.level);
             }
             int count = 0, types = 0;
-            for (int i = 0; i < XG_PARTY_ITEMS && record.m298_itemIds[i] != 0; i++) {
+            for (int i = 0; i < XG_PARTY_ITEMS && saved.m298_itemIds[i] != 0; i++) {
                 types++;
-                count += record.m2C8_itemCounts[i];
+                count += saved.m2C8_itemCounts[i];
             }
             if (types) ImGui::Text(tr("Save items: %d types, %d total"), types, count);
-            continue;
         }
         for (int i = 0; i < team.count; i++) {
             const XgBeast* enemy = rosterEnemy(rosterCatalog.beasts, team.enemy[i]);
@@ -539,20 +539,25 @@ void confirmLocalRoster(ArenaLoadoutReview& review, bool canApprove, SDL_Joystic
     }
 }
 
-void rosterBlock(bool online, void (*resumeGame)()) {
+void rosterBlock(bool online, void (*resumeGame)(), bool mixed = false, int ownSide = 0,
+                 XgPartyRecord* ownRecord = nullptr) {
     if (online) rosterCode[0] = 0;
-    static ArenaLoadoutReview review{};
-    static std::string discPath;
+    struct Draft {
+        ArenaLoadoutReview review{};
+        std::string discPath;
+        bool reviewing = false;
+        char localCode[ARENA_LOADOUT_CODE]{};
+        int selected[2] = {-1, -1};
+        int quantities[2] = {1, 1};
+        const char* error = nullptr;
+    };
+    static Draft drafts[5];
+    Draft& draft = drafts[!online ? (mixed ? 1 : 0) : (mixed ? 3 + ownSide : 2)];
+    auto& [review, discPath, reviewing, localDraft, selected, quantities, error] = draft;
     static bool both = false;
-    static bool setup = false;
-    static bool reviewing = false;
-    static char localDraft[ARENA_LOADOUT_CODE];
     static char filter[64] = "";
-    static int selected[2] = {-1, -1};
-    static int quantities[2] = {1, 1};
     static bool held[2] = {};
     static SDL_JoystickID pad[2] = {};
-    static const char* error = nullptr;
     int session = netplaySessionState();
     if (session != NETPLAY_IDLE && session != NETPLAY_OVER) {
         pcArenaLoadoutChanged(&review);
@@ -566,8 +571,7 @@ void rosterBlock(bool online, void (*resumeGame)()) {
     }
     const auto& beasts = rosterCatalog.beasts;
     const auto& gears = rosterCatalog.gears;
-    if (!setup || discPath != path) {
-        setup = true;
+    if (discPath != path) {
         discPath = path;
         review = {};
         reviewing = false;
@@ -578,15 +582,17 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         opt::plain();
         markBlock();
         ImGui::SeparatorText(tr("Review enemy stats"));
-        bool canConfirm = showRosterReview(localDraft, review.current.record);
+        bool canConfirm = showRosterReview(localDraft, review.current.record, review.current.secondRecord);
         confirmLocalRoster(review, canConfirm, pad, held, error, reviewing, resumeGame);
         return;
     }
     bool changed = false;
-    opt::row(N_("Enemy teams on both sides"));
-    changed |= skin::checkbox("##both-enemy-teams", &both);
-    hint("Give both players enemy teams, or use a character party for Player 1.");
-    if (!both && review.current.loadout.side[0].count != 0) {
+    if (!mixed) {
+        opt::row(N_("Enemy teams on both sides"));
+        changed |= skin::checkbox("##both-enemy-teams", &both);
+        hint("Give both players enemy teams, or use a character party for Player 1.");
+    }
+    if (!mixed && !both && review.current.loadout.side[0].count != 0) {
         review.current.loadout.side[0].count = 0;
         review.current.loadout.side[0].gearSlots = 0;
         memset(review.current.loadout.side[0].items, 0, ARENA_ROSTER_ITEMS);
@@ -602,7 +608,7 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         }
         hint("%s", tr(description));
     };
-    if (!both) {
+    if (!mixed && !both) {
         gearOption(N_("Start in Gear"), N_("Start compatible fighters in their assigned Gears."),
                    "##start-in-gear", startInGear);
         gearOption(N_("Enable Gear"), N_("Let both players call an assigned Gear during a fight."),
@@ -610,24 +616,37 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         gearOption(N_("Allow dismounting"), N_("Use Call Gear again to return to fighting on foot."),
                    "##exit-gear", allowExitGear);
     }
-    loadout.startInGear = both ? 0 : startInGear;
-    loadout.callGear = both ? 0 : callGear;
-    loadout.allowExitGear = both ? 0 : allowExitGear;
+    loadout.mixed = mixed;
+    loadout.startInGear = mixed || both ? 0 : startInGear;
+    loadout.callGear = mixed || both ? 0 : callGear;
+    loadout.allowExitGear = mixed || both ? 0 : allowExitGear;
     bool usesAssignedGears = loadout.callGear || loadout.startInGear;
-    stagePicker();
-    unsigned char stage = pcArenaStageSetting() - 1;
+    if (!online || !mixed || ownSide == 0) stagePicker();
+    unsigned char stage = pcArenaStageSetting() > 0 ? pcArenaStageSetting() - 1 : 0;
     changed |= stage != review.current.loadout.stage;
     review.current.loadout.stage = stage;
     int party[3] = {0, 2, 255}; // hidden by the enemy-team battle when both sides use enemies
-    XgPartyRecord record{};
-    bool partyOk = both || online || arenaSavesPanel(1, &record);
-    if (!both && record.m3_count) {
+    XgPartyRecord record{}, second{};
+    bool partyOk;
+    if (mixed && online) {
+        partyOk = arenaSavesPanel(0, &record);
+        if (ownRecord) *ownRecord = record;
+    } else if (mixed) {
+        partyOk = arenaSavesPanel(1, &record);
+        bool secondOk = arenaSavesPanel(2, &second);
+        partyOk = partyOk && secondOk;
+    } else {
+        partyOk = both || online || arenaSavesPanel(1, &record);
+    }
+    if (record.m3_count) {
         for (int i = 0; i < 3; i++) party[i] = record.m4_members[i];
     }
     changed |= memcmp(review.current.party, party, sizeof(party)) != 0 ||
-               memcmp(&review.current.record, &record, sizeof record) != 0;
+               memcmp(&review.current.record, &record, sizeof record) != 0 ||
+               memcmp(&review.current.secondRecord, &second, sizeof second) != 0;
     memcpy(review.current.party, party, sizeof(party));
     review.current.record = record;
+    review.current.secondRecord = second;
     opt::row(N_("Filter by enemy"));
     ImGui::SetNextItemWidth(-1);
     ImGui::InputText("##custom-enemy-filter", filter, sizeof(filter));
@@ -635,10 +654,15 @@ void rosterBlock(bool online, void (*resumeGame)()) {
     const char* stats[ARENA_ROSTER_STATS] = {
         N_("HP"), N_("Physical attack"), N_("Ether"), N_("Defense"), N_("Ether defense"), N_("Agility"),
     };
-    for (int side = both ? 0 : 1; side < 2; side++) {
+    int firstSide = mixed ? (online ? ownSide : 0) : both ? 0 : 1;
+    int sideEnd = mixed && online ? ownSide + 1 : 2;
+    for (int side = firstSide; side < sideEnd; side++) {
         opt::plain();
         ArenaEnemyTeam& team = review.current.loadout.side[side];
         int cap = side == 0 ? 3 : 5;
+        if (mixed) cap -= (online || side == 0 ? record : second).m3_count;
+        partyOk &= team.count <= cap;
+        quantities[side] = std::min(quantities[side], std::max(1, cap));
         ImGui::PushID(side);
         opt::group(side == 0 ? N_("Player 1 enemies") : N_("Player 2 enemies"));
         opt::row(N_("Enemy"));
@@ -663,9 +687,15 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         hint("Choose the enemy to add to this team.");
         opt::row(N_("Quantity"));
         ImGui::SetNextItemWidth(-1);
-        ImGui::SliderInt("##quantity", &quantities[side], 1, cap);
+        ImGui::BeginDisabled(cap == 0);
+        ImGui::SliderInt("##quantity", &quantities[side], 1, std::max(1, cap));
+        ImGui::EndDisabled();
         hint("Number of copies to add. This team can have up to %d enemies.", cap);
         opt::plain();
+        if (mixed) {
+            ImGui::PopID();
+            continue;
+        }
         markBlock();
         ImGui::BeginDisabled(selected[side] < 0 || team.count + quantities[side] > cap);
         if (ImGui::Button(tr("Add"))) {
@@ -791,8 +821,8 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         pcArenaLoadoutChanged(&review);
         error = nullptr;
     }
-    bool canApprove = partyOk && review.current.loadout.side[1].count != 0 &&
-                      (!both || review.current.loadout.side[0].count != 0);
+    bool canApprove = partyOk && (mixed ? online || loadout.side[0].count + loadout.side[1].count != 0
+                                      : loadout.side[1].count != 0 && (!both || loadout.side[0].count != 0));
     if (online) {
         rosterCode[0] = '\0';
         memset(loadout.side[0].items, 0, sizeof loadout.side[0].items);
@@ -994,10 +1024,15 @@ void versusBlock(void (*resumeGame)()) {
         partyBlock(resumeGame);
         opt::endSubmenu();
     }
-
+    if (opt::beginSubmenu("local-mixed", N_("Mixed teams"), nullptr,
+                          N_("Fight on foot with saved characters and enemies on either team."))) {
+        musicPicker();
+        rosterBlock(false, resumeGame, true);
+        opt::endSubmenu();
+    }
 }
 
-enum OnlineMatch { OnlineBattling, OnlineVersus, OnlineParty, OnlineCustom };
+enum OnlineMatch { OnlineBattling, OnlineVersus, OnlineParty, OnlineCustom, OnlineMixed };
 
 struct {
     bool loaded = false;
@@ -1106,7 +1141,8 @@ bool reviewOnlineRoster() {
     if (review) {
         ImGui::SeparatorText(tr("Review enemy stats"));
         const char* roster = reviewingDraft ? draftedRoster.roster : proposal;
-        bool canConfirm = showRosterReview(roster, reviewingDraft ? draftedRoster.record : agreed.record);
+        bool canConfirm = reviewingDraft ? showRosterReview(roster, draftedRoster.record)
+                                         : showRosterReview(roster, agreed.record, agreed.secondRecord);
         const char* confirm = reviewingDraft ? tr("Propose loadout") : tr("Confirm loadout");
         focusLobbyActions(canConfirm ? confirm : close, close);
         ImGui::BeginDisabled(!canConfirm);
@@ -1115,7 +1151,7 @@ bool reviewOnlineRoster() {
                 reviewingDraft = false;
                 rosterLobbyError = !netplayRosterLobbyStart(&draftedRoster);
             } else {
-                netplayRosterLobbyConfirm(proposal, &agreed.record);
+                netplayRosterLobbyConfirm(proposal, &agreed.record, &agreed.secondRecord);
             }
         }
         ImGui::EndDisabled();
@@ -1123,7 +1159,7 @@ bool reviewOnlineRoster() {
     } else if (state == NETPLAY_ROSTER_READY) {
         // Keep the agreed stats on the last rendered frame for the shatter.
         ImGui::SeparatorText(tr("Loadout confirmed"));
-        showRosterReview(agreed.roster, agreed.record);
+        showRosterReview(agreed.roster, agreed.record, agreed.secondRecord);
         nextOnlineMatch = agreed;
         needsArenaPicture = launchAfterArenaPicture = true;
         netplayRosterLobbyStop();
@@ -1136,7 +1172,7 @@ bool reviewOnlineRoster() {
         if (agreed.host) waiting = proposal[0] ? "Waiting for Player 2 to confirm the loadout."
                                                    : "Waiting for Player 2 to propose a loadout.";
         ImGui::TextUnformatted(tr(waiting));
-        if (!agreed.host && proposal[0]) showRosterReview(agreed.roster, agreed.record);
+        if (!agreed.host && proposal[0]) showRosterReview(proposal, agreed.record, agreed.secondRecord);
     }
     if (!review) focusLobbyActions(close);
     if (ImGui::Button(close)) {
@@ -1255,8 +1291,9 @@ void onlineBlock(OnlineMatch mode) {
         hint("A name or an IPv4 address, then the port (192.168.1.20:7461); an IPv6 address goes in brackets "
              "([2001:db8::20]:7461).");
     }
-    const bool custom = mode == OnlineCustom;
-    const bool bringing = mode == OnlineParty || (mode == OnlineVersus && O.host);
+    const bool mixed = mode == OnlineMixed;
+    const bool custom = mode == OnlineCustom || mixed;
+    const bool bringing = mode == OnlineParty || mixed || (mode == OnlineVersus && O.host);
     bool partyOk = false;
     const uint8_t* hostItemSave = nullptr;
     const XgVersusFormation* formation = nullptr;
@@ -1298,11 +1335,15 @@ void onlineBlock(OnlineMatch mode) {
             rosterBlock(true, nullptr);
         }
         break;
+    case OnlineMixed:
+        rosterBlock(true, nullptr, true, O.host ? 0 : 1, &O.record);
+        partyOk = O.record.m3_count != 0;
+        break;
     }
     if (O.host) musicPicker();
-    bool ready = O.code[0] != '\0' && (!bringing || partyOk) && (!custom || O.host || rosterCode[0]) &&
+    bool ready = O.code[0] != '\0' && (!bringing || partyOk) && (!custom || (O.host && !mixed) || rosterCode[0]) &&
                  (O.host ? mode != OnlineVersus || O.joinerPicks || formation : strchr(O.address, ':') != nullptr);
-    const char* start = custom ? (O.host ? tr("Open lobby") : tr("Review enemy stats"))
+    const char* start = custom ? (O.host ? tr("Open lobby") : mixed ? tr("Join lobby") : tr("Review enemy stats"))
                                : (O.host ? tr("Host##netplay") : tr("Join##netplay"));
     opt::plain();
     markBlock();
@@ -1320,9 +1361,10 @@ void onlineBlock(OnlineMatch mode) {
         s.battlingOnly = !O.host && mode == OnlineBattling;
         s.hasParty = (bringing || (custom && O.host)) && partyOk;
         if (s.hasParty) s.record = O.record;
+        s.mixedRoster = mixed;
         s.joinerPicks = s.versus && O.joinerPicks;
         s.pick = !O.host && formation;
-        if (custom && !O.host) memcpy(s.roster, rosterCode, sizeof(s.roster));
+        if (mixed || (custom && !O.host)) memcpy(s.roster, rosterCode, sizeof(s.roster));
         if (hostItemSave != nullptr) xgPartyReadItems(hostItemSave, s.rosterHostItems);
         if (formation) {
             s.table = formation->table;
@@ -1339,7 +1381,7 @@ void onlineBlock(OnlineMatch mode) {
         if (!O.host) settingsSet("netplay_address", O.address);
         settingsSave();
         O.custom = custom;
-        if (custom && O.host) {
+        if (custom && (O.host || mixed)) {
             rosterLobbyError = !netplayRosterLobbyStart(&s);
         } else if (custom) {
             draftedRoster = s;
@@ -1353,8 +1395,9 @@ void onlineBlock(OnlineMatch mode) {
     if (O.code[0] == '\0') hint("Enter the session code.");
     else if (!O.host && strchr(O.address, ':') == nullptr) hint("Enter the host's address and port.");
     else if (bringing && !partyOk) hint("Choose a party from a memory-card save.");
-    else if (custom && !O.host && !rosterCode[0]) hint("Build a valid loadout to review it.");
+    else if ((mixed || (custom && !O.host)) && !rosterCode[0]) hint("Build a valid loadout to review it.");
     else if (!ready) hint("Choose an enemy formation or let Player 2 choose.");
+    else if (mixed) hint("Each player chooses their own team. Both players review the matchup before confirming.");
     else if (custom && O.host) hint("Player 2 proposes the teams. Review their stats here before confirming.");
     else hint("Both players see each other's IP address. The host's gameplay settings apply to both players.");
 }
@@ -1369,6 +1412,7 @@ void onlineMenu() {
         {OnlineBattling, "online-battling", N_("Battling"), N_("Two-player Gear Battling online.")},
         {OnlineVersus, "online-formation", N_("Enemy battle"), N_("Fight preset enemy formations or build custom teams for two players.")},
         {OnlineParty, "online-party", N_("Party vs party"), N_("Both players bring a party from their own save.")},
+        {OnlineMixed, "online-mixed", N_("Mixed teams"), N_("Each player brings saved characters and can add enemies to their team.")},
     };
     for (const auto& mode : modes) {
         if (opt::beginSubmenu(mode.id, mode.label, nullptr, mode.description)) {

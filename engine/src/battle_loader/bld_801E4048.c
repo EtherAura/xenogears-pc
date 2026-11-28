@@ -181,8 +181,11 @@ void batteLoaderPhase1_1(void) {
     for (i = 3; i < 11; i++) {
         if (battleVisualEntities[i].m2_characterId != 0x7F) {
 #ifdef PLATFORM_PC
-            if (pcArenaRosterEnemyTeams() && pcArenaRosterSide(i) == 0) {
-                battleVisualEntities[i].m1_indexInSlot = i - 3;
+            if ((pcArenaRosterEnemyTeams() || pcArenaRosterMixed()) && pcArenaRosterSide(i) == 0) {
+                s32 row = battleVisualEntities[i].m0_positionSlot;
+                s32 place = battleSlotLayout[row][0]++;
+                battleVisualEntities[i].m1_indexInSlot = place;
+                battleSlotLayout[row][1] |= characterIdToTargetBitmask(place);
                 continue;
             }
 #endif
@@ -211,7 +214,7 @@ void batteLoaderPhase1_1(void) {
     for (i = 3; i < 11; i++) {
         if (battleVisualEntities[i].m2_characterId != 0x7F) {
 #ifdef PLATFORM_PC
-            if (pcArenaRosterEnemyTeams() && pcArenaRosterSide(i) == 0) {
+            if ((pcArenaRosterEnemyTeams() || pcArenaRosterMixed()) && pcArenaRosterSide(i) == 0) {
                 sBattleSlotPositions* row = &battleMechaInitData->m4_slotPositions[battleVisualEntities[i].m0_positionSlot];
                 s32 place = battleVisualEntities[i].m1_indexInSlot;
                 battleVisualEntities[i].mA_X = row->m0_party[place].vx;

@@ -558,7 +558,11 @@ void battleDrawAPBar(void) {
     AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m8920_fullWindowDrMode[D_800CCB04.m30_battleOddOrEven]);
     pcVersusViewSwap(1); /* the bar's fills: player 2's when its bar is the one shown (mirror.c) */
     for (i = 0; i < 4; i++) {
-        if (battleVar1->m7F_drawTimeBarFill[i] && currentBattleMode == 1) {
+        if (battleVar1->m7F_drawTimeBarFill[i] && currentBattleMode == 1
+#ifdef PLATFORM_PC
+            && (!pcArenaRosterMixed() || i == 3)
+#endif
+        ) {
             AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m5A0_timeBarFills[0][i * 2 + battleVar1->m84_timeBarsOddOrEven[i]]);
         }
     }

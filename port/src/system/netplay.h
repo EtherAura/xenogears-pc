@@ -56,6 +56,8 @@ typedef struct {
     int hasParty;      /* a checked save record is attached */
     char roster[ARENA_LOADOUT_CODE]; /* both players approve the same roster before launching */
     XgPartyRecord record; /* ... (checked) */
+    XgPartyRecord secondRecord; /* Player 2's saved party after a mixed roster review */
+    int mixedRoster;
     uint8_t rosterHostItems[ARENA_ROSTER_ITEMS]; /* host inventory for enemy-only proposals */
 } NetplayStart;
 enum { NETPLAY_IDLE, NETPLAY_STARTING, NETPLAY_HOSTING, NETPLAY_JOINING, NETPLAY_LOADING, NETPLAY_CONNECTED, NETPLAY_OVER };
@@ -64,7 +66,7 @@ enum { NETPLAY_ROSTER_IDLE, NETPLAY_ROSTER_WAITING, NETPLAY_ROSTER_REVIEW, NETPL
 uint64_t netplayCompatibilityId(void);
 int netplayRosterLobbyStart(const NetplayStart* start);
 int netplayRosterLobbyState(NetplayStart* start, char* proposal, char* detail, size_t detailSize);
-void netplayRosterLobbyConfirm(const char* proposal, const XgPartyRecord* party);
+void netplayRosterLobbyConfirm(const char* proposal, const XgPartyRecord* party, const XgPartyRecord* second);
 void netplayRosterLobbyStop(void);
 
 /* Returns 1 when the connection worker starts. */

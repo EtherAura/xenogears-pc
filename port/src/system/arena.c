@@ -821,6 +821,7 @@ int pcVersusStage(unsigned char party[3], unsigned char places[3]) {
 
 const unsigned char* pcVersusPartyRecord(int player) {
     if (player != 1 && player != 2) return NULL;
+    if (player == 2 && pcArenaRosterMixed()) return (const unsigned char*)pcArenaRosterSecondParty();
     if (S.kind == ARENA_MATCH_PARTY && matchOnline()) return (const unsigned char*)&S.records[player - 1];
     if (M.phase != MATCH_ON || M.kind != ARENA_MATCH_PARTY) return NULL;
     return (const unsigned char*)&M.records[player - 1];

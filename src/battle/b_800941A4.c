@@ -8,6 +8,9 @@
 #include "main/game_state.h"
 #include "battle/battle.h"
 #include "pc_gameplay.h"
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+#endif
 
 /* Battle data block at 0x800CCCE8; retail reaches it both through the
  * initialised pointer pBattleEntities (= &battleEntities) and directly. */
@@ -105,7 +108,11 @@ u8 startBattleAttackAnimation(void) {
         setEtherAbilitiesTargetAll(startBattleAttackAnimationVar2);
         IMPLICIT_RETURN(0);
     }
-    if (startBattleAttackAnimationVar2 < 3) {
+    if (startBattleAttackAnimationVar2 < 3
+#ifdef PLATFORM_PC
+        || (pcArenaRosterMixed() && pcVersusMirrorSlot(startBattleAttackAnimationVar2))
+#endif
+    ) {
         currentEntityBattleStats = &BATTLE_FOOT_ROWS(pBattleEntities, startBattleAttackAnimationVar2)[pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
     } else {
         currentEntityBattleStats = &pBattleEntities->m35D8_enemiesBattleStats[pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
@@ -3013,7 +3020,11 @@ void func_8009C134(void) {
 void startGearAttackAnimation(void) {
     u16 mask;
 
-    if (startBattleAttackAnimationVar2 < 3) {
+    if (startBattleAttackAnimationVar2 < 3
+#ifdef PLATFORM_PC
+        || (pcArenaRosterMixed() && pcVersusMirrorSlot(startBattleAttackAnimationVar2))
+#endif
+    ) {
         currentEntityBattleStats = &BATTLE_GEAR_ROWS(pBattleEntities, pBattleEntities->m5FC1_performAttackSub3_attacker)
                                                          [pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
     } else {

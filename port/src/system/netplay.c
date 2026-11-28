@@ -250,6 +250,7 @@ static struct {
     char save[64];
     int hasParty;
     XgPartyRecord party;
+    XgPartyRecord secondParty;
     char roster[ARENA_LOADOUT_CODE];
     uint8_t codes[XG_PARTY_CODE_TABLE];
     int haveCodes;
@@ -811,7 +812,9 @@ static int prepareConnection(const char* disc, const char* approved) {
         ArenaLoadout roster;
         const char* why = "The approved loadout code is invalid.";
         if (!pcArenaLoadoutDecode(approved, &roster, approvedParty) ||
-            !pcArenaLoadoutEncode(&roster, approvedParty, N.roster) || !pcArenaRosterOnline(&roster, disc, &why)) {
+            !pcArenaLoadoutEncode(&roster, approvedParty, N.roster) ||
+            !(roster.mixed ? pcArenaRosterMixedOnline(&roster, N.hasParty ? &N.party : NULL, &N.secondParty, disc, &why)
+                           : pcArenaRosterOnline(&roster, disc, &why))) {
             say("%s", why);
             status("over loadout");
             return 0;
@@ -842,17 +845,18 @@ static int prepareConnection(const char* disc, const char* approved) {
         return 0;
     }
     if (N.roster[0]) {
+        _Static_assert(ARENA_ROSTER_PACKET <= NP_PARTY_MAX, "roster fits the party packet");
         uint8_t packet[ARENA_ROSTER_PACKET];
-        int bytes = pcArenaRosterPack(N.roster, N.hasParty ? &N.party : NULL, packet);
-        if (N.hasParty) {
-            char code[ARENA_LOADOUT_CODE];
-            XgPartyRecord record;
-            if (!pcArenaRosterUnpack(packet, bytes, N.haveCodes ? N.codes : NULL, code, &record)) {
-                status("over loadout");
-                return 0;
-            }
+        int mixed = N.secondParty.m3_count != 0;
+        int bytes = pcArenaRosterPack(N.roster, N.hasParty ? &N.party : NULL, mixed ? &N.secondParty : NULL, packet);
+        char code[ARENA_LOADOUT_CODE];
+        XgPartyRecord record, second;
+        if (!pcArenaRosterUnpack(packet, bytes, N.haveCodes ? N.codes : NULL, code, &record, mixed ? &second : NULL) ||
+            !npSetParty(s, packet, bytes)) {
+            status("over loadout");
+            return 0;
         }
-        npSetParty(s, packet, bytes);
+        if (mixed) N.sidesHash = s->partyHash;
     } else if (N.hasParty) {
         npSetParty(s, (const uint8_t*)&N.party, (int)sizeof N.party);
         if (N.host && s->terms.mode == NP_MODE_VERSUS) {
@@ -1081,6 +1085,7 @@ int netplayMenuConnect(const NetplayStart* o) {
     N.pickConfig = o->config;
     N.hasParty = o->hasParty;
     if (o->hasParty) N.party = o->record;
+    if (o->mixedRoster) N.secondParty = o->secondRecord;
     if (prepareConnection(cdSwapPath(0), o->roster)) {
         SDL_SetAtomicInt(&cancelled, 0);
         SDL_SetAtomicInt(&connected, 0);
@@ -1227,18 +1232,21 @@ static uint64_t stateHash(void) {
         h = gearHash(h, &battlingGear2);
     } else if (pcWideGetMode() == 2) {
         h = npFnv(h, &battleEntities.m0_entities, sizeof battleEntities.m0_entities);
-        if (N.np.terms.mode == NP_MODE_PARTY) {
+        if (N.np.terms.mode == NP_MODE_PARTY || pcArenaRosterMixed()) {
             u32 p2 = pcVersusPartyHash(); /* player 2's side between its turns (mirror.c) */
             h = npFnv(h, &p2, sizeof p2);
         }
-        if (N.np.terms.mode == NP_MODE_ROSTER) {
+        if (pcArenaRosterMixed()) {
+            h = npFnv(h, battleEffectBF.m12_counts, sizeof battleEffectBF.m12_counts);
+            h = npFnv(h, battleEffectBF.m42_ids, sizeof battleEffectBF.m42_ids);
+        } else if (N.np.terms.mode == NP_MODE_ROSTER) {
             for (int side = 0; side < 2; side++) {
                 const u8* counts = pcArenaRosterItemCounts(side);
                 if (counts != NULL) h = npFnv(h, counts, ARENA_ROSTER_ITEMS);
             }
         }
     }
-    if (N.np.terms.mode == NP_MODE_PARTY) h = npFnv(h, &N.sidesHash, sizeof N.sidesHash); /* the two records */
+    if (N.sidesHash != 0) h = npFnv(h, &N.sidesHash, sizeof N.sidesHash);
     return h;
 }
 

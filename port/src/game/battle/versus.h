@@ -16,12 +16,19 @@ void pcVersusWord(u8* out, const char* s);                /* fixed words in the 
 void pcVersusGameText(u8* out, const u8* s, s32 max);     /* a string of the game's, at most max bytes */
 void pcVersusShowLabel(const u8* s);                      /* the acting entity's name label (window 5) */
 void pcVersusHideLabel(void);
+/* enemyinfo.c */
+void pcBattleRosterHud(void);
+void pcBattleRosterHudReset(void);
 
 /* mirror.c */
 void pcVersusMirrorSetup(void); /* pcVersusBattleSetup: the formation as the mirror wants it */
+void pcVersusMixedItems(int side, unsigned char* inventory);
+void pcVersusMixedUseItem(int side, int item);
+const unsigned char* pcVersusSavedPortrait(int entity, const unsigned short** palette);
 void pcVersusMirrorEnd(void);   /* pcVersusBattleEnd: what the mirror loaded, freed */
 int pcVersusMirrorForfeit(void); /* player 2 chose Escape: player 1 won */
 void pcVersusMirrorLabel(void); /* pcVersusDraw, each frame: player 2's name label kept up for its turn */
+int pcVersusHudSide(void);      /* zero-based side this screen shows */
 /* the enemy info window in a versus battle (enemyinfo.c): the first slot of
  * the side it lists (3 player 2's, 0 the party on player 2's screen), and a
  * slot's name in currentBattleSpecificStrings */

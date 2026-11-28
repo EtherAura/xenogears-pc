@@ -160,6 +160,7 @@
 #include "pc_arena.h"
 #include "versus.h"
 #include "../../card/party_record.h"
+#include "../../system/arena_roster.h"
 
 /* the battle loader (battle_loader overlay) */
 extern s32 battlePartyFileMapping[14][2]; /* per character: battle sprite file, attack animation file (dir 0x2C/1) */
@@ -288,6 +289,14 @@ static u8 portraitFile[PORTRAITS * PORTRAIT_BYTES]; /* the loader's portrait fil
 static s32 portraitsShown; /* whose portraits the glyphs have in VRAM: 1 player 1's, 2 player 2's */
 static u8 hudSavedIds[3];  /* hudIn: the party's boxes' visual ids, its layout */
 static u8 hudSavedLayout;
+
+const u8* pcVersusSavedPortrait(int entity, const u16** palette) {
+    int character = entity < 3 ? battleCharacters[entity] : mirrorChar[entity - 3];
+    if (character >= PORTRAITS) return NULL;
+    const u8* tim = portraitFile + character * PORTRAIT_BYTES;
+    *palette = (const u16*)(tim + 20);
+    return tim + 544;
+}
 /* partyBuild: what running the party's code for player 2 changes of player 1's */
 static struct {
     sBattleEntity entities[3];
@@ -358,6 +367,10 @@ static s32 viewShown(void) {
     s32 p = pcVersusPerspective();
 
     return p == 1 || p == 2 ? p : viewSide;
+}
+
+int pcVersusHudSide(void) {
+    return viewShown() == 2 ? 1 : 0;
 }
 
 /* BATTLE_CHARACTER (include/battle/battle.h): the party's code asks for a
@@ -450,7 +463,8 @@ void pcVersusMirrorSetup(void) {
     s32 enemy = c[8] & 0x7F;
     s32 i;
 
-    mirrorOn = pcVersusMirror();
+    int mixed = pcArenaRosterMixed();
+    mirrorOn = pcVersusMirror() || mixed;
     forfeit = 0;
     p2Turn = 0;
     labelOn = 0;
@@ -459,6 +473,9 @@ void pcVersusMirrorSetup(void) {
     viewSide = 1; /* the party's bar until a copy's turn */
     partyOn = 0;
     portraitsShown = 1; /* the loader's: the party's */
+    __builtin_memset(p2Party, 0, sizeof(p2Party));
+    __builtin_memset(p2Abilities, 0, sizeof(p2Abilities));
+    __builtin_memset(p2Names, 0, sizeof(p2Names));
     __builtin_memset(p2Rows, 0, sizeof(p2Rows));
     __builtin_memset(p2GearRows, 0, sizeof(p2GearRows));
     for (i = 0; i < 3; i++) {
@@ -468,7 +485,7 @@ void pcVersusMirrorSetup(void) {
     if (!mirrorOn) {
         return;
     }
-    if (pcVersusPartyMatch()) {
+    if (pcVersusPartyMatch() || mixed) {
         const u8* r = pcVersusPartyRecord(2);
 
         if (r != NULL) {
@@ -481,6 +498,7 @@ void pcVersusMirrorSetup(void) {
             pcArenaLog("party vs party: no record for player 2: a copy of the party instead");
         }
     }
+    if (mixed) return; /* pcArenaRosterConfig already placed both teams. */
     if (partyOn) {
         members = p2Count; /* player 2's own party (its record) */
     } else {
@@ -728,6 +746,7 @@ static void buildNames(void) {
     s32 i;
 
     __builtin_memset(mirrorStrings, 0, sizeof(mirrorStrings));
+    *(u32*)mirrorStrings = NAMES;
     pcVersusWord(tag, " (P2)");
     for (k = 0; k < NAMES; k++) {
         *(u16*)(mirrorStrings + 4 + 2 * k) = (u16)at;
@@ -751,6 +770,7 @@ void pcVersusBattleLoaded(void) {
     s32 k;
     s32 e;
 
+    viewSide = 1;
     if (!mirrorOn) {
         return;
     }
@@ -867,12 +887,42 @@ static void swapItems(void) {
     swapBytes(gameState.m26C_party[4].m6F_equipment, p2GunEquipment, sizeof(p2GunEquipment));
 }
 
+static u8* mixedItemList(int side, int ids) {
+    if (side == 1) return p2Items[ids];
+    return ids ? battleEffectBF.m42_ids : battleEffectBF.m12_counts;
+}
+
+void pcVersusMixedItems(int side, u8* inventory) {
+    const u8* counts = mixedItemList(side, 0);
+    const u8* ids = mixedItemList(side, 1);
+    int i;
+    __builtin_memset(inventory, 0, ARENA_ROSTER_ITEMS);
+    for (i = 0; i < ARENA_ROSTER_ITEMS; i++) {
+        if (ids[i] > 0 && ids[i] <= ARENA_ROSTER_ITEMS) {
+            int count = inventory[ids[i] - 1] + counts[i];
+            inventory[ids[i] - 1] = count < 99 ? count : 99;
+        }
+    }
+}
+
+void pcVersusMixedUseItem(int side, int item) {
+    u8* counts = mixedItemList(side, 0);
+    const u8* ids = mixedItemList(side, 1);
+    int i;
+    for (i = 0; i < ARENA_ROSTER_ITEMS; i++) {
+        if (ids[i] == item && counts[i] != 0) {
+            --counts[i];
+            return;
+        }
+    }
+}
+
 /* ---- the sprites (createBattlePlayerSpriteActors) ---- */
 
 void pcVersusMirrorSprites(void) {
     s32 dir;
     s32 sub;
-    s32 x = MIRROR_SPRITE_X;
+    s32 x = pcArenaRosterMixed() ? 0x140 : MIRROR_SPRITE_X;
     s32 k;
     s32 e;
     s32 c;
@@ -1037,6 +1087,17 @@ static void hudReady(void) {
         u8 character = mirrorChar[k];
         p2Hud0.m835C_apFuelLabels[k].m1E1_barMode =
             character == 0x7F ? 0 : character != 7 && battleVisualEntities[k + 3].m4_isGear ? 2 : 1;
+        if (character != 0x7F) {
+            s32 odd;
+            for (odd = 0; odd < 2; odd++) {
+                POLY_FT4* portrait = &p2Hud0.m818_portraits[k][odd];
+                u8 top = portrait->u0, bottom = portrait->u2;
+                portrait->u0 = portrait->u1;
+                portrait->u1 = top;
+                portrait->u2 = portrait->u3;
+                portrait->u3 = bottom;
+            }
+        }
     }
     p2HudReady = 1;
 }
@@ -1089,6 +1150,16 @@ void pcVersusMirrorGearHud(int slot, int inGear) {
         p2Hud0.m835C_apFuelLabels[slot - 3].m1E1_barMode = inGear && mirrorChar[slot - 3] != 7 ? 2 : 1;
 }
 
+static void drawMixedTurnGauge(void) {
+    int i;
+    if (pcVersusPrivateSelection()) return;
+    battleRenderPolyArray(battleVar0->m2E08_timeBars[3][0], battleVar1->m74_timeBarsLengths[3],
+                          battleVar1->m84_timeBarsOddOrEven[3]);
+    for (i = 0; i < battleVar1->m97_apMarkCount; i++) {
+        AddPrim(D_800CCB04.m0_pCurrentBattleOT + 1, &battleVar0->m908_apMarks[battleVar1->m98_apMarksOddOrEven + i * 2]);
+    }
+}
+
 int pcVersusViewBar(void) {
     HudScratch scratch;
     s32 shows2;
@@ -1103,7 +1174,8 @@ int pcVersusViewBar(void) {
     /* what the battle changes in the party's (a Gear's bar mode; the ring
      * up, which shows the turn gauge's fill); party vs party: its labels are
      * its own boxes' (hudReady), on foot */
-    if (partyOn && portraitsShown != (shows2 ? 2 : 1)) {
+    int mixed = pcArenaRosterMixed();
+    if (partyOn && !mixed && portraitsShown != (shows2 ? 2 : 1)) {
         portraitsLoad(shows2 ? 2 : 1); /* the shown side's portraits (the header) */
     }
     p2Hud1.mCB_drawCommandRing = battleVar1->mCB_drawCommandRing;
@@ -1112,19 +1184,21 @@ int pcVersusViewBar(void) {
     updatePolyArray3A88();
     renderGearHP();
     updatePortraits();
-    if (shows2) {
+    if (shows2 && !mixed) {
         battleRenderPortraitSelection();
         battleRenderPlayerPortraits();
     }
+    if (shows2 && mixed) drawMixedTurnGauge();
     hudOut();
     scratchLoad(&scratch);
-    if (shows2 && battleVar1->mAF_drawApCounter) {
+    if (!shows2 && mixed) drawMixedTurnGauge();
+    if ((shows2 || mixed) && battleVar1->mAF_drawApCounter && (!mixed || !pcVersusPrivateSelection())) {
         /* the turn's AP counter, which battleRenderPlayerPortraits draws with the party's bar */
         battleRenderPolyArray(battleVar0->m9C8_APCounterDisplayPolys[0], battleVar1->m7B_apCounterLength,
                               battleVar1->mA4_oddOrEven7B);
     }
     hwClockHold(0);
-    return shows2;
+    return shows2 || mixed;
 }
 
 /* battleDrawAPBar's time bar fills and wideBattleHud's turn gauge: player
@@ -1186,6 +1260,10 @@ void pcVersusViewHpShown(void) {
 
 /* battleTickMain: entity's turn begins. */
 void pcVersusViewTurn(u8 entity) {
+    if (pcArenaRosterEnemyTeams() || pcArenaRosterMixed()) {
+        viewSide = pcArenaRosterSide(entity) + 1;
+        return;
+    }
     if (!mirrorOn) {
         return;
     }
@@ -1486,10 +1564,12 @@ int pcVersusMirrorTurn(u8 entity) {
         p2Hud0.m6415_drawHighlight = 0;
         return 1;
     }
-    if (inGear) {
-        __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats, p2GearRows[k], sizeof(p2GearRows[k]));
-    } else {
-        __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats, p2Rows[k], sizeof(p2Rows[k]));
+    if (!pcArenaRosterMixed()) {
+        if (inGear) {
+            __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats, p2GearRows[k], sizeof(p2GearRows[k]));
+        } else {
+            __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats, p2Rows[k], sizeof(p2Rows[k]));
+        }
     }
     pcVersusGameText(label, getDialogParamPointer(currentBattleSpecificStrings, battleMonsterMapping[entity]),
                      VERSUS_LABEL - 1);

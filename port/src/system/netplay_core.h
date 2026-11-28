@@ -37,7 +37,7 @@ extern "C" {
 /* Party vs party: each side's party record (netplay.c: card/party.h; bytes
  * here) in PARTY pages of NP_PARTY_DATA bytes, at most NP_PARTY_MAX bytes */
 #define NP_PARTY_DATA 44
-#define NP_PARTY_MAX 2048 /* format 1 is 952 bytes; the Gears' format 2 about 1500 */
+#define NP_PARTY_MAX 2560 /* shared mixed roster terms and two saved parties */
 #define NP_PARTY_PAGES ((NP_PARTY_MAX + NP_PARTY_DATA - 1) / NP_PARTY_DATA)
 
 enum { NP_HELLO = 1, NP_WELCOME, NP_INPUT, NP_BYE, NP_SETTINGS, NP_PARTY };
