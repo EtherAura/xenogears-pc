@@ -38,6 +38,7 @@ int pcVersusPrivateSelection(void);
 int pcArenaRosterMultiplier(int slot, int stat);
 const unsigned char* pcArenaRosterBank(int slot, int* bank, int* type);
 #define PC_ARENA_BATTLE_PORTRAIT_SIZE 24
+#define PC_ARENA_BATTLE_PORTRAIT_RIM 1
 const unsigned char* pcArenaRosterPortrait(int slot, const unsigned short** palette);
 const unsigned char* pcArenaRosterVisuals(int* bytes);
 int pcArenaRosterSpriteLocation(int type, int* x, int* y);

@@ -367,6 +367,7 @@ static void entityHp(const sBattleEntity* e, Readout* hp) {
 /* Enemy rosters occupy slots 3..10. Use the party HUD without its AP row. */
 #define ROSTER_TIME_W 56
 #define ROSTER_PORTRAIT_SIZE PC_ARENA_BATTLE_PORTRAIT_SIZE
+#define ROSTER_PORTRAIT_RIM PC_ARENA_BATTLE_PORTRAIT_RIM
 #define ROSTER_PORTRAIT_PARTS 63 /* the sprite actor's six-bit part count */
 #define ROSTER_PORTRAIT_PIXELS (ROSTER_PORTRAIT_SIZE * ROSTER_PORTRAIT_SIZE)
 #define ROSTER_PORTRAITS_VISIBLE 5
@@ -434,7 +435,7 @@ static void captureRosterPortrait(RosterSpritePortrait* portrait, const SpriteAc
     const SubSprite* parts = actor->m20_object->m30_subSprites;
     RECT bounds[ROSTER_PORTRAIT_PARTS];
     u16 silhouette[ROSTER_PORTRAIT_PIXELS] = {0};
-    const s32 fit = ROSTER_PORTRAIT_SIZE - 2;
+    const s32 fit = ROSTER_PORTRAIT_SIZE - 2 * ROSTER_PORTRAIT_RIM;
     s32 count = actor->m40_draw.bits.x2_subSpriteCount;
     s32 left = 32767, top = 32767, right = -32768, bottom = -32768;
     s32 size, marginX, marginY;
@@ -598,11 +599,12 @@ static void prepareRosterPortraits(const s32* slots, s32 count) {
     }
 }
 
-static void drawMixedPortrait(const RosterHud* hud, s32 index, s32 slot, s32 x, s32 y) {
+static void drawMixedPortrait(const RosterHud* hud, s32 index, s32 slot, s32 x, s32 y, s32 rim) {
     const u16* palette;
     const u8* pixels;
     TILE* tile = mixedPortraitDraw[index][hud->odd];
     s32 side = pcArenaRosterSide(slot);
+    s32 endPixel = ROSTER_PORTRAIT_SIZE - rim;
     s32 row, col;
 
     if (slot < pcArenaRosterFirstEnemy()) {
@@ -615,12 +617,12 @@ static void drawMixedPortrait(const RosterHud* hud, s32 index, s32 slot, s32 x, 
         }
     }
     if (pixels == NULL) return;
-    for (row = 0; row < ROSTER_PORTRAIT_SIZE; row++) {
+    for (row = rim; row < endPixel; row++) {
         const u8* line = pixels + row * ROSTER_PORTRAIT_SIZE;
-        for (col = 0; col < ROSTER_PORTRAIT_SIZE;) {
+        for (col = rim; col < endPixel;) {
             u16 color = palette[line[rosterPortraitColumn(side, col)]];
             s32 end = col + 1;
-            while (end < ROSTER_PORTRAIT_SIZE && palette[line[rosterPortraitColumn(side, end)]] == color) end++;
+            while (end < endPixel && palette[line[rosterPortraitColumn(side, end)]] == color) end++;
             if (color != 0 && (color & 0x7FFF) != 0x7FFF) {
                 setlen(tile, 3);
                 setcode(tile, 0x60);
@@ -637,20 +639,32 @@ static void drawMixedPortrait(const RosterHud* hud, s32 index, s32 slot, s32 x, 
     }
 }
 
+static void drawPortraitSquare(const RosterHud* hud, TILE* tile, s32 x, s32 y, s32 size, u8 r, u8 g, u8 b) {
+    setlen(tile, 3);
+    setcode(tile, 0x60);
+    setRGB0(tile, r, g, b);
+    tile->x0 = x;
+    tile->y0 = y;
+    tile->w = tile->h = size;
+    AddPrim(hud->ot, tile);
+    pcWidePrim(tile, hud->wideX, 0);
+}
+
 static void drawRosterPortrait(const RosterHud* hud, s32 index, s32 slot, s32 x, s32 y) {
     TILE* box = rosterPortraits[index][hud->odd];
-    s32 edge;
+    s32 rim = slot < pcArenaRosterFirstEnemy() ? 0 : ROSTER_PORTRAIT_RIM;
+    s32 size = ROSTER_PORTRAIT_SIZE - 2 * rim;
 
     if (pcArenaRosterMixed()) {
-        drawMixedPortrait(hud, index, slot, x, y);
+        drawMixedPortrait(hud, index, slot, x, y, rim);
     } else if (rosterPortraitSlot[index] == slot) {
         POLY_FT4* p = &rosterPortraitDraw[index][hud->odd];
-        s32 u = index * ROSTER_PORTRAIT_SIZE;
-        s32 v = 0xC0;
-        s32 size = ROSTER_PORTRAIT_SIZE;
+        s32 u = index * ROSTER_PORTRAIT_SIZE + rim;
+        s32 v = 0xC0 + rim;
         SetPolyFT4(p);
         SetShadeTex(p, 1);
-        setXY4(p, x, y, x + size, y, x, y + size, x + size, y + size);
+        setXY4(p, x + rim, y + rim, x + rim + size, y + rim,
+               x + rim, y + rim + size, x + rim + size, y + rim + size);
         setUV4(p, u, v, u + size, v, u, v + size, u + size, v + size);
         p->tpage = GetTPage(1, 0, 0x100, 0x1C0);
         p->clut = GetClut(0, rosterPortraitClutY[index]);
@@ -659,17 +673,10 @@ static void drawRosterPortrait(const RosterHud* hud, s32 index, s32 slot, s32 x,
         pcWidePrim(p, hud->wideX, 0);
     }
 
-    for (edge = 0; edge <= 1; edge++) {
-        TILE* tile = &box[edge];
-        u8 shade = edge ? 0x08 : 0xFF;
-        setlen(tile, 3);
-        setcode(tile, 0x60);
-        setRGB0(tile, shade, shade, shade);
-        tile->x0 = x - edge;
-        tile->y0 = y - edge;
-        tile->w = tile->h = ROSTER_PORTRAIT_SIZE + edge * 2;
-        AddPrim(hud->ot, tile);
-        pcWidePrim(tile, hud->wideX, 0);
+    drawPortraitSquare(hud, &box[0], x + rim, y + rim, size, 0xFF, 0xFF, 0xFF);
+    /* The saved portraits already have their inner rim in the TIM. */
+    if (rim != 0) {
+        drawPortraitSquare(hud, &box[1], x, y, ROSTER_PORTRAIT_SIZE, 0x28, 0x18, 0x08);
     }
 }
 

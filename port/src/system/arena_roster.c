@@ -75,7 +75,12 @@ static void loadPortrait(XgDisc* disc, RosterType* type) {
         {57, 0, 0x68}, {57, 1, 0x6B}, {57, 2, 0x6A}, {57, 3, 0x69}, /* Elements */
         {57, 4, 0x6B}, {57, 5, 0x6A},
     };
-    enum { FieldSize = 64, BattleSize = PC_ARENA_BATTLE_PORTRAIT_SIZE };
+    enum {
+        FieldSize = 64,
+        BattleSize = PC_ARENA_BATTLE_PORTRAIT_SIZE,
+        Rim = PC_ARENA_BATTLE_PORTRAIT_RIM,
+        ArtSize = BattleSize - 2 * Rim
+    };
 
     if (xgTimParse == NULL) return;
     for (unsigned i = 0; i < sizeof(portraits) / sizeof(portraits[0]); i++) {
@@ -87,13 +92,13 @@ static void loadPortrait(XgDisc* disc, RosterType* type) {
         XgTim t;
         if (raw != NULL && xgTimParse(raw, bytes, &t) && t.bpp == 8 && t.clutW == 256 &&
             t.width == FieldSize && t.imgH == FieldSize) {
-            /* The retail dialogue faces look right. Cache them in the
-             * left-facing orientation of the native battle portraits. */
-            for (int y = 0; y < BattleSize; y++) {
-                int sy = (2 * y + 1) * FieldSize / (2 * BattleSize);
-                for (int x = 0; x < BattleSize; x++) {
-                    int sx = (2 * x + 1) * FieldSize / (2 * BattleSize);
-                    type->portrait[y * BattleSize + BattleSize - 1 - x] = t.pixels[sy * FieldSize + sx];
+            /* The dialogue faces look right. Fit them inside the battle
+             * portrait rim and cache them facing left. */
+            for (int y = 0; y < ArtSize; y++) {
+                int sy = (2 * y + 1) * FieldSize / (2 * ArtSize);
+                for (int x = 0; x < ArtSize; x++) {
+                    int sx = (2 * x + 1) * FieldSize / (2 * ArtSize);
+                    type->portrait[(y + Rim) * BattleSize + Rim + ArtSize - 1 - x] = t.pixels[sy * FieldSize + sx];
                 }
             }
             for (int c = 0; c < 256; c++) {
