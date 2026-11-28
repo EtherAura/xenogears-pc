@@ -534,7 +534,9 @@ void signalFieldMechaAnimEvent(void) {
 void swapFieldRenderContext(void) {
     g_frameOddOrEven = (g_frameOddOrEven + 1) % 2;
     pCurrentFieldRenderingContext = &fieldRenderContext[g_frameOddOrEven];
-    PutDispEnv(&pCurrentFieldRenderingContext->mB8_displayEnv);
+    /* Show the fade at y=0, the source of the menu backdrop. The backdrop
+     * at y=224 overwrites part of the other field buffer at y=256. */
+    PutDispEnv(&fieldRenderContext[1].mB8_displayEnv);
     PutDrawEnv(&pCurrentFieldRenderingContext->m0_drawEnv);
 }
 
