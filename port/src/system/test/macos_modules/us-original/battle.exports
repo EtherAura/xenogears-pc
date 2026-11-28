@@ -202,9 +202,11 @@ partyMemberSpritesOffset
 pcBattleMechaData2
 pcGauntletSpaceGears
 pcVersusChoosing
+pcVersusDeployMirrorGears
 pcVersusLastResult
 pcVersusMirrorSlot
 pcVersusMirrorSprites
+pcVersusPartyExitEnabled
 pcVersusPartyFiles
 pcVersusPartyHash
 pcVersusRandom
