@@ -117,13 +117,18 @@ float glyphScale(ImFontConfig* src, ImFontBaked* baked, float* density) {
     return k < 1 ? 1 : k;
 }
 
-bool fontContains(ImFontAtlas*, ImFontConfig*, ImWchar c) {
+constexpr unsigned FALLBACK_FONT = 2;
+
+bool fontContains(ImFontAtlas*, ImFontConfig* src, ImWchar c) {
+    if (src->FontLoaderFlags & FALLBACK_FONT) return assets::fallbackFontCode(c) >= 0;
     return (c >= 0xe000 && c < 0xe000 + PAD_GLYPH_COUNT) || assets::fontCode(c) >= 0;
 }
 
-bool fontBakedInit(ImFontAtlas*, ImFontConfig*, ImFontBaked* baked, void*) {
-    baked->Ascent = baked->Size;
-    baked->Descent = 0.0f;
+bool fontBakedInit(ImFontAtlas*, ImFontConfig* src, ImFontBaked* baked, void*) {
+    if (!src->MergeMode) {
+        baked->Ascent = baked->Size;
+        baked->Descent = 0.0f;
+    }
     return true;
 }
 
@@ -132,8 +137,9 @@ bool fontLoadGlyph(ImFontAtlas* atlas, ImFontConfig* src, ImFontBaked* baked, vo
     uint8_t px[13][14];
     uint32_t icon[13][14] = {};
     int advance = 8;
-    int code = assets::fontCode(c);
-    bool button = c >= 0xe000 && c < 0xe000 + PAD_GLYPH_COUNT;
+    bool fallback = (src->FontLoaderFlags & FALLBACK_FONT) != 0;
+    int code = fallback ? assets::fallbackFontCode(c) : assets::fontCode(c);
+    bool button = !fallback && c >= 0xe000 && c < 0xe000 + PAD_GLYPH_COUNT;
     if (button) {
         memset(px,0,sizeof(px));
         int glyph = c - 0xe000;
@@ -187,8 +193,9 @@ bool fontLoadGlyph(ImFontAtlas* atlas, ImFontConfig* src, ImFontBaked* baked, vo
             int ty = std::min(12, (int)(y / k)), tx = std::min(13, (int)(x / k));
             uint8_t v = px[ty][tx];
             int palette = src->FontLoaderFlags & 1;
-            pixels[y * w + x] = button ? icon[ty][tx] :
-                v == 1 ? st.textBody[palette] : v == 2 ? st.textOutline[palette] : 0;
+            if (fallback) pixels[y * w + x] = v == 1 ? IM_COL32_WHITE : 0;
+            else if (button) pixels[y * w + x] = icon[ty][tx];
+            else pixels[y * w + x] = v == 1 ? st.textBody[palette] : v == 2 ? st.textOutline[palette] : 0;
         }
     }
     // The picture starts at the pen (its first column is the outline).
@@ -380,6 +387,13 @@ bool init() {
         }
     } else if (!again) {
         io.Fonts->AddFontDefaultVector();
+        // The built-in catalogs can be used before the first disc is mounted.
+        ImFontConfig merge;
+        merge.MergeMode = true;
+        merge.FontLoader = fontLoader();
+        merge.FontLoaderFlags = FALLBACK_FONT;
+        merge.SizePixels = LINE;
+        io.Fonts->AddFont(&merge);
     }
     return st.native;
 }

@@ -823,6 +823,9 @@ void pump() {
     while (SDL_PollEvent(&e)) {
         if (padDeviceEvent(&e)) continue;
         switch (e.type) {
+        case SDL_EVENT_LOCALE_CHANGED:
+            l10nLocaleChanged();
+            break;
         case SDL_EVENT_QUIT:
             st.leaving = true;
             st.quitAfter = st.fromMenu; // with --extras, leaving is quitting

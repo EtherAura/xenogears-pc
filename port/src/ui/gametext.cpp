@@ -124,7 +124,7 @@ void rememberImages() {
 }
 
 void languageSelector() {
-    if (!opt::row("Language", "text_dialogue text_battle text_menus text_names")) return;
+    if (!opt::row("Game text language", "text_dialogue text_battle text_menus text_names")) return;
     const bool us = !strcmp(gameTextOtherRegion(), "JP");
     const char* native = us ? tr("English") : tr("Japanese");
     const char* other = us ? tr("Japanese") : tr("English");

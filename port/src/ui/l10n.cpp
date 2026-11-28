@@ -29,8 +29,7 @@ bool native(); // skin.cpp: the game's font is the menu's (else ImGui's own: Lat
 
 namespace {
 
-// The interface's language until the player chooses one: the release's own
-// (the user's choice, xg-htn.35.22 Q2).
+// The build's language is the fallback when the OS offers no supported locale.
 #ifdef VERSION_JP
 const char* const BUILD_LANGUAGE = "ja";
 #else
@@ -52,12 +51,10 @@ struct L10nBuiltin {
 struct Language {
     std::string code, name;
     std::unordered_map<std::string_view, const char*> text; // English -> translation
-    bool gameFont = false; // a character past Latin (kana, kanji...): needs the game's font and its fallback
+    bool gameFont = false; // a player catalog that may need the disc's extra glyphs
 };
 
-// Characters past Latin Extended: only the game's font (with the pixel
-// fallback, assets.cpp) draws them; ImGui's own font, the menu's look
-// without a disc, shows them as boxes.
+// Player catalogs may include characters beyond the built-in fallback.
 bool pastLatin(const char* s) {
     for (const unsigned char* p = (const unsigned char*)s; *p; p++) {
         if (*p >= 0xC9 && *p < 0xF8) return true; // a UTF-8 lead of U+0250 and above
@@ -71,8 +68,9 @@ struct State {
     std::vector<Language> languages;  // [0] English
     std::deque<std::string> store;    // the player's catalogs' strings (stable addresses)
     int chosen = 0;
+    bool automatic = true;
     int serial = 1;
-    std::unordered_map<std::string, std::string> labels; // "<lang>\x1f<source>" -> translation + id suffix
+    std::unordered_set<std::string> labels; // translation + id suffix
     std::unordered_set<std::string> missing;
     FILE* missingLog = nullptr;
 } st;
@@ -262,6 +260,12 @@ int readPo(const std::string& path, Language& lang, std::string* code, std::stri
     return used;
 }
 
+bool sameCode(std::string_view a, std::string_view b) {
+    return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+        return SDL_tolower(x == '_' ? '-' : x) == SDL_tolower(y == '_' ? '-' : y);
+    });
+}
+
 // The player's catalogs: <save folder>/lang/*.po (XG_LANG_DIR overrides).
 void readPlayerCatalogs() {
     const char* env = SDL_getenv("XG_LANG_DIR");
@@ -288,16 +292,19 @@ void readPlayerCatalogs() {
         int used = readPo(dir + file, lang, &code, &name);
         if (used < 0) continue;
         if (code.empty()) code = file.substr(0, file.size() - 3);
+        if (sameCode(code, "auto")) {
+            fprintf(stderr, "l10n: %s%s: auto is reserved for system locale selection\n", dir.c_str(), file.c_str());
+            continue;
+        }
         if (name.empty()) name = code;
         auto same = std::find_if(st.languages.begin(), st.languages.end(),
-                                 [&](const Language& l) { return SDL_strcasecmp(l.code.c_str(), code.c_str()) == 0; });
+                                 [&](const Language& l) { return sameCode(l.code, code); });
         if (same == st.languages.begin()) {
             fprintf(stderr, "l10n: %s%s: English is the sources' own text; not used\n", dir.c_str(), file.c_str());
             continue;
         }
         if (same != st.languages.end()) {
             for (auto& e : lang.text) same->text[e.first] = e.second;
-            same->gameFont = same->gameFont || lang.gameFont;
             fprintf(stderr, "l10n: %s%s: %d entries over the built-in %s\n", dir.c_str(), file.c_str(), used,
                     code.c_str());
         } else {
@@ -310,16 +317,59 @@ void readPlayerCatalogs() {
     }
 }
 
-int find(const char* code) {
-    for (size_t i = 0; code != nullptr && i < st.languages.size(); i++) {
-        if (SDL_strcasecmp(st.languages[i].code.c_str(), code) == 0) return (int)i;
+int find(std::string_view code) {
+    for (size_t i = 0; i < st.languages.size(); i++) {
+        if (sameCode(st.languages[i].code, code)) return (int)i;
     }
     return -1;
 }
 
+int localeLanguage(std::string code) {
+    std::replace(code.begin(), code.end(), '_', '-');
+    const bool traditional = sameCode(code, "zh-TW") || sameCode(code, "zh-HK") || sameCode(code, "zh-MO");
+    for (;;) {
+        int match = find(code);
+        if (match >= 0) return match;
+        auto separator = code.rfind('-');
+        if (separator == std::string::npos) break;
+        code.resize(separator);
+    }
+    if (sameCode(code, "zh")) return find(traditional ? "zh-Hant" : "zh-Hans");
+    return -1;
+}
+
+int preferredLanguage() {
+    int count = 0;
+    SDL_Locale** locales = SDL_GetPreferredLocales(&count);
+    int match = -1;
+    for (int i = 0; locales != nullptr && match < 0 && i < count; i++) {
+        const SDL_Locale& locale = *locales[i];
+        std::string code = locale.language;
+        if (locale.country != nullptr) {
+            code += '-';
+            code += locale.country;
+        }
+        match = localeLanguage(std::move(code));
+    }
+    SDL_free(locales);
+    return match < 0 ? find(BUILD_LANGUAGE) : match;
+}
+
+void selectLanguage() {
+    const char* want = settingsGet("ui_language");
+    st.automatic = want == nullptr || want[0] == '\0' || sameCode(want, "auto");
+    int choice = st.automatic ? preferredLanguage() : localeLanguage(want);
+    if (choice < 0 && !st.automatic) {
+        fprintf(stderr, "l10n: ui_language=%s: no such catalog; English\n", want);
+    }
+    choice = std::max(choice, 0);
+    if (st.chosen != choice) st.serial++;
+    st.chosen = choice;
+}
+
 // The languages: English, the built-in catalogs, the player's. A reload keeps
 // the strings read before (a pointer handed out stays valid for the run).
-void load(const char* keep) {
+void load() {
     st.languages.clear();
     Language en;
     en.code = "en";
@@ -334,26 +384,20 @@ void load(const char* keep) {
             const char* why = refuse(b.pairs[i].english, b.pairs[i].text);
             if (why == nullptr) {
                 lang.text[b.pairs[i].english] = b.pairs[i].text;
-                lang.gameFont = lang.gameFont || pastLatin(b.pairs[i].text);
             }
         }
         st.languages.push_back(std::move(lang));
     }
     readPlayerCatalogs();
-    int i = find(keep);
-    if (keep != nullptr && keep[0] != '\0' && i < 0) {
-        fprintf(stderr, "l10n: ui_language=%s: no such catalog; English\n", keep);
-    }
-    st.chosen = i < 0 ? 0 : i;
+    selectLanguage();
     st.serial++;
 }
 
 void init() {
     std::call_once(st.once, [] {
-        settingsDescribe("ui_language", "ui_language: the settings menu's and the extras' language: en, ja, or the code "
-                                        "of a catalog in the save folder's lang folder; unset: the build's (US en, JP ja)");
-        const char* want = settingsGet("ui_language");
-        load(want != nullptr && want[0] != '\0' ? want : BUILD_LANGUAGE);
+        settingsDescribe("ui_language", "ui_language: auto (default, uses system language preferences), or a catalog "
+                                        "code such as en, fr, pt-BR, or zh-Hant");
+        load();
         const char* log = SDL_getenv("XG_L10N_MISSING");
         if (log != nullptr && log[0] != '\0') st.missingLog = fopen(log, "a");
     });
@@ -366,7 +410,7 @@ extern "C" const char* l10nText(const char* english) {
     init();
     if (st.chosen == 0) return english;
     const Language& lang = st.languages[(size_t)st.chosen];
-    if (lang.gameFont && !skin::native()) return english; // no disc yet: ImGui's font has no kana
+    if (lang.gameFont && !skin::native()) return english;
     const char* id = strstr(english, "##");
     std::string_view key = id ? std::string_view(english, (size_t)(id - english)) : std::string_view(english);
     auto it = lang.text.find(key);
@@ -386,10 +430,7 @@ extern "C" const char* l10nText(const char* english) {
     // A label with an id: the translation and the source's id suffix, kept
     // for the run (ImGui reads the text again next frame).
     std::lock_guard<std::mutex> guard(st.lock);
-    std::string slot = lang.code + '\x1f' + english;
-    auto found = st.labels.find(slot);
-    if (found == st.labels.end()) found = st.labels.emplace(slot, std::string(it->second) + id).first;
-    return found->second.c_str();
+    return st.labels.emplace(std::string(it->second) + id).first->c_str();
 }
 
 extern "C" int l10nLanguageCount(void) {
@@ -412,13 +453,22 @@ extern "C" int l10nLanguage(void) {
     return st.chosen;
 }
 
+extern "C" int l10nIsAutomatic(void) {
+    init();
+    return st.automatic;
+}
+
 extern "C" void l10nSetLanguage(int i) {
     init();
-    if (i < 0 || i >= (int)st.languages.size()) return;
-    if (i != st.chosen) st.serial++;
-    st.chosen = i;
-    settingsSet("ui_language", st.languages[(size_t)i].code.c_str());
+    if (i < L10N_AUTOMATIC || i >= (int)st.languages.size()) return;
+    settingsSet("ui_language", i == L10N_AUTOMATIC ? "auto" : st.languages[(size_t)i].code.c_str());
+    selectLanguage();
     settingsSave();
+}
+
+extern "C" void l10nLocaleChanged(void) {
+    init();
+    if (st.automatic) selectLanguage();
 }
 
 extern "C" int l10nSerial(void) {
@@ -428,9 +478,8 @@ extern "C" int l10nSerial(void) {
 
 extern "C" void l10nReload(void) {
     init();
-    std::string keep = st.languages[(size_t)st.chosen].code;
     std::lock_guard<std::mutex> guard(st.lock);
-    load(keep.c_str());
+    load();
 }
 
 extern "C" int l10nEntries(int i) {

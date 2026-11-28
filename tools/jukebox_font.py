@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build/embed the OFL pixel fallback used for Japanese OST titles and the
-interface's Japanese (port/src/ui/lang/*.po).
+interface translations (port/src/ui/lang/*.po).
 
 Regenerate once using fontTools (not needed for normal builds):
   python tools/jukebox_font.py subset SOURCE.ttc OUTPUT.otf
@@ -47,10 +47,18 @@ def main():
         root = pathlib.Path(__file__).resolve().parent.parent
         chars = characters(root)
         font = ImageFont.truetype(str(source), 11)
+        cyrillic_font = ImageFont.truetype(str(source), 10)
         data = bytearray()
         for c in chars:
             image = Image.new('L', (12, 11))
-            ImageDraw.Draw(image).text((0, -font.getbbox(c)[1]), c, font=font, fill=255)
+            draw = ImageDraw.Draw(image)
+            if 0x0400 <= ord(c) <= 0x052F:
+                _, top, _, bottom = cyrillic_font.getbbox(c, anchor='ls')
+                # Preserve the shared baseline where the accent and descender fit.
+                baseline = max(-top, min(9, 11 - bottom))
+                draw.text((0, baseline), c, font=cyrillic_font, fill=255, anchor='ls')
+            else:
+                draw.text((0, -font.getbbox(c)[1]), c, font=font, fill=255)
             rows = [sum(1 << bit for x, bit in enumerate([7, 6, 5, 4, 3, 2, 1, 0, 15, 14, 13, 12])
                         if image.getpixel((x, y)) >= 96) for y in range(11)]
             data.extend(struct.pack('<I11H', ord(c), *rows))

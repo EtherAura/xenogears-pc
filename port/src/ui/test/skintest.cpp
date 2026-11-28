@@ -25,6 +25,7 @@ namespace assets {
 bool load() { return false; }
 const Image* sprite(int, bool) { return nullptr; }
 Image vramImage(int, int, int, int, int, int, int, int, int, bool) { return {}; }
+int fallbackFontCode(uint32_t) { return -1; }
 int fontCode(uint32_t) { return -1; }
 bool fontGlyph(int, uint8_t[13][14], int*) { return false; }
 void fontColors(uint16_t* body, uint16_t* outline) { *body = *outline = 0; }

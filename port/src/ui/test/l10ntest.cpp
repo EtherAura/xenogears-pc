@@ -2,9 +2,13 @@
 // player's catalogs (one overriding the built-in, one a new language), the
 // entries a catalog may not use (printf conversions that differ, fuzzy, an
 // ImGui id), id suffixes, the English fallback without the game's font, and
-// the missing-string log. Runs in the current directory (l10ntest/).
+// locale selection and the missing-string log. Runs in the current directory (l10ntest/).
 
 #include "ui/l10n.h"
+
+extern "C" {
+#include "system/settings.h"
+}
 
 #include <SDL3/SDL.h>
 
@@ -38,14 +42,15 @@ static int language(const char* code) {
 }
 
 int main() {
-    SDL_setenv_unsafe("XG_SETTINGS", "none", 1); // language switching must never write player settings
     SDL_CreateDirectory("l10ntest");
+    SDL_setenv_unsafe("XG_SETTINGS", "l10ntest/settings.ini", 1);
+    write("l10ntest/settings.ini", "ui_language=en\ntext_dialogue=disc\n");
     write("l10ntest/ja.po",
           "msgid \"\"\nmsgstr \"Language: ja\\n\"\n\n"
           "# a player's correction of a built-in entry\n"
           "msgid \"Display\"\nmsgstr \"表示\"\n");
     write("l10ntest/it.po",
-          "msgid \"\"\nmsgstr \"\"\n\"Language: it\\n\"\n\"X-Language-Name: Italiano\\n\"\n\n"
+          "msgid \"\"\nmsgstr \"\"\n\"Language: it-CH\\n\"\n\"X-Language-Name: Italiano (Svizzera)\\n\"\n\n"
           "msgid \"Audio\"\nmsgstr \"Suono\"\n\n"
           "#, c-format\nmsgid \"Slot %d: %s\"\nmsgstr \"Slot %s: %d\"\n\n"
           "#, fuzzy\nmsgid \"Back\"\nmsgstr \"Indietro\"\n\n"
@@ -55,16 +60,17 @@ int main() {
           "#~ msgid \"Old\"\n#~ msgstr \"Vecchio\"\n");
     std::remove("l10ntest/missing.txt");
     SDL_setenv_unsafe("XG_LANG_DIR", "l10ntest", 1);
-    SDL_setenv_unsafe("XG_UI_LANGUAGE", "ja", 1);
+    SDL_setenv_unsafe("XG_UI_LANGUAGE", "ja_JP", 1);
     SDL_setenv_unsafe("XG_L10N_MISSING", "l10ntest/missing.txt", 1);
+    SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, "fr_CA");
 
-    // English, the built-in Japanese and the player's Italian.
-    int ja = language("ja"), it = language("it");
-    EXPECT(l10nLanguageCount() == 3);
-    EXPECT(language("en") == 0 && ja > 0 && it > 0);
-    EXPECT(!std::strcmp(l10nLanguageName(it), "Italiano"));
+    int ja = language("ja"), it = language("it-CH"), fr = language("fr");
+    int es = language("es"), italian = language("it");
+    EXPECT(language("en") == 0 && ja > 0 && it > 0 && fr > 0 && es > 0 && italian > 0);
+    EXPECT(!std::strcmp(l10nLanguageName(it), "Italiano (Svizzera)"));
     EXPECT(!std::strcmp(l10nLanguageName(ja), "日本語"));
     EXPECT(l10nLanguage() == ja);
+    EXPECT(!l10nIsAutomatic()); // environment overrides both the saved setting and the OS
     EXPECT(l10nEntries(ja) > 600);
 
     // Japanese: built-in, the player's correction over it, id suffixes kept.
@@ -93,9 +99,9 @@ int main() {
     std::snprintf(buf, sizeof buf, tr("%d save%s, %d free block%s"), 2, "s", 13, "s");
     EXPECT(!std::strcmp(buf, "2 件、空き 13 ブロック"));
 
-    // Without the game's font (no disc yet) kana cannot be drawn: English.
+    // The no-disc font can also draw the built-in catalogs.
     gameFont = false;
-    EXPECT(!std::strcmp(tr("Audio"), "Audio"));
+    EXPECT(!std::strcmp(tr("Audio"), "サウンド"));
     gameFont = true;
 
     // Italian: what it may use, and what falls back to English.
@@ -116,11 +122,53 @@ int main() {
 
     // A reload keeps the chosen language and the texts handed out.
     const char* before = tr("Audio");
-    write("l10ntest/it.po", "msgid \"\"\nmsgstr \"Language: it\\n\"\n\nmsgid \"Audio\"\nmsgstr \"Musica\"\n");
+    const char* beforeLabel = tr("Audio##test");
+    write("l10ntest/it.po", "msgid \"\"\nmsgstr \"Language: it-CH\\n\"\n\nmsgid \"Audio\"\nmsgstr \"Musica\"\n");
     l10nReload();
-    EXPECT(l10nLanguage() == language("it"));
+    EXPECT(l10nLanguage() == language("it-CH"));
     EXPECT(!std::strcmp(tr("Audio"), "Musica"));
     EXPECT(!std::strcmp(before, "Suono"));
+    EXPECT(!std::strcmp(tr("Audio##test"), "Musica##test"));
+    EXPECT(!std::strcmp(beforeLabel, "Suono##test"));
+
+    l10nSetLanguage(L10N_AUTOMATIC);
+    EXPECT(l10nIsAutomatic());
+    EXPECT(l10nLanguage() == fr); // generic French matches fr_CA
+    EXPECT(!std::strcmp(settingsGet("ui_language"), "auto"));
+    EXPECT(!std::strcmp(settingsGet("text_dialogue"), "disc"));
+
+    SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, "zz_ZZ,it_CH,fr");
+    l10nLocaleChanged();
+    EXPECT(l10nLanguage() == it); // skip unsupported locales, prefer exact regional catalogs
+    SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, "es_MX,it_CH");
+    l10nReload();
+    EXPECT(l10nIsAutomatic() && l10nLanguage() == es);
+    const struct { const char* locale; const char* code; } regional[] = {
+        {"de_AT", "de"}, {"ru_RU", "ru"}, {"pt_BR", "pt-BR"}, {"pt_PT", "pt"},
+        {"zh_CN", "zh-Hans"}, {"zh_SG", "zh-Hans"}, {"zh_TW", "zh-Hant"},
+        {"zh_HK", "zh-Hant"}, {"zh_MO", "zh-Hant"}, {"zh-Hans_TW", "zh-Hans"},
+        {"zh-Hant-TW", "zh-Hant"},
+    };
+    for (const auto& pair : regional) {
+        SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, pair.locale);
+        l10nLocaleChanged();
+        EXPECT(!std::strcmp(l10nLanguageCode(l10nLanguage()), pair.code));
+    }
+    SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, "zz_ZZ");
+    l10nLocaleChanged();
+    EXPECT(l10nLanguage() == language("en")); // test build's default
+    SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, "fr_FR");
+    l10nLocaleChanged();
+    EXPECT(l10nLanguage() == fr);
+    l10nSetLanguage(fr); // same effective language, but now fixed to French
+    EXPECT(!l10nIsAutomatic());
+    EXPECT(!std::strcmp(settingsGet("ui_language"), "fr"));
+    SDL_SetHint(SDL_HINT_PREFERRED_LOCALES, "ja_JP");
+    l10nLocaleChanged();
+    EXPECT(l10nLanguage() == fr);
+    char* saved = static_cast<char*>(SDL_LoadFile("l10ntest/settings.ini", nullptr));
+    EXPECT(saved && std::strstr(saved, "ui_language=fr") && std::strstr(saved, "text_dialogue=disc"));
+    SDL_free(saved);
 
     // English: the sources' own strings.
     l10nSetLanguage(0);

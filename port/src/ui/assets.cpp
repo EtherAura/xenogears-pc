@@ -512,6 +512,15 @@ const struct {
 const char usNarrow[] = " +,-./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ[]=abcdefghijklmnopqrstuvwxyz!\"#%&'():?";
 const char jpNarrow[] = " ()+,-./0123456789=ACDEFGILMNOPRSTUVXYZ[]\1abcdefgiklmnoprstuwxy";
 
+constexpr int FALLBACK_FONT_BASE = 0x40000;
+
+int fallbackFontCode(uint32_t c) {
+    auto end = japaneseFallback + sizeof(japaneseFallback) / sizeof(japaneseFallback[0]);
+    auto glyph = std::lower_bound(japaneseFallback, end, c,
+                                [](const auto& entry, uint32_t code) { return entry.unicode < code; });
+    return glyph != end && glyph->unicode == c ? FALLBACK_FONT_BASE + (int)(glyph - japaneseFallback) : -1;
+}
+
 int fontCode(uint32_t c) {
     // The font's own layout: its first code and narrow glyphs tell the US
     // font (81 from 0x10) from the Japanese one (63); another has no table.
@@ -524,7 +533,7 @@ int fontCode(uint32_t c) {
         narrow = jpNarrow;
     }
     if (narrow == nullptr) {
-        return -1;
+        return fallbackFontCode(c);
     }
     const char* at = c >= 0x20 && c < 0x7F ? strchr(narrow, (int)c) : nullptr;
     if (at != nullptr) {
@@ -546,7 +555,7 @@ int fontCode(uint32_t c) {
     g = us ? gtUnicodeGlyph("US", c, nullptr) : -1;
     if (g >= 0) return 0x30000 + g;
     if (!us) {
-        return -1;
+        return fallbackFontCode(c);
     }
     switch (c) { // the US font's wide signs
     case 0x00D7: return 0x7F; // the multiplication sign
@@ -555,13 +564,15 @@ int fontCode(uint32_t c) {
     case 0x25CB: return 0x6E; // circle, square, triangle
     case 0x25A1: return 0x6F;
     case 0x25B3: return 0x70;
-    default: return -1;
+    default: return fallbackFontCode(c);
     }
 }
 
 bool fontGlyph(int code, uint8_t px[13][14], int* advance) {
     memset(px, 0, 13 * 14);
     bool bits[11][12] = {};
+    bool proportionalFallback = false;
+    int inkWidth = 0;
     int count = (int)(sizeof(extra) / sizeof(extra[0]));
     if (code >= 0x100 && code < 0x100 + count && font != nullptr) {
         *advance = 8;
@@ -575,7 +586,13 @@ bool fontGlyph(int code, uint8_t px[13][14], int* advance) {
         int size = fontSize, at = -1;
         const uint16_t* fallback = nullptr;
         int jpCount = (int)(sizeof(japaneseCodes) / sizeof(japaneseCodes[0]));
-        if (code >= 0x20000 && code < 0x40000) {
+        if (code >= FALLBACK_FONT_BASE &&
+            code - FALLBACK_FONT_BASE < (int)(sizeof(japaneseFallback) / sizeof(japaneseFallback[0]))) {
+            const auto& glyph = japaneseFallback[code - FALLBACK_FONT_BASE];
+            fallback = glyph.rows;
+            proportionalFallback = glyph.unicode < 0x0250 || (glyph.unicode >= 0x0400 && glyph.unicode <= 0x052F);
+            *advance = 12;
+        } else if (code >= 0x20000 && code < 0x40000) {
             // A glyph of the JP font (0x20000 + n) or the US font (0x30000 + n).
             bool jp = code < 0x30000;
             int n = code & 0xFFFF;
@@ -615,9 +632,11 @@ bool fontGlyph(int code, uint8_t px[13][14], int* advance) {
             else memcpy(&row, data + at + r * 2, 2);
             for (int c = 0; c < 12; c++) {
                 bits[r][c] = (row >> order[c]) & 1;
+                if (proportionalFallback && bits[r][c]) inkWidth = std::max(inkWidth, c + 1);
             }
         }
     }
+    if (proportionalFallback && inkWidth > 0) *advance = inkWidth + 2;
     // Each pixel is drawn one right and one down of its place, with the
     // outline in the eight around it.
     for (int r = 0; r < 11; r++) {

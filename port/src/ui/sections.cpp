@@ -3273,7 +3273,8 @@ void battlesSection() {
 
 // ---- Language and text --------------------------------------------------------------------------
 
-void languageRow();
+void interfaceLanguageRow();
+void translationReloadRow();
 
 void subtitleRows() {
     bool captionText = regionalCaptionsAvailable() != 0;
@@ -3324,8 +3325,9 @@ void subtitleRows() {
 void languageSection() {
     opt::beginPage("language", LANGUAGE);
     opt::group(N_("Language"));
-    languageRow();
-    gameTextRows(); // gametext.cpp: Game language, plus collapsed Individual text settings & Translation sources
+    interfaceLanguageRow();
+    translationReloadRow();
+    gameTextRows(); // gametext.cpp: Game text language, plus collapsed Individual text settings & Translation sources
 
     opt::group(N_("Text"));
     if (row("Text speed", "text_speed")) {
@@ -3550,27 +3552,37 @@ bool acceptSetup() {
 
 // The menu's and the extras' language (l10n.h), each name in its own
 // language (never translated).
-void languageRow() {
+void interfaceLanguageRow() {
     if (row("Interface language", "ui_language")) {
         int count = l10nLanguageCount(), now = l10nLanguage();
-        const char* preview = now >= 0 && now < count ? l10nLanguageName(now) : "";
-        if (skin::beginCombo("##ui_language", preview)) {
+        bool automatic = l10nIsAutomatic();
+        const char* preview = l10nLanguageName(now);
+        char automaticPreview[160];
+        if (automatic) {
+            snprintf(automaticPreview, sizeof automaticPreview, tr("Automatic (%s)"), preview);
+            preview = automaticPreview;
+        }
+        if (skin::beginCombo("##ui_language", preview, ImGuiComboFlags_HeightLarge)) {
+            if (skin::comboItem(tr("Automatic"), automatic) && !automatic) l10nSetLanguage(L10N_AUTOMATIC);
+            if (automatic) ImGui::SetItemDefaultFocus();
             for (int i = 0; i < count; i++) {
                 const char* name = l10nLanguageName(i);
+                bool selected = !automatic && now == i;
                 ImGui::PushID(i);
-                if (skin::comboItem(name, now == i) && i != now) l10nSetLanguage(i);
-                if (now == i) ImGui::SetItemDefaultFocus();
+                if (skin::comboItem(name, selected) && !selected) l10nSetLanguage(i);
+                if (selected) ImGui::SetItemDefaultFocus();
                 ImGui::PopID();
             }
             skin::endCombo();
         }
-        hint("This menu and the extras. The game's own text stays as the disc has it. Text not yet translated shows in "
-             "English.");
-        if (now > 0) hint("%s: %d texts translated.", l10nLanguageName(now), l10nEntries(now));
+        hint("Automatic follows your system language.");
         overrideNote("ui_language");
     }
+}
+
+void translationReloadRow() {
     if (row("Translations")) {
-        if (ImGui::Button(tr("Reload translations"))) l10nReload();
+        if (ImGui::Button(tr("Reload"))) l10nReload();
         hint("Your own translations: a gettext .po file in the save folder's lang folder (tools/l10n.py makes one). "
              "Reload reads them again after an edit.");
     }
@@ -4152,6 +4164,7 @@ bool wizardButton(const char* label) {
 
 void setupWizardStep1() {
     opt::beginPage("setup-wiz-1", -1);
+    interfaceLanguageRow();
     if (row("Disc folder")) {
         if (folderField("setup-folder", setup.imageDir, sizeof setup.imageDir, 42, nullptr, false, &setup.imageScroll)) {
             searchImages();

@@ -2576,6 +2576,10 @@ static bool acceptMenuPointer(SDL_MouseID id) {
 }
 
 extern "C" int uiEvent(const SDL_Event* e) {
+    if (e->type == SDL_EVENT_LOCALE_CHANGED) {
+        l10nLocaleChanged();
+        return 1;
+    }
     noteInput(e);
     lifecycle(e);
     if ((e->type == SDL_EVENT_KEY_DOWN || e->type == SDL_EVENT_KEY_UP) && e->key.scancode < SDL_SCANCODE_COUNT) {

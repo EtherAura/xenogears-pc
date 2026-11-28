@@ -1,6 +1,6 @@
 /*
- * The interface's languages: the settings menu's and the extras' own text
- * (l10n.cpp). Not the game's text: that is the disc's.
+ * The interface's languages: setup, settings, and Extras (l10n.cpp).
+ * Game text has its own language setting.
  *
  * A string is looked up by its English text as the sources have it (the
  * gettext convention): tr("Display") gives the chosen language's text, or
@@ -20,10 +20,10 @@
  * "Language:" is the code, "X-Language-Name:" the name shown (in that
  * language). tools/l10n.py extracts the English strings and checks catalogs.
  *
- *   ui_language        (settings.ini; F1 > System > Language) en, ja, or a
- *                      player's catalog's code; unset, the build's language
- *                      (US English, JP Japanese); XG_UI_LANGUAGE overrides it
- *                      for a run. Applies at once.
+ *   ui_language        (settings.ini; F1 > Language & text) auto or a catalog
+ *                      code. Unset or auto follows system language preferences,
+ *                      with the build's language as fallback (US en, JP ja).
+ *                      XG_UI_LANGUAGE overrides it until changed in the menu.
  *   XG_L10N_MISSING=file  every English string looked up that the chosen
  *                      language lacks, once each (a coverage run).
  */
@@ -54,7 +54,10 @@ int l10nLanguageCount(void);
 const char* l10nLanguageCode(int i);  /* "en", "ja", ... */
 const char* l10nLanguageName(int i);  /* "English", "日本語", ... */
 int l10nLanguage(void);               /* the chosen one */
-void l10nSetLanguage(int i);          /* and settings.ini's ui_language */
+enum { L10N_AUTOMATIC = -1 };
+int l10nIsAutomatic(void);
+void l10nSetLanguage(int i);          /* catalog index or L10N_AUTOMATIC, saved to settings.ini */
+void l10nLocaleChanged(void);         /* refresh Automatic on SDL_EVENT_LOCALE_CHANGED */
 int l10nSerial(void);                 /* changes with the language (for caches of translated text) */
 int l10nEntries(int i);               /* a language's usable entries (0 for English) */
 void l10nReload(void);                /* read the player's catalogs again (the chosen language kept) */

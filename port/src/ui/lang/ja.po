@@ -10300,3 +10300,41 @@ msgstr "バトリングで PLAYER1 VS PLAYER2 を選びます。試合後は再�
 #: port/src/ui/arena_saves.cpp
 msgid "Refresh the save list from both memory cards."
 msgstr "両方のメモリーカードからセーブ一覧を読み直します。"
+
+#: port/src/ui/sections.cpp
+msgid "Automatic (%s)"
+msgstr "自動（%s）"
+
+#: port/src/ui/gametext.cpp
+msgid "Game text language"
+msgstr "ゲーム内の言語"
+
+#: port/src/ui/menu.cpp
+msgid "Back to start"
+msgstr "最初に戻る"
+
+#: port/src/ui/menu.cpp
+msgid "OK"
+msgstr "OK"
+
+#: port/src/ui/options.cpp
+msgid "Enhanced (Normal Mode)"
+msgstr "強化版（ノーマル）"
+
+#: port/src/ui/options.cpp
+msgid "Enhanced (Hard Mode)"
+msgstr "強化版（ハード）"
+
+#: port/src/ui/options.cpp
+msgid "Show menu on startup"
+msgstr "起動時にメニューを表示"
+
+#: port/src/ui/sections.cpp
+msgid "Automatic follows your system language."
+msgstr "自動設定ではシステムの言語に従います。"
+
+#: port/src/ui/menu.cpp
+msgid ""
+"Choose Presets, Settings, Discs or BIOS, then Start. Quit leaves without "
+"starting the game."
+msgstr "プリセット、設定、ディスク、BIOS を選び、ゲームを開始します。"

@@ -46,6 +46,7 @@ Image vramImage(int depth, int tpageX, int tpageY, int clutX, int clutY, int u, 
 // Japanese OST characters use the disc's native kana/kanji (a nearby JP
 // image supplies US-disc kanji), with an outlined pixel fallback for absent
 // glyphs. menu_jp_disc can name that image explicitly or disable discovery.
+int fallbackFontCode(uint32_t codepoint);
 int fontCode(uint32_t codepoint);
 bool fontGlyph(int code, uint8_t pixels[13][14], int* advance);
 
