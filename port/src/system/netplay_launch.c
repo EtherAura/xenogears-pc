@@ -82,6 +82,7 @@ static struct {
     SDL_AtomicInt cancelled;
     NetplayStart start;
     char proposal[ARENA_LOADOUT_CODE];
+    XgPartyRecord reviewRecord;
     char detail[200];
     uint8_t codes[XG_PARTY_CODE_TABLE];
     int haveCodes;
@@ -92,26 +93,97 @@ static int rosterLobbyCancelled(void) {
     return SDL_GetAtomicInt(&R.cancelled);
 }
 
-static int rosterLobbyCheck(NpSession* session, const uint8_t* data, int bytes, int* member) {
-    *member = -1;
-    if (!session->host) return bytes != session->partyBytes || memcmp(data, session->party, (size_t)bytes) != 0;
-
-    char roster[ARENA_LOADOUT_CODE];
-    XgPartyRecord party;
-    if (!pcArenaRosterUnpack(data, bytes, R.haveCodes ? R.codes : NULL, roster, &party)) return 1;
-
-    SDL_LockMutex(R.lock);
-    if (strcmp(R.proposal, roster) != 0 || memcmp(&R.start.record, &party, sizeof party) != 0) {
+/* Called with the lobby locked. */
+static void setRosterReview(const char* roster, const XgPartyRecord* record) {
+    if (strcmp(R.proposal, roster) != 0 || memcmp(&R.reviewRecord, record, sizeof *record) != 0) {
         copy(R.proposal, sizeof R.proposal, roster);
-        R.start.record = party;
-        R.start.hasParty = party.m3_count != 0;
+        R.reviewRecord = *record;
         R.confirmed = 0;
     }
     R.phase = NETPLAY_ROSTER_REVIEW;
+}
+
+/* The joiner proposes enemy teams and rules. Player 1's save and inventory
+ * are supplied only by the host and are part of the final review. */
+static int rosterLobbyCheck(NpSession* session, const uint8_t* data, int bytes, int* member) {
+    char roster[ARENA_LOADOUT_CODE];
+    XgPartyRecord party;
+    ArenaLoadout loadout;
+    int ids[3];
+    *member = -1;
+
+    if (!session->host) {
+        char resolved[ARENA_LOADOUT_CODE];
+        ArenaLoadout proposal;
+        if (!pcArenaRosterUnpack(data, bytes, R.haveCodes ? R.codes : NULL, roster, &party) ||
+            !pcArenaLoadoutDecode(roster, &loadout, ids) ||
+            !pcArenaLoadoutDecode(R.start.roster, &proposal, ids)) return 1;
+        memset(loadout.side[0].items, 0, sizeof loadout.side[0].items);
+        return !pcArenaLoadoutEncode(&loadout, ids, resolved) ||
+               strcmp(resolved, R.start.roster) != 0;
+    }
+    if (bytes <= 0 || bytes > ARENA_LOADOUT_CODE || data[bytes - 1] != 0 ||
+        strlen((const char*)data) + 1 != (size_t)bytes ||
+        !pcArenaLoadoutDecode((const char*)data, &loadout, ids)) return 1;
+
+    SDL_LockMutex(R.lock);
+    memset(&party, 0, sizeof party);
+    if (loadout.side[0].count == 0) {
+        if (!R.start.hasParty) {
+            copy(R.detail, sizeof R.detail, "Choose your save before hosting a match with a character party.");
+            R.phase = NETPLAY_ROSTER_FAILED;
+            SDL_UnlockMutex(R.lock);
+            return XG_PARTY_BAD_MEMBERS;
+        }
+        party = R.start.record;
+        for (int i = 0; i < 3; i++) ids[i] = party.m4_members[i];
+    } else {
+        memcpy(loadout.side[0].items, R.start.rosterHostItems, sizeof loadout.side[0].items);
+    }
+    if (!pcArenaLoadoutEncode(&loadout, ids, roster)) {
+        SDL_UnlockMutex(R.lock);
+        return 1;
+    }
+    setRosterReview(roster, &party);
     int confirmed = R.confirmed;
     SDL_UnlockMutex(R.lock);
     if (!confirmed) return NP_RECORD_PENDING;
-    return !npSetParty(session, data, bytes);
+    uint8_t final[ARENA_ROSTER_PACKET];
+    int length = pcArenaRosterPack(roster, party.m3_count != 0 ? &party : NULL, final);
+    return !npSetParty(session, final, length);
+}
+
+static int reviewFinalRoster(NpSession* session) {
+    const uint8_t* data = session->host ? session->party : session->peerParty;
+    int bytes = session->host ? session->partyBytes : session->peerPartyBytes;
+    char roster[ARENA_LOADOUT_CODE];
+    XgPartyRecord party;
+    if (!pcArenaRosterUnpack(data, bytes, R.haveCodes ? R.codes : NULL, roster, &party)) return 0;
+
+    SDL_LockMutex(R.lock);
+    setRosterReview(roster, &party);
+    SDL_UnlockMutex(R.lock);
+
+    uint64_t until = SDL_GetTicksNS() + 300000000000ull;
+    uint32_t bothReady = 0;
+    for (uint32_t frame = 1; !rosterLobbyCancelled() && SDL_GetTicksNS() < until; frame++) {
+        SDL_LockMutex(R.lock);
+        unsigned ready = R.confirmed != 0;
+        SDL_UnlockMutex(R.lock);
+        unsigned p1, p2;
+        if (!npFrame(session, frame, ready, 0, &p1, &p2)) return 0;
+        if (bothReady == 0 && p1 && p2) bothReady = frame;
+        if (bothReady != 0 && frame == bothReady + 2) {
+            SDL_LockMutex(R.lock);
+            copy(R.start.roster, sizeof R.start.roster, roster);
+            R.start.record = party;
+            R.start.hasParty = party.m3_count != 0;
+            SDL_UnlockMutex(R.lock);
+            return 1;
+        }
+        SDL_Delay(50);
+    }
+    return 0;
 }
 
 static int rosterLobbyRun(void* unused) {
@@ -146,18 +218,13 @@ static int rosterLobbyRun(void* unused) {
     } else {
         const uint64_t wait = 300000000000ull;
         if (!start.host) {
-            uint8_t packet[ARENA_ROSTER_PACKET];
-            int bytes = pcArenaRosterPack(start.roster, start.hasParty ? &start.record : NULL, packet);
-            npSetParty(&session, packet, bytes);
+            npSetParty(&session, (const uint8_t*)start.roster, (int)strlen(start.roster) + 1);
         }
         if (start.host) agreed = npHost(&session, wait);
         else if (netResolveHostPort(start.address, &address)) agreed = npJoin(&session, &address, wait);
         else failure = netError();
         if (agreed && session.terms.mode == NP_MODE_ROSTER) {
-            unsigned p1, p2;
-            /* Let both peers acknowledge the accepted record before the host
-             * releases this port. The live game uses the original code. */
-            agreed = npFrame(&session, 1, 0, 0, &p1, &p2) && npFrame(&session, 2, 0, 0, &p1, &p2);
+            agreed = reviewFinalRoster(&session);
             if (agreed) {
                 const uint64_t until = SDL_GetTicksNS() + 500000000ull;
                 while (!rosterLobbyCancelled() && SDL_GetTicksNS() < until && !session.over) {
@@ -175,10 +242,9 @@ static int rosterLobbyRun(void* unused) {
 
     SDL_LockMutex(R.lock);
     if (agreed && !rosterLobbyCancelled()) {
-        if (start.host) copy(R.start.roster, sizeof R.start.roster, R.proposal);
         R.phase = NETPLAY_ROSTER_READY;
     } else {
-        copy(R.detail, sizeof R.detail, failure != NULL && *failure ? failure : "The lobby could not complete.");
+        if (!R.detail[0]) copy(R.detail, sizeof R.detail, failure != NULL && *failure ? failure : "The lobby could not complete.");
         R.phase = NETPLAY_ROSTER_FAILED;
     }
     SDL_UnlockMutex(R.lock);
@@ -199,7 +265,7 @@ int netplayRosterLobbyStart(const NetplayStart* start) {
     R.lock = SDL_CreateMutex();
     if (R.lock == NULL) return 0;
     R.start = *start;
-    R.haveCodes = start->host && xgPartyGameCodes(R.codes);
+    R.haveCodes = xgPartyGameCodes(R.codes);
     R.proposal[0] = R.detail[0] = 0;
     R.phase = NETPLAY_ROSTER_WAITING;
     R.confirmed = 0;
@@ -218,7 +284,10 @@ int netplayRosterLobbyState(NetplayStart* start, char* proposal, char* detail, s
     *start = R.start;
     copy(proposal, ARENA_LOADOUT_CODE, R.proposal);
     copy(detail, detailSize, R.detail);
-    if (phase == NETPLAY_ROSTER_REVIEW && R.confirmed) phase = NETPLAY_ROSTER_WAITING;
+    if (phase == NETPLAY_ROSTER_REVIEW) {
+        start->record = R.reviewRecord;
+        if (R.confirmed) phase = NETPLAY_ROSTER_WAITING;
+    }
     SDL_UnlockMutex(R.lock);
     return phase;
 }
@@ -227,7 +296,7 @@ void netplayRosterLobbyConfirm(const char* proposal, const XgPartyRecord* party)
     if (R.worker == NULL) return;
     SDL_LockMutex(R.lock);
     if (R.phase == NETPLAY_ROSTER_REVIEW && strcmp(R.proposal, proposal) == 0 &&
-        memcmp(&R.start.record, party, sizeof *party) == 0) R.confirmed = 1;
+        memcmp(&R.reviewRecord, party, sizeof *party) == 0) R.confirmed = 1;
     SDL_UnlockMutex(R.lock);
 }
 

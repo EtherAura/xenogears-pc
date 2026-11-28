@@ -5,6 +5,7 @@
  * source files (see isGearComboAttackAvailable's caller and battleOddOrEven's views).
  */
 #include "common.h"
+#include "pc_arena.h"
 #include "psyq.h"
 #include "main/game_state.h"
 #include "main/filesystem.h"
@@ -273,8 +274,8 @@ void performAutoPartyMemberTurn(u8 arg0) {
         ret = 0;
         break;
     case 2:
-        if (partyBattleStats[arg0].m0_commands[cmd[1] + 0x16].m13_cost <= battleEntities.m0_entities[arg0].m0_base.m50_MP) {
-            battleEntities.m0_entities[arg0].m0_base.m50_MP -= partyBattleStats[arg0].m0_commands[cmd[1] + 0x16].m13_cost;
+        if (BATTLE_FOOT_COMMANDS(arg0)[cmd[1] + 0x16].m13_cost <= battleEntities.m0_entities[arg0].m0_base.m50_MP) {
+            battleEntities.m0_entities[arg0].m0_base.m50_MP -= BATTLE_FOOT_COMMANDS(arg0)[cmd[1] + 0x16].m13_cost;
             battleVar2->m2E6_menuSelection = cmd[1];
             executeAbility(arg0);
             ret = 0;
@@ -869,6 +870,9 @@ void drawBattleMenuEscape(s32 arg0) {
 void callGear(u8 arg0) {
     s32 i;
 
+#ifdef PLATFORM_PC
+    if (pcVersusCallPartyGear(arg0)) return;
+#endif
     callGearRelocateSlot(arg0);
     callGearClearStatus(arg0);
     callGearSwapSprite(arg0);
@@ -1294,6 +1298,12 @@ void drawGearBattleMenuEscape(s32 arg0) {
     case 4:
     case 6:
     case 7:
+#ifdef PLATFORM_PC
+        if (pcVersusExitPartyGear(arg0)) {
+            battleVar2->m2DE_actionDone = 1;
+            return;
+        }
+#endif
         if (tryToEscape(battleVar2->m2D3_currentEntityTurn) != 0) {
             battleRunningVar1[0] = 0x40;
         }
@@ -1485,7 +1495,10 @@ s32 handleGearMenuSelectEnemy(u8 arg0) {
             break;
         }
     }
-    battleVar1->m7C_hpDisplayDirty[arg0] = 1;
+#ifdef PLATFORM_PC
+    if (arg0 < 3)
+#endif
+        battleVar1->m7C_hpDisplayDirty[arg0] = 1;
     if (battleVar2->m2E7_gearAttackCount != 0) {
         if (D_800D2C0A.m2A_mode != 4 && (D_800D2C0A.m2A_mode == 0 || D_800D2C0A.m2A_mode - 1 < battleVar2->m2CC_comboInput[0])) {
             handleMenuSelectEnemy_cancel_sub0(arg0);

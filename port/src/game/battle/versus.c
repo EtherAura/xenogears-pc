@@ -762,6 +762,7 @@ static void numberSame(u8 (*l)[LABEL], s32 count) {
 static DialogWindow18 window;
 static DialogWindow18 ringCaption;
 static int ringCaptionShown;
+static int partyGearCaptionShown;
 static int enemyRingShown;
 static int enemyItemMenu;
 static s32 shown;
@@ -772,6 +773,32 @@ static u8 text[(PAGE + 2) * (LABEL + 1) + 2];
 
 void pcVersusPartySelection(int player) {
     partySelection = player;
+    if (player == 0) pcVersusExitGearCaption(0, 0);
+}
+
+void pcVersusExitGearCaption(int show, int selected) {
+    u8 caption[LABEL];
+
+    if (!show) {
+        if (partyGearCaptionShown) {
+            ringCaptionShown = 0;
+            partyGearCaptionShown = 0;
+        }
+        return;
+    }
+    if (!partyGearCaptionShown) {
+        word(caption, "Exit Gear");
+        setupWindowSize2(&ringCaption, 0x380, 0x100, 0x60, 0x30, 22, 1);
+        ringCaption.m10_flags |= 2;
+        ringCaption.m68_charsPerStep = 0x20;
+        resetDialogWindow18(&ringCaption);
+        if (pcBacklogIgnore) pcBacklogIgnore(&ringCaption);
+        addDialogWindowsToOTSub2(&ringCaption, caption);
+        setupMultiChoiceColor(&ringCaption, 0xEF, 0x1E, 0xF0);
+        ringCaptionShown = 1;
+        partyGearCaptionShown = 1;
+    }
+    setSelectedLineForMultiChoice(&ringCaption, selected ? 0 : 0xFF);
 }
 
 int pcVersusEnemyRing(void) {
@@ -961,6 +988,163 @@ void mechaInitEnvironmentMechaMesh(s32 entity, u16 flags, void* controls, void* 
                                  s16 tpageX, s16 tpageY, s16 clutX, s16 clutY, SVECTOR* position);
 extern sBattleMechaInitData* battleMechaInitData;
 
+int pcVersusCallGearSetting(void);
+int pcVersusExitGearSetting(void);
+void callGearRelocateSlot(u8 slot);
+void callGearSwapSprite(s32 slot);
+void createGearLoadingFileRequests(s32 slot);
+void pcVersusMirrorGearHud(int slot, int inGear);
+void markEnemyDead(u8 slot);
+void clearBattleAnimationData(void);
+void sampleBattleTerrainHeight(SpriteActorCore* actor);
+extern s32 battlePartyFileMapping[14][2];
+extern sBattleSlotLayout battleSlotLayout[32];
+extern u16 party1C_InitialValues[16];
+extern u16 battleMechaTextureSlotsUsed;
+
+static int partyGearRulesActive(void) {
+    return pcVersusSession() == PC_VERSUS_IN && !pcArenaRosterEnemyTeams();
+}
+
+int pcVersusPartyGearTextureSlot(int slot) {
+    return partyGearRulesActive() && slot >= 0 && slot < 3 ? slot : -1;
+}
+
+int pcVersusPartyExitEnabled(void) {
+    return partyGearRulesActive() && (pcArenaRosterActive() ? pcArenaRosterExitGear() : pcVersusExitGearSetting());
+}
+
+static int partyGearSlot(int slot) {
+    return slot >= 0 && (slot < 3 || pcVersusMirrorSlot(slot));
+}
+
+int pcVersusPartyCanExitGear(int slot) {
+    return partyGearSlot(slot) && battleVisualEntities[slot].m4_isGear && pcVersusPartyExitEnabled();
+}
+
+static int partyCanCallGear(int slot) {
+    sBattleEntity* entity = &battleEntities.m0_entities[slot];
+    return !(battleConfigs[requestedBattleConfig * 0x20 + 1] & 0x40) &&
+           (pcArenaRosterActive() ? pcArenaRosterCallGear() : pcVersusCallGearSetting()) &&
+           entity->m0_base.mA0_gearNum < 20 && entity->mA4_gear.m60_hp > 0;
+}
+
+void pcVersusPartyGearMenu(int slot) {
+    if (!partyGearSlot(slot) || !partyGearRulesActive()) return;
+    sBattleVar2Sub* menu = &battleVar2->m0_entityMenus[slot];
+    menu->m1C_isCommandEnabled[7] = partyCanCallGear(slot) ? 0 : party1C_InitialValues[7];
+    if (pcVersusPartyCanExitGear(slot)) menu->m1C_isCommandEnabled[8] = 0;
+}
+
+static void setPartyGearForm(int slot, int inGear) {
+    s32 i;
+    apConfigArray[slot].m1_gearState = inGear ? 2 : 0;
+    battleVisualEntities[slot].m4_isGear = inGear;
+    if (inGear) battleEntities.m0_entities[slot].m15A_flags |= 0x80;
+    else battleEntities.m0_entities[slot].m15A_flags &= ~0x80;
+    battleVar2->m2EB_hpChanged[slot] = 1;
+    if (slot >= 3) {
+        pcVersusMirrorGearHud(slot, inGear);
+        return;
+    }
+    battleVar0->m835C_apFuelLabels[slot].m1E1_barMode = inGear && battleCharacters[slot] != 7 ? 2 : 1;
+    for (i = 0; i < 3; i++) {
+        if (gameState.m1D34_currentParty[i] == battleCharacters[slot]) gameState.m22B1_isOnGear[i] = inGear;
+    }
+}
+
+static void boardPartyGear(int slot) {
+    updateCharacterBlinkingTask(0);
+    markEnemyDead(slot); /* Free the old foot position before choosing a Gear position. */
+    if (slot < 3) {
+        callGearRelocateSlot(slot);
+        callGearSwapSprite(slot);
+    } else {
+        sBattleVisualEntity* visual = &battleVisualEntities[slot];
+        s32 position = slot - 3;
+        sBattleSlotLayout* layout = &battleSlotLayout[0x18 + position];
+        visual->m0_positionSlot = position;
+        visual->m1_indexInSlot = 0;
+        visual->mA_X = battleMechaInitData->m100_gearPositions[position][1].vx;
+        visual->mC_Z = battleMechaInitData->m100_gearPositions[position][1].vy;
+        layout->m0_count = layout->m1_mask = 1;
+        releaseSpriteActor(slot);
+        createGearLoadingFileRequests(slot);
+        waitReadCompletion(0);
+        finalizeBattleMechaLoadingCommands(slot, 0x140 + position * 64, 0x100, 0, slot + 0x1C0);
+        initMechaForBattle(slot);
+    }
+    setPartyGearForm(slot, 1);
+    pcArenaLog("  player %d called Gear for slot %d", slot < 3 ? 1 : 2, slot);
+}
+
+int pcVersusCallPartyGear(int slot) {
+    if (!partyGearSlot(slot) || !partyGearRulesActive()) return 0;
+    if (partyCanCallGear(slot) && !battleVisualEntities[slot].m4_isGear) boardPartyGear(slot);
+    return 1;
+}
+
+int pcVersusExitPartyGear(int slot) {
+    s32 dir, sub, file, index;
+    void* sprite;
+    sBattleVisualEntity* visual;
+    sBattleSlotLayout* layout;
+    Vec2s16* position;
+    SpriteActorCore* core;
+
+    if (!pcVersusPartyCanExitGear(slot)) return 0;
+    visual = &battleVisualEntities[slot];
+    s32 character = visual->m2_characterId;
+    u8* config = battleConfigs + requestedBattleConfig * 0x20;
+    s32 secondSide = slot >= 3;
+    s32 footSlot = config[secondSide ? 0x18 + slot - 3 : 4 + slot] & 7;
+    layout = &battleSlotLayout[footSlot + 8 * secondSide];
+    for (index = 0; layout->m1_mask & (1 << index); index++) {}
+
+    pcVersusExitGearCaption(0, 0);
+    updateCharacterBlinkingTask(0);
+    markEnemyDead(slot); /* Release the Gear's position. */
+    clearBattleAnimationData();
+    freeMecha_battle(slot);
+    if (secondSide) {
+        freeMecha_battle(slot * 2 + 13);
+        freeMecha_battle(slot * 2 + 14);
+    } else {
+        battleMechaTextureSlotsUsed &= ~(1u << slot);
+    }
+    releaseSpriteActor(slot);
+    layout->m0_count++;
+    layout->m1_mask |= 1 << index;
+    visual->m0_positionSlot = footSlot;
+    visual->m1_indexInSlot = index;
+    position = secondSide ? &battleMechaInitData->m4_slotPositions[footSlot].mC_monsters[index]
+                          : &battleMechaInitData->m4_slotPositions[footSlot].m0_party[index];
+    visual->mA_X = position->vx;
+    visual->mC_Z = position->vy;
+    setPartyGearForm(slot, 0);
+
+    /* Mirror sprites retain their file buffer when the Gear takes over. */
+    if (!secondSide) {
+        getCurrentDirectory(&dir, &sub);
+        setCurrentDirectory(0x2C, 1);
+        file = battlePartyFileMapping[character][0];
+        sprite = allocateHeap(getFileSizeAligned(file), 0);
+        readFile(file, sprite, 0, 0x80);
+        waitReadCompletion(0);
+        setCurrentDirectory(dir, sub);
+        battleBssBlock.m8D24_visualBuffers[slot].m0_spriteData = sprite;
+        battleBssBlock.m8D24_visualBuffers[slot].m8_vramParam = 0;
+    }
+    createBattleSpriteActor(slot, slot, 1);
+    core = battleBssBlock.m8C8C_spriteActorCores[slot];
+    core->m7C_extra->m0 = battlePartyFileMapping[character][1];
+    freeHeap(core->m20_object->m2C_subSpriteBuffer);
+    core->m20_object->m30_subSprites = core->m20_object->m2C_subSpriteBuffer = allocateHeap(0x300, 0);
+    sampleBattleTerrainHeight(core);
+    pcArenaLog("  player %d exited Gear at slot %d", secondSide + 1, slot);
+    return 1;
+}
+
 int pcVersusEnemyTurnResolved(void) { return enemyTurnResolved; }
 
 static void callEnemyGear(u8 slot) {
@@ -1040,6 +1224,15 @@ static void exitEnemyGear(u8 slot) {
     createBattleSpriteActor(slot, index, 1);
     enemyTurnResolved = 1;
     pcArenaLog("  player %d exited Gear at slot %d", pcArenaRosterSide(slot) + 1, slot);
+}
+
+void pcVersusDeployMirrorGears(void) {
+    int slot;
+    if (!pcVersusMirror() || !pcVersusGears()) return;
+    for (slot = 3; slot < 6; slot++) {
+        if (pcVersusMirrorSlot(slot) && battleEntities.m0_entities[slot].m0_base.mA0_gearNum < 20 &&
+            battleEntities.m0_entities[slot].mA4_gear.m60_hp > 0) boardPartyGear(slot);
+    }
 }
 
 void pcVersusRosterDeployGears(void) {
@@ -1433,7 +1626,7 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
     s32 i;
     s32 j;
     s32 chosen = -1;
-    s32 canCallGear = pcArenaRosterGear(entity, NULL, NULL, NULL, NULL);
+    s32 canCallGear = pcArenaRosterCallGear() && pcArenaRosterGear(entity, NULL, NULL, NULL, NULL);
     s32 canExitGear = pcArenaRosterCanExitGear(entity);
     const sBattleEntity* actor = &battleEntities.m0_entities[entity];
 
@@ -1609,7 +1802,7 @@ void pcVersusBattleSetup(void) {
         return;
     }
     pcVersusMirrorSetup(); /* a mirror match: the copy's places in the formation (mirror.c) */
-    if (pcVersusGears() && !pcVersusMirror() && !(battleConfigs[requestedBattleConfig * 0x20 + 1] & 0x40)) {
+    if (pcVersusGears() && !(battleConfigs[requestedBattleConfig * 0x20 + 1] & 0x40)) {
         /* Gear against Gear: the members with a Gear ride it (the battle loader
          * takes m22B1_isOnGear; config flag 0x40 is a battle without Gears) */
         for (i = 0; i < 3; i++) {

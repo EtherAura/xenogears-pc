@@ -46,6 +46,15 @@ void pcArenaRosterGearActivated(int slot);
 void pcArenaRosterGearDeactivated(int slot);
 int pcArenaRosterStartInGear(void);
 int pcArenaRosterCanExitGear(int slot);
+/* The native party's reversible Gear commands in Versus. */
+int pcVersusPartyExitEnabled(void);
+int pcVersusPartyCanExitGear(int slot);
+void pcVersusPartyGearMenu(int slot);
+int pcVersusPartyGearTextureSlot(int slot);
+void pcVersusDeployMirrorGears(void);
+void pcVersusExitGearCaption(int show, int selected);
+int pcVersusCallPartyGear(int slot);
+int pcVersusExitPartyGear(int slot);
 void pcVersusRosterDeployGears(void);
 int pcVersusEnemyTurnResolved(void);
 

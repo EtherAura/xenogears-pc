@@ -9901,12 +9901,84 @@ msgid "Start in Gear"
 msgstr "ギアで開始"
 
 #: port/src/ui/arena.cpp
+msgid "Start compatible fighters in their assigned Gears."
+msgstr "対応する戦闘員は割り当てられたギアに搭乗して戦闘を開始します。"
+
+#: port/src/ui/arena.cpp
+msgid "Let the party call its Gears in formations that support them."
+msgstr "ギアを使える編成では、パーティーがギアを呼べるようにします。"
+
+#: port/src/ui/arena.cpp
 msgid "Start on foot"
 msgstr "徒歩で開始"
 
 #: port/src/ui/arena.cpp
 msgid "Allow Exit Gear"
 msgstr "ギアから降りられる"
+
+#: port/src/ui/arena.cpp
+msgid "Allow switching back to fighting on foot after entering a Gear."
+msgstr "ギアに搭乗した後、降りて生身で戦えるようにします。"
+
+#: port/src/ui/arena.cpp
+msgid "Exit Gear allowed"
+msgstr "ギアから降りられる"
+
+#: port/src/ui/arena.cpp
+msgid "Choose your save if you want to play a character party."
+msgstr "キャラクターパーティーで戦う場合は、自分のセーブデータを選んでください。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 1 chooses their own save."
+msgstr "プレイヤー1は自分のセーブデータを選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "Player 1 chooses their own items."
+msgstr "プレイヤー1は自分でアイテムを選びます。"
+
+#: port/src/ui/arena.cpp
+msgid "Optional inventory for your team in enemy vs enemy."
+msgstr "敵同士の対戦で、自分のチームが使うアイテムを選べます。"
+
+#: port/src/ui/arena.cpp
+msgid "Propose loadout"
+msgstr "編成を提案"
+
+#: port/src/ui/arena.cpp
+msgid "Confirm loadout"
+msgstr "編成を確認"
+
+#: port/src/ui/arena.cpp
+msgid "Waiting for Player 2 to confirm the loadout."
+msgstr "プレイヤー2が編成を確認するのを待っています。"
+
+#: port/src/ui/arena.cpp
+msgid "Choose your save before hosting a match with a character party."
+msgstr "キャラクターパーティーで対戦を主催する前に、自分のセーブデータを選んでください。"
+
+#: port/src/ui/arena.cpp
+msgid "Enemy battle"
+msgstr "敵との対戦"
+
+#: port/src/ui/arena.cpp
+msgid "Enemy team"
+msgstr "敵チーム"
+
+#: port/src/ui/arena.cpp
+msgid "Preset formation"
+msgstr "既存の編成"
+
+#: port/src/ui/arena.cpp
+msgid "Custom teams"
+msgstr "カスタムチーム"
+
+#: port/src/ui/arena.cpp
+msgid "Choose an existing enemy formation or build custom teams."
+msgstr "既存の敵編成を選ぶか、カスタムチームを編成します。"
+
+#: port/src/ui/arena.cpp
+msgid "Fight preset enemy formations or build custom teams for two players."
+msgstr "既存の敵編成やカスタムチームで二人対戦を行います。"
 
 #: port/src/ui/arena.cpp
 msgid "Enemy teams on both sides"

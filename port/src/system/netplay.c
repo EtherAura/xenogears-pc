@@ -305,6 +305,8 @@ static void logicList(NpSession* s) {
     logicAdd(s, "text_hold_fast", 0, 1, K_BOOL, pcGameplayTextHold() != 0);
     logicAdd(s, "text_auto_advance", 0, 10, K_INT, pcGameplayTextAutoAdvance());
     logicAdd(s, "arena_versus_gears", 0, 1, K_BOOL, pcVersusGearsSetting() != 0);
+    logicAdd(s, "arena_versus_call_gear", 0, 1, K_BOOL, pcVersusCallGearSetting() != 0);
+    logicAdd(s, "arena_versus_exit_gear", 0, 1, K_BOOL, pcVersusExitGearSetting() != 0);
     /* the battle music: the song is game state (the driver and the SPU run in the game) */
     logicAdd(s, "arena_music", 0, ARENA_MUSIC_IDS, K_INT, pcArenaMusicSetting());
     /* the opponent's HP and EP in a versus battle: a picture only, but the match's

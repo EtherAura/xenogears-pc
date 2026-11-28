@@ -383,6 +383,20 @@ void pcVersusSetGears(int on) {
     settingsSave();
 }
 
+int pcVersusCallGearSetting(void) { return settingsBool("arena_versus_call_gear", 0); }
+
+void pcVersusSetCallGear(int on) {
+    settingsSetInt("arena_versus_call_gear", on != 0);
+    settingsSave();
+}
+
+int pcVersusExitGearSetting(void) { return settingsBool("arena_versus_exit_gear", 0); }
+
+void pcVersusSetExitGear(int on) {
+    settingsSetInt("arena_versus_exit_gear", on != 0);
+    settingsSave();
+}
+
 /* pcVersusBattleSetup (port/src/game/battle/versus.c): a versus battle's
  * party in its Gears. */
 int pcVersusGears(void) {
@@ -962,7 +976,10 @@ int pcArenaApplyMatchParty(void) {
     } else {
         return 0;
     }
-    partyFromRecord(record, kind == ARENA_MATCH_VERSUS || kind == ARENA_MATCH_ROSTER);
+    int allowGears = kind == ARENA_MATCH_ROSTER
+                         ? pcArenaRosterCallGear() || pcArenaRosterStartInGear()
+                         : pcVersusCallGearSetting() || pcVersusGearsSetting();
+    partyFromRecord(record, allowGears);
     return 1;
 }
 

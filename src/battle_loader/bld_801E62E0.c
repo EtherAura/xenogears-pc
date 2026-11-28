@@ -1,6 +1,7 @@
 /* Battle loader: battle sprite VRAM and sprite actors (Noah
  * battleSpriteLoader.cpp). 0x801E62E0-0x801E70E8; gcc-2.7.2-cdk, ASPSX 2.56. */
 #include "common.h"
+#include "pc_arena.h"
 #include "psyq.h"
 #include "main/memory.h"
 #include "main/task.h"
@@ -300,6 +301,14 @@ void createBattlePlayerSpriteActors(void) {
 
     for (i = 0; i != 3; i++) {
         s32 id = battleBssBlock.m4_visualEntities[i].m2_characterId;
+#ifdef PLATFORM_PC
+        if (id < 0x11 && battleBssBlock.m4_visualEntities[i].m4_isGear != 0 && pcVersusPartyExitEnabled()) {
+            /* Keep a sprite texture location for Gear pilots who can dismount. */
+            battleBssBlock.m8D24_visualBuffers[i].m6_vramY = 0x1C0;
+            battleBssBlock.m8D24_visualBuffers[i].m4_vramX = battleSpriteX + 0x100;
+            battleSpriteX += battleSpriteWidthPerCharacter[id];
+        }
+#endif
         if (id < 0x11 && battleBssBlock.m4_visualEntities[i].m4_isGear == 0) {
             battleBssBlock.m8D24_visualBuffers[i].m6_vramY = 0x1C0;
             battleBssBlock.m8D24_visualBuffers[i].m4_vramX = battleSpriteX + 0x100;
@@ -309,6 +318,9 @@ void createBattlePlayerSpriteActors(void) {
             core->m7C_extra->m0 = battlePartyFileMapping[id][1];
             freeHeap(core->m20_object->m2C_subSpriteBuffer);
             core->m20_object->m2C_subSpriteBuffer = allocateHeap(0x300, 0);
+#ifdef PLATFORM_PC
+            core->m20_object->m30_subSprites = core->m20_object->m2C_subSpriteBuffer;
+#endif
         }
     }
 #ifdef PLATFORM_PC
@@ -358,6 +370,9 @@ void mainBattleSpriteCallback_phase5(TaskHeader* task) {
 void mainBattleSpriteCallback_phase4(TaskHeader* task) {
     if ((s16)waitForMusic(0) == 0) {
         freeHeap(((sBattleSpriteLoaderTask*)task)->m28_texture);
+#ifdef PLATFORM_PC
+        pcVersusDeployMirrorGears();
+#endif
         startPlayableCharactersJumpToPosition();
         setTaskUpdateFunction(task, mainBattleSpriteCallback_phase5);
     }

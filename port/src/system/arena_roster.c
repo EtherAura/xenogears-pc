@@ -213,6 +213,9 @@ static int prepare(RosterAssets* a, const ArenaLoadout* loadout, const char* pat
     if (disc == NULL) return refused(why, "The current Xenogears disc could not be read.");
     a->loadout = *loadout;
     a->split = loadout->side[0].count;
+    if (a->split != 0) {
+        a->loadout.callGear = a->loadout.startInGear = a->loadout.allowExitGear = 0;
+    }
     for (int side = 0; side < 2; side++) {
         for (int i = 0; i < loadout->side[side].count; i++) {
             int id = addType(a, disc, loadout->side[side].enemy[i]);
@@ -221,7 +224,7 @@ static int prepare(RosterAssets* a, const ArenaLoadout* loadout, const char* pat
                 return refused(why, "An enemy has no compatible on-foot battle record.");
             }
             RosterGear* gear = &a->gear[a->count];
-            if (loadout->callGear && (loadout->side[side].gearSlots & (1 << i))) {
+            if ((a->loadout.callGear || a->loadout.startInGear) && (loadout->side[side].gearSlots & (1 << i))) {
                 if (!readGear(disc, loadout->side[side].gear[i], gear)) {
                     xgDiscClose(disc);
                     return refused(why, "An assigned Gear has no compatible battle record.");
@@ -259,8 +262,7 @@ static int validLoadout(const ArenaLoadout* loadout, const int party[3]) {
     int members = 0;
     if (loadout->side[0].count > 3 || loadout->side[1].count == 0 || loadout->side[1].count > 5 ||
         loadout->stage >= 75 || loadout->callGear > 1 || party[0] == 255) return 0;
-    if (loadout->startInGear > 1 || loadout->allowExitGear > 1 ||
-        (!loadout->callGear && (loadout->startInGear || loadout->allowExitGear))) return 0;
+    if (loadout->startInGear > 1 || loadout->allowExitGear > 1) return 0;
     for (int i = 0; i < 3; i++) {
         if (party[i] == 255) continue;
         if (party[i] < 0 || party[i] > 10 || (members & (1 << party[i]))) return 0;
@@ -293,6 +295,7 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
             if (loadout->side[side].items[i] != 0) flags |= 4u << side;
         }
     }
+    int usesAssignedGears = loadout->callGear || loadout->startInGear;
     bytes[n++] = flags ? 2 : 1;
     bytes[n++] = loadout->stage;
     bytes[n++] = loadout->callGear;
@@ -300,7 +303,7 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
     for (int side = 0; side < 2; side++) {
         const ArenaEnemyTeam* team = &loadout->side[side];
         bytes[n++] = team->count;
-        bytes[n++] = loadout->callGear ? team->gearSlots : 0;
+        bytes[n++] = usesAssignedGears ? team->gearSlots : 0;
         for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
             bytes[n++] = team->multiplier[i] & 0xff;
             bytes[n++] = team->multiplier[i] >> 8;
@@ -308,7 +311,7 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
         for (int i = 0; i < team->count; i++) {
             bytes[n++] = team->enemy[i].bank;
             bytes[n++] = team->enemy[i].type;
-            if (loadout->callGear && (team->gearSlots & (1 << i))) {
+            if (usesAssignedGears && (team->gearSlots & (1 << i))) {
                 bytes[n++] = team->gear[i].bank;
                 bytes[n++] = team->gear[i].type;
             }
@@ -359,7 +362,7 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
         if (at + 2 + 2 * ARENA_ROSTER_STATS > length) return 0;
         team->count = bytes[at++];
         team->gearSlots = bytes[at++];
-        if (team->count > ARENA_ROSTER_SLOTS || (!decoded.callGear && team->gearSlots)) return 0;
+        if (team->count > ARENA_ROSTER_SLOTS) return 0;
         for (int i = 0; i < ARENA_ROSTER_STATS; i++, at += 2) team->multiplier[i] = u16le(bytes + at);
         for (int i = 0; i < team->count; i++) {
             if (at + 2 > length) return 0;
@@ -385,6 +388,7 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
             at += ARENA_ROSTER_ITEMS;
         }
     }
+    if (!decoded.callGear && !decoded.startInGear && (decoded.side[0].gearSlots || decoded.side[1].gearSlots)) return 0;
     if (at != length || !validLoadout(&decoded, party)) return 0;
     *loadout = decoded;
     return 1;
@@ -477,7 +481,7 @@ int pcArenaRosterConfig(unsigned char* config) {
     for (int side = 0; side < 2; side++) {
         memcpy(roster.items[side], roster.loadout.side[side].items, ARENA_ROSTER_ITEMS);
     }
-    config[1] = (config[1] & ~0x60) | (roster.loadout.callGear ? 0x80 : 0xC0);
+    config[1] = (config[1] & ~0x60) | (roster.loadout.callGear || roster.loadout.startInGear ? 0x80 : 0xC0);
     config[2] = roster.loadout.stage;
     config[3] = 0;
     memcpy(config + 4, party, 3);
@@ -534,10 +538,14 @@ const void* pcArenaRosterFootSheet(int slot) {
     return foot->visuals + foot->sprite.sheetOffset;
 }
 
+int pcArenaRosterCallGear(void) { return pcArenaRosterActive() && roster.loadout.callGear; }
+
+int pcArenaRosterExitGear(void) { return pcArenaRosterActive() && roster.loadout.allowExitGear; }
+
 int pcArenaRosterStartInGear(void) { return pcArenaRosterActive() && roster.loadout.startInGear; }
 
 int pcArenaRosterCanExitGear(int slot) {
-    return pcArenaRosterActive() && roster.loadout.allowExitGear && slot >= 3 && slot < roster.count + 3 &&
+    return pcArenaRosterExitGear() && slot >= 3 && slot < roster.count + 3 &&
            (roster.activeGears & (1 << (slot - 3))) != 0;
 }
 

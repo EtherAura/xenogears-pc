@@ -198,10 +198,10 @@ void executeAbility(u8 entity) {
     }
     if (apConfigArray[entity].m1_gearState == 0) {
         battleVar2->m2DC_attackIndex = battleVar2->m2E6_menuSelection + 0x17;
-        flags = partyBattleStats[entity].m0_commands[battleVar2->m2E6_menuSelection + 0x16].m0_flags & 7;
+        flags = BATTLE_FOOT_COMMANDS(entity)[battleVar2->m2E6_menuSelection + 0x16].m0_flags & 7;
     } else {
         battleVar2->m2DC_attackIndex = battleVar2->m2E6_menuSelection + 0x16;
-        flags = mechaBattleStats[entity].m0_commands[battleVar2->m2E6_menuSelection + 0x15].m0_flags & 7;
+        flags = BATTLE_GEAR_COMMANDS(entity)[battleVar2->m2E6_menuSelection + 0x15].m0_flags & 7;
     }
     if (flags != 0) {
         mask = abilityTargetBitmask;
@@ -259,12 +259,12 @@ u8 useAbility(u8 entity, u8 cmd, u8 page) {
     u8 cost;
 
     if (apConfigArray[entity].m1_gearState == 0) {
-        flags = partyBattleStats[entity].m0_commands[page * 2 + cmd + 0x16].m0_flags;
-        cost = partyBattleStats[entity].m0_commands[page * 2 + cmd + 0x16].m13_cost;
+        flags = BATTLE_FOOT_COMMANDS(entity)[page * 2 + cmd + 0x16].m0_flags;
+        cost = BATTLE_FOOT_COMMANDS(entity)[page * 2 + cmd + 0x16].m13_cost;
         ok = bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[1], cmd + page * 2) != 0;
     } else {
-        flags = mechaBattleStats[entity].m0_commands[page * 2 + cmd + 0x15].m0_flags;
-        cost = mechaBattleStats[entity].m0_commands[page * 2 + cmd + 0x15].m13_cost;
+        flags = BATTLE_GEAR_COMMANDS(entity)[page * 2 + cmd + 0x15].m0_flags;
+        cost = BATTLE_GEAR_COMMANDS(entity)[page * 2 + cmd + 0x15].m13_cost;
         if (bitmaskCharacterCheckReverse(gameState.m16C0_abilities[BATTLE_CHARACTER(entity)].m0_unlockedAbilitiesBitField[3], cmd + page * 2)) {
             ok = 1;
         }

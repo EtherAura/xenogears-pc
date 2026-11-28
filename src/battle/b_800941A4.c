@@ -106,7 +106,7 @@ u8 startBattleAttackAnimation(void) {
         IMPLICIT_RETURN(0);
     }
     if (startBattleAttackAnimationVar2 < 3) {
-        currentEntityBattleStats = &pBattleEntities->m1058_partyBattleStats[startBattleAttackAnimationVar2][pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
+        currentEntityBattleStats = &BATTLE_FOOT_ROWS(pBattleEntities, startBattleAttackAnimationVar2)[pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
     } else {
         currentEntityBattleStats = &pBattleEntities->m35D8_enemiesBattleStats[pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
     }
@@ -856,7 +856,7 @@ void onPlayerAttackedByEnemy(void) {
                         battleGetSlotStatusSub_currentBattleEntity = startBattleAttackAnimationVar5;
                         startBattleAttackAnimationVar4 = attacker;
                         startBattleAttackAnimationVar5 = target;
-                        currentEntityBattleStats = &pBattleEntities->m1058_partyBattleStats[startBattleAttackAnimationVar2][20];
+                        currentEntityBattleStats = &BATTLE_FOOT_ROWS(pBattleEntities, startBattleAttackAnimationVar2)[20];
                         pBattleEntities->m5FA0_initBattleAttackStatusArray0[startBattleAttackAnimationVar2] = 7;
                         pBattleEntities->m5F6C_damageDonePerAttack[startBattleAttackAnimationVar2] = 0;
                         pBattleEntities->m5FC7_battleTickMain_var1 = 0x34;
@@ -1485,14 +1485,14 @@ u8 battleGetSlotStatusSub(u8 entity, s32 unused) {
     battleGetSlotStatusSub_currentBattleEntityGear = &pBattleEntities->m0_entities[entity].mA4_gear;
     if (PARTY_SPEED(entity)) {
         if (!(battleGetSlotStatusSub_currentBattleEntity->m15A_flags & 0x80)) {
-            currentEntityBattleStats = &pBattleEntities->m1058_partyBattleStats[entity][pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
+            currentEntityBattleStats = &BATTLE_FOOT_ROWS(pBattleEntities, entity)[pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
             if (battleGetSlotStatusSub_currentBattleEntity->m0_base.m5A_agility > (s8)currentEntityBattleStats->m27_agilityPenalty) {
                 speed = (battleGetSlotStatusSub_currentBattleEntity->m0_base.m5A_agility - (s8)currentEntityBattleStats->m27_agilityPenalty) * 9;
             } else {
                 speed = 9;
             }
         } else {
-            currentEntityBattleStats = &pBattleEntities->m2228_mechaBattleStats[entity][pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
+            currentEntityBattleStats = &BATTLE_GEAR_ROWS(pBattleEntities, entity)[pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
             if (battleGetSlotStatusSub_currentBattleEntity->mA4_gear.m98_agility > (s8)currentEntityBattleStats->m27_agilityPenalty) {
                 speed = (battleGetSlotStatusSub_currentBattleEntity->mA4_gear.m98_agility - (s8)currentEntityBattleStats->m27_agilityPenalty) * 9;
             } else {
@@ -2105,7 +2105,7 @@ u8 getAbilityHitChance(u8 entity, u8 command) {
     sBattle800CDD40Sub* p;
     sBattleEntity* e;
 
-    p = &pBattleEntities->m1058_partyBattleStats[entity][command];
+    p = &BATTLE_FOOT_ROWS(pBattleEntities, entity)[command];
     e = &pBattleEntities->m0_entities[entity];
     v = p->m14_etherHitBonus + e->m0_base.m5B_ether;
     if (v > 100) {
@@ -2120,7 +2120,7 @@ void setupGearTurnState(u8 idx) {
     sBattleEntity* e = &battleEntities.m0_entities[idx];
     GameStateGear* gear = &battleEntities.m0_entities[idx].mA4_gear;
     u8* mode = &battleEntities.m0_entities[idx].m148_gearMode;
-    sBattle800CDD40Sub* stats = battleEntities.m2228_mechaBattleStats[idx];
+    sBattle800CDD40Sub* stats = BATTLE_GEAR_ROWS(&battleEntities, idx);
     BattleGearTurn* t = &battleEntities.m5F24_gearTurn;
     u8 i;
     u8 chance;
@@ -2333,7 +2333,7 @@ void setEtherAbilitiesTargetAll(u8 idx) {
     }
     if (v) {
         if (pBattleEntities->m0_entities[idx].m15A_flags & 0x80) {
-            s = pBattleEntities->m2228_mechaBattleStats[idx];
+            s = BATTLE_GEAR_ROWS(pBattleEntities, idx);
             s[21].m0_flags = 1;
             s[23].m0_flags = 1;
             s[24].m0_flags = 1;
@@ -2342,7 +2342,7 @@ void setEtherAbilitiesTargetAll(u8 idx) {
             s[27].m0_flags = 1;
             s[28].m0_flags = 1;
         } else {
-            p = pBattleEntities->m1058_partyBattleStats[idx];
+            p = BATTLE_FOOT_ROWS(pBattleEntities, idx);
             p[22].m0_flags = 1;
             p[24].m0_flags = 1;
             p[25].m0_flags = 1;
@@ -2378,7 +2378,7 @@ void startBattleAttackAnimationSub0(u8 idx, u8 arg1) {
         }
         if (v) {
             if (pBattleEntities->m0_entities[idx].m15A_flags & 0x80) {
-                s = pBattleEntities->m2228_mechaBattleStats[idx];
+                s = BATTLE_GEAR_ROWS(pBattleEntities, idx);
                 s[21].m0_flags = 0x2000;
                 s[23].m0_flags = 0x2000;
                 s[24].m0_flags = 0x2000;
@@ -2388,7 +2388,7 @@ void startBattleAttackAnimationSub0(u8 idx, u8 arg1) {
                 s[28].m0_flags = 0x2000;
                 pBattleEntities->m0_entities[idx].mA4_gear.m80_statusFlags2 &= ~0x2000;
             } else {
-                p = pBattleEntities->m1058_partyBattleStats[idx];
+                p = BATTLE_FOOT_ROWS(pBattleEntities, idx);
                 p[22].m0_flags = 0x2000;
                 p[24].m0_flags = 0x2000;
                 p[25].m0_flags = 0x2000;
@@ -2985,7 +2985,7 @@ void startGearAttackAnimation(void) {
     u16 mask;
 
     if (startBattleAttackAnimationVar2 < 3) {
-        currentEntityBattleStats = &pBattleEntities->m2228_mechaBattleStats[pBattleEntities->m5FC1_performAttackSub3_attacker]
+        currentEntityBattleStats = &BATTLE_GEAR_ROWS(pBattleEntities, pBattleEntities->m5FC1_performAttackSub3_attacker)
                                                          [pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];
     } else {
         currentEntityBattleStats = &pBattleEntities->m35D8_enemiesBattleStats[pBattleEntities->m5FC2_battleGetSlotStatusSub_current28Index];

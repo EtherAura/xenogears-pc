@@ -52,6 +52,8 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]);
 int pcArenaRosterPack(const char* code, const XgPartyRecord* party, unsigned char packet[ARENA_ROSTER_PACKET]);
 int pcArenaRosterUnpack(const unsigned char* packet, int bytes, const unsigned char* codes,
                         char code[ARENA_LOADOUT_CODE], XgPartyRecord* record);
+int pcArenaRosterCallGear(void);
+int pcArenaRosterExitGear(void);
 int pcArenaRosterOnline(const ArenaLoadout* loadout, const char* disc, const char** why);
 int pcArenaRosterStart(const ArenaLoadoutReview* review, const char** why);
 const unsigned char* pcArenaRosterItemCounts(int side);

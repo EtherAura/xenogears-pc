@@ -2231,7 +2231,7 @@ void setupGearTurnHud(u8 entity) {
         ((u8*)battleVar2 + off)[8 + i * 4 + n] = v + 0x83;
     }
     initBattleRenderStruct2();
-    if (battleCharacters[entity] != 7) {
+    if (BATTLE_CHARACTER(entity) != 7) {
         setupGearHudTexts(entity);
         battleRenderDebugAndMain();
         updateGearHudFuel(entity);
@@ -2288,6 +2288,9 @@ void setupTurnRenderLoop(u8 entity) {
     for (i = 0; i < 16; i++) {
         battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[i] = battleEntities.m0_entities[entity].m0_base.m7A_commandEnabledBF & party1C_InitialValues[i];
     }
+#ifdef PLATFORM_PC
+    pcVersusPartyGearMenu(entity);
+#endif
     if (battleCharacters[entity] == 7 && apConfigArray[entity].m1_gearState != 0) {
         battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[13] = party1C_InitialValues[13];
         battleVar2->m0_entityMenus[entity].m1C_isCommandEnabled[4] = party1C_InitialValues[4];

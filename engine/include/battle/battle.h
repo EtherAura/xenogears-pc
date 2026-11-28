@@ -1406,6 +1406,12 @@ extern u8 battleCharacters[4];
  * from the mirror then. */
 u8 pcBattleCharacter(u32 entity);
 #define BATTLE_CHARACTER(entity) pcBattleCharacter(entity)
+int pcVersusMirrorSlot(s32 entity);
+sBattle800CDD40Sub* pcVersusMirrorRows(int entity, int gear);
+#define BATTLE_FOOT_ROWS(state, entity) (pcVersusMirrorSlot(entity) ? pcVersusMirrorRows(entity, 0) : (state)->m1058_partyBattleStats[entity])
+#define BATTLE_GEAR_ROWS(state, entity) (pcVersusMirrorSlot(entity) ? pcVersusMirrorRows(entity, 1) : (state)->m2228_mechaBattleStats[entity])
+#define BATTLE_FOOT_COMMANDS(entity) BATTLE_FOOT_ROWS(&battleEntities, entity)
+#define BATTLE_GEAR_COMMANDS(entity) BATTLE_GEAR_ROWS(&battleEntities, entity)
 extern u16 allPlayerCharacterBitmask;
 extern BattleCamera_800D309C battleCameraBlock;
 extern BattleBss_800C3EB0 battleBssBlock;

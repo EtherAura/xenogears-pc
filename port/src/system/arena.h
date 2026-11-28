@@ -90,6 +90,10 @@ int pcVersusRequest(int table, int config);
 int pcVersusRequestMirror(void); /* a mirror match (include/pc_arena.h): player 2 commands a copy of the party */
 int pcVersusGearsSetting(void); /* the party in its Gears (those who have one) */
 void pcVersusSetGears(int on);
+int pcVersusCallGearSetting(void);
+void pcVersusSetCallGear(int on);
+int pcVersusExitGearSetting(void);
+void pcVersusSetExitGear(int on);
 /* What each player sees (include/pc_arena.h): this machine's player, set by
  * netplay (1 host, 2 joiner; 0 one screen); the opponent's HP and EP. */
 void pcVersusSetPerspective(int player);

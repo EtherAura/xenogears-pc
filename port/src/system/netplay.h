@@ -56,6 +56,7 @@ typedef struct {
     int hasParty;      /* a checked save record is attached */
     char roster[ARENA_LOADOUT_CODE]; /* both players approve the same roster before launching */
     XgPartyRecord record; /* ... (checked) */
+    uint8_t rosterHostItems[ARENA_ROSTER_ITEMS]; /* host inventory for enemy-only proposals */
 } NetplayStart;
 enum { NETPLAY_IDLE, NETPLAY_STARTING, NETPLAY_HOSTING, NETPLAY_JOINING, NETPLAY_LOADING, NETPLAY_CONNECTED, NETPLAY_OVER };
 

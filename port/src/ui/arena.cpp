@@ -249,7 +249,6 @@ struct {
 } formations;
 
 char rosterCode[ARENA_LOADOUT_CODE] = "";
-XgPartyRecord rosterParty{};
 
 void allGearsOption() {
     opt::row(N_("Every Gear"));
@@ -442,8 +441,9 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
     }
     if (const StageName* stage = stageName(loadout.stage)) ImGui::Text("%s %s", tr("Stage"), tr(stage->name));
     else ImGui::Text(tr("Stage %d"), loadout.stage);
-    if (loadout.callGear) {
+    if (loadout.side[0].count == 0) {
         ImGui::TextUnformatted(tr(loadout.startInGear ? "Start in Gear" : "Start on foot"));
+        if (loadout.callGear) ImGui::TextUnformatted(tr("Enable Gear"));
         if (loadout.allowExitGear) ImGui::TextUnformatted(tr("Exit Gear allowed"));
     }
     bool valid = false;
@@ -453,6 +453,7 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
         const ArenaEnemyTeam& team = loadout.side[side];
         if (team.count == 0) {
             ImGui::TextUnformatted(tr("Character party"));
+            if (!record.m3_count) ImGui::TextUnformatted(tr("Player 1 chooses their own save."));
             XgPartyMember member;
             for (int i = 0; xgPartyMemberInfo(&record, i, &member); i++) {
                 ImGui::BulletText(tr("%s (level %d)"), tr(memberNames[member.id]), member.level);
@@ -479,7 +480,7 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
             ImGui::BulletText("%s", enemy->name[0] ? enemy->name : tr("Enemy"));
             ImGui::TextWrapped(tr("Base HP %d  ATK %d  ETH %d  DEF %d  EDEF %d  AGI %d"), enemy->hp, enemy->attack,
                         enemy->ether, enemy->defence, enemy->etherDefence, enemy->agility);
-            if (loadout.callGear && (team.gearSlots & (1 << i))) {
+            if ((loadout.callGear || loadout.startInGear) && (team.gearSlots & (1 << i))) {
                 const XgBeast* gear = rosterEnemy(rosterCatalog.gears, team.gear[i]);
                 if (gear != nullptr) ImGui::Text(tr("Gear %s"), gear->name[0] ? gear->name : tr("Assigned"));
                 else valid = false;
@@ -593,42 +594,37 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         review.current.loadout.side[0].gearSlots = 0;
         memset(review.current.loadout.side[0].items, 0, ARENA_ROSTER_ITEMS);
     }
-    opt::row(N_("Enable Gear"));
-    bool call = review.current.loadout.callGear != 0;
-    if (skin::checkbox("##call-gear", &call)) {
-        review.current.loadout.callGear = call;
-        if (!call) {
-            review.current.loadout.startInGear = 0;
-            review.current.loadout.allowExitGear = 0;
-        }
-        changed = true;
-    }
-    hint("Let both players call an assigned Gear during a fight.");
-    if (call) {
-        ArenaLoadout& loadout = review.current.loadout;
-        opt::row(N_("Start in Gear"));
-        bool inGear = loadout.startInGear != 0;
-        if (skin::checkbox("##start-in-gear", &inGear)) {
-            loadout.startInGear = inGear;
+    static unsigned char startInGear = 0, callGear = 0, allowExitGear = 0;
+    ArenaLoadout& loadout = review.current.loadout;
+    auto gearOption = [&changed](const char* label, const char* description, const char* id, unsigned char& value) {
+        opt::row(label);
+        bool on = value != 0;
+        if (skin::checkbox(id, &on)) {
+            value = on;
             changed = true;
         }
-        hint("Start on foot to call a Gear during battle, or start in the assigned Gears.");
-        opt::row(N_("Allow Exit Gear"));
-        bool exit = loadout.allowExitGear != 0;
-        if (skin::checkbox("##exit-gear", &exit)) {
-            loadout.allowExitGear = exit;
-            changed = true;
-        }
-        hint("Allow switching back to fighting on foot after entering a Gear.");
+        hint("%s", tr(description));
+    };
+    if (!both) {
+        gearOption(N_("Start in Gear"), N_("Start compatible fighters in their assigned Gears."),
+                   "##start-in-gear", startInGear);
+        gearOption(N_("Enable Gear"), N_("Let both players call an assigned Gear during a fight."),
+                   "##call-gear", callGear);
+        gearOption(N_("Allow Exit Gear"), N_("Allow switching back to fighting on foot after entering a Gear."),
+                   "##exit-gear", allowExitGear);
     }
+    loadout.startInGear = both ? 0 : startInGear;
+    loadout.callGear = both ? 0 : callGear;
+    loadout.allowExitGear = both ? 0 : allowExitGear;
+    bool usesAssignedGears = loadout.callGear || loadout.startInGear;
     stagePicker();
     unsigned char stage = pcArenaStageSetting() - 1;
     changed |= stage != review.current.loadout.stage;
     review.current.loadout.stage = stage;
     int party[3] = {0, 2, 255}; // hidden by the enemy-team battle when both sides use enemies
     XgPartyRecord record{};
-    bool partyOk = both || arenaSavesPanel(online ? 0 : 1, &record);
-    if (!both && partyOk) {
+    bool partyOk = both || online || arenaSavesPanel(1, &record);
+    if (!both && record.m3_count) {
         for (int i = 0; i < 3; i++) party[i] = record.m4_members[i];
     }
     changed |= memcmp(review.current.party, party, sizeof(party)) != 0 ||
@@ -709,7 +705,7 @@ void rosterBlock(bool online, void (*resumeGame)()) {
                 changed = true;
                 continue;
             }
-            if (call) {
+            if (usesAssignedGears) {
                 opt::row(N_("Gear"));
                 ArenaEnemy gear = team.gear[i];
                 bool assigned = (team.gearSlots & (1 << i)) != 0;
@@ -768,7 +764,9 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         int itemTypes = 0;
         for (unsigned char count : team.items) itemTypes += count != 0;
         hint("Item types available in battle: %d", itemTypes);
-        if (showItems) {
+        if (showItems && online && side == 0) {
+            hint("Player 1 chooses their own items.");
+        } else if (showItems) {
             static_assert(ARENA_ROSTER_ITEMS == XG_PARTY_ITEMS);
             const uint8_t* save = arenaItemSavePicker(side);
             opt::plain();
@@ -794,7 +792,9 @@ void rosterBlock(bool online, void (*resumeGame)()) {
     bool canApprove = partyOk && review.current.loadout.side[1].count != 0 &&
                       (!both || review.current.loadout.side[0].count != 0);
     if (online) {
-        if (canApprove && pcArenaLoadoutEncode(&review.current.loadout, party, rosterCode)) rosterParty = record;
+        rosterCode[0] = '\0';
+        memset(loadout.side[0].items, 0, sizeof loadout.side[0].items);
+        if (canApprove) pcArenaLoadoutEncode(&loadout, party, rosterCode);
         return;
     }
     opt::plain();
@@ -893,21 +893,37 @@ bool versusStatus(void (*resumeGame)()) {
     return false;
 }
 
-void versusStartingGear() {
+void versusGearOptions() {
     opt::row(N_("Start in Gear"));
-    bool gears = pcVersusGearsSetting() != 0;
-    if (skin::checkbox("##party-gears", &gears)) {
+    bool startsInGear = pcVersusGearsSetting() != 0;
+    if (skin::checkbox("##party-gears", &startsInGear)) {
         sfx::play(sfx::CHOOSE);
-        pcVersusSetGears(gears);
+        pcVersusSetGears(startsInGear);
     }
-    hint("Gear against Gear: the members who have a Gear fight in it (pick a formation of Gears).");
+    hint("Start compatible fighters in their assigned Gears.");
+
+    opt::row(N_("Enable Gear"));
+    bool call = pcVersusCallGearSetting() != 0;
+    if (skin::checkbox("##call-gear", &call)) {
+        sfx::play(sfx::CHOOSE);
+        pcVersusSetCallGear(call);
+    }
+    hint("Let the party call its Gears in formations that support them.");
+
+    opt::row(N_("Allow Exit Gear"));
+    bool exit = pcVersusExitGearSetting() != 0;
+    if (skin::checkbox("##exit-gear", &exit)) {
+        sfx::play(sfx::CHOOSE);
+        pcVersusSetExitGear(exit);
+    }
+    hint("Allow switching back to fighting on foot after entering a Gear.");
 }
 
 void versusFormation(void (*resumeGame)()) {
     musicPicker();
     opponentHpOption();
     const XgVersusFormation* formation = formationPicker(formations.local);
-    versusStartingGear();
+    versusGearOptions();
     XgPartyRecord record;
     bool partyOk = arenaSavesPanel(1, &record);
     const char* why = nullptr;
@@ -928,35 +944,55 @@ void versusFormation(void (*resumeGame)()) {
     availability(available, why);
 }
 
+bool customEnemyTeams(bool& custom) {
+    opt::row(N_("Enemy team"));
+    if (skin::beginCombo("##enemy-team", tr(custom ? "Custom teams" : "Preset formation"))) {
+        if (skin::comboItem(tr("Preset formation"), !custom)) {
+            custom = false;
+            sfx::play(sfx::CHOOSE);
+        }
+        if (skin::comboItem(tr("Custom teams"), custom)) {
+            custom = true;
+            sfx::play(sfx::CHOOSE);
+        }
+        skin::endCombo();
+    }
+    hint("Choose an existing enemy formation or build custom teams.");
+    return custom;
+}
+
 void versusBlock(void (*resumeGame)()) {
     if (versusStatus(resumeGame)) return;
-    if (opt::beginSubmenu("formation", N_("An enemy formation"), nullptr,
-                          N_("Player 2 uses the second controller to choose attacks and targets for an enemy formation."))) {
-        versusFormation(resumeGame);
+    if (opt::beginSubmenu("formation", N_("Enemy battle"), nullptr,
+                          N_("Fight preset enemy formations or build custom teams for two players."))) {
+        static bool custom = false;
+        if (customEnemyTeams(custom)) {
+            musicPicker();
+            rosterBlock(false, resumeGame);
+        } else {
+            versusFormation(resumeGame);
+        }
         opt::endSubmenu();
     }
     if (opt::beginSubmenu("mirror", N_("Mirror match"), nullptr,
-                          N_("Player 2 commands a copy of your party on foot, with its own command ring and copy of your items."))) {
+                          N_("Player 2 commands a copy of your party, with its own command ring and copy of your items."))) {
         musicPicker();
         opponentHpOption();
         stagePicker();
+        versusGearOptions();
         mirrorBlock(resumeGame);
         opt::endSubmenu();
     }
     if (opt::beginSubmenu("local-party", N_("Party vs party"), nullptr,
-                          N_("Each player controls a party from a memory-card save. Both parties fight on foot."))) {
+                          N_("Each player controls a party from a memory-card save."))) {
         musicPicker();
         opponentHpOption();
         stagePicker();
+        versusGearOptions();
         partyBlock(resumeGame);
         opt::endSubmenu();
     }
-    if (opt::beginSubmenu("local-custom", N_("Custom enemy teams"), nullptr,
-                          N_("Build enemy teams and review the loadout together before fighting."))) {
-        musicPicker();
-        rosterBlock(false, resumeGame);
-        opt::endSubmenu();
-    }
+
 }
 
 enum OnlineMatch { OnlineBattling, OnlineVersus, OnlineParty, OnlineCustom };
@@ -1057,7 +1093,7 @@ bool reviewOnlineRoster() {
         const char* roster = reviewingDraft ? draftedRoster.roster : proposal;
         bool canConfirm = showRosterReview(roster, reviewingDraft ? draftedRoster.record : agreed.record);
         ImGui::BeginDisabled(!canConfirm);
-        const char* confirm = reviewingDraft ? tr("Confirm loadout") : tr("Confirm and start match");
+        const char* confirm = reviewingDraft ? tr("Propose loadout") : tr("Confirm loadout");
         if (ImGui::Button(confirm)) {
             if (reviewingDraft) {
                 reviewingDraft = false;
@@ -1079,10 +1115,12 @@ bool reviewOnlineRoster() {
     } else if (state == NETPLAY_ROSTER_FAILED || rosterLobbyError) {
         ImGui::TextWrapped("%s", rosterLobbyError ? tr("The lobby could not start.") : tr(detail));
     } else {
-        ImGui::TextUnformatted(tr(agreed.host ? (proposal[0] ? "Loadout confirmed. Starting the match."
-                                                            : "Waiting for Player 2 to propose a loadout.")
-                                            : "Waiting for Player 1 to confirm the loadout."));
-        if (!agreed.host) showRosterReview(agreed.roster, agreed.record);
+        const char* waiting = proposal[0] ? "Loadout confirmed. Starting the match."
+                                          : "Waiting for Player 1 to confirm the loadout.";
+        if (agreed.host) waiting = proposal[0] ? "Waiting for Player 2 to confirm the loadout."
+                                                   : "Waiting for Player 2 to propose a loadout.";
+        ImGui::TextUnformatted(tr(waiting));
+        if (!agreed.host && proposal[0]) showRosterReview(agreed.roster, agreed.record);
     }
     if (ImGui::Button(tr(reviewingDraft ? "Back to teams" : "Close lobby"))) {
         reviewingDraft = rosterLobbyError = false;
@@ -1201,6 +1239,7 @@ void onlineBlock(OnlineMatch mode) {
     const bool custom = mode == OnlineCustom;
     const bool bringing = mode == OnlineParty || (mode == OnlineVersus && O.host);
     bool partyOk = false;
+    const uint8_t* hostItemSave = nullptr;
     const XgVersusFormation* formation = nullptr;
     switch (mode) {
     case OnlineBattling:
@@ -1215,7 +1254,7 @@ void onlineBlock(OnlineMatch mode) {
         if (!O.host || !O.joinerPicks) formation = formationPicker(formations.online);
         if (O.host) {
             opponentHpOption();
-            versusStartingGear();
+            versusGearOptions();
             partyOk = arenaSavesPanel(0, &O.record);
         }
         break;
@@ -1223,12 +1262,22 @@ void onlineBlock(OnlineMatch mode) {
         if (O.host) {
             stagePicker();
             opponentHpOption();
+            versusGearOptions();
         }
         partyOk = arenaSavesPanel(0, &O.record);
         hint("Both players bring a party from their own save. Edited saves are accepted within the game's ranges.");
         break;
     case OnlineCustom:
-        if (!O.host) rosterBlock(true, nullptr);
+        if (O.host) {
+            partyOk = arenaSavesPanel(0, &O.record);
+            hint("Choose your save if you want to play a character party.");
+            opt::plain();
+            markBlock();
+            hostItemSave = arenaHostItemSavePicker(ImGui::CollapsingHeader(tr("Use items from a save")));
+            hint("Optional inventory for your team in enemy vs enemy.");
+        } else {
+            rosterBlock(true, nullptr);
+        }
         break;
     }
     if (O.host) musicPicker();
@@ -1250,15 +1299,12 @@ void onlineBlock(OnlineMatch mode) {
         s.versus = O.host && mode == OnlineVersus;
         s.partyVsParty = O.host && mode == OnlineParty;
         s.battlingOnly = !O.host && mode == OnlineBattling;
-        s.hasParty = bringing && partyOk;
+        s.hasParty = (bringing || (custom && O.host)) && partyOk;
         if (s.hasParty) s.record = O.record;
         s.joinerPicks = s.versus && O.joinerPicks;
         s.pick = !O.host && formation;
-        if (custom && !O.host) {
-            memcpy(s.roster, rosterCode, sizeof(s.roster));
-            s.record = rosterParty;
-            s.hasParty = s.record.m3_count != 0;
-        }
+        if (custom && !O.host) memcpy(s.roster, rosterCode, sizeof(s.roster));
+        if (hostItemSave != nullptr) xgPartyReadItems(hostItemSave, s.rosterHostItems);
         if (formation) {
             s.table = formation->table;
             s.config = formation->config;
@@ -1302,13 +1348,13 @@ void onlineMenu() {
         const char* description;
     } modes[] = {
         {OnlineBattling, "online-battling", N_("Battling"), N_("Two-player Gear Battling online.")},
-        {OnlineVersus, "online-formation", N_("An enemy formation"), N_("One player controls a party, the other its enemies.")},
+        {OnlineVersus, "online-formation", N_("Enemy battle"), N_("Fight preset enemy formations or build custom teams for two players.")},
         {OnlineParty, "online-party", N_("Party vs party"), N_("Both players bring a party from their own save.")},
-        {OnlineCustom, "online-custom", N_("Custom enemy teams"), N_("Player 2 proposes the teams. Both players approve the same loadout.")},
     };
     for (const auto& mode : modes) {
         if (opt::beginSubmenu(mode.id, mode.label, nullptr, mode.description)) {
-            onlineBlock(mode.mode);
+            static bool custom = false;
+            onlineBlock(mode.mode == OnlineVersus && customEnemyTeams(custom) ? OnlineCustom : mode.mode);
             opt::endSubmenu();
         }
     }

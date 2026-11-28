@@ -46,11 +46,8 @@
  *   - battleCharacters[entity] (a 4-byte array) is read through
  *     BATTLE_CHARACTER (include/battle/battle.h): pcBattleCharacter gives
  *     the copy's ids for entities 3-5;
- *   - m1058_partyBattleStats[entity] (the party's attacks, deathblows and
- *     ethers, 38 entries a member) past its 3 rows is the party's Gear
- *     table, m2228_mechaBattleStats, in the same struct: the copy's rows
- *     are written there (a mirror match is on foot: nothing reads those for
- *     a Gear);
+ *   - BATTLE_FOOT_ROWS and BATTLE_GEAR_ROWS route player 2's combat
+ *     commands to their own tables;
  *   - an attack resolves (startBattleAttackAnimation) from
  *     m35D8_enemiesBattleStats for an attacker past 2: the member's 38
  *     entries are copied there for each of its turns (the battle has no
@@ -162,6 +159,7 @@
 #include "gte_pc.h"
 #include "pc_arena.h"
 #include "versus.h"
+#include "../../card/party_record.h"
 
 /* the battle loader (battle_loader overlay) */
 extern s32 battlePartyFileMapping[14][2]; /* per character: battle sprite file, attack animation file (dir 0x2C/1) */
@@ -183,6 +181,10 @@ void spriteActorSetPlayingAnimation(SpriteActorCore* actor, s32 animation);
 u8 getEntityToFace(u8 entity);
 void handleMenuSelectEnemy(u8 entity);
 void initBattleRenderStruct2(void);
+void setupGearTurnHud(u8 entity);
+s32 handleGearMenuSelectEnemy(u8 entity);
+int pcVersusCallGearSetting(void);
+void pcVersusApplySavedGears(const XgPartyRecord* party);
 void resetBattleVar2_2CC(void);
 void clearEntityFlag15A_1(u8 entity);
 void freeBattleVar1_AE(void);
@@ -272,13 +274,14 @@ static s32 hudPass;  /* the bar's code is on player 2's HUD: HUD_SLOT reads slot
 static s32 viewSide; /* the side whose turn began last: 1 player 1's, 2 player 2's */
 /* party vs party (the header) */
 static s32 partyOn;
-static u8 p2Record[PC_PARTY_BYTES]; /* player 2's party record, as the match has it */
+static u8 p2Record[XG_PARTY_BYTES]; /* player 2's party record, as the match has it */
 static u8 p2Count;                  /* its members */
 static u8 p2Layout;                 /* its bar's box layout (battlePartyLayoutType: members - 1) */
 static GameStateCharacter p2Party[3]; /* its rows of gameState (swapRows), member k's */
 static GameStateSize20 p2Abilities[3];
 static u8 p2Names[3][sizeof(gameState.m0_names[0])];
 static sBattle800CDD40Sub p2Rows[3][STATS_ROWS]; /* its attack rows from the disc (pcVersusPartyFiles) */
+static sBattle800CDD40Sub p2GearRows[3][42];
 #define PORTRAIT_BYTES 0x460 /* a 24x24 8-bit TIM (loadBattleCharacterPortraits) */
 #define PORTRAITS 12         /* characters 0-10, and 11 (battleForceOnGear's) */
 static u8 portraitFile[PORTRAITS * PORTRAIT_BYTES]; /* the loader's portrait file (reloc[36]) */
@@ -298,6 +301,7 @@ static struct {
     u8 count;
     sBattleEntity* entity;
     GameStateGear* gear;
+    GameStateGear gears[20];
 } keep;
 
 int pcVersusMirror(void);
@@ -305,6 +309,14 @@ static void swapBytes(u8* a, u8* b, s32 n);
 
 int pcVersusMirrorSlot(s32 entity) {
     return mirrorOn && entity >= 3 && entity < 6 && mirrorChar[entity - 3] != 0x7F;
+}
+
+sBattle800CDD40Sub* pcVersusMirrorRows(int entity, int gear) {
+    return gear ? p2GearRows[entity - 3] : p2Rows[entity - 3];
+}
+
+static int gearEnabled(void) {
+    return pcVersusCallGearSetting() || pcVersusGears();
 }
 
 /* HUD_SLOT (src/battle/b_800728B8.c): the slot whose numbers the bar's code
@@ -320,13 +332,13 @@ int pcBattleHudSlot(int slot) {
 void pcVersusSpeedLog(int entity, int wait) {
     u8 row;
 
-    if (!mirrorOn || entity >= 6) {
+    if (!mirrorOn || (entity >= 3 && !pcVersusMirrorSlot(entity))) {
         return;
     }
     row = battleEntities.m5FC2_battleGetSlotStatusSub_current28Index;
     pcArenaLog("mirror match: entity %d's wait %d (agility %d, command row %d, its penalty %d; vblank %u)", entity, wait,
                battleEntities.m0_entities[entity].m0_base.m5A_agility, row,
-               (s8)battleEntities.m1058_partyBattleStats[entity][row].m27_agilityPenalty, hwVSyncCount());
+               (s8)BATTLE_FOOT_ROWS(&battleEntities, entity)[row].m27_agilityPenalty, hwVSyncCount());
 }
 
 /* AMMO_SLOT (src/battle/b_800941A4.c loadBillyAmmo): the battle entity of
@@ -389,6 +401,7 @@ u32 pcVersusPartyHash(void) {
     h = hashBytes(h, p2Abilities, sizeof(p2Abilities));
     h = hashBytes(h, p2Names, sizeof(p2Names));
     h = hashBytes(h, p2Rows, sizeof(p2Rows));
+    h = hashBytes(h, p2GearRows, sizeof(p2GearRows));
     h = hashBytes(h, p2Items, sizeof(p2Items));
     h = hashBytes(h, p2AmmoItems, sizeof(p2AmmoItems));
     h = hashBytes(h, p2Ammo, sizeof(p2Ammo));
@@ -403,8 +416,8 @@ u32 pcVersusPartyHash(void) {
 
 /* Party vs party: player 2's members' gameState rows from its record, as
  * player 1's are applied to the game (port/src/system/arena.c
- * partyFromRecord): HP and EP full, the Gear number 0xFF (on foot), the
- * command loadout the member's own. */
+ * partyFromRecord): HP and EP full, the command loadout the member's own,
+ * and the saved Gear kept when the match uses it. */
 static void partyRecordRows(void) {
     s32 k;
     u8 c;
@@ -415,7 +428,7 @@ static void partyRecordRows(void) {
                          sizeof(p2Party[k]));
         p2Party[k].m4C_HP = p2Party[k].m4E_MaxHP;
         p2Party[k].m50_MP = p2Party[k].m52_MaxMP;
-        p2Party[k].mA0_gearNum = 0xFF;
+        if (!gearEnabled()) p2Party[k].mA0_gearNum = 0xFF;
         p2Party[k].m56_battleCommandLoadout = c;
         __builtin_memcpy(&p2Abilities[k], p2Record + PC_PARTY_ABILITIES + k * sizeof(GameStateSize20),
                          sizeof(p2Abilities[k]));
@@ -441,6 +454,8 @@ void pcVersusMirrorSetup(void) {
     viewSide = 1; /* the party's bar until a copy's turn */
     partyOn = 0;
     portraitsShown = 1; /* the loader's: the party's */
+    __builtin_memset(p2Rows, 0, sizeof(p2Rows));
+    __builtin_memset(p2GearRows, 0, sizeof(p2GearRows));
     for (i = 0; i < 3; i++) {
         mirrorChar[i] = 0x7F;
         mirrorSprite[i] = NULL;
@@ -476,7 +491,8 @@ void pcVersusMirrorSetup(void) {
         c[8 + i] = i < members ? enemy : 0x7F;
         c[0x10 + i] = 0;
     }
-    c[1] = (c[1] & ~0x20) | 0x40; /* no battle event; on foot (no Gears to call) */
+    c[1] &= ~(0x20 | 0x40); /* No story event. */
+    if (!gearEnabled()) c[1] |= 0x40;
     pcArenaLog("%s: %d members, set %d, enemy %d in their places", partyOn ? "party vs party" : "mirror match",
                members, c[0], enemy);
     /* the stage the players chose (include/pc_arena.h pcVersusStage): its
@@ -514,9 +530,18 @@ void pcVersusPartyFiles(u8** reloc) {
         return;
     }
     for (k = 0; k < p2Count; k++) {
-        p = mallocAndDecompress(reloc[p2Record[PC_PARTY_MEMBERS + k] + 5], 1);
-        __builtin_memcpy(p2Rows[k], p, sizeof(p2Rows[k]));
+        u8* footFile = reloc[p2Record[PC_PARTY_MEMBERS + k] + 5];
+        n = *(u32*)footFile;
+        p = mallocAndDecompress(footFile, 1);
+        __builtin_memcpy(p2Rows[k], p, n < sizeof(p2Rows[k]) ? n : sizeof(p2Rows[k]));
         freeHeap(p);
+        if (p2Party[k].mA0_gearNum < 20) {
+            u8* gearFile = reloc[p2Party[k].mA0_gearNum + 17];
+            n = *(u32*)gearFile;
+            p = mallocAndDecompress(gearFile, 1);
+            __builtin_memcpy(p2GearRows[k], p, n < sizeof(p2GearRows[k]) ? n : sizeof(p2GearRows[k]));
+            freeHeap(p);
+        }
     }
     n = *(u32*)reloc[36]; /* LZSS: the decompressed size first */
     p = mallocAndDecompress(reloc[36], 1);
@@ -545,7 +570,7 @@ static void swapRows(void) {
 static void partyLog(s32 e) {
     sBattleEntity* b = &battleEntities.m0_entities[e];
     const u8* bytes = (const u8*)b;
-    const u8* rows = (const u8*)(&battleEntities.m1058_partyBattleStats[0][0] + e * STATS_ROWS);
+    const u8* rows = (const u8*)BATTLE_FOOT_ROWS(&battleEntities, e);
     u32 h = 2166136261u;
     u32 r = 2166136261u;
     u32 i;
@@ -589,9 +614,8 @@ static void partyLogBilly(void) {
     }
 }
 
-/* Player 2's members made by the party's own code (the header), into slots
- * 3-5 with their rows (m1058_partyBattleStats[e], past its 3 rows: the
- * mirror's place), their AP and their menus. */
+/* Build Player 2's saved party with the native stat initializer, then
+ * move its combatants into slots 3–5 and restore Player 1's records. */
 static void partyBuild(void) {
     sBattleVar2Sub* menu;
     sBattleEntity* b;
@@ -616,6 +640,8 @@ static void partyBuild(void) {
     /* player 2's members in slots 0-2, as loadPartyMembers makes the party's
      * (on foot, the Gear number 0xFF reads Gear 0), its rows in gameState */
     swapRows();
+    __builtin_memcpy(keep.gears, gameState.m978_gears, sizeof(keep.gears));
+    if (gearEnabled()) pcVersusApplySavedGears((const XgPartyRecord*)p2Record);
     for (k = 0; k < 3; k++) {
         c = mirrorChar[k];
         battleCharacters[k] = c;
@@ -624,8 +650,10 @@ static void partyBuild(void) {
         }
         __builtin_memset(&battleEntities.m0_entities[k], 0, sizeof(sBattleEntity));
         __builtin_memcpy(&battleEntities.m0_entities[k].m0_base, &gameState.m26C_party[c], sizeof(GameStateCharacter));
-        __builtin_memcpy(&battleEntities.m0_entities[k].mA4_gear, &gameState.m978_gears[0], sizeof(GameStateGear));
+        u8 gear = gameState.m26C_party[c].mA0_gearNum;
+        __builtin_memcpy(&battleEntities.m0_entities[k].mA4_gear, &gameState.m978_gears[gear < 20 ? gear : 0], sizeof(GameStateGear));
         __builtin_memcpy(battleEntities.m1058_partyBattleStats[k], p2Rows[k], sizeof(p2Rows[k]));
+        __builtin_memcpy(battleEntities.m2228_mechaBattleStats[k], p2GearRows[k], sizeof(p2GearRows[k]));
     }
     initPartyBattleStats();
     for (k = 0; k < 3; k++) {
@@ -637,6 +665,7 @@ static void partyBuild(void) {
         b = &battleEntities.m0_entities[e];
         __builtin_memcpy(b, &battleEntities.m0_entities[k], sizeof(sBattleEntity));
         __builtin_memcpy(p2Rows[k], battleEntities.m1058_partyBattleStats[k], sizeof(p2Rows[k]));
+        __builtin_memcpy(p2GearRows[k], battleEntities.m2228_mechaBattleStats[k], sizeof(p2GearRows[k]));
         b->m15A_flags &= 0x7F; /* on foot (batteLoaderPhase1_3) */
         /* battleStartPartyFixups' fix of character 8's abilities, on its own row */
         if (c == 8 && (gameState.m16C0_abilities[8].m1A_unlockedGearAbilities & 0x2000)) {
@@ -647,8 +676,7 @@ static void partyBuild(void) {
         apConfigArray[e].m4_currentAP = gameState.m16C0_abilities[c].m17_energyPerTurn;
         apConfigArray[e].m5_savedLevels[0] = b->m0_base.m62_Level;
         apConfigArray[e].m5_savedLevels[1] = b->m0_base.m63_Level2;
-        /* its ring, as batteLoaderPhase2_2 sets up the party's: its loadout's
-         * commands, no Gear to call (config flag 0x40) */
+        /* Build its command ring from the save, as the party loader does. */
         menu = &battleVar2->m0_entityMenus[e];
         __builtin_memset(menu, 0, sizeof(*menu));
         for (j = 0; j < 8; j++) {
@@ -662,8 +690,6 @@ static void partyBuild(void) {
         for (j = 0; j < 16; j++) {
             menu->m1C_isCommandEnabled[j] = b->m0_base.m7A_commandEnabledBF & party1C_InitialValues[j];
         }
-        menu->m1C_isCommandEnabled[7] = party1C_InitialValues[7];
-        b->m0_base.m7A_commandEnabledBF |= party1C_InitialValues[7];
         if (currentBattleConfig.m1_flags & 0x80) {
             menu->m1C_isCommandEnabled[8] = party1C_InitialValues[8];
             b->m0_base.m7A_commandEnabledBF |= party1C_InitialValues[8];
@@ -682,14 +708,7 @@ static void partyBuild(void) {
     battlePartyMemberCount = keep.count;
     battleGetSlotStatusSub_currentBattleEntity = keep.entity;
     battleGetSlotStatusSub_currentBattleEntityGear = keep.gear;
-    /* its rows where the party's code reads them for its slots (the header:
-     * past the party's 3, over its Gear rows, which nothing reads on foot) */
-    for (k = 0; k < 3; k++) {
-        if (mirrorChar[k] != 0x7F) {
-            __builtin_memcpy(&battleEntities.m1058_partyBattleStats[0][0] + (3 + k) * STATS_ROWS, p2Rows[k],
-                             sizeof(p2Rows[k]));
-        }
-    }
+    __builtin_memcpy(gameState.m978_gears, keep.gears, sizeof(keep.gears));
 }
 
 /* ---- the copy (battleMain, after the loader) ---- */
@@ -724,7 +743,6 @@ static void buildNames(void) {
 }
 
 void pcVersusBattleLoaded(void) {
-    sBattle800CDD40Sub* rows = &battleEntities.m1058_partyBattleStats[0][0];
     s32 k;
     s32 e;
 
@@ -767,8 +785,10 @@ void pcVersusBattleLoaded(void) {
         if (!partyOn) {
             apConfigArray[e] = apConfigArray[k];
             apConfigArray[e].m0_storedAP = 0;
-            /* the party's table, read as m1058_partyBattleStats[e] (the header) */
-            __builtin_memcpy(rows + e * STATS_ROWS, rows + k * STATS_ROWS, sizeof(sBattle800CDD40Sub) * STATS_ROWS);
+            apConfigArray[e].m1_gearState = 0;
+            battleEntities.m0_entities[e].m15A_flags &= ~0x80;
+            __builtin_memcpy(p2Rows[k], battleEntities.m1058_partyBattleStats[k], sizeof(p2Rows[k]));
+            __builtin_memcpy(p2GearRows[k], battleEntities.m2228_mechaBattleStats[k], sizeof(p2GearRows[k]));
             /* the same start to its turns as the member's */
             isBattleSlotFilled.m24_battleSlotStatusVar0[e] = isBattleSlotFilled.m24_battleSlotStatusVar0[k];
             isBattleSlotFilled.m3A_numTicksBeforeReady[e] = isBattleSlotFilled.m3A_numTicksBeforeReady[k];
@@ -881,7 +901,7 @@ void pcVersusMirrorSprites(void) {
         core = battleBssBlock.m8C8C_spriteActorCores[e];
         core->m7C_extra->m0 = battlePartyFileMapping[c][1]; /* its attack animations */
         freeHeap(core->m20_object->m2C_subSpriteBuffer);
-        core->m20_object->m2C_subSpriteBuffer = allocateHeap(0x300, 0);
+        core->m20_object->m30_subSprites = core->m20_object->m2C_subSpriteBuffer = allocateHeap(0x300, 0);
         if (currentBattleLoaderTransitionEffect == 0) {
             sampleBattleTerrainHeight(core);
             core->mA0_destination.vx = core->m0_position.vx >> 16;
@@ -1002,11 +1022,15 @@ static void hudReady(void) {
          * labels where its layout puts them (batteLoaderPhase3_0_sub1) */
         for (k = 0; k < 3; k++) {
             p2Hud1.m78_apBarFrameLengths[k] = 0;
-            p2Hud0.m835C_apFuelLabels[k].m1E1_barMode = mirrorChar[k] != 0x7F;
         }
         hudIn();
         batteLoaderPhase3_0_sub1();
         hudOut();
+    }
+    for (k = 0; k < 3; k++) {
+        u8 character = mirrorChar[k];
+        p2Hud0.m835C_apFuelLabels[k].m1E1_barMode =
+            character == 0x7F ? 0 : character != 7 && battleVisualEntities[k + 3].m4_isGear ? 2 : 1;
     }
     p2HudReady = 1;
 }
@@ -1054,6 +1078,11 @@ static void scratchLoad(const HudScratch* s) {
  * as on the PS1): player 2's built too, every frame of a mirror match; then
  * 1 when player 2's is the bar to show (drawn here, the party's not), else
  * 0 (the party's drawn by the caller). */
+void pcVersusMirrorGearHud(int slot, int inGear) {
+    if (p2HudReady)
+        p2Hud0.m835C_apFuelLabels[slot - 3].m1E1_barMode = inGear && mirrorChar[slot - 3] != 7 ? 2 : 1;
+}
+
 int pcVersusViewBar(void) {
     HudScratch scratch;
     s32 shows2;
@@ -1068,9 +1097,7 @@ int pcVersusViewBar(void) {
     /* what the battle changes in the party's (a Gear's bar mode; the ring
      * up, which shows the turn gauge's fill); party vs party: its labels are
      * its own boxes' (hudReady), on foot */
-    if (!partyOn) {
-        __builtin_memcpy(p2Hud0.m835C_apFuelLabels, battleVar0->m835C_apFuelLabels, sizeof(p2Hud0.m835C_apFuelLabels));
-    } else if (portraitsShown != (shows2 ? 2 : 1)) {
+    if (partyOn && portraitsShown != (shows2 ? 2 : 1)) {
         portraitsLoad(shows2 ? 2 : 1); /* the shown side's portraits (the header) */
     }
     p2Hud1.mCB_drawCommandRing = battleVar1->mCB_drawCommandRing;
@@ -1224,6 +1251,16 @@ static void drawRing(u8 entity, u8 menu) {
     battleVar1->mCB_drawCommandRing = 1;
 }
 
+/* Escape gives the match to Player 1. Exit Gear uses the same ring slot. */
+static int confirmForfeit(void) {
+    if (battleInputButton != 4 && battleInputButton != 6 && battleInputButton != 7) return 0;
+    pcArenaLog("mirror match: player 2 gave up (vblank %u)", hwVSyncCount());
+    forfeit = 1;
+    performAttackSub3_var0.m2_battleRunningVar1 = 1;
+    battleVar2->m2DE_actionDone = 1;
+    return 1;
+}
+
 /* setupTurnRenderLoop for player 2's member: the same, its time bar and AP
  * marks in player 2's HUD (the header). */
 static void turnLoop(u8 entity) {
@@ -1231,6 +1268,7 @@ static void turnLoop(u8 entity) {
     sBattleEntity* self = &battleEntities.m0_entities[entity];
     u8 c = mirrorChar[entity - 3];
     u8 box = entity - 3;
+    int inGear = apConfigArray[entity].m1_gearState != 0;
     u8 target;
     s32 i;
 
@@ -1263,14 +1301,22 @@ static void turnLoop(u8 entity) {
     for (i = 0; i < 16; i++) {
         menu->m1C_isCommandEnabled[i] = self->m0_base.m7A_commandEnabledBF & party1C_InitialValues[i];
     }
-    menu->m1C_isCommandEnabled[7] = party1C_InitialValues[7]; /* no Gear to call */
+    pcVersusPartyGearMenu(entity);
+    if (c == 7 && inGear) {
+        menu->m1C_isCommandEnabled[13] = party1C_InitialValues[13];
+        menu->m1C_isCommandEnabled[4] = party1C_InitialValues[4];
+    }
     if (c == 4) {
-        if (gameStateAmmoByWeaponItem[gameState.m26C_party[4].m6F_equipment[0]] == 0) {
-            menu->m1C_isCommandEnabled[0] = party1C_InitialValues[0];
+        int hasPrimary, hasSecondary;
+        if (inGear) {
+            hasPrimary = gameStateAmmoByGearItem[self->mA4_gear.m4_slotItem[0]];
+            hasSecondary = gameStateAmmoByGearItem[self->mA4_gear.m4_slotItem[3]];
+        } else {
+            hasPrimary = gameStateAmmoByWeaponItem[self->m0_base.m6F_equipment[0]];
+            hasSecondary = gameStateAmmoByWeaponItem[self->m0_base.m6F_equipment[3]];
         }
-        if (gameStateAmmoByWeaponItem[gameState.m26C_party[4].m6F_equipment[3]] == 0) {
-            menu->m1C_isCommandEnabled[2] = party1C_InitialValues[2];
-        }
+        if (!hasPrimary) menu->m1C_isCommandEnabled[0] = party1C_InitialValues[0];
+        if (!hasSecondary) menu->m1C_isCommandEnabled[2] = party1C_InitialValues[2];
     }
     if (menu->m1C_isCommandEnabled[9] == 0) {
         battleVar2->m2DD_currentActiveBattleMenu = 1;
@@ -1283,7 +1329,13 @@ static void turnLoop(u8 entity) {
         battleVar2->m2DD_currentActiveBattleMenu = 2;
         previousNewBattleInputButton[0] = 1;
     }
-    initBattleRenderStruct2();
+    if (inGear) {
+        battleVar2->m2DD_currentActiveBattleMenu = menu->m1C_isCommandEnabled[9] ? 19 : 16;
+        previousNewBattleInputButton[0] = menu->m1C_isCommandEnabled[9] ? 3 : 0;
+        setupGearTurnHud(entity);
+    } else {
+        initBattleRenderStruct2();
+    }
     resetBattleVar2_2CC();
     clearEntityFlag15A_1(entity);
     setCameraVisibleEntities(characterIdToTargetBitmask(entity) | characterIdToTargetBitmask(menu->m3C_currentTarget));
@@ -1292,9 +1344,11 @@ static void turnLoop(u8 entity) {
     while (battleVar2->m2DE_actionDone == 0 && performAttackSub3_var0.m2_battleRunningVar1 == 0 &&
            battleVar2->m2DB_turnEnded == 0) {
         /* the AP marks on the turn gauge, in player 2's HUD */
-        hudIn();
-        setAPMarksPositions(battleVar2->m2D5_maxAP, battleVar2->m2D4_remainingAP);
-        hudOut();
+        if (!inGear) {
+            hudIn();
+            setAPMarksPositions(battleVar2->m2D5_maxAP, battleVar2->m2D4_remainingAP);
+            hudOut();
+        }
         if (battleVar2->m2E2_previousActiveBattleMenu != battleVar2->m2DD_currentActiveBattleMenu) {
             battleVar2->m2F6_doublePressPending = 0;
             battleVar2->m2E2_previousActiveBattleMenu = battleVar2->m2DD_currentActiveBattleMenu;
@@ -1335,28 +1389,52 @@ static void turnLoop(u8 entity) {
             drawCircleMenuItemSecondaryActive(entity);
             break;
         case 9:
-            /* Escape: player 2 gives up, player 1 wins (drawBattleMenuEscape's
-             * buttons; its directions as the game's) */
-            if (battleInputButton == 4 || battleInputButton == 6 || battleInputButton == 7) {
-                pcArenaLog("mirror match: player 2 gave up (vblank %u)", hwVSyncCount());
-                forfeit = 1;
-                performAttackSub3_var0.m2_battleRunningVar1 = 1;
-                battleVar2->m2DE_actionDone = 1;
-            } else {
-                drawBattleMenuEscape(entity);
-            }
+            if (!confirmForfeit()) drawBattleMenuEscape(entity);
+            break;
+        case 10:
+            drawCircleMenuCallGear(entity);
+            break;
+        case 16:
+            drawGearCircleMenuAttackActive(entity);
+            break;
+        case 17:
+            drawGearCircleMenuItemActive(entity);
+            break;
+        case 18:
+            drawGearCircleMenuCharge(entity);
+            break;
+        case 19:
+            drawGearCircleMenuChi(entity);
+            break;
+        case 21:
+            drawGearCircleMenuBooster(entity);
+            break;
+        case 22:
+            drawGearCircleMenuItemSecondaryActive(entity);
+            break;
+        case 23:
+            if (pcVersusPartyCanExitGear(entity) || !confirmForfeit()) drawGearBattleMenuEscape(entity);
+            break;
+        case 24:
+            drawGearCircleMenuSpecial(entity);
+            break;
+        case 101:
+            battleVar2->m2E2_previousActiveBattleMenu = 0xFF;
+        case 25:
+            handleGearMenuSelectEnemy(entity);
             break;
         default:
-            battleVar2->m2DD_currentActiveBattleMenu = 1; /* the Gear's menus: none on foot */
+            battleVar2->m2DD_currentActiveBattleMenu = inGear ? 16 : 1;
             break;
         }
     }
+    updateCharacterBlinkingTask(0);
     battleVar1->mCB_drawCommandRing = 0;
     battleVar1->mAF_drawApCounter = 0;
     p2Hud1.m90_perPCTimeBarStatus[box] = 0;
     p2Hud1.m7F_drawTimeBarFill[box] = 0;
     p2Hud1.m7C_hpDisplayDirty[box] = 1; /* its AP stored, as setupTurnRenderLoop's end */
-    if (battleVar2->m2E3_hasAttacked) {
+    if (!inGear && battleVar2->m2E3_hasAttacked) {
         apConfigArray[entity].m0_storedAP += battleVar2->m2D4_remainingAP;
         if (apConfigArray[entity].m0_storedAP > 0x1C) {
             apConfigArray[entity].m0_storedAP = 0x1C;
@@ -1396,16 +1474,17 @@ int pcVersusMirrorTurn(u8 entity) {
             0x18);
     p2Hud0.m6414_highlightOddOrEven = D_800CCB04.m30_battleOddOrEven;
     p2Hud0.m6415_drawHighlight = 1;
-    if ((self->m0_base.m7C_statusFlags[0] & 0x2080) || (self->m0_base.m7C_statusFlags[2] & 0x1000)) {
+    int inGear = apConfigArray[entity].m1_gearState != 0;
+    if (inGear ? (self->mA4_gear.m7C_statusFlags & 0x2080)
+               : ((self->m0_base.m7C_statusFlags[0] & 0x2080) || (self->m0_base.m7C_statusFlags[2] & 0x1000))) {
         p2Hud0.m6415_drawHighlight = 0;
-        return 1; /* asleep, stopped...: no turn (as the party's) */
+        return 1;
     }
-    /* its attacks, deathblows and ethers where an enemy's attack resolves
-     * (party vs party: its own rows, m1058_partyBattleStats[entity]) */
-    __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats,
-                     partyOn ? &battleEntities.m1058_partyBattleStats[0][0] + entity * STATS_ROWS
-                             : battleEntities.m1058_partyBattleStats[k],
-                     sizeof(battleEntities.m1058_partyBattleStats[k]));
+    if (inGear) {
+        __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats, p2GearRows[k], sizeof(p2GearRows[k]));
+    } else {
+        __builtin_memcpy(battleEntities.m35D8_enemiesBattleStats, p2Rows[k], sizeof(p2Rows[k]));
+    }
     pcVersusGameText(label, getDialogParamPointer(currentBattleSpecificStrings, battleMonsterMapping[entity]),
                      VERSUS_LABEL - 1);
     pcVersusShowLabel(label);
@@ -1413,7 +1492,7 @@ int pcVersusMirrorTurn(u8 entity) {
     labelOn = 1; /* kept up for the turn (pcVersusMirrorLabel) */
     p2Turn = entity;
     swapItems(); /* its own items */
-    if (self->m0_base.m7C_statusFlags[2] & 0x2000) {
+    if (!inGear && (self->m0_base.m7C_statusFlags[2] & 0x2000)) {
         performAutoPartyMemberTurn(entity); /* the party's own automatic turn (confused...) */
     } else {
         turnLoop(entity);

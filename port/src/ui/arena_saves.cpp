@@ -79,7 +79,7 @@ struct Browser {
     bool haveCodes = false;
     uint8_t codes[XG_PARTY_CODE_TABLE];
 };
-Browser browsers[6];      // local players 1 and 2, online, gauntlet, and each roster's items
+Browser browsers[7];      // local players 1 and 2, online, gauntlet, two roster item lists, host items
 Browser* B = &browsers[0]; // the one being drawn
 
 int pickedCount() {
@@ -275,6 +275,22 @@ const uint8_t* gauntletSavePicker() {
 const uint8_t* arenaItemSavePicker(int side) {
     opt::row(N_("Memory card save"));
     return saveBlockPicker(4 + side);
+}
+
+const uint8_t* arenaHostItemSavePicker(bool show) {
+    constexpr int browser = 6;
+    if (show) {
+        opt::row(N_("Memory card save"));
+        const uint8_t* selected = saveBlockPicker(browser);
+        opt::plain();
+        if (selected != nullptr && ImGui::Button(tr("Clear items"))) {
+            browsers[browser].selected = -1;
+            return nullptr;
+        }
+        return selected;
+    }
+    const Browser& b = browsers[browser];
+    return b.selected < 0 ? nullptr : b.saves[b.selected].block.data();
 }
 
 void arenaPartyReason(int reason, int characterId, char* out, size_t size) {

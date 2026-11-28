@@ -1778,10 +1778,18 @@ void finalizeBattleMechaLoading(sBattleMechaLoaderTask* arg0) {
     s32 i;
     u32 mask;
 
-    for (i = 0, mask = 1; i != 3; i++, mask <<= 1) {
-        if ((battleMechaTextureSlotsUsed & mask) == 0) {
-            battleMechaTextureSlotsUsed |= mask;
-            break;
+#ifdef PLATFORM_PC
+    i = pcVersusPartyGearTextureSlot(arg0->m1C_entity);
+    if (i >= 0) {
+        battleMechaTextureSlotsUsed |= 1u << i;
+    } else
+#endif
+    {
+        for (i = 0, mask = 1; i != 3; i++, mask <<= 1) {
+            if ((battleMechaTextureSlotsUsed & mask) == 0) {
+                battleMechaTextureSlotsUsed |= mask;
+                break;
+            }
         }
     }
     finalizeBattleMechaLoadingCommands(arg0->m1C_entity, battleMechaPartyTextureLocations[i][0], battleMechaPartyTextureLocations[i][1], 0, arg0->m1C_entity + 0x1C0);
