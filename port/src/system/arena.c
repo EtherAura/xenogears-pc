@@ -573,7 +573,7 @@ static struct {
 } S;
 static GameState keptState; /* the kept game's gameState, as the match was asked for */
 static int gameSeen;        /* a field past the title, the world map or a battle since the boot: a game is loaded */
-static int holdMenuIntro;
+static int holdMenuIntro; /* shatter buffers left to draw before revealing the battle */
 enum { MENU_PICTURE_W = 512, MENU_PICTURE_H = 288 };
 static uint16_t menuPicture[MENU_PICTURE_W * MENU_PICTURE_H];
 static int haveMenuPicture;
@@ -644,11 +644,14 @@ int pcArenaUploadMenuShatter(void) {
 /* Hold the settings page on screen until the new battle can draw its shatter. */
 int pcArenaHoldBattleIntro(void) {
     const char* versus = getenv("XG_VERSUS");
-    holdMenuIntro = (M.armed && M.kind != ARENA_MATCH_BATTLING) || pcGauntletMenuIntroActive() ||
-                    (matchOnline() && (S.kind || (versus != NULL && *versus != '\0')));
+    int wantsIntro = (M.armed && M.kind != ARENA_MATCH_BATTLING) || pcGauntletMenuIntroActive() ||
+                     (matchOnline() && (S.kind || (versus != NULL && *versus != '\0')));
+    /* The first draw fills only the back buffer. Keep the staging field
+     * hidden until the shatter has drawn into both buffers. */
+    holdMenuIntro = wantsIntro ? 2 : 0;
     if (holdMenuIntro && !haveMenuPicture && matchOnline()) readMenuPicture();
     if (holdMenuIntro) pcArenaLog("arena intro: holding the picture during battle setup");
-    return holdMenuIntro;
+    return wantsIntro;
 }
 
 int pcArenaBattleIntroHidden(void) {
@@ -658,8 +661,9 @@ int pcArenaBattleIntroHidden(void) {
 
 void pcArenaGlassShatterStarted(void) {
     if (!holdMenuIntro) return;
-    holdMenuIntro = 0;
-    pcArenaLog("arena intro: showing the glass shatter at vblank %u", hwVSyncCount());
+    if (--holdMenuIntro == 0) {
+        pcArenaLog("arena intro: showing the glass shatter at vblank %u", hwVSyncCount());
+    }
 }
 
 static int gameLoaded(void) {
