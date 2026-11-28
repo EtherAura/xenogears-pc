@@ -4,8 +4,8 @@ English | [日本語](translations-ja.md)
 
 The US download plays in English. Start the game from your original US
 discs and select a translation as its text source; the patched images are
-read only for their text. Italian, Spanish and Atelier's French work straight
-from patched images in v2026.11.20 and later.
+read only for their text. Italian, Spanish, Helsionium's German and Atelier's
+French work straight from patched images in v2026.11.20 and later.
 
 ## Choose a translation
 
@@ -33,6 +33,12 @@ Extras.
 For **Atelier Français 1.1**, enter the original CUEs or BINs from the
 patcher’s `Patched` or `Undub_patched` folder. The port reads the French
 text, font and battle wheel directly from them. [Atelier’s patch and instructions](https://ateliertraduction.forumgaming.fr/t51-mise-a-jour-de-xenogears-en-v1-1)
+
+For **Helsionium's German**, apply the xdelta to copies of both US discs.
+Disc 1 is version 1.03-final-cd1fix. Disc 2 is version 1.03-final. Enter
+those images under **Text images**, name the pair, and choose that name under
+**Language**. The port reads the German text and font from them. The movies
+stay the original video. [Helsionium's patch and instructions](https://xenogears.helsionium.eu/deutsch/)
 
 To read Japanese game text in the US build, supply your Japanese discs and
 choose **Japanese** under **Language**. An installed text pack is listed by
@@ -105,6 +111,7 @@ playthrough were outside this test. [Tested release](https://github.com/EtherAur
 |---|---|
 | Italian · SadNES cITy 1.2.1 | Both discs showed Italian dialogue and equipment text. The battle showed **Attacco** and **Tempo**. Some status labels stayed in English. [Patch and instructions](https://www.sadnescity.it/traduzioni/xeno/xeno.php) |
 | Spanish · Romhack Hispano v1 | The text-and-graphics edition showed Spanish dialogue, menu labels and equipment names on both discs. The battle command read **Atacar**. Some status labels stayed in English. [Patch and instructions](https://xenogears.romhackhispano.org/traduccion.html) |
+| German · Helsionium 1.03-final-cd1fix | An xdelta of both US discs, read as a text image the same way as the Italian and Spanish patches. Disc 1 is 1.03-final-cd1fix and Disc 2 is 1.03-final. [Patch and instructions](https://xenogears.helsionium.eu/deutsch/) |
 | English · Perfect Works Build 0.11.4 | Use your own images patched with the **`story_mode_script`** preset for the tested text option. Revised English narration appeared on Disc 2. All six `all_*` presets failed verification on both discs. The `bug_fixes` and `story_mode` images passed verification, but their dialogue was untested. Selecting a text image leaves gameplay rules under the control of the PC engine. [Perfect Works release](https://github.com/PWBuild-Team/Perfect_Works_Build/releases/tag/0.11.4) |
 | French · Atelier Traduction 1.1 | The personal pack showed French dialogue and equipment text on both discs. With the updated helper, the Disc 1 battle wheel reads **Attaque** and the gauge reads **Temps**. [French setup](#french-with-atelier-traduction-11) |
 | Brazilian Portuguese · TransXeno | Compatibility with the team's translation is **unverified**. In a separate two-line Portuguese test pack, accented dialogue appeared when the pack supplied the missing glyphs. With the stock US font, both lines fell back to English. [TransXeno's translation screenshots](https://transxeno.blogspot.com/2010/06/novas-imagens-da-traducao.html) |
