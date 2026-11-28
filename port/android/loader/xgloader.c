@@ -59,6 +59,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/system_properties.h>
 #include <unistd.h>
 
 #include <SDL3/SDL.h>
@@ -169,12 +170,8 @@ static void setOptions(const char* list) {
 
 /* ---- the engine ---------------------------------------------------------------- */
 
-/* The engine the settings ask for: XG_ENGINE, else settings.ini's engine= (the file
- * port/src/system/settings.c reads: XG_SETTINGS, "none" for none, else the pref path's).
- * 1 Enhanced, 0 Original or unset. */
-static int enhancedAsked(void) {
-    const char* e = getenv("XG_ENGINE");
-    if (e != NULL && e[0] != '\0') return SDL_strcasecmp(e, "enhanced") == 0;
+/* Options needed before the engine loads use the same settings file as the game. */
+static int savedOption(const char* key, char* value, size_t size) {
     char path[1024];
     const char* file = getenv("XG_SETTINGS");
     if (file != NULL && file[0] != '\0') {
@@ -189,21 +186,48 @@ static int enhancedAsked(void) {
     FILE* f = fopen(path, "r");
     if (f == NULL) return 0;
     char line[512];
-    int enhanced = 0;
+    size_t len = strlen(key);
+    int found = 0;
     while (fgets(line, sizeof line, f) != NULL) {
         char* p = line;
         while (*p == ' ' || *p == '\t') p++;
-        if (strncmp(p, "engine", 6) != 0) continue;
-        p += 6;
+        if (strncmp(p, key, len) != 0) continue;
+        p += len;
         while (*p == ' ' || *p == '\t') p++;
         if (*p != '=') continue;
         p++;
         while (*p == ' ' || *p == '\t') p++;
         p[strcspn(p, " \t\r\n")] = '\0';
-        enhanced = SDL_strcasecmp(p, "enhanced") == 0; /* the last one counts, as in settings.c */
+        SDL_strlcpy(value, p, size);
+        found = 1; /* the last one counts, as in settings.c */
     }
     fclose(f);
-    return enhanced;
+    return found;
+}
+
+static int enhancedAsked(void) {
+    const char* engine = getenv("XG_ENGINE");
+    char saved[32];
+    if (engine == NULL || engine[0] == '\0') {
+        if (!savedOption("engine", saved, sizeof saved)) return 0;
+        engine = saved;
+    }
+    return SDL_strcasecmp(engine, "enhanced") == 0;
+}
+
+/* Blackmoon Forest at 16:9 on Tensor G5: specialise the lighting passes,
+ * use their compute barriers and take the exact nearest presentation path.
+ * Start GPU-budgeted Auto at 1x; it still grows with measured headroom. */
+static void offlineRenderDefaults(void) {
+    char soc[PROP_VALUE_MAX];
+    if (__system_property_get("ro.soc.model", soc) == 0 || strcmp(soc, "Tensor G5") != 0) return;
+    setenv("XG_EXPERIMENT_LIGHT_SPECIALIZE", "1", 0);
+    setenv("XG_EXPERIMENT_LIGHT_BARRIERS", "1", 0);
+    setenv("XG_EXPERIMENT_PRESENT_NEAREST", "1", 0);
+    char seed[16];
+    if (getenv("XG_UPSCALE_AUTO_START") == NULL && !savedOption("upscale_auto_start", seed, sizeof seed)) {
+        SDL_setenv_unsafe("XG_UPSCALE_AUTO_START", "1", 0); /* settingsGet reads SDL's environment */
+    }
 }
 
 /* Whether the app carries a library: beside this one, where the system put the app's
@@ -452,6 +476,7 @@ int SDL_main(int argc, char* argv[]) {
     setenv("XG_ANDROID_ENGINES", haveEnhanced ? "original,enhanced" : "original", 1);
     setenv("XG_ANDROID_ENGINE_ASKED", asked ? "enhanced" : "original", 1);
     if (asked && haveEnhanced) {
+        if (argc < 2 || strcmp(argv[1], "--netplay") != 0) offlineRenderDefaults();
         snprintf(name, sizeof name, "%s", enhanced);
     } else {
         if (asked) fprintf(stderr, "loader: the Enhanced engine is asked for, but this app has no %s\n", enhanced);

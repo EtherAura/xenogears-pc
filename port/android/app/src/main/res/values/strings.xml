@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Xenogears port</string>
+    <string name="netplay_connecting">Connecting to the online battle…</string>
 </resources>
