@@ -543,15 +543,21 @@ static int wideReadRect(const ReadSet* reads, VRect* out) {
     return 1;
 }
 
-/* With the hi-res copy on, a write box one 1x pixel larger (its sloped
- * edges reach past the 1x pixels), inside a target `width` wide. */
+/* The hi-res edge can extend past the native rasterized pixels, up to the
+ * same inclusive drawing area used by the native and hi-res shaders. The
+ * adjacent texture page stays readable in this batch. Fills and transfers
+ * track their own rectangles because they ignore the drawing area. */
 static VRect hiPad(VRect w, int width) {
     if (gvkHiScale() != 0) {
         int pad = hiresPrecision() ? 6 : 1;
-        w.x0 = w.x0 > pad ? w.x0 - pad : 0;
-        w.y0 = w.y0 > pad ? w.y0 - pad : 0;
-        w.x1 = w.x1 < width - pad ? w.x1 + pad : width - 1;
-        w.y1 = w.y1 < VRAM_H - pad ? w.y1 + pad : VRAM_H - 1;
+        int right = gp.clipX1 < width ? gp.clipX1 : width - 1;
+        int bottom = gp.clipY1 < VRAM_H ? gp.clipY1 : VRAM_H - 1;
+        int left = gp.clipX0 > 0 ? gp.clipX0 : 0;
+        int top = gp.clipY0 > 0 ? gp.clipY0 : 0;
+        w.x0 = w.x0 - pad > left ? w.x0 - pad : left;
+        w.y0 = w.y0 - pad > top ? w.y0 - pad : top;
+        w.x1 = w.x1 + pad < right ? w.x1 + pad : right;
+        w.y1 = w.y1 + pad < bottom ? w.y1 + pad : bottom;
     }
     return w;
 }
@@ -1188,7 +1194,7 @@ static int hiSeal(const HiVertex src[3], HiVertex out[21], unsigned perimeter, i
         double nx = ty * sign, ny = -tx * sign;
         double x0 = src[i].x - tx, y0 = src[i].y - ty;
         double x1 = src[j].x + tx, y1 = src[j].y + ty;
-        HiVertex strip[4];
+        HiVertex* strip = out + n;
         if (reuse == 2) {
             const double x[4] = {x0, x1, x0 + nx, x1 + nx};
             const double y[4] = {y0, y1, y0 + ny, y1 + ny};
@@ -1200,8 +1206,10 @@ static int hiSeal(const HiVertex src[3], HiVertex out[21], unsigned perimeter, i
                 !hiAttribute(src, x1 + nx, y1 + ny, area, &strip[3])) continue;
         }
         for (int k = 0; k < 4; k++) strip[k].mode |= DRAW_FRINGE;
-        out[n++] = strip[0]; out[n++] = strip[1]; out[n++] = strip[2];
-        out[n++] = strip[1]; out[n++] = strip[3]; out[n++] = strip[2];
+        strip[5] = strip[2];
+        strip[4] = strip[3];
+        strip[3] = strip[1];
+        n += 6;
     }
     return n;
 }
@@ -1252,9 +1260,11 @@ static void hiTriangle(const PVertex* a, const PVertex* b, const PVertex* c, uin
         sceneVertexZ(&o[i], p[i]);
     }
 
+    if (seal && !gp.sampled && gvkHiSealFace(o, perimeter, gp.sceneOn, gp.wide)) return;
     HiVertex sealed[21];
     int n = seal ? gp0SealTriangle(o, sealed, perimeter, gp.sceneOn) : 0;
-    hiEmit(n ? sealed : o, n ? n : 3);
+    const TextureSample* sample = gp.sampled && (mode & DRAW_TEXTURED) ? &gp.sample : NULL;
+    gvkHiDrawFace(n ? sealed : o, n ? n : 3, gp.wide, sample, gp.filter);
 }
 
 int gp0SealTriangle(const HiVertex src[3], HiVertex out[21], unsigned perimeter, int sceneDepth) {
@@ -1263,6 +1273,12 @@ int gp0SealTriangle(const HiVertex src[3], HiVertex out[21], unsigned perimeter,
         /* The fringe's depth: the face's plane carried on (1/z is linear on screen). */
         double area = (double)(src[1].x - src[0].x) * (src[2].y - src[0].y) - (double)(src[2].x - src[0].x) * (src[1].y - src[0].y);
         for (int k = 3; k < n; k++) {
+            /* Each six-vertex edge strip repeats its second and third corners. */
+            int corner = (k - 3) % 6;
+            if (corner == 3 || corner == 5) {
+                out[k].z = out[k - (corner == 3 ? 2 : 3)].z;
+                continue;
+            }
             double dx = out[k].x - src[0].x, dy = out[k].y - src[0].y;
             double l1 = (dx * (src[2].y - src[0].y) - dy * (src[2].x - src[0].x)) / area;
             double l2 = ((src[1].x - src[0].x) * dy - (src[1].y - src[0].y) * dx) / area;
@@ -1465,7 +1481,7 @@ static int buildSpansMode(const PVertex* a, const PVertex* b, const PVertex* c, 
         }
         int fr = k == 0 ? r->u : k == 1 ? r->v : k == 2 ? r->r : k == 3 ? r->g : r->b;
         gx[k] = gy[k] = 0;
-        if (interpolate) {
+        if (interpolate && (f[0] != f[1] || f[0] != f[2])) {
             int64_t dx = (int64_t)(f[1] - f[0]) * (c->y - a->y) - (int64_t)(f[2] - f[0]) * (b->y - a->y);
             int64_t dy = (int64_t)(f[2] - f[0]) * (b->x - a->x) - (int64_t)(f[1] - f[0]) * (c->x - a->x);
             gx[k] = dx * 4096 / area; /* C division truncates toward zero */
@@ -2304,7 +2320,12 @@ static void cacheWalkReads(const SelfDraw* s, const ReadSet* reads, ReadSet* wal
 /* 0 ordinary GPU path, 1 cached spans, 2 resolved draw, 3 native wave drawn. */
 static int cacheRaster(const SelfDraw* s, const ReadSet* reads, int* ints) {
     if (gp.wide) return 0;
-    int feedback = selfOverlap(s->box, reads, s->tpage, s->tex >> 16);
+    ReadSet walk;
+    cacheWalkReads(s, reads, &walk);
+    /* Native feedback depends on the cache lines actually sampled. The
+     * wider GPU footprint can wrap a filtering neighbour across the edge
+     * of VRAM into the framebuffer even when the primitive never reads it. */
+    int feedback = selfOverlap(s->box, &walk, s->tpage, s->tex >> 16);
     /* Native wave pieces stay authoritative on the CPU, including pieces
      * whose source and destination do not overlap. This avoids downloading
      * their device result when a later piece touches the same dirty tile.
@@ -2314,8 +2335,6 @@ static int cacheRaster(const SelfDraw* s, const ReadSet* reads, int* ints) {
      * (vramCpuOwned). */
     int cpuWave = !feedback && ((s->tri && interpolationWavePacket()) || interpolationWaveFrame() || (!gp.wide && vramCpuOwned(s->box)));
     if (feedback) interpolationReject("texture-feedback");
-    ReadSet walk;
-    cacheWalkReads(s, reads, &walk);
     for (int i = 0; i < walk.n; i++) vramSyncRect(walk.r[i]);
     if (feedback || cpuWave) {
         vramKeepWrite(s->box); /* a picture between's keep (vram.c): shaded on the CPU, into its copy */
@@ -3041,6 +3060,11 @@ static void spriteCellFromCorners(const PVertex* v, uint32_t tpage, uint32_t clu
     gp.flatUvMax = uvWord(cell.u + cell.w - 1, cell.v + cell.h - 1);
 }
 
+/* Both draws of one packet use the same address-validated projections.
+ * Coordinate offsets and wrapping are still checked in each target. */
+static int packetProjectionStatus;
+static GtePrecise packetProjection[4];
+
 static void polygon(void) {
     gp.portraitSource = (TextureRequest){0};
     gp.glyphSource = (TextureRequest){0};
@@ -3151,11 +3175,17 @@ static void polygon(void) {
     }
     int subpixel = hiresPrecision();
     if (gvkHiScale() != 0 && (subpixel || gp.sceneOn)) {
-        GtePrecise precise[4];
-        int complete = 1;
-        for (int k = 0; k < n; k++) {
-            if (!gtePrecisionLookup(addr[k], raw_[k], &precise[k])) complete = 0;
+        if (!packetProjectionStatus) {
+            packetProjectionStatus = 1;
+            for (int k = 0; k < n; k++) {
+                if (!gtePrecisionLookup(addr[k], raw_[k], &packetProjection[k])) {
+                    packetProjectionStatus = -1;
+                    break;
+                }
+            }
         }
+        const GtePrecise* precise = packetProjection;
+        int complete = packetProjectionStatus > 0;
         if (complete) {
             for (int k = 0; k < n; k++) {
                 /* A wrapped GP0 coordinate field cannot retain the original
@@ -3788,7 +3818,20 @@ void gp0ClearImage(int x, int y, int w, int h, uint32_t rgb) {
     gp.clipX1 = VRAM_W - 1; gp.clipY1 = VRAM_H - 1;
     PVertex color;
     decodeColor(&color, rgb);
-    rectangle(sext11(x), sext11(y), w, h, 0, 0, &color, 0, 0, 0, 0);
+    int left = sext11(x), top = sext11(y);
+    VRect clear = {left, top, left + w - 1, top + h - 1};
+    int visible = !gp.wide && clipToVram(&clear);
+    int stale = visible && vramIsDrawn(clear);
+    if (visible) vramKeepWrite(clear);
+    rectangle(left, top, w, h, 0, 0, &color, 0, 0, 0, 0);
+    if (visible) {
+        /* Sprite uploads often follow this clear immediately. Its native
+         * words are already known without waiting for the GPU to return
+         * them. Preserve unknown neighbours of a partially cleared tile. */
+        vramFillShadow(clear, rgb);
+        if (stale) vramResolveCpuWrite(clear);
+        else vramResolveCpuDraw(clear);
+    }
     wideFill((VRect){x, y, x + w - 1, y + h - 1}, rgb);
     gp.clipX0 = x0; gp.clipY0 = y0; gp.clipX1 = x1; gp.clipY1 = y1;
     gp.offX = ox; gp.offY = oy;
@@ -4056,6 +4099,7 @@ static void execute(void) {
          * by word (polylineWord). */
         int polylineStart = op >= 0x40 && op < 0x60 && (op & 0x08);
         gp.replayed = 0;
+        packetProjectionStatus = 0;
         memset(&gp.wideUv, 0, sizeof(gp.wideUv));
         if (!polylineStart && wideBegin()) {
             uint32_t e1 = gp.e1;

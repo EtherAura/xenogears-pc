@@ -38,8 +38,11 @@ const unsigned char* pcArenaRosterBank(int slot, int* bank, int* type);
 const unsigned char* pcArenaRosterVisuals(int* bytes);
 void* pcVersusRosterVisuals(void* stock);
 unsigned char* pcVersusEnemyText(int entity, int name);
+unsigned char* pcVersusMoveText(int entity, int idx);
 void pcVersusRosterHideParty(void);
 int pcVersusRosterResult(unsigned mask);
+int pcVersusInitCommandTargets(unsigned char actor, unsigned short flags, int attackRange);
+unsigned short pcVersusGroupTargets(unsigned char selected, unsigned short eligible, int rowOnly);
 int pcVersusRosterTargetOp(const unsigned char* op, int actor);
 int pcArenaRosterGear(int slot, const unsigned char** controls, const unsigned char** model, int* x, int* position);
 void pcArenaRosterGearActivated(int slot);
@@ -52,10 +55,8 @@ int pcVersusPartyCanExitGear(int slot);
 void pcVersusPartyGearMenu(int slot);
 int pcVersusPartyGearTextureSlot(int slot);
 void pcVersusDeployMirrorGears(void);
-void pcVersusExitGearCaption(int show, int selected);
 int pcVersusCallPartyGear(int slot);
-int pcVersusExitPartyGear(int slot);
-void pcVersusRosterDeployGears(void);
+int pcVersusDeployEnemyGear(int slot);
 int pcVersusEnemyTurnResolved(void);
 
 /* The session (pcArenaSession; port/src/system/arena.h's phases, which add
@@ -113,6 +114,8 @@ void pcVersusBattleOver(void);
 int pcVersusLastResult(void); /* 0x81 player 2 won, 0x40 bit player 1 escaped, else player 1 won; 0 none */
 void pcVersusBattleEnd(void);
 void pcVersusDraw(void);
+int pcVersusAttackNameRowsAfter(int label);
+void pcVersusFitAttackNames(void);
 int pcVersusRandom(int lo, int hi, int* out);
 
 /* Mirror match (xg-htn.35.143): a versus battle where player 2 commands a copy

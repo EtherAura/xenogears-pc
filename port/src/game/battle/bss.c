@@ -32,7 +32,7 @@ BattleBssBlock battleBssUnion __asm__(XG_ASM_LABEL(battleBssBlock)) = { 0 };
 BattleBss_800CCCE8* pBattleEntities = &battleBssUnion.m0_tail.m8E38_entities;
 
 /* Noah's battleMechas; [31] (the environment) also has its own name. */
-sLoadedMechas* battleMechas[32] = { 0 };
+sLoadedMechas* battleMechas[BATTLE_MECHA_COUNT] = { 0 };
 
 /* name = (char*)&block + offset. Emitted from a function only because
  * top-level asm takes no operands. */

@@ -13,6 +13,7 @@
 /* The status bar's code reads a party slot's numbers through HUD_SLOT: a
  * mirror match (port/src/game/battle/mirror.c) also has it draw player 2's
  * bar, its members in slots 3-5: HUD_SLOT gives theirs then. */
+void pcBattleArrangeAttackPrompts(void);
 int pcBattleHudSlot(int slot);
 #define HUD_SLOT(i) pcBattleHudSlot(i)
 int pcVersusViewBar(void);      /* drawBattleMode1: player 2's bar drawn instead of the party's */
@@ -509,6 +510,7 @@ void battleRenderCommandRing(void) {
     s32 i;
 
     if (battleVar1->mCB_drawCommandRing) {
+        pcBattleArrangeAttackPrompts();
         for (i = 0; i < 2; i++) {
             /* This shared font contains both command lettering and wheel
              * artwork. The wheel's measured atlas/CLUT is HUD, not text. */
@@ -792,7 +794,12 @@ void drawMonsterNames(void) {
                               previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth);
             } else {
                 repositionTextRenderingPlanePrim(&previousEntityTurn.m8_nameLabels[i].m0_polys[D_800CCB04.m30_battleOddOrEven],
-                              0x9A - (previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth >> 1), 0xCA, 0,
+                              0x9A - (previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth >> 1),
+#ifdef PLATFORM_PC
+                              0xCA - 13 * pcVersusAttackNameRowsAfter(i), 0,
+#else
+                              0xCA, 0,
+#endif
                               (i / 2) * 0xD, previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth);
             }
             pcTextureClass(&previousEntityTurn.m8_nameLabels[i].m0_polys[D_800CCB04.m30_battleOddOrEven], PC_TEX_TEXT);

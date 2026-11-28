@@ -509,10 +509,13 @@ void executeBattleCode_finalizeDamageEntry(u8 entity, u8 idx) {
 }
 
 void executeBattleCode_showMonsterName(u8 idx, u8 entity) {
+#ifdef PLATFORM_PC
+    if (battleTickMain_var0 >= sizeof(previousEntityTurn.m8_nameLabels) / sizeof(previousEntityTurn.m8_nameLabels[0])) return;
+#endif
     if (battleTickMain_var0 < 9) {
         previousEntityTurn.m8_nameLabels[battleTickMain_var0].m5E_currentMonsterNameStringWidth = renderString(
 #ifdef PLATFORM_PC
-            pcVersusEnemyText(entity, battleScriptContext[idx].m3_nameIndex),
+            pcVersusMoveText(entity, idx),
 #else
             getDialogParamPointer(currentBattleSpecificStrings, battleScriptContext[idx].m3_nameIndex),
 #endif

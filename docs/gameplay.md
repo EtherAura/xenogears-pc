@@ -84,6 +84,11 @@ Ten slots with a picture of each. F7 saves, F8 loads, F9 and Shift+F9 choose
 the slot, Shift+F8 undoes the last load. Memory cards are never changed by a
 state. F1 > Saves.
 
+To move a portable slot between devices, copy the slot's `.xgs` file and its
+save folder's `schemas/` directory. Use the same disc region and engine in
+the destination build. Slots marked **This version only** need the original
+build. Ordinary memory card saves travel as a single `.mcd` or `.mcr` image.
+
 ![Rewind](img/clip-rewind.webp)
 
 Rewind keeps the last 30 seconds: hold R, or Select + L2, to go back; let go

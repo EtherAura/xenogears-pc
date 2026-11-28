@@ -543,6 +543,9 @@ u16 abilityTargetSelectionInit(u16 flags, u16 flags2, u8 self, u8 mode, u8 useSe
         flags = 0x2001;
         break;
     }
+#ifdef PLATFORM_PC
+    if (pcVersusInitCommandTargets(self, flags, useSelfTargets)) return flags;
+#endif
     if (flags & 0x8000) {
         includeKO = 1;
     }
@@ -618,11 +621,23 @@ u8 abilitySelectTarget(u16 flags, u8 self, u8 useSelfTargets) {
                 setCameraVisibleEntities(characterIdToTargetBitmask(abilitySelectedTarget));
                 break;
             case 1:
+#ifdef PLATFORM_PC
+                if (pcVersusSession() == PC_VERSUS_IN) {
+                    savedMask = pcVersusGroupTargets(abilitySelectedTarget, abilityTargetBitmask, 0);
+                    updateCharacterBlinkingTask(savedMask);
+                    setCameraVisibleEntities(savedMask);
+                    break;
+                }
+#endif
                 updateCharacterBlinkingTask(abilityTargetBitmask);
                 setCameraVisibleEntities(abilityTargetBitmask);
                 break;
             case 2:
                 savedMask = abilitySelectTargetSub0();
+#ifdef PLATFORM_PC
+                if (pcVersusSession() == PC_VERSUS_IN)
+                    savedMask = pcVersusGroupTargets(abilitySelectedTarget, savedMask, 1);
+#endif
                 updateCharacterBlinkingTask(savedMask);
                 setCameraVisibleEntities(savedMask);
                 break;

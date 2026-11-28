@@ -101,17 +101,17 @@
  * Gears, battle music, opponent's HP and the stage) are the host's on both sides: it sends them in the handshake
  * (SETTINGS, each range-checked), and both hold them for the session
  * (settingsPin: the settings menu shows them locked, a change is ignored,
- * nothing is written). Both also play without what one may have and the
- * other not: no memory cards (card1/card2 none), the game's own text and
- * battle voices (no other release's text or Japanese voices), and no free
- * camera (its heading is game state, its stick is not in the pads). Save states
+ * nothing is written). The battle voice language stays local to each player.
+ * Sessions use the game's own text and cutscene audio, with no memory cards
+ * (card1/card2 none) or free camera (its heading is game state, its stick is
+ * not in the pads). Save states
  * are off in a session (savestate.c stateAvailable): a load on one side
  * alone would part the two games, and a state is the machine's whole memory,
  * not something to take from the other player.
  *
- * Started from the F1 menu (Extras > Battle arena > Online, netplay_launch.c),
- * this runs as a process of its own with XG_NETPLAY_STATUS=1: its state goes
- * to stdout as lines "XGNP <state> ...", which the menu reads: hosting <port>,
+ * From the menu the game keeps its window and parks the local timeline
+ * for the return trip. The menu receives session status directly; standalone
+ * sessions with XG_NETPLAY_STATUS=1 write the same events to stdout: hosting <port>,
  * joining <host:port>, connected <address> <delay> (loading), ready (first
  * synchronized inputs), waiting, paused, back,
  * lost, resumed, moved <address>,
@@ -186,6 +186,7 @@
 #include "netplay_core.h"
 #include "settings.h"
 #include "speedup.h"
+#include "stateimage.h"
 #include "system.h"
 #if defined(__has_include)
 #if __has_include("netplay_compat.h")
@@ -258,6 +259,15 @@ static struct {
     FILE* hashLog;     /* XG_NETPLAY_HASH_LOG */
 } N;
 
+/* The game thread owns the loaded game, settings and SDL window. Only the
+ * blocking UDP negotiation runs on the worker while the menu stays usable. */
+static int fromMenu, originalClock, startingMenuBattle, leaveRequested, returningToGame;
+static SDL_Thread* handshake;
+static SDL_AtomicInt connected, cancelled;
+static int approvedParty[3], cardsRead;
+static int handshakeCancelled(void) { return SDL_GetAtomicInt(&cancelled); }
+static void leaveMenuSession(void);
+
 void uiNetplayNotice(const char* text, int wait); /* ui/menu.cpp */
 void gpuPresentMenu(const char* shot);           /* gpu/libgpu.c: the last picture again */
 
@@ -327,7 +337,7 @@ static int stageListed(int value) {
 /* The session's settings held on this side (both sides). */
 static void logicPin(const NpTerms* t) {
     static const char* const fixed[][2] = {
-        {"card1", "none"}, {"card2", "none"}, {"japanese_battle_voices", "0"}, {"japanese_cutscene_audio", "0"},
+        {"card1", "none"}, {"card2", "none"}, {"japanese_cutscene_audio", "0"},
         /* The free camera writes its heading into the game's state (freecam.c: m10E_cameraTan,
          * m10C_camera2Tan; a field script reads it: a desync at vblank 669 in field 22), and its
          * right-stick turns are not in the pad bytes the sides exchange (xg-htn.35.139). */
@@ -359,6 +369,14 @@ static void say(const char* fmt, ...) {
 /* A state line for the menu that started this process (netplay_launch.c). */
 static void status(const char* fmt, ...) {
     va_list ap;
+    if (fromMenu) {
+        char line[320];
+        va_start(ap, fmt);
+        SDL_vsnprintf(line, sizeof line, fmt, ap);
+        va_end(ap);
+        netplayMenuStatus(line);
+        return;
+    }
     if (!N.status) return;
     FILE* out = stdout;
 #ifdef __ANDROID__
@@ -452,7 +470,11 @@ static void stop(int end) {
     npBye(&N.np, end);
     N.active = 0;
     pcVersusSetPerspective(0);
-    uiNetplayNotice(text, end != END_LEAVE || N.status);
+    uiNetplayNotice(text, end != END_LEAVE || N.status || fromMenu);
+    if (fromMenu) {
+        leaveMenuSession();
+        return;
+    }
     if (N.status) {
         quitNow(); /* the menu's session: the game that started it goes on */
     }
@@ -731,16 +753,16 @@ static int partyFromHex(const char* hex, XgPartyRecord* out) {
  * settings: *cardsRead), checked as the other side's will be. 0 (said, and
  * the status line) where there is one but it cannot be used. */
 static int ownParty(int* cardsRead) {
-    const char* hex = SDL_getenv("XG_NETPLAY_PARTY");
+    const char* hex = fromMenu ? NULL : SDL_getenv("XG_NETPLAY_PARTY");
     *cardsRead = 0;
-    if ((hex == NULL || hex[0] == '\0') && N.save[0] == '\0') return 1; /* none brought */
+    if (!N.hasParty && (hex == NULL || hex[0] == '\0') && N.save[0] == '\0') return 1; /* none brought */
     if (hex != NULL && hex[0] != '\0') {
         if (!partyFromHex(hex, &N.party)) {
             say("XG_NETPLAY_PARTY is not a party record's %d bytes in hex", (int)sizeof N.party);
             status("over ownparty %d 255", XG_PARTY_BAD_HEADER);
             return 0;
         }
-    } else {
+    } else if (!N.hasParty) {
         cardImagesInit(); /* the player's cards as the settings have them, before the session's pins */
         *cardsRead = 1;
         if (!pcArenaPackSave(N.save, N.haveCodes ? N.codes : NULL, &N.party)) {
@@ -771,13 +793,12 @@ static int checkRosterAgreement(NpSession* session, const uint8_t* data, int byt
     return bytes != session->partyBytes || memcmp(data, session->party, (size_t)bytes) != 0;
 }
 
-int netplayConnect(const char* disc) {
+static int prepareConnection(const char* disc, const char* approved) {
     NpSession* s = &N.np;
-    int cardsRead = 0;
-    int approvedParty[3];
+    cardsRead = 0;
 
     const char* st = SDL_getenv("XG_NETPLAY_STATUS");
-    N.status = st != NULL && atoi(st) != 0;
+    N.status = !fromMenu && st != NULL && atoi(st) != 0;
 #ifdef __ANDROID__
     const char* path = SDL_getenv("XG_NETPLAY_STATUS_FILE");
     if (N.status && path != NULL) N.statusFile = fopen(path, "a");
@@ -785,7 +806,7 @@ int netplayConnect(const char* disc) {
 #ifndef _WIN32
     if (N.status) signal(SIGPIPE, SIG_IGN); /* the menu's end of the pipe gone: no end of this session */
 #endif
-    const char* approved = SDL_getenv("XG_NETPLAY_ROSTER");
+
     if (approved != NULL && approved[0] != 0) {
         ArenaLoadout roster;
         const char* why = "The approved loadout code is invalid.";
@@ -844,6 +865,11 @@ int netplayConnect(const char* disc) {
         statusEnd(s);
         return 0;
     }
+    return 1;
+}
+
+static int negotiate(void) {
+    NpSession* s = &N.np;
     if (N.host) {
         say("hosting on UDP port %d (player 1); waiting for player 2 with the same code", netLocalPort(s->s));
         status("hosting %d", netLocalPort(s->s));
@@ -870,18 +896,16 @@ int netplayConnect(const char* disc) {
             return 0;
         }
     }
+    return 1;
+}
+
+static int sessionAgreed(void) {
+    NpSession* s = &N.np;
     if ((s->terms.mode == NP_MODE_ROSTER) != (N.roster[0] != 0)) {
         status("over loadout");
         npBye(s, END_NONE);
         return 0;
     }
-    if (s->terms.mode == NP_MODE_ROSTER) {
-        s->terms.table = 2;
-        s->terms.config = 13;
-        for (int i = 0; i < 3; i++) s->terms.party[i] = approvedParty[i];
-        say("both players approved the same enemy loadout");
-    }
-    say("connected: input delay %d vblanks, story progress %d", s->terms.delay, s->terms.progress);
     for (int i = 0; i < logicCount; i++) {
         if (logic[i].kind == K_STAGE && !stageListed(s->terms.settings[i])) { /* within range, but not one of ours */
             say("the host's stage (setting %d) is not one of this game's", s->terms.settings[i]);
@@ -890,6 +914,18 @@ int netplayConnect(const char* disc) {
             return 0;
         }
     }
+    return 1;
+}
+
+static void enterSession(void) {
+    NpSession* s = &N.np;
+    if (s->terms.mode == NP_MODE_ROSTER) {
+        s->terms.table = 2;
+        s->terms.config = 13;
+        for (int i = 0; i < 3; i++) s->terms.party[i] = approvedParty[i];
+        say("both players approved the same enemy loadout");
+    }
+    say("connected: input delay %d vblanks, story progress %d", s->terms.delay, s->terms.progress);
     if (s->terms.mode == NP_MODE_PARTY) {
         /* both checked (the handshake: each side's of the other's, here of its own) */
         const XgPartyRecord* mine = &N.party;
@@ -905,12 +941,19 @@ int netplayConnect(const char* disc) {
             (unsigned long long)npPartyHash((const uint8_t*)&N.sides[0], (int)sizeof N.sides[0]),
             N.sides[1].m4_members[0], N.sides[1].m4_members[1], N.sides[1].m4_members[2],
             (unsigned long long)npPartyHash((const uint8_t*)&N.sides[1], (int)sizeof N.sides[1]));
-    } else if (s->terms.mode == NP_MODE_ROSTER && N.hasParty) {
-        pcArenaSessionVersus(ARENA_MATCH_ROSTER, s->terms.table, s->terms.config, &N.party);
-    } else if (s->terms.mode == NP_MODE_VERSUS && (N.host ? N.hasParty : s->peerPartyBytes != 0)) {
-        XgPartyRecord record = N.party;
-        if (!N.host) memcpy(&record, s->peerParty, sizeof record);
-        pcArenaSessionVersus(ARENA_MATCH_VERSUS, s->terms.table, s->terms.config, &record);
+    } else if (s->terms.mode == NP_MODE_ROSTER || s->terms.mode == NP_MODE_VERSUS) {
+        int roster = s->terms.mode == NP_MODE_ROSTER;
+        const XgPartyRecord* party = N.hasParty ? &N.party : NULL;
+        XgPartyRecord hostRecord;
+        if (!roster && !N.host) {
+            party = NULL;
+            if (s->peerPartyBytes == sizeof hostRecord) {
+                memcpy(&hostRecord, s->peerParty, sizeof hostRecord);
+                party = &hostRecord;
+            }
+        }
+        pcArenaSessionVersus(roster ? ARENA_MATCH_ROSTER : ARENA_MATCH_VERSUS,
+                             s->terms.table, s->terms.config, s->terms.party, party);
     }
     {
         char peer[64];
@@ -921,7 +964,7 @@ int netplayConnect(const char* disc) {
                                                  : "battling");
     }
     logicPin(&s->terms);
-    if (cardsRead) cardImagesReload(); /* --save read the player's cards: the session's game has none */
+    if (cardsRead || fromMenu) cardImagesReload(); /* --save read the player's cards: the session's game has none */
     char held[1024];
     size_t used = 0;
     held[0] = '\0';
@@ -932,7 +975,26 @@ int netplayConnect(const char* disc) {
     /* the session's game, on the stepped clock: power-on into Battling's main
      * menu, or into a field with the versus battle asked for */
     char value[64];
-    setEnv("XG_CLOCK", "step");
+#if XG_ENGINE_ENHANCED
+    /* A slow first turn holds both peers. Let Auto start small and grow
+     * with measured headroom. A player's own budget or seed takes priority. */
+    if (!fromMenu && settingsGet("upscale_auto_start") == NULL) setEnv("XG_UPSCALE_AUTO_START", "1");
+#ifdef __ANDROID__
+    /* These choices are local to the match process. The integrated GPU
+     * already has a budget, and Android can schedule the game thread to it. */
+    if (!fromMenu && settingsGet("performance_hints") == NULL) setEnv("XG_PERFORMANCE_HINTS", "on");
+    const char* const renderFlags[] = {
+        "XG_EXPERIMENT_LIGHT_SPECIALIZE", "XG_EXPERIMENT_LIGHT_BARRIERS",
+        "XG_EXPERIMENT_PRESENT_NEAREST", "XG_VK_FIFO",
+    };
+    for (size_t i = 0; i < sizeof renderFlags / sizeof renderFlags[0]; ++i) {
+        if (!fromMenu && getenv(renderFlags[i]) == NULL) setEnv(renderFlags[i], "1");
+    }
+#else
+    if (!fromMenu && settingsGet("upscale_gpu_ms") == NULL) setEnv("XG_UPSCALE_GPU_MS", "6");
+#endif
+#endif
+    if (!fromMenu) setEnv("XG_CLOCK", "step");
     setEnv("XG_MUSIC", ""); /* a start's music (options.c) reads the disc: one side's alone would part them */
     if (s->terms.mode == NP_MODE_PARTY) {
         /* field 22 (the boot into the field); the match's start itself is
@@ -970,8 +1032,134 @@ int netplayConnect(const char* disc) {
     N.active = 1;
     /* each machine shows its own player's side of a mirror match (system/arena.c) */
     pcVersusSetPerspective(N.host ? 1 : 2);
-    atexit(byeAtExit);
+    static int registered;
+    if (!registered) { atexit(byeAtExit); registered = 1; }
+}
+
+int netplayConnect(const char* disc) {
+    if (!prepareConnection(disc, SDL_getenv("XG_NETPLAY_ROSTER")) || !negotiate() || !sessionAgreed()) return 0;
+    enterSession();
     return 1;
+}
+
+static const char* const bootOptions[] = {"XG_BOOT_MODE", "XG_FIELD", "XG_GAMESTATE", "XG_PARTY", "XG_VERSUS", "XG_MUSIC"};
+static char* previousOptions[sizeof bootOptions / sizeof bootOptions[0]];
+
+static void menuSessionCleanup(void) {
+    npClose(&N.np);
+    if (N.hashLog) { fclose(N.hashLog); N.hashLog = NULL; }
+    pcArenaRosterClear();
+    pcArenaSessionParties(NULL, NULL);
+    fromMenu = startingMenuBattle = leaveRequested = 0;
+}
+
+static int SDLCALL negotiateMenu(void* unused) {
+    (void)unused;
+    SDL_SetAtomicInt(&connected, negotiate() ? 1 : -1);
+    return 0;
+}
+
+int netplayMenuConnect(const NetplayStart* o) {
+    if (fromMenu || N.active || stateKept() || !stateBootAvailable()) return 0;
+    memset(&N, 0, sizeof N);
+    returningToGame = 0;
+    fromMenu = 1;
+    N.host = o->host;
+    N.port = o->port;
+    SDL_strlcpy(N.code, o->code, sizeof N.code);
+    SDL_strlcpy(N.joinTo, o->address, sizeof N.joinTo);
+    N.terms.delay = o->host ? o->delay : 3;
+    N.terms.progress = o->host ? o->progress : 0;
+    N.terms.mode = o->partyVsParty ? NP_MODE_PARTY : o->versus ? NP_MODE_VERSUS : NP_MODE_BATTLING;
+    N.terms.pick = o->joinerPicks;
+    N.terms.table = o->table;
+    N.terms.config = o->config;
+    for (int i = 0; i < 3; i++) N.terms.party[i] = o->hasParty ? o->record.m4_members[i] : (i == 0 ? 0 : i == 1 ? 2 : 255);
+    N.battlingOnly = o->battlingOnly;
+    N.hasPick = o->pick;
+    N.pickTable = o->table;
+    N.pickConfig = o->config;
+    N.hasParty = o->hasParty;
+    if (o->hasParty) N.party = o->record;
+    if (prepareConnection(cdSwapPath(0), o->roster)) {
+        SDL_SetAtomicInt(&cancelled, 0);
+        SDL_SetAtomicInt(&connected, 0);
+        N.np.cancel = handshakeCancelled;
+        handshake = SDL_CreateThread(negotiateMenu, "Online match connection", NULL);
+        if (handshake) return 1;
+    }
+    menuSessionCleanup();
+    return 0;
+}
+
+static void beginMenuBattle(void) {
+    /* This is the game's new stack, after the original game was parked. */
+    stateRestoreBoot();
+    /* The power-on image predates the first game tick. Two devices may have
+     * spent different amounts of wall time in the loader before that image. */
+    originalClock = hwSetSteppedClock(1, 0.0);
+    if (cdBootDiscNumber() != 1 && cdSwapForReset()) cdBootTablesReload();
+    for (size_t i = 0; i < SDL_arraysize(bootOptions); i++) {
+        const char* old = getenv(bootOptions[i]);
+        previousOptions[i] = old ? SDL_strdup(old) : NULL;
+        setEnv(bootOptions[i], "");
+    }
+    enterSession();
+    startingMenuBattle = 0;
+    extern void kernelMain(void);
+    kernelMain();
+}
+
+static void leaveMenuSession(void) {
+    N.active = 0;
+    for (size_t i = 0; i < SDL_arraysize(bootOptions); i++) {
+        if (previousOptions[i]) setEnv(bootOptions[i], previousOptions[i]);
+        else {
+            SDL_unsetenv_unsafe(bootOptions[i]);
+            SDL_UnsetEnvironmentVariable(SDL_GetEnvironment(), bootOptions[i]);
+        }
+        SDL_free(previousOptions[i]);
+        previousOptions[i] = NULL;
+    }
+    settingsUnpinAll();
+    cardImagesReload();
+    hwSetSteppedClock(originalClock, hwNow());
+    menuSessionCleanup();
+    returningToGame = 1;
+    stateRequestReturn();
+}
+
+/* Called on the game thread, both in the menu and at vblank. */
+int netplayMenuStartingBattle(void) {
+    return startingMenuBattle && N.np.terms.mode != NP_MODE_BATTLING;
+}
+
+int netplayMenuPoll(void) {
+    if (startingMenuBattle || leaveRequested || (returningToGame && stateKept())) return 1;
+    returningToGame = 0;
+    int result = SDL_GetAtomicInt(&connected);
+    if (!handshake || !result) return 0;
+    SDL_WaitThread(handshake, NULL);
+    handshake = NULL;
+    N.np.cancel = NULL;
+    if (handshakeCancelled()) {
+        if (result > 0) npBye(&N.np, END_LEAVE);
+        status("over leave");
+        menuSessionCleanup();
+        return 0;
+    }
+    if (result < 0 || !sessionAgreed()) {
+        menuSessionCleanup();
+        return 0;
+    }
+    startingMenuBattle = 1;
+    stateRequestRestart(1, beginMenuBattle);
+    return 1;
+}
+
+void netplayMenuCancel(void) {
+    if (handshake) SDL_SetAtomicInt(&cancelled, 1);
+    else if (N.active && fromMenu) leaveRequested = 1;
 }
 
 int netplayActive(void) {
@@ -1089,11 +1277,16 @@ static void paceToRealTime(void) {
 }
 
 void netplayPace(void) {
+    if (leaveRequested && N.active) {
+        leaveRequested = 0;
+        stop(END_LEAVE);
+        return;
+    }
     pcArenaVBlank(); /* the Battle arena's matches (system/arena.c) */
     pcGauntletVBlank();
     if (!N.active) {
         if (N.after) paceToRealTime(); /* a command-line session's game after it */
-        netplayLaunchWait(); /* a session started from the menu: this game waits */
+        netplayMenuPoll();
         return;
     }
     int mode = pcWideGetMode();
@@ -1144,6 +1337,10 @@ static void dumpState(uint32_t n) {
 }
 
 void netplayFrame(unsigned local, unsigned* port1, unsigned* port2) {
+    if (!N.active) {
+        *port1 = *port2 = 0;
+        return;
+    }
     uint32_t n = hwVSyncCount();
 
     if (!N.np.started) {

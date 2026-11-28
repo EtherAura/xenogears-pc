@@ -17,11 +17,15 @@ static unsigned epoch = 1;
 static int enabled;
 static unsigned pendingDraws;
 
+/* The original logical index is ((word ^ (word >> 16)) * 0x9e3779b1)
+ * modulo 65536, followed by linear probes. Permute storage by the inverse
+ * of that multiplier: adjacent packet words now normally share cache lines
+ * and each probe visits precisely the same logical candidate as before. */
+#define PROBE_STEP 0x2f51u
+_Static_assert(((0x9e3779b1u * PROBE_STEP) & (SLOTS - 1)) == 1, "precision probe permutation");
 static unsigned hash(const void* addr) {
-    uintptr_t p = (uintptr_t)addr >> 2;
-    p ^= p >> 16;
-    p *= UINT64_C(0x9e3779b1);
-    return (unsigned)p & (SLOTS - 1);
+    uintptr_t word = (uintptr_t)addr >> 2;
+    return (unsigned)(word ^ (word >> 16)) & (SLOTS - 1);
 }
 
 void gtePrecisionEnable(int on) {
@@ -58,12 +62,16 @@ void gtePrecisionRecord(void* addr, const GtePrecise* vertex) {
     unsigned first = hash(addr);
     int freeSlot = -1;
     for (unsigned i = 0; i < PROBES; i++) {
-        unsigned slot = (first + i) & (SLOTS - 1);
+        unsigned slot = (first + i * PROBE_STEP) & (SLOTS - 1);
         if (entries[slot].addr == addr) {
             freeSlot = (int)slot;
             break;
         }
-        if (freeSlot < 0 && (!entries[slot].addr || epoch - entries[slot].epoch > MAX_AGE)) freeSlot = (int)slot;
+        if (!entries[slot].addr) {
+            if (freeSlot < 0) freeSlot = (int)slot;
+            break;
+        }
+        if (freeSlot < 0 && epoch - entries[slot].epoch > MAX_AGE) freeSlot = (int)slot;
     }
     if (freeSlot >= 0) {
         entries[freeSlot].addr = addr;
@@ -76,7 +84,7 @@ int gtePrecisionLookup(const void* addr, u32 word, GtePrecise* out) {
     if (!enabled) return 0;
     unsigned first = hash(addr);
     for (unsigned i = 0; i < PROBES; i++) {
-        unsigned slot = (first + i) & (SLOTS - 1);
+        unsigned slot = (first + i * PROBE_STEP) & (SLOTS - 1);
         /* An empty slot ends the probe: gtePrecisionRecord puts an address in
          * the first empty or stale slot of its sequence and never empties one
          * (only the whole table is cleared), so an address recorded past an
@@ -110,8 +118,14 @@ void gteCopyPrecision(void* dst, const void* src) {
 }
 
 void gteCopySxy(void* dst, const void* src) {
-    memcpy(dst, src, 4);
-    gteCopyPrecision(dst, src);
+    u32 word;
+    memcpy(&word, src, sizeof word);
+    memcpy(dst, &word, sizeof word);
+    if (enabled) {
+        GtePrecise p = {0};
+        gtePrecisionLookup(src, word, &p);
+        gtePrecisionRecord(dst, &p);
+    }
 }
 
 /* The field's drawn view's fraction (xg-ugy.9; include/gte_pc.h): the camera's translation

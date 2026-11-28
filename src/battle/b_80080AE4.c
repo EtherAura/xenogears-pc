@@ -1299,7 +1299,7 @@ void drawGearBattleMenuEscape(s32 arg0) {
     case 6:
     case 7:
 #ifdef PLATFORM_PC
-        if (pcVersusExitPartyGear(arg0)) {
+        if (pcVersusPartyCanExitGear(arg0) && pcVersusCallPartyGear(arg0)) {
             battleVar2->m2DE_actionDone = 1;
             return;
         }

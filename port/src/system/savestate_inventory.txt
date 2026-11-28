@@ -153,6 +153,7 @@ gpu/gp0.c clutCleanMemo derived memo of cacheRaster's CLUT-cache-equals-VRAM che
 gpu/gp0.c exact host the XG_CACHE_WALK_READS switch, read once
 gpu/gp0.c gp state the drawing state, a command or load in progress, the texture and CLUT caches
 gpu/gp0.c l derived per-line scratch
+gpu/gp0.c margin host the XG_DOF_OWN_MARGIN setting, read once
 gpu/gp0.c probe host debug switches
 gpu/gp0.c probeSolid host debug switches
 gpu/gp0.c probeX host debug switches
@@ -514,6 +515,7 @@ system/mouse_battle.c seen derived actors seen: cleared on load
 system/net.c * host networking (netplay)
 system/netplay.c * host netplay: an input source, like the pads' devices
 system/netplay_launch.c * host netplay: the session the menu started, a process of its own
+system/options.c softResetPending host the live F1 reset request
 system/options.c start state
 system/overlay_cd.c * host XG_OVERLAY_CD (states refused in that mode)
 system/pad.c actuator state
@@ -550,6 +552,7 @@ system/workers.c * host helper threads for work the game thread splits into part
 system/rumble.c * host vibration devices
 system/touch.c * host live touch input and the touch pad's state (as the mouse's: never in a state)
 system/rumble_game.c * host the port's feedback
+system/safeaudit.c au host XG_SAFE_AUDIT counters and backtraces for the running process
 system/savestate.c * host save states
 system/selectchord.c hold host a live Select kept from the game for a chord of the port's (the player's hands, as pad.c's edges)
 system/settings.c * host settings

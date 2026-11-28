@@ -42,7 +42,7 @@ void safeAuditVBlank(void);
 void stallNameOf(void* p, char* out, size_t size); /* stall.c */
 
 #define GRACE 6          /* vblanks: a frame's longest wait at a loop top */
-#define SAFE_WAIT 120    /* savestate.c: how long a slot save waits */
+#define SAFE_WAIT 120    /* savestate.c: when a pending slot save shows a notice */
 #define DUMP_VBLANKS 1200
 #define KEY_FRAMES 16    /* frames that tell two waits apart */
 #define SKIP_FRAMES 1    /* this function's own frame */

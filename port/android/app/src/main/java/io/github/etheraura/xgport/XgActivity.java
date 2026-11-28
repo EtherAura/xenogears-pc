@@ -69,6 +69,8 @@ import android.provider.DocumentsContract.Document;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.DisplayCutout;
+import android.view.Display;
+import android.view.WindowManager;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.View;
@@ -109,6 +111,7 @@ public class XgActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        requestGameRefreshRate();
         readUpdateAllowed();
         boolean again = getIntent().getBooleanExtra("discs-picker", false);
         if (again || (discTree() == null && getIntent().getStringExtra("discs-dir") == null)) {
@@ -125,6 +128,24 @@ public class XgActivity extends SDLActivity {
                 Log.i(TAG, "test: to the background");
                 moveTaskToBack(true);
             }, away);
+        }
+    }
+
+    /* Match the 60 Hz game surface without changing the device's resolution. */
+    private void requestGameRefreshRate() {
+        Display display = getDisplay();
+        if (display == null) return;
+        Display.Mode current = display.getMode();
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        for (Display.Mode mode : display.getSupportedModes()) {
+            if (mode.getPhysicalWidth() == current.getPhysicalWidth()
+                    && mode.getPhysicalHeight() == current.getPhysicalHeight()
+                    && Math.abs(mode.getRefreshRate() - 60f) < 0.3f) {
+                params.preferredDisplayModeId = mode.getModeId();
+                getWindow().setAttributes(params);
+                Log.i("xenogears", "requested game display mode " + mode);
+                return;
+            }
         }
     }
 

@@ -330,6 +330,9 @@ s32 waitForMusic(s32 wait);
  * other widths): the PC sees the definitions' prototypes here, the callers
  * keep their views under #ifndef PLATFORM_PC. */
 void PlaySoundEffect2(s32 id, s32 ch, s32 vol, s32 pan);   /* sound.c */
+#ifdef PLATFORM_PC
+void pcPlaySoundEffectAtVolume(s32 id, u32 volume);
+#endif
 void playSoundEffectSub(u32 ch, s32 id, u32 vol, u16 pan); /* sequencer.c */
 
 #endif

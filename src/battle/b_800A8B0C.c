@@ -9,6 +9,13 @@
 #include "main/filesystem.h"
 #include "main/sprite.h"
 #include "battle/battle.h"
+#ifdef PLATFORM_PC
+#define BATTLE_DRAW_MECHA_END BATTLE_MECHA_COUNT
+#define GEAR_PART_SLOT(owner, part) pcVersusGearPartSlot((owner), (part))
+#else
+#define BATTLE_DRAW_MECHA_END 31
+#define GEAR_PART_SLOT(owner, part) ((owner) * 2 + 13 + (part))
+#endif
 #include "pc_convert.h"
 #include "pc_retail_heap.h"
 #ifdef PLATFORM_PC
@@ -311,7 +318,7 @@ void mechaInitForBattle(void) {
     initMechaInitVar2_battle(&battleMechaInitVar2, battleEnvMechaInitData->m348_trackPoolSize);
     initMechaInitVar3_battle(&battleMechaInitVar3, battleEnvMechaInitData->m34A_trailPoolSize);
     clearMechaEventAnimTracks();
-    for (i = 0; i < 32; i++) {
+    for (i = 0; i < BATTLE_MECHA_COUNT; i++) {
         battleMechas[i] = NULL;
     }
     for (i = 0; i < 20; i++) {
@@ -323,7 +330,7 @@ void mechaInitForBattle(void) {
 }
 
 /* Noah: mechaInitEnvironmentMechaMesh (battle copy of field_mecha
- * mechaInitNewMecha): builds battle mecha entryId (< 32) from its data tables,
+ * mechaInitNewMecha): builds a battle mecha from its data tables,
  * with the battle config's shadow colour and scale and terrain snapping. */
 void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pData2, sMechaDataTable1* pData1, s16 tpageX,
                    s16 tpageY, s16 clutX, s16 clutY, SVECTOR* pPosition) {
@@ -344,7 +351,7 @@ void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pDa
     s32 size;
 
     resetMemoryAllocStats(4, 0);
-    if (entryId >= 32) {
+    if (entryId >= BATTLE_MECHA_COUNT) {
         return;
     }
     if (battleMechas[entryId] != NULL) {
@@ -508,7 +515,11 @@ void mechaInitEnvironmentMechaMesh(s32 entryId, u16 flags, sMechaDataTable2* pDa
     }
     pMecha->m20_mechaEntryId = entryId;
     pMecha->m22_isBattleGear = 0;
+#ifdef PLATFORM_PC
+    if ((u32)entryId < 11 && battleVisualEntities[entryId].m3_hidden != 0) {
+#else
     if (battleVisualEntities[entryId].m3_hidden != 0 && entryId < 11) {
+#endif
         pMecha->m34_visible = 0;
     } else {
         pMecha->m34_visible = 1;
@@ -643,7 +654,7 @@ void finalizeBattleMechaLoadingCommands(s32 index, s16 tpageX, s16 tpageY, s16 c
                 if (i == count - 1) {
                     flags -= 2;
                 }
-                entry = index * 2 + 13 + i;
+                entry = GEAR_PART_SLOT(index, i);
                 mechaInitEnvironmentMechaMesh(entry, flags, data, EXTRA_PARTS(extra), tpageX, tpageY, clutX, clutY, NULL);
                 battleMechas[entry]->m5E_attachBone = *rec++;
                 battleMechas[entry]->m5C_attachMecha = index;
@@ -706,7 +717,7 @@ void renderMechasBattle(MATRIX* pMatrix, MATRIX* pArgs, OTag* ot, s32 oddOrEven)
         }
         finalizeMechaForEvent(mechaAnimSelfIndex);
     }
-    for (i = 0; i < 32; i++) {
+    for (i = 0; i < BATTLE_MECHA_COUNT; i++) {
         if (battleMechas[i] != NULL) {
             updateMechAnim_battle(battleMechas[i], &battleMechaInitVar2, iterations, oddOrEven, battle800ccc5c);
         }
@@ -714,7 +725,7 @@ void renderMechasBattle(MATRIX* pMatrix, MATRIX* pArgs, OTag* ot, s32 oddOrEven)
     if (battle800c3df8 != 0) {
         updateMechaEventAnim(&battleMechaInitVar2, iterations, 0, oddOrEven);
     }
-    for (i = 0; i < 32; i++) {
+    for (i = 0; i < BATTLE_MECHA_COUNT; i++) {
         if (battleMechas[i] != NULL && battleMechas[i]->m5C_attachMecha < 0xFF) {
             updateMechasBaseMatrixIsAttached_battle(battleMechas[i]);
 #ifdef PLATFORM_PC
@@ -725,9 +736,16 @@ void renderMechasBattle(MATRIX* pMatrix, MATRIX* pArgs, OTag* ot, s32 oddOrEven)
     refreshAttachedMechaTransforms_battle(battleMechas);
     SetColorMatrix(battle800d2fc0);
     if (battleMechaVar5 != 0) {
-        for (i = 0; i < 31; i++) {
+        for (i = 0; i < BATTLE_DRAW_MECHA_END; i++) {
+#ifdef PLATFORM_PC
+            if (i == 31) continue; /* The environment has its own draw and teardown. */
+#endif
             if (battleMechas[i] != NULL) {
-                if ((updateTargetSelectionMarkerSub0_var0 >> i) & 1) {
+                if (
+#ifdef PLATFORM_PC
+                    i < 16 &&
+#endif
+                    ((updateTargetSelectionMarkerSub0_var0 >> i) & 1)) {
                     SetBackColor(color[0], color[1], color[2]);
                 } else {
                     SetBackColor(battleEnvMechaInitData->m474_backR, battleEnvMechaInitData->m475_backG, battleEnvMechaInitData->m476_backB);
@@ -749,7 +767,10 @@ void renderMechasBattle(MATRIX* pMatrix, MATRIX* pArgs, OTag* ot, s32 oddOrEven)
 void freeMechaModule_battle(void) {
     s32 i;
 
-    for (i = 0; i < 31; i++) {
+    for (i = 0; i < BATTLE_DRAW_MECHA_END; i++) {
+#ifdef PLATFORM_PC
+        if (i == 31) continue;
+#endif
         freeMecha_battle(i);
     }
     freeMechaInitVar2_battle(&battleMechaInitVar2);
@@ -1550,6 +1571,10 @@ skip:
                     break;
                 }
             }
+#ifdef PLATFORM_PC
+            /* A saturated effect pool leaves this subtree on its owner. */
+            if (tmp == 31) break;
+#endif
             *(sBattleLoadedMechasCopy*)pNew = *(sBattleLoadedMechasCopy*)pMecha;
             battleMechas[tmp] = pNew;
 #ifdef PLATFORM_PC
@@ -3236,11 +3261,15 @@ u8 getMechaBitfieldForAnim_battle(sLoadedMechas* pMecha, u8 id, u16* pMask) {
     } else if (id == 0xFA) {
         id = 0x1F;
     } else if (id == 0xF8) {
-        id = pMecha->m20_mechaEntryId * 2 + 13;
+        id = GEAR_PART_SLOT(pMecha->m20_mechaEntryId, 0);
     } else if (id == 0xF7) {
-        id = pMecha->m20_mechaEntryId * 2 + 14;
+        id = GEAR_PART_SLOT(pMecha->m20_mechaEntryId, 1);
     }
+#ifdef PLATFORM_PC
+    *pMask = id < 16 ? 1u << id : 0;
+#else
     *pMask = 1 << id;
+#endif
     return id;
 }
 
@@ -3251,7 +3280,12 @@ sMechaDataTable2_4_4* mechaGetKeyframe_battle(sLoadedMechas* pMecha, u8 id, s32*
     *pFlag = 0;
     if (id >= 0xFE) {
         if (id == 0xFF) {
+#ifdef PLATFORM_PC
+            /* Standalone animation parts have no battle entity status. */
+            r = pMecha->m20_mechaEntryId < 11 ? getGearAnimStatusBits(pMecha->m20_mechaEntryId) : 0;
+#else
             r = getGearAnimStatusBits(pMecha->m20_mechaEntryId);
+#endif
             if ((r & 4) && (pMecha->m4A_flags & 0x100)) {
                 pMecha->m2A_animQueue[0] = 0x1B;
             } else if ((r & 2) && (pMecha->m4A_flags & 0x80)) {

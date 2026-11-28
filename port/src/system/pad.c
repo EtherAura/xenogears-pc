@@ -148,6 +148,8 @@ static void padLogOpen(void) {
 }
 static u8* actuator[2];
 static SDL_Gamepad* gamepads[2];
+static int sessionWindowOpen;
+static enum { PAD_HERE, PAD_IN_SESSION, PAD_WAIT_RELEASE } padOwner;
 static int returnTaken; /* Return went down as Alt+Enter: not Start until released */
 static int heldAfterMenu; /* the settings menu closed: real input reads released until let go */
 
@@ -711,7 +713,36 @@ static void removeGamepad(SDL_JoystickID id) {
     }
 }
 
-void padDeviceEvent(const SDL_Event* event) {
+/* The lobby and battle are separate SDL processes. Polling a gamepad can see
+ * the same button in both even when SDL filters background input events. */
+void padSessionWindow(int open) {
+    if (sessionWindowOpen == open) return;
+    sessionWindowOpen = open;
+    padOwner = open ? PAD_IN_SESSION : PAD_WAIT_RELEASE;
+}
+
+static u16 readGamepad(SDL_Gamepad* pad, const GamepadBindings* profile);
+
+SDL_JoystickID* padMenuGamepads(int* count) {
+    if (padOwner == PAD_WAIT_RELEASE) {
+        padOwner = PAD_HERE;
+        for (int i = 0; i < 2; i++) {
+            if (gamepads[i] && readGamepad(gamepads[i], &profiles[i])) padOwner = PAD_WAIT_RELEASE;
+        }
+    }
+    if (padOwner == PAD_HERE) return SDL_GetGamepads(count);
+    *count = 0;
+    return NULL;
+}
+
+int padDeviceEvent(const SDL_Event* event) {
+    if (sessionWindowOpen) {
+        if (event->type == SDL_EVENT_WINDOW_FOCUS_GAINED) padOwner = PAD_WAIT_RELEASE;
+        if (event->type == SDL_EVENT_WINDOW_FOCUS_LOST) padOwner = PAD_IN_SESSION;
+    }
+    if (padOwner == PAD_IN_SESSION && (event->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+                                       event->type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+                                       event->type == SDL_EVENT_GAMEPAD_AXIS_MOTION)) return 1;
     if (event->type == SDL_EVENT_GAMEPAD_ADDED) {
         addGamepad(event->gdevice.which);
     } else if (event->type == SDL_EVENT_GAMEPAD_REMOVED) {
@@ -730,6 +761,7 @@ void padDeviceEvent(const SDL_Event* event) {
             (axis < SDL_GAMEPAD_AXIS_LEFT_TRIGGER && (value>threshold || value<-threshold)))
             promptPad=event->gaxis.which;
     }
+    return 0;
 }
 
 /* port/src/ui/diagnostics.cpp: its hotkeys (the performance overlay, its log, the
@@ -858,7 +890,7 @@ void padPumpEvents(void) {
             fflush(padLog);
         }
         rumbleEvent(&e); /* the window's focus (rumble.c) */
-        padDeviceEvent(&e);
+        if (padDeviceEvent(&e)) continue;
         touchInputSeen(&e); /* a key or a controller hides an automatic touch pad */
         if (e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
             menuButton(&e.gbutton);
@@ -1024,6 +1056,44 @@ unsigned pcPadRegionalButtons(unsigned buttons) {
 
 int pcPadPromptSlot(int slot) {
     return regionalSwap() && slot >= 0 && slot < 4 ? slot ^ 1 : slot;
+}
+
+/* The battle help diamond orders its icons clockwise from the right. Use
+ * physical SDL positions, so lettered controllers follow their own layout.
+ * Actions on shoulders or unbound inputs get the remaining hint positions. */
+void pcPadAttackPositions(int positions[4]) {
+    static const int faces[] = { SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_SOUTH,
+                                 SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_NORTH };
+    int swap = regionalSwap();
+    int port = promptPort();
+    unsigned used = 0;
+    for (int i = 0; i < 4; i++) {
+        int regional = i ^ swap;
+        int input = faces[regional];
+        if (port >= 0) {
+            for (int b = 0; b < PAD_BUTTONS; b++) {
+                if (buttonInfo[b].pad == input) {
+                    input = profiles[port].pad[b];
+                    break;
+                }
+            }
+        }
+        positions[i] = -1;
+        for (int j = 0; j < 4; j++) {
+            if (input == faces[j] && !(used & (1u << j))) {
+                positions[i] = j;
+                used |= 1u << j;
+                break;
+            }
+        }
+    }
+    for (int i = 0; i < 4; i++) {
+        if (positions[i] >= 0) continue;
+        int j = i ^ swap;
+        while (used & (1u << j)) j = (j + 1) % 4;
+        positions[i] = j;
+        used |= 1u << j;
+    }
 }
 
 static u16 readKeyboard(void) {

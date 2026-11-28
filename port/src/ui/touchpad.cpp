@@ -405,6 +405,10 @@ float boxPlate(const Pen& pen, const TouchControl& c, float rounding, bool on) {
 void touchpadDraw(ImDrawList* d, float w, float h) {
     TouchControl cs[32];
     int n = touchControls(cs, 32, w, h);
+    // The menu skin's pixel lines use separate quads. A translucent circle
+    // needs joined edges or each segment leaves a notch in the ring.
+    const ImDrawListFlags previousFlags = d->Flags;
+    d->Flags |= ImDrawListFlags_AntiAliasedLines;
     Pen pen;
     pen.d = d;
     pen.a = touchOpacity();
@@ -503,6 +507,7 @@ void touchpadDraw(ImDrawList* d, float w, float h) {
             break;
         }
     }
+    d->Flags = previousFlags;
 }
 
 } // namespace menu

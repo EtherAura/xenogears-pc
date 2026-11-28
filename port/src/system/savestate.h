@@ -163,7 +163,7 @@ void stateSelectSlot(int slot) XG_STATE_WEAK;          /* wraps around (F9 past 
 void stateNoteSlot(void) XG_STATE_WEAK;                /* a corner note: the selected slot's contents */
 /* Whether states can be used at all; else why not (a sentence). */
 int stateAvailable(const char** why);
-/* A save or load waits for the game's next VSync wait. */
+/* A save, load or restart is pending. Portable slot saves wait for a safe point. */
 int stateBusy(void);
 
 /* A slot as F1 > States shows it. thumb: RGB888 thumbW x thumbH, malloc'd. */

@@ -813,6 +813,20 @@ uint32_t hwWaitVSyncSince(uint32_t previous) {
     return vblankCount;
 }
 
+/* Switch at a parked game boundary. Save states restore the virtual time
+ * for either clock. Outside the match, resume the clock the player chose. */
+int hwSetSteppedClock(int on, double now) {
+    int before = stepClock;
+    stepClock = on;
+    if (on) stepNow = now;
+    else {
+        startAt = now;
+        startNs = lastBeatNs = SDL_GetTicksNS();
+    }
+    if (gpuHostClock) gpuHostClock(!stepClock);
+    return before;
+}
+
 int hwInit(void) {
     const char* clock = getenv("XG_CLOCK");
 

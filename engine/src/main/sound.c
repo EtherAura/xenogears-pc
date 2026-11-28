@@ -1477,15 +1477,28 @@ s32 setSoundEffectVoiceCount(s32 n) {
 }
 
 /* Noah: playSoundEffect. */
+#ifdef PLATFORM_PC
+void pcPlaySoundEffectAtVolume(s32 id, u32 volume) {
+#else
 void playSoundEffect(s32 id) {
+#endif
     if (musicStatusFlag & 0x800) {
         /* A separate statement keeps retail's full-word load: written inline
          * in the s16 argument, the front end narrows the read to lhu. */
         s32 ch = numMaxSoundEffectInstances - 2;
         playSoundEffectVar0 = 2;
+#ifdef PLATFORM_PC
+        playSoundEffectSub(ch | 0x8000, id, volume, 0x4000);
+#else
         playSoundEffectSub(ch | 0x8000, id, 0x6000, 0x4000);
+#endif
     }
 }
+#ifdef PLATFORM_PC
+void playSoundEffect(s32 id) {
+    pcPlaySoundEffectAtVolume(id, 0x6000);
+}
+#endif
 
 void playSoundEffectFixedSlot(s32 id) {
     if (musicStatusFlag & 0x800) {

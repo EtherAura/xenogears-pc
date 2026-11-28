@@ -444,7 +444,7 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
     if (loadout.side[0].count == 0) {
         ImGui::TextUnformatted(tr(loadout.startInGear ? "Start in Gear" : "Start on foot"));
         if (loadout.callGear) ImGui::TextUnformatted(tr("Enable Gear"));
-        if (loadout.allowExitGear) ImGui::TextUnformatted(tr("Exit Gear allowed"));
+        if (loadout.allowExitGear) ImGui::TextUnformatted(tr("Dismounting allowed"));
     }
     bool valid = false;
     for (int i = 0; i < pcArenaStageCount(); i++) valid |= pcArenaStageId(i) == loadout.stage;
@@ -466,10 +466,6 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
             if (types) ImGui::Text(tr("Save items: %d types, %d total"), types, count);
             continue;
         }
-        ImGui::TextWrapped(tr("HP %u%%  Physical attack %u%%  Ether %u%%"),
-                    team.multiplier[0], team.multiplier[1], team.multiplier[2]);
-        ImGui::TextWrapped(tr("Defense %u%%  Ether defense %u%%  Agility %u%%"),
-                    team.multiplier[3], team.multiplier[4], team.multiplier[5]);
         for (int i = 0; i < team.count; i++) {
             const XgBeast* enemy = rosterEnemy(rosterCatalog.beasts, team.enemy[i]);
             if (enemy == nullptr) {
@@ -477,7 +473,11 @@ bool showRosterReview(const char* code, const XgPartyRecord& record) {
                 valid = false;
                 continue;
             }
-            ImGui::BulletText("%s", enemy->name[0] ? enemy->name : tr("Enemy"));
+            ImGui::BulletText("%d. %s", i + 1, enemy->name[0] ? enemy->name : tr("Enemy"));
+            ImGui::TextWrapped(tr("HP %u%%  Physical attack %u%%  Ether %u%%"),
+                        team.multiplier[i][0], team.multiplier[i][1], team.multiplier[i][2]);
+            ImGui::TextWrapped(tr("Defense %u%%  Ether defense %u%%  Agility %u%%"),
+                        team.multiplier[i][3], team.multiplier[i][4], team.multiplier[i][5]);
             ImGui::TextWrapped(tr("Base HP %d  ATK %d  ETH %d  DEF %d  EDEF %d  AGI %d"), enemy->hp, enemy->attack,
                         enemy->ether, enemy->defence, enemy->etherDefence, enemy->agility);
             if ((loadout.callGear || loadout.startInGear) && (team.gearSlots & (1 << i))) {
@@ -573,9 +573,6 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         reviewing = false;
         selected[0] = selected[1] = -1;
         error = nullptr;
-        for (auto& team : review.current.loadout.side) {
-            for (auto& multiplier : team.multiplier) multiplier = 100;
-        }
     }
     if (!online && reviewing) {
         opt::plain();
@@ -610,7 +607,7 @@ void rosterBlock(bool online, void (*resumeGame)()) {
                    "##start-in-gear", startInGear);
         gearOption(N_("Enable Gear"), N_("Let both players call an assigned Gear during a fight."),
                    "##call-gear", callGear);
-        gearOption(N_("Allow Exit Gear"), N_("Allow switching back to fighting on foot after entering a Gear."),
+        gearOption(N_("Allow dismounting"), N_("Use Call Gear again to return to fighting on foot."),
                    "##exit-gear", allowExitGear);
     }
     loadout.startInGear = both ? 0 : startInGear;
@@ -674,6 +671,7 @@ void rosterBlock(bool online, void (*resumeGame)()) {
         if (ImGui::Button(tr("Add"))) {
             const auto& b = beasts[selected[side]];
             for (int i = 0; i < quantities[side]; i++) {
+                for (auto& percent : team.multiplier[team.count]) percent = 100;
                 team.enemy[team.count++] = ArenaEnemy{(unsigned char)b.set, (unsigned char)b.type};
             }
             changed = true;
@@ -696,6 +694,7 @@ void rosterBlock(bool online, void (*resumeGame)()) {
                 for (int j = i + 1; j < team.count; j++) {
                     team.enemy[j - 1] = team.enemy[j];
                     team.gear[j - 1] = team.gear[j];
+                    memcpy(team.multiplier[j - 1], team.multiplier[j], sizeof team.multiplier[j]);
                 }
                 unsigned lower = (1u << i) - 1;
                 team.gearSlots = (team.gearSlots & lower) | ((team.gearSlots >> 1) & ~lower);
@@ -736,27 +735,30 @@ void rosterBlock(bool online, void (*resumeGame)()) {
                 ImGui::PopID();
                 hint("Assign a Gear to %s.", name);
             }
-        }
-        opt::plain();
-        markBlock();
-        bool showStats = ImGui::CollapsingHeader(tr("Enemy stats"));
-        hint("%s %u%%  %s %u%%  %s %u%%\n%s %u%%  %s %u%%  %s %u%%", tr(stats[0]), team.multiplier[0],
-             tr(stats[1]), team.multiplier[1], tr(stats[2]), team.multiplier[2], tr(stats[3]), team.multiplier[3],
-             tr(stats[4]), team.multiplier[4], tr(stats[5]), team.multiplier[5]);
-        if (showStats) {
-            for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
-                opt::row(stats[i]);
-                int percent = team.multiplier[i];
-                ImGui::SetNextItemWidth(-1);
-                ImGui::PushID(i);
-                bool adjusted = ImGui::SliderInt("##multiplier", &percent, 25, 400, "%d%%");
-                ImGui::PopID();
-                if (adjusted) {
-                    team.multiplier[i] = percent;
-                    changed = true;
+            opt::plain();
+            ImGui::PushID(i);
+            markBlock();
+            bool showStats = ImGui::CollapsingHeader(tr("Enemy stats"));
+            hint("%s %u%%  %s %u%%  %s %u%%\n%s %u%%  %s %u%%  %s %u%%", tr(stats[0]), team.multiplier[i][0],
+                 tr(stats[1]), team.multiplier[i][1], tr(stats[2]), team.multiplier[i][2], tr(stats[3]), team.multiplier[i][3],
+                 tr(stats[4]), team.multiplier[i][4], tr(stats[5]), team.multiplier[i][5]);
+            if (showStats) {
+                for (int stat = 0; stat < ARENA_ROSTER_STATS; stat++) {
+                    opt::row(stats[stat]);
+                    int percent = team.multiplier[i][stat];
+                    ImGui::SetNextItemWidth(-1);
+                    ImGui::PushID(stat);
+                    bool adjusted = ImGui::SliderInt("##multiplier", &percent, 25, 400, "%d%%");
+                    ImGui::PopID();
+                    if (adjusted) {
+                        team.multiplier[i][stat] = percent;
+                        changed = true;
+                    }
+                    hint("Scale this stat for %s.", name);
                 }
-                hint("Scale this stat for every enemy on this team.");
+                opt::plain();
             }
+            ImGui::PopID();
         }
         opt::plain();
         markBlock();
@@ -910,13 +912,13 @@ void versusGearOptions() {
     }
     hint("Let the party call its Gears in formations that support them.");
 
-    opt::row(N_("Allow Exit Gear"));
+    opt::row(N_("Allow dismounting"));
     bool exit = pcVersusExitGearSetting() != 0;
     if (skin::checkbox("##exit-gear", &exit)) {
         sfx::play(sfx::CHOOSE);
         pcVersusSetExitGear(exit);
     }
-    hint("Allow switching back to fighting on foot after entering a Gear.");
+    hint("Use Call Gear again to return to fighting on foot.");
 }
 
 void versusFormation(void (*resumeGame)()) {
@@ -1080,6 +1082,17 @@ NetplayStart draftedRoster = {};
 bool reviewingDraft;
 bool rosterLobbyError;
 
+// The status page replaces the setup controls in the same pane. When the
+// focused control disappears, let navigation pick the first available action.
+void focusLobbyActions(const char* first, const char* second = nullptr) {
+    ImGuiWindow* pane = ImGui::GetCurrentWindow();
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    if (g.NavWindow == pane && g.NavCursorVisible && g.NavId && g.NavId != pane->GetID(first) &&
+        (!second || g.NavId != pane->GetID(second))) {
+        ImGui::NavInitWindow(pane, true);
+    }
+}
+
 bool reviewOnlineRoster() {
     NetplayStart agreed = {};
     char proposal[ARENA_LOADOUT_CODE];
@@ -1088,12 +1101,15 @@ bool reviewOnlineRoster() {
     if (state == NETPLAY_ROSTER_IDLE && !reviewingDraft && !rosterLobbyError) return false;
 
     markBlock();
-    if (state == NETPLAY_ROSTER_REVIEW || reviewingDraft) {
+    const bool review = state == NETPLAY_ROSTER_REVIEW || reviewingDraft;
+    const char* close = tr(reviewingDraft ? "Back to teams" : "Close lobby");
+    if (review) {
         ImGui::SeparatorText(tr("Review enemy stats"));
         const char* roster = reviewingDraft ? draftedRoster.roster : proposal;
         bool canConfirm = showRosterReview(roster, reviewingDraft ? draftedRoster.record : agreed.record);
-        ImGui::BeginDisabled(!canConfirm);
         const char* confirm = reviewingDraft ? tr("Propose loadout") : tr("Confirm loadout");
+        focusLobbyActions(canConfirm ? confirm : close, close);
+        ImGui::BeginDisabled(!canConfirm);
         if (ImGui::Button(confirm)) {
             if (reviewingDraft) {
                 reviewingDraft = false;
@@ -1122,7 +1138,8 @@ bool reviewOnlineRoster() {
         ImGui::TextUnformatted(tr(waiting));
         if (!agreed.host && proposal[0]) showRosterReview(agreed.roster, agreed.record);
     }
-    if (ImGui::Button(tr(reviewingDraft ? "Back to teams" : "Close lobby"))) {
+    if (!review) focusLobbyActions(close);
+    if (ImGui::Button(close)) {
         reviewingDraft = rosterLobbyError = false;
         netplayRosterLobbyStop();
     }
@@ -1130,13 +1147,13 @@ bool reviewOnlineRoster() {
 }
 
 bool onlineStatus() {
-    if (netplayActive()) {
+    int state = netplaySessionState();
+    if (netplayActive() && state == NETPLAY_IDLE) {
         markBlock();
         ImGui::TextUnformatted(tr("Online match in progress."));
         hint("At the end of a match, choose Rematch or Leave. EXIT in Battling closes the session.");
         return true;
     }
-    int state = netplaySessionState();
     char line[512];
     if (state != NETPLAY_IDLE && state != NETPLAY_OVER) {
         const char* d = netplaySessionDetail();
@@ -1179,7 +1196,9 @@ bool onlineStatus() {
                       "goes on where it stopped.");
         }
         markBlock();
-        if (ImGui::Button(tr("End the session"))) {
+        const char* end = tr("End the session");
+        focusLobbyActions(end);
+        if (ImGui::Button(end)) {
             sfx::play(sfx::BACK);
             netplaySessionStop();
         }
@@ -1189,7 +1208,7 @@ bool onlineStatus() {
     return reviewOnlineRoster();
 }
 
-// A session runs in its own process. Only the chosen match's controls are shown here.
+// Show the controls for the selected match type.
 void onlineBlock(OnlineMatch mode) {
     if (!O.loaded) {
         O.loaded = true;
@@ -1213,7 +1232,7 @@ void onlineBlock(OnlineMatch mode) {
         if (skin::comboItem(tr("Join (player 2)"), !O.host)) O.host = false;
         skin::endCombo();
     }
-    hint("Use the same game version, disc and session code. A session opens in its own window.");
+    hint("Use the same game version, disc and session code.");
     if (mode == OnlineBattling) hint("After connecting, choose BONUS BATTLING, then PLAYER1 VS PLAYER2.");
     opt::row(N_("Session code"));
     ImGui::SetNextItemWidth(-1);

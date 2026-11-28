@@ -33,6 +33,9 @@
 
 #include "system.h"
 #include "settings.h"
+#ifdef __ANDROID__
+#include "netplay.h"
+#endif
 
 /* port/src/gpu (weak: the GPU layer may not be in the build). */
 extern SDL_Window* presentWindow(void) __attribute__((weak));
@@ -119,6 +122,15 @@ void displayLockVBlank(void) {
     double tolerance = t != NULL && t[0] != '\0' ? atof(t) : 0.05;
     tolerance = tolerance < 0 ? 0 : tolerance > MAX_TOLERANCE ? MAX_TOLERANCE : tolerance;
     double hz = displayHz(), vblankHz = 1.0 / period;
+#ifdef __ANDROID__
+    /* SDL can report the panel's 120 Hz while the Android game surface
+     * requests 60 Hz. A vblank can line up with every second refresh. The
+     * same tolerance below applies to this cadence, and online keeps its
+     * own clock. */
+    if (!netplayActive() && hz > 1.5 * vblankHz) {
+        hz /= round(hz / vblankHz);
+    }
+#endif
     /* Virtual seconds per real second for one vblank per refresh. */
     double rate = hz * period;
     if (hz > 0 && fabs(hz - vblankHz) <= tolerance && fabs(rate - 1) <= MAX_RATE_OFFSET) {

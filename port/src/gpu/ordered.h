@@ -9,6 +9,9 @@ typedef struct { int x0,y0,x1,y1; } OrderedBox;
 /* Positions are the first two floats in each vertex. Non-finite input uses
  * the whole target; clipping and perspective remain the rasterizer's job. */
 OrderedBox orderedBounds(const void* vertices, size_t stride, int scale, int w, int h);
+/* Union of complete triangles, with one rounding step for the whole batch.
+ * Optional projected W must be finite and positive to bound the projection. */
+OrderedBox orderedBatchBounds(const void* vertices, size_t stride, uint32_t count, int scale, int w, int h, size_t wOffset);
 uint64_t orderedEstimate(const OrderedBox* boxes, int count, OrderedBox band);
 /* Largest safe next horizontal band within column. The caller limits
  * column width to capacity/count, guaranteeing at least one row fits. */

@@ -18,6 +18,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import state_compat  # noqa: E402
 import state_corpus as cs  # noqa: E402
+import state_platform_gate as sp  # noqa: E402
 
 
 def case_rec(config: str, case: str, vblank: int = 1000, build: str = "aa" * 16, schema: str = "11" * 8) -> dict:
@@ -48,8 +49,9 @@ def write_corpus(root: Path, release: str, configs: dict, canonical: bool = True
     m = {"format": cs.FORMAT, "kind": "xenogears-pc state corpus", "release": release, "canonical": canonical,
          "created": created, "order": cs.release_order(release, created), "run": 600,
          "configs": {c: {"region": c.split("-")[0], "engine": c.split("-")[1], "build": b,
+                         "cases": len(ids),
                          "executable": {"kind": "local", "path": f"/nowhere/{release}/{c}"}}
-                     for c, (b, _) in configs.items()},
+                     for c, (b, ids) in configs.items()},
          "cases": cases, "failed": []}
     (d / "manifest.json").write_text(json.dumps(m))
     return d
@@ -96,6 +98,36 @@ class ManifestTest(TestCase):
 
 
 class CanonicalSetTest(TestCase):
+    def test_required_release_history_detects_removed_corpora_and_cases(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            first, middle, latest = cs.FIRST_CANONICAL_RELEASE, "v2026.12.0", "v2026.12.1"
+            configs = {c: ("aa" * 16, ["field"]) for c in cs.RELEASE_CONFIGS}
+            with self.assertRaisesRegex(cs.CorpusError, first):
+                cs.require_release_history(root)
+            base = write_corpus(root, first, configs)
+            cs.require_release_history(root)
+            with self.assertRaisesRegex(cs.CorpusError, middle):
+                cs.require_release_history(root, published={middle})
+            write_corpus(root, middle, configs)
+            last = write_corpus(root, latest, configs)
+            path = last / "manifest.json"
+            m = cs.read_manifest(last)
+            m["gate"] = {"earlier": [first, middle]}
+            cs.write_json(path, m)
+            cs.require_release_history(root, published={latest})
+            (root / middle / "manifest.json").unlink()
+            with self.assertRaisesRegex(cs.CorpusError, middle):
+                cs.require_release_history(root)
+            write_corpus(root, middle, configs)
+            m["cases"].pop()
+            cs.write_json(path, m)
+            with self.assertRaisesRegex(cs.CorpusError, "incomplete canonical release corpus"):
+                cs.require_release_history(root)
+            (base / "jp-enhanced/field/slot1.xgs").unlink()
+            with self.assertRaisesRegex(cs.CorpusError, "no slot1.xgs"):
+                cs.require_release_history(root, before=latest)
+
     def test_order_and_canonical_only(self):
         with TemporaryDirectory() as t:
             root = Path(t)
@@ -129,6 +161,17 @@ def make_tarball(path: Path, top: str, files: dict, extra: list | None = None) -
 
 class CacheTest(TestCase):
     TAG = "v2099.01.0"
+
+    def test_published_history_uses_all_pages_and_ignores_drafts(self):
+        page = [{"tag_name": f"v2027.01.{i}", "draft": False} for i in range(100)]
+        with patch.object(cs.urllib.request, "urlopen",
+                          side_effect=[io.StringIO(json.dumps(page)),
+                                       io.StringIO(json.dumps([{"tag_name": self.TAG, "draft": True},
+                                                               {"tag_name": "v2027.01.100", "draft": False}]))]):
+            self.assertEqual(cs.ReleaseCache().published_tags(), {f"v2027.01.{i}" for i in range(101)})
+        with patch.object(cs.urllib.request, "urlopen", side_effect=OSError("network unavailable")):
+            with self.assertRaisesRegex(cs.CorpusError, "cannot verify published save-state history"):
+                cs.ReleaseCache().published_tags()
 
     def assets(self, root: Path, sum_text: str | None = "good", digest: str | None = "good") -> Path:
         name = cs.tarball_name(self.TAG)
@@ -206,6 +249,19 @@ class CacheTest(TestCase):
             cache = cs.ReleaseCache(root / "cache")
             self.assertTrue(cache.tarball(self.TAG, local=local).is_file())
 
+    def test_rebuilt_local_tarball_supersedes_cached_tag(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            name = cs.tarball_name(self.TAG)
+            local = self.assets(root, digest=None) / self.TAG / name
+            cache = cs.ReleaseCache(root / "cache")
+            self.assertEqual((cache.unpacked(self.TAG, local=local) / "bin/xenogears").read_bytes(), b"\x7fELF original")
+            make_tarball(local, name.removesuffix(".tar.gz"), {"bin/xenogears": b"\x7fELF rebuilt"})
+            with self.assertRaisesRegex(cs.CorpusError, "does not match"):
+                cache.unpacked(self.TAG, local=local)
+            local.with_name(name + ".sha256").write_text(f"{cs.sha256(local)}  {name}\n")
+            self.assertEqual((cache.unpacked(self.TAG, local=local) / "bin/xenogears").read_bytes(), b"\x7fELF rebuilt")
+
     def test_unsafe_tarballs(self):
         top = cs.tarball_name(self.TAG).removesuffix(".tar.gz")
         link = tarfile.TarInfo(f"{top}/bin/link")
@@ -255,11 +311,14 @@ class LogsTest(TestCase):
 class CheckLoadTest(TestCase):
     """check_load's verdicts, the game replaced by a fake that writes what a reader would."""
 
-    def run_load(self, log: str, code: int = 0, inv: str | None = None, reader_id: str = "bb" * 16):
+    def run_load(self, log: str, code: int = 0, inv: str | None = None, reader_id: str = "bb" * 16,
+                 writer_image_id: str | None = None):
         with TemporaryDirectory() as t:
             root = Path(t)
             corpus = write_corpus(root, "v2026.12.0", {"us-original": ("aa" * 16, ["field"])})
             rec = cs.read_manifest(corpus)["cases"][0]
+            if writer_image_id is not None:
+                rec["image_id"] = writer_image_id
 
             def fake(exe, out, image, quit_at, env):
                 self.assertEqual(quit_at, 1601)
@@ -317,11 +376,105 @@ class CheckLoadTest(TestCase):
         self.assertIn("converted its slot", self.run_load(self.LOADED, reader_id="aa" * 16).problems[0])
         self.assertIn("without converting", self.run_load(raw).problems[0])
 
+    def test_windows_raw_state_id_can_differ_from_the_image_id(self):
+        raw = "state: Loaded slot 1 (Field 8)\n"
+        self.assertTrue(self.run_load(raw, writer_image_id="bb" * 16).ok)
+        self.assertTrue(self.run_load(self.LOADED, writer_image_id="bb" * 16).ok)
+        self.assertFalse(self.run_load(raw, writer_image_id="cc" * 16).ok)
+
     def test_notes(self):
         got = self.run_load("state: converting x in 100 ms: 2 encode and 3 decode warnings\n" + self.LOADED
                             + "state: 4 values not carried\n")
         self.assertTrue(got.ok)
         self.assertEqual(got.notes, ["3 decode warnings", "4 values not carried"])
+
+
+class PlatformGateTest(TestCase):
+    def test_missing_runtime_case_rejects_historical_corpus(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            corpus = write_corpus(root, "v2026.12.0", {
+                "us-original": ("aa" * 16, ["field"]), "us-enhanced": ("bb" * 16, ["field"]),
+            })
+            sp.validate_corpus(corpus, "windows-x64", ["field"])
+            manifest = cs.read_manifest(corpus)
+            manifest["cases"].pop()
+            cs.write_json(corpus / "manifest.json", manifest)
+            with self.assertRaisesRegex(cs.CorpusError, "incomplete runtime corpus"):
+                sp.validate_corpus(corpus, "windows-x64", ["field"])
+
+    def test_current_matrix_checks_each_platform_and_shared_region(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            candidate = "v2026.12.0"
+            configs = {"us-original": ("aa" * 16, ["field"]), "jp-enhanced": ("aa" * 16, ["battle"])}
+            linux = write_corpus(root / "linux", candidate, configs)
+            windows = write_corpus(root / "win", candidate, {"us-original": configs["us-original"]})
+            builds = {c: cs.Build(*c.split("-"), Path("linux"), None) for c in configs}
+            win = {"us-original": cs.Build("us", "original", Path("wine"), None)}
+            platform = type("Windows", (), {"jobs": 1})()
+            with patch.object(cs, "check_load", return_value=cs.Loaded(True, [], [])) as check:
+                result = sp.replay_matrix(candidate, {
+                    "linux-x86_64": (None, linux, builds), "windows-x64": (platform, windows, win),
+                }, root / "runs", None)
+            self.assertEqual(result["windows-x64 to linux-x86_64"]["current"], 1)
+            self.assertEqual(result["linux-x86_64 to windows-x64"]["current"], 1)
+            self.assertEqual({c.args[0].exe.name for c in check.call_args_list}, {"linux", "wine"})
+
+            failed = cs.Loaded(False, ["different continuation"], [])
+            passed = cs.Loaded(True, [], [])
+            with patch.object(cs, "check_load", side_effect=[failed, passed]) as check:
+                with self.assertRaisesRegex(cs.CorpusError, "1 platform comparisons failed"):
+                    sp.replay_matrix(candidate, {
+                        "linux-x86_64": (None, linux, builds), "windows-x64": (platform, windows, win),
+                    }, root / "failed", None)
+            self.assertEqual(check.call_count, 2)
+            report = json.loads((root / "failed" / "matrix-failures.json").read_text())
+            self.assertTrue(report["windows-x64 to linux-x86_64"]["failures"])
+            self.assertEqual(report["linux-x86_64 to windows-x64"]["current"], 1)
+
+    def test_draft_digest_must_match_the_tested_artifact(self):
+        manifest = {"draft.apk": "sha256:" + "aa" * 32}
+        sp.check_draft_asset(manifest, "draft.apk", "aa" * 32)
+        with self.assertRaisesRegex(cs.CorpusError, "does not match the draft"):
+            sp.check_draft_asset(manifest, "draft.apk", "bb" * 32)
+
+    def test_replaced_draft_gets_a_new_corpus_and_preserves_the_prior_one(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            tag = "v2026.12.0"
+            target = "windows-x64"
+            configs = {"us-original": ("aa" * 16, ["field"])}
+            prior = write_corpus(root / target, tag, configs)
+            original = cs.read_manifest(prior)
+            original["configs"]["us-original"]["executable"]["sha256"] = "bb" * 32
+            cs.write_json(prior / "manifest.json", original)
+            build = cs.Build("us", "original", Path("wine"), None)
+            platform = type("Windows", (), {"target": target})()
+
+            def capture(_platform, _tag, _asset, corpus, _cases, _discs):
+                corpus.mkdir()
+                manifest = cs.read_manifest(prior)
+                manifest["configs"]["us-original"]["executable"]["sha256"] = "cc" * 32
+                return [build], manifest
+
+            args = (platform, tag, Path("windows.zip"), root, [], root / "runs", None, None)
+            with (patch.object(sp, "check_asset", return_value="cc" * 32),
+                  patch.object(sp, "validate_corpus", side_effect=lambda path, *_: cs.read_manifest(path)),
+                  patch.object(sp, "capture", side_effect=capture) as make):
+                with self.assertRaisesRegex(cs.CorpusError, "archived artifact differs"):
+                    sp.run_target(*args)
+                _, candidate, _ = sp.run_target(*args, replace_draft=True)
+                make.assert_called_once()
+            sp.file_corpus(candidate, prior, cs.read_manifest(candidate))
+            self.assertNotEqual(cs.read_manifest(prior), original)
+            backup, = prior.parent.glob(".superseded-*/corpus")
+            self.assertEqual(cs.read_manifest(backup), original)
+
+    def test_runtime_history_needs_both_directions(self):
+        outcome = state_compat.Result(Path("corpus"), loads=[{"ok": True, "direction": "forward"}])
+        with self.assertRaisesRegex(cs.CorpusError, "both directions"):
+            sp.require_result(outcome)
 
 
 class GateTest(TestCase):
@@ -426,7 +579,8 @@ class KeptExecutablesTest(TestCase):
     def region_of(path: Path) -> str:
         return "jp" if path.read_bytes().endswith(b"jp") else "us"
 
-    def release(self, root: Path, *more: str, gate_passes: bool | None = None) -> tuple[int, str]:
+    def release(self, root: Path, *more: str, gate_passes: bool | None = None,
+                rehearsal: bool = True) -> tuple[int, str]:
         """state_corpus.py release with the game left out: make_corpus writes a manifest of the builds it is given,
         the gate's verdict is given."""
         made = []
@@ -450,7 +604,9 @@ class KeptExecutablesTest(TestCase):
                 patch.object(cs, "make_corpus", side_effect=fake_make), \
                 patch.object(state_compat, "run", return_value=verdict), \
                 patch("sys.stdout", new_callable=io.StringIO) as out, patch("sys.stderr", new_callable=io.StringIO) as err:
-            code = cs.main(["release", self.TAG, "--assets-from", str(root / "assets"), "--cache", str(root / "cache"),
+            source = ["--assets-from", str(root / "assets")] if rehearsal else [
+                "--tarball", str(root / "assets" / self.TAG / cs.tarball_name(self.TAG))]
+            code = cs.main(["release", self.TAG, *source, "--cache", str(root / "cache"),
                             "--corpora", str(root / "corpora"), *more, *(["--gate"] if gate_passes is not None else [])])
         self.made = made
         return code, out.getvalue() + err.getvalue()
@@ -473,7 +629,8 @@ class KeptExecutablesTest(TestCase):
             rec = m["configs"]["jp-enhanced"]["executable"]
             self.assertEqual((rec["kind"], rec["kept"], rec["path"], rec["sha256"]),
                              ("tarball", f"executables/jp/{jp.name}", "bin/xenogears-enhanced", cs.sha256(jp)))
-            self.assertNotIn("kept", m["configs"]["us-original"]["executable"])  # the published one: downloaded
+            us = m["configs"]["us-original"]["executable"]
+            self.assertEqual(us["kept"], f"executables/us/{jp.name}")
             self.assertEqual(cs.check_corpus(corpus), [])
             # A later release's backward run: from the corpus alone (the local build and the cache gone).
             shutil.rmtree(root / "local")
@@ -481,6 +638,8 @@ class KeptExecutablesTest(TestCase):
             cache = cs.ReleaseCache(root / "cache2", offline=True)
             exe = cache.executable(self.TAG, rec, corpus)
             self.assertEqual(exe.read_bytes(), b"\x7fELF jp enhanced")
+            exe = cache.executable(self.TAG, us, corpus)
+            self.assertEqual(exe.read_bytes(), b"\x7fELF us original")
             with self.assertRaisesRegex(cs.CorpusError, "no corpus was named"):
                 cache.executable(self.TAG, rec)
             kept.write_bytes(b"other")
@@ -501,6 +660,32 @@ class KeptExecutablesTest(TestCase):
             self.assertEqual(len(rejected), 1)
             self.assertTrue((rejected[0] / "executables/jp" / jp.name).is_file())
             self.assertFalse(cs.read_manifest(rejected[0])["canonical"])
+
+    def test_release_gate_requires_both_regions_and_every_case(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            self.tarball(root / "assets" / self.TAG, "us")
+            code, said = self.release(root, gate_passes=True)
+            self.assertEqual(code, 1, said)
+            self.assertIn("needs builds for jp-enhanced, jp-original", said)
+            self.assertEqual(self.made, [])
+            code, said = self.release(root, "--case", "field", gate_passes=True)
+            self.assertEqual(code, 1, said)
+            self.assertIn("requires every corpus case", said)
+            self.assertEqual(self.made, [])
+
+    def test_production_gate_rejects_missing_published_history_before_recording(self):
+        with TemporaryDirectory() as t:
+            root = Path(t)
+            self.tarball(root / "assets" / self.TAG, "us")
+            jp = self.tarball(root / "local", "jp")
+            missing = "v2026.12.1"
+            with patch.object(cs.ReleaseCache, "published_tags", return_value={missing}):
+                code, said = self.release(root, "--build", str(jp), gate_passes=True, rehearsal=False)
+            self.assertEqual(code, 1, said)
+            self.assertIn("missing canonical release corpora", said)
+            self.assertIn(missing, said)
+            self.assertEqual(self.made, [])
 
     def test_what_a_build_given_must_be(self):
         with TemporaryDirectory() as t:
@@ -534,7 +719,7 @@ class KeptExecutablesTest(TestCase):
             folder.mkdir()
             (folder / "xenogears").write_bytes(b"\x7fELF jp dev build")
             (folder / "xenogears.xgschema").write_bytes(b"XGSCHEMA jp")
-            code, said = self.release(root, "--build", f"jp-original={folder}", gate_passes=True)
+            code, said = self.release(root, "--build", f"jp-original={folder}")
             self.assertEqual(code, 0, said)
             corpus = root / "corpora" / self.TAG
             rec = cs.read_manifest(corpus)["configs"]["jp-original"]["executable"]
@@ -583,8 +768,12 @@ class KeptExecutablesTest(TestCase):
 
 
 class ReleaseTest(TestCase):
-    def test_a_release_without_portable_slots_gets_no_corpus(self):
-        tag = "v2099.01.0"
+    def test_raw_only_releases_are_allowed_before_the_canonical_baseline(self):
+        for tag, expected in (("v2026.11.28", 0), (cs.FIRST_CANONICAL_RELEASE, 1), ("v2099.01.0", 1)):
+            with self.subTest(tag=tag):
+                self.check_raw_only_release(tag, expected)
+
+    def check_raw_only_release(self, tag: str, expected: int):
         with TemporaryDirectory() as t:
             root = Path(t)
             name = cs.tarball_name(tag)
@@ -594,11 +783,11 @@ class ReleaseTest(TestCase):
                 "bin/xenogears": b"\x7fELF ..." + cs.OFF_TEXT + b"...",
                 "share/xenogears-pc/xenogears.xgschema": b"XGSCHEMA"})
             with patch.object(cs, "schema_version", return_value="us"), \
-                    patch("sys.stdout", new_callable=io.StringIO) as out:
+                    patch("sys.stdout", new_callable=io.StringIO) as out, patch("sys.stderr", new_callable=io.StringIO) as err:
                 code = cs.main(["release", tag, "--assets-from", str(root / "assets"), "--cache", str(root / "cache"),
                                 "--corpora", str(root / "corpora")])
-            self.assertEqual(code, 0)
-            self.assertIn("is not a canonical release", out.getvalue())
+            self.assertEqual(code, expected)
+            self.assertIn("writes no portable slots", out.getvalue() + err.getvalue())
             self.assertFalse((root / "corpora").exists())
 
     def test_the_reason_in_pieces_still_says_off(self):
@@ -619,7 +808,7 @@ class CasesTest(TestCase):
         for region in ("us", "jp"):
             ids = [c.id for c in cs.all_cases(region)]
             self.assertEqual(len(ids), len(set(ids)), region)  # one variant of each case per region
-            self.assertEqual(len(ids), 32, region)
+            self.assertEqual(len(ids), 33, region)
             self.assertEqual([c.id for c in cs.find_cases(["b-boss", "field"], region)], ["field", "b-boss"])
             self.assertEqual({c.region for c in cs.find_cases(["b-foot"], region)}, {region})
         ids = [c.id for c in cases]

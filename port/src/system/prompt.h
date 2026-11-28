@@ -23,6 +23,7 @@ enum {
     PAD_GLYPH_COUNT
 };
 
+void pcPadAttackPositions(int positions[4]); /* right, bottom, left, top */
 int padInputGlyph(int input); /* selected controller profile */
 int padActionGlyph(const char* button); /* same active controller as padActionLabel */
 int pcPadPromptGlyph(int originalSlot); /* retail symbol -> region -> physical binding */

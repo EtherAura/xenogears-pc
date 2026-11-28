@@ -19,6 +19,8 @@
 #include "system.h"
 
 void portClearModuleBss(const char* name);
+void portResetModule(const char* name);
+int netplayActive(void) __attribute__((weak));
 void portStartPrepare(void); /* options.c: a start the extras asked for (its disc) */
 void pcArenaSoftReset(void) __attribute__((weak)); /* arena.c: a Battle arena match starts again (its disc) */
 void transitionSpeedReset(void) __attribute__((weak)); /* fieldspeed.c: Speedup transitions' marks */
@@ -26,7 +28,14 @@ void transitionSpeedReset(void) __attribute__((weak)); /* fieldspeed.c: Speedup 
 void portSoftReset(void) {
     regionalMovieEnd();
     fprintf(stderr, "xenogears: soft reset\n");
-    portClearModuleBss("main");
+    /* An online rematch boots the negotiated match again. Restore the
+     * initial main data as well as BSS so a previous fight cannot seed the
+     * next one (Clang and GCC can place zero-initialized statics differently). */
+    if (netplayActive != NULL && netplayActive()) {
+        portResetModule("main");
+    } else {
+        portClearModuleBss("main");
+    }
     etcSoftReset();
     portStartPrepare();
     if (pcArenaSoftReset != NULL) {

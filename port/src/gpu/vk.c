@@ -31,6 +31,7 @@
 #include <SDL3/SDL_vulkan.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 #include <math.h>
 #include <string.h>
 
@@ -422,6 +423,7 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 
 #define FRAMES SHADER_CHAIN_FRAMES
 #define VERTEX_BYTES (8u << 20)
+static size_t frameVertexBytes = VERTEX_BYTES;
 #define STAGING_BYTES (2u << 20)
 #define SPAN_BYTES (8u << 20)
 #define VRAM_BYTES (VRAM_W * VRAM_H * 2u)
@@ -437,7 +439,8 @@ VK_DEVICE_FUNCS(VK_DECLARE)
 #define LIGHT_FOG 18
 #define LIGHT_COMPOSITE 19
 #define LIGHT_SHAFTS 22 /* and 23: light shafts, before the composite */
-#define LIGHT_PASS_COUNT 25
+#define LIGHT_FOG_PARTIAL 25
+#define LIGHT_PASS_COUNT 26
 /* XG_GPU_TIMING=1: GPU time per kind of pass, from timestamp queries. */
 /* light.comp's working images: eight on the PS1's pixel grid, six on a quarter of it. */
 #define SCENE_LIGHT_GRID 8
@@ -831,6 +834,7 @@ static struct {
      * attachments. */
     int tileImage;
     VkPipeline tileDraw, tileWideDraw, tileHiDraw, tileHiWideDraw;
+    VkPipeline tileUnit[2][2]; /* 1x tile shaders, indexed by depth and wide target */
     VkPipeline tileHiDepthDraw, tileHiWideDepthDraw; /* a registered scene's (orderedDepthMake) */
     uint64_t tilePasses;
     float tileBox[4]; /* the batch's vertices so far: x0, y0, x1, y1 (tileNote) */
@@ -1022,7 +1026,7 @@ static void rasterBarrier(VkCommandBuffer cmd) {
  * barriers at the edges of the chain still cover raster and transfer. */
 static void lightingPassBarrier(VkCommandBuffer cmd) {
     static int computeOnly = -1;
-    if (computeOnly < 0) computeOnly = getenv("XG_EXPERIMENT_LIGHT_BARRIERS") != NULL;
+    if (computeOnly < 0) computeOnly = envFlag("XG_EXPERIMENT_LIGHT_BARRIERS");
     if (!computeOnly || vk.env.fullBarriers) {
         rasterBarrier(cmd);
         return;
@@ -2043,8 +2047,8 @@ static VkPipeline createPipeline(const uint32_t* vs, size_t vsSize, const uint32
  * thread's; the scene's own build passes `depth` to createHiPipelineDepth,
  * as it may run on a thread of its own: sceneBuild). */
 static int hiPipelineDepth;
-static VkPipeline createHiPipelineDepth(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices,
-                                        int depth) {
+static VkPipeline makeHiPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices,
+                                        int depth, VkBool32 unitScale) {
     /* 5: optional like 3, with the copy (R32_UINT) as its colour attachment (tileHiPass);
      * 6: the same with the scene's depth plane (R32_UINT) as a second one (tileHiDepthPass). */
     int attached = vertices == 5 ? 1 : vertices == 6 ? 2 : 0;
@@ -2061,6 +2065,9 @@ static VkPipeline createHiPipelineDepth(const uint32_t* vs, size_t vsSize, const
     stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
     stages[1].module = fm;
     stages[1].pName = "main";
+    VkSpecializationMapEntry unitEntry = {0, 0, sizeof(unitScale)};
+    VkSpecializationInfo unitSpec = {1, &unitEntry, sizeof(unitScale), &unitScale};
+    if (unitScale) stages[1].pSpecializationInfo = &unitSpec;
     VkVertexInputBindingDescription binding = {0, sizeof(HiVertex), VK_VERTEX_INPUT_RATE_VERTEX};
     VkVertexInputAttributeDescription attrs[16] = {
         {0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(HiVertex, x)},
@@ -2137,6 +2144,11 @@ static VkPipeline createHiPipelineDepth(const uint32_t* vs, size_t vsSize, const
     vkDestroyShaderModule(vk.device, fm, NULL);
     return p;
 }
+static VkPipeline createHiPipelineDepth(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize,
+                                        int vertices, int depth) {
+    return makeHiPipeline(vs, vsSize, fs, fsSize, vertices, depth, VK_FALSE);
+}
+
 static VkPipeline createHiPipeline(const uint32_t* vs, size_t vsSize, const uint32_t* fs, size_t fsSize, int vertices) {
     return createHiPipelineDepth(vs, vsSize, fs, fsSize, vertices, hiPipelineDepth);
 }
@@ -3063,33 +3075,11 @@ static void drawTile(FrameCtx* f, uint32_t first, uint32_t count) {
     tilePass(f, vk.vramView, VK_NULL_HANDLE, vk.tileDraw, vk.pipelineLayout, 0, first, count, box, VRAM_W, VRAM_H, NULL, 0);
 }
 
-/* The box of count vertices (triangles) at scale in a w x h target, as the
- * ordered lists bound them (orderedBounds); all of it for a vertex that is
- * not finite or, hi-res (wOffset: HiVertex.w), behind the eye, whose clipped
- * triangle can reach past its vertices. */
-static OrderedBox tileBounds(const void* v, size_t stride, uint32_t count, int scale, int w, int h, size_t wOffset) {
-    OrderedBox all = {w, h, 0, 0};
-    for (uint32_t i = 0; i + 2 < count; i += 3) {
-        const char* t = (const char*)v + i * stride;
-        for (int k = 0; wOffset && k < 3; k++) {
-            float vw;
-            memcpy(&vw, t + k * stride + wOffset, sizeof vw);
-            if (!isfinite(vw) || vw <= 0) return (OrderedBox){0, 0, w, h};
-        }
-        OrderedBox b = orderedBounds(t, stride, scale, w, h);
-        if (b.x0 < all.x0) all.x0 = b.x0;
-        if (b.y0 < all.y0) all.y0 = b.y0;
-        if (b.x1 > all.x1) all.x1 = b.x1;
-        if (b.y1 > all.y1) all.y1 = b.y1;
-    }
-    return all;
-}
-
 /* The wide target's batch in one render pass (draw_wide_tile.frag), as
  * drawTile's: the box of its vertices (already in the frame's vertex buffer
  * at first), the wide target loaded and stored. */
 static void tileWidePass(FrameCtx* f, const GpuVertex* v, uint32_t first, uint32_t count) {
-    OrderedBox box = tileBounds(v, sizeof(GpuVertex), count, 1, WIDE_W, WIDE_H, 0);
+    OrderedBox box = orderedBatchBounds(v, sizeof(GpuVertex), count, 1, WIDE_W, WIDE_H, 0);
     tilePass(f, vk.wideView, VK_NULL_HANDLE, vk.tileWideDraw, vk.pipelineLayout, 0, first, count, box, WIDE_W, WIDE_H,
              NULL, 0);
 }
@@ -3323,12 +3313,13 @@ static void resIdle(void) {
 }
 
 static void orderedDestroy(void) {
-    VkPipeline* pipelines[14]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw,
+    VkPipeline* pipelines[]={&vk.orderedDraw,&vk.orderedWide,&vk.orderedHi,&vk.orderedHiWide,&vk.orderedResolve,&vk.tileDraw,
                               &vk.tileWideDraw,&vk.tileHiDraw,&vk.tileHiWideDraw,
                               &vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth,
-                              &vk.tileHiDepthDraw,&vk.tileHiWideDepthDraw};
+                              &vk.tileHiDepthDraw,&vk.tileHiWideDepthDraw,
+                              &vk.tileUnit[0][0],&vk.tileUnit[0][1],&vk.tileUnit[1][0],&vk.tileUnit[1][1]};
     vk.orderedDepthState=0;
-    for(int i=0;i<14;i++) {
+    for(size_t i=0;i<sizeof(pipelines)/sizeof(*pipelines);i++) {
         if(*pipelines[i])vkDestroyPipeline(vk.device,*pipelines[i],NULL);
         *pipelines[i]=VK_NULL_HANDLE;
     }
@@ -3393,8 +3384,14 @@ static int orderedMake(void) {
         vk.tileWideDraw=createPipeline(drawWideVertSpv,sizeof(drawWideVertSpv),draw_wide_tile_fragSpv,sizeof(draw_wide_tile_fragSpv),8,VK_FORMAT_R16_UINT);
     if(others&&!vk.tileHiDraw)
         vk.tileHiDraw=createHiPipeline(hiresVertSpv,sizeof(hiresVertSpv),hires_tile_fragSpv,sizeof(hires_tile_fragSpv),5);
+    if (vk.tileHiDraw && !vk.tileUnit[0][0])
+        vk.tileUnit[0][0] = makeHiPipeline(hiresVertSpv, sizeof(hiresVertSpv),
+            hires_tile_fragSpv, sizeof(hires_tile_fragSpv), 5, 0, VK_TRUE);
     if(others&&!vk.tileHiWideDraw)
         vk.tileHiWideDraw=createHiPipeline(hiresWideVertSpv,sizeof(hiresWideVertSpv),hires_wide_tile_fragSpv,sizeof(hires_wide_tile_fragSpv),5);
+    if (vk.tileHiWideDraw && !vk.tileUnit[0][1])
+        vk.tileUnit[0][1] = makeHiPipeline(hiresWideVertSpv, sizeof(hiresWideVertSpv),
+            hires_wide_tile_fragSpv, sizeof(hires_wide_tile_fragSpv), 5, 0, VK_TRUE);
     VkShaderModule module=shaderModule(ordered_compSpv,sizeof(ordered_compSpv));
     VkComputePipelineCreateInfo ci={.sType=VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
     ci.stage=(VkPipelineShaderStageCreateInfo){.sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,.stage=VK_SHADER_STAGE_COMPUTE_BIT,.module=module,.pName="main"};
@@ -3435,7 +3432,13 @@ static int orderedDepthMake(void) {
     if(vk.tileHiDraw&&vk.tileHiWideDraw) {
         hiPipelineDepth=1;
         vk.tileHiDepthDraw=createHiPipeline(hiresDepthVertSpv,sizeof(hiresDepthVertSpv),hires_tile_depth_fragSpv,sizeof(hires_tile_depth_fragSpv),6);
+        if (vk.tileHiDepthDraw && !vk.tileUnit[1][0])
+            vk.tileUnit[1][0] = makeHiPipeline(hiresDepthVertSpv, sizeof(hiresDepthVertSpv),
+                hires_tile_depth_fragSpv, sizeof(hires_tile_depth_fragSpv), 6, 1, VK_TRUE);
         vk.tileHiWideDepthDraw=createHiPipeline(hiresWideDepthVertSpv,sizeof(hiresWideDepthVertSpv),hires_wide_tile_depth_fragSpv,sizeof(hires_wide_tile_depth_fragSpv),6);
+        if (vk.tileHiWideDepthDraw && !vk.tileUnit[1][1])
+            vk.tileUnit[1][1] = makeHiPipeline(hiresWideDepthVertSpv, sizeof(hiresWideDepthVertSpv),
+                hires_wide_tile_depth_fragSpv, sizeof(hires_wide_tile_depth_fragSpv), 6, 1, VK_TRUE);
         hiPipelineDepth=0;
         if(!vk.tileHiDepthDraw||!vk.tileHiWideDepthDraw) {
             if(vk.tileHiDepthDraw)vkDestroyPipeline(vk.device,vk.tileHiDepthDraw,NULL);
@@ -3444,8 +3447,9 @@ static int orderedDepthMake(void) {
         }
     }
     if(!vk.orderedHiDepth||!vk.orderedHiWideDepth||!vk.orderedResolveDepth) {
-        VkPipeline* made[5]={&vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth,&vk.tileHiDepthDraw,&vk.tileHiWideDepthDraw};
-        for(int i=0;i<5;i++){if(*made[i])vkDestroyPipeline(vk.device,*made[i],NULL);*made[i]=VK_NULL_HANDLE;}
+        VkPipeline* made[]={&vk.orderedHiDepth,&vk.orderedHiWideDepth,&vk.orderedResolveDepth,
+                            &vk.tileHiDepthDraw,&vk.tileHiWideDepthDraw,&vk.tileUnit[1][0],&vk.tileUnit[1][1]};
+        for(size_t i=0;i<sizeof(made)/sizeof(*made);i++){if(*made[i])vkDestroyPipeline(vk.device,*made[i],NULL);*made[i]=VK_NULL_HANDLE;}
         gpuLog("scene: no depth in GPU ordering mode on this device");
         return 0;
     }
@@ -3695,7 +3699,7 @@ void gvkDraw(const GpuVertex* v, int n) {
     vramFlushCpuWrites((VRect){0,0,VRAM_W-1,VRAM_H-1});
     size_t bytes = (size_t)n * sizeof(GpuVertex);
     recording();
-    if (frame()->vertexUsed + bytes + pendingBytes() > VERTEX_BYTES) {
+    if (frame()->vertexUsed + bytes + pendingBytes() > frameVertexBytes) {
         endBatch();
         submitFrame(NULL, NULL);
         recording();
@@ -3714,7 +3718,7 @@ void gvkDrawSpans(GpuVertex* v, int n, const int32_t* spans, int ints) {
     size_t bytes = (size_t)n * sizeof(GpuVertex);
     size_t spanBytes = (size_t)ints * 4;
     recording();
-    if (frame()->vertexUsed + bytes + pendingBytes() > VERTEX_BYTES || frame()->spanUsed + spanBytes > SPAN_BYTES) {
+    if (frame()->vertexUsed + bytes + pendingBytes() > frameVertexBytes || frame()->spanUsed + spanBytes > SPAN_BYTES) {
         endBatch();
         submitFrame(NULL, NULL);
         recording();
@@ -3787,10 +3791,19 @@ void gvkRestoreWide(VRect r, const uint16_t* src, int pitch) {
     }
 }
 
+/* Uploads to the 1x enhanced canvas can expand PS1 words straight into
+ * the staging buffer. This is word15() in hires_util.frag and preserves
+ * both the 5-bit colour replication and the mask. */
+static uint32_t expandedWord(uint32_t word) {
+    uint32_t rgb = ((word & 31u) << 3) | ((word & 0x3e0u) << 6) | ((word & 0x7c00u) << 9);
+    return rgb | ((rgb >> 5) & 0x070707u) | ((word & 0x8000u) << 9);
+}
+
 static void uploadImage(VkImage image, VRect r, const uint16_t* src, int pitch) {
     int w = r.x1 - r.x0 + 1;
     int h = r.y1 - r.y0 + 1;
-    size_t bytes = ((size_t)w * h * 2 + 15) & ~(size_t)15;
+    int expand = image == vk.hiVram;
+    size_t bytes = ((size_t)w * h * (expand ? 4 : 2) + 15) & ~(size_t)15;
     if (image == vk.vram || image == vk.scratch) endNativeBatch();
     else endBatch();
     recording();
@@ -3801,7 +3814,13 @@ static void uploadImage(VkImage image, VRect r, const uint16_t* src, int pitch) 
     FrameCtx* f = frame();
     uint8_t* dst = f->staging.map + f->stagingUsed;
     for (int y = 0; y < h; y++) {
-        memcpy(dst + (size_t)y * w * 2, src + (size_t)y * pitch, (size_t)w * 2);
+        const uint16_t* row = src + (size_t)y * pitch;
+        if (expand) {
+            uint32_t* to = (uint32_t*)dst + (size_t)y * w;
+            for (int x = 0; x < w; x++) to[x] = expandedWord(row[x]);
+        } else {
+            memcpy(dst + (size_t)y * w * 2, row, (size_t)w * 2);
+        }
     }
     barrierIfNeeded(cmd);
     int q = gtStart(cmd, GT_COPY);
@@ -3822,10 +3841,10 @@ static void uploadImage(VkImage image, VRect r, const uint16_t* src, int pitch) 
 /* Room for n more wide vertices (and span data) in this frame context. */
 static void wideReserve(int n, size_t spanBytes) {
     size_t bytes = (size_t)n * sizeof(GpuVertex) + pendingBytes();
-    if (vk.wideCount + (uint32_t)n > WIDE_MAX || frame()->vertexUsed + bytes > VERTEX_BYTES ||
+    if (vk.wideCount + (uint32_t)n > WIDE_MAX || frame()->vertexUsed + bytes > frameVertexBytes ||
         frame()->spanUsed + spanBytes > SPAN_BYTES) {
         endBatch();
-        if (frame()->vertexUsed + (size_t)n * sizeof(GpuVertex) > VERTEX_BYTES ||
+        if (frame()->vertexUsed + (size_t)n * sizeof(GpuVertex) > frameVertexBytes ||
             frame()->spanUsed + spanBytes > SPAN_BYTES) {
             submitFrame(NULL, NULL);
         }
@@ -5100,10 +5119,10 @@ static int interpolationRender(const GpuDisplay* d, double vblank, PresentConsta
         if (nativeBatch) spanCount+=(uint32_t)count/3*5;
         size_t vb = (size_t)count*sizeof(HiVertex), pb = (size_t)f->pixelCount*4, sb = (size_t)spanCount*4;
         endBatch();
-        if (vb > VERTEX_BYTES || pb+sb > SPAN_BYTES) return 0;
+        if (vb > frameVertexBytes || pb+sb > SPAN_BYTES) return 0;
         size_t lb = f->sceneLight && (f->fx.light.all || f->fx.light.shadow > 0 || f->fx.light.fogMost > 0 || f->fx.light.particles > 0)
                         ? lightBlockBytes(&f->fx.light) : 0; /* lightBlock's */
-        if (frame()->vertexUsed+vb > VERTEX_BYTES || frame()->spanUsed+pb+sb+lb > SPAN_BYTES) {
+        if (frame()->vertexUsed+vb > frameVertexBytes || frame()->spanUsed+pb+sb+lb > SPAN_BYTES) {
             if(vk.presentAcquired)return 0;
             submitFrame(NULL,NULL);
         }
@@ -5939,7 +5958,7 @@ static void sceneCompile(ScenePipelines* p) {
      * The specialisation changes only which branch the driver compiles. */
     int separateLighting = envFlag("XG_EXPERIMENT_LIGHT_SPECIALIZE");
     for (int32_t pass = 0; pass < LIGHT_PASS_COUNT; pass++) {
-        if (!separateLighting && pass != LIGHT_FOG && pass != LIGHT_COMPOSITE && pass != 21) continue;
+        if (!separateLighting && pass != LIGHT_FOG && pass != LIGHT_FOG_PARTIAL && pass != LIGHT_COMPOSITE && pass != 21) continue;
         VkSpecializationMapEntry entry = {0, 0, sizeof(pass)};
         VkSpecializationInfo spec = {1, &entry, sizeof(pass), &pass};
         VkComputePipelineCreateInfo one = ci;
@@ -6131,6 +6150,34 @@ static int scenePlane(int t, int w, int h) {
     toGeneral(recording(), vk.scene.plane[t]);
     vk.needBarrier = 1;
     return 1;
+}
+
+/* Only the current scene rectangle is copied out of the plane. Clearing
+ * the entire wide attachment every scene needlessly touches unrelated rows. */
+static void clearScenePlane(VkCommandBuffer cmd, int t, int n, VkClearColorValue value) {
+    VRect r = vk.scene.rect[t];
+    int x = r.x0 * n, y = r.y0 * n;
+    int right = (r.x1 + 1) * n, bottom = (r.y1 + 1) * n;
+    if (right > vk.scene.planeW[t]) right = vk.scene.planeW[t];
+    if (bottom > vk.scene.planeH[t]) bottom = vk.scene.planeH[t];
+    if (right <= x || bottom <= y) return;
+    VkRenderingAttachmentInfo color = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = vk.scene.planeView[t],
+        .imageLayout = VK_IMAGE_LAYOUT_GENERAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue.color = value,
+    };
+    VkRenderingInfo info = {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = {{x, y}, {(uint32_t)(right - x), (uint32_t)(bottom - y)}},
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &color,
+    };
+    vkCmdBeginRendering(cmd, &info);
+    vkCmdEndRendering(cmd);
 }
 
 /* The planes' scene frames into the depth images, which hold the scene's
@@ -6375,7 +6422,7 @@ int gvkSceneBegin(VRect narrow, const VRect* wide, int insetX, int insetY) {
     VkClearColorValue nothing = {.uint32 = {0xFFFFFFFFu, 0, 0, 0}}; /* dof.comp DEPTH_FAR */
     for (int t = 0; t < vk.scene.targets; t++) {
         vkCmdClearColorImage(cmd, vk.scene.depth[t], VK_IMAGE_LAYOUT_GENERAL, &nothing, 1, &colorRange);
-        if (vk.scene.planes && t < 2) vkCmdClearColorImage(cmd, vk.scene.plane[t], VK_IMAGE_LAYOUT_GENERAL, &nothing, 1, &colorRange);
+        if (vk.scene.planes && t < 2) clearScenePlane(cmd, t, n, nothing);
     }
     vk.needBarrier = 1;
     vk.scene.active = 1;
@@ -6515,6 +6562,29 @@ static void lightPipeline(VkCommandBuffer cmd, int pass, VkPipeline* bound) {
     }
 }
 
+/* All pixels contribute to the room colour and glare. Let 64 groups gather
+ * them concurrently, then reduce their totals in the original final group.
+ * Both passes use this frame's span buffer. A full buffer can still use the
+ * single-group calculation without interrupting a recorded scene. */
+static void recordFog(VkCommandBuffer cmd, FrameCtx* ctx, LightConstants c, VkPipeline* bound) {
+    enum { groups = 8, bytes = groups * groups * 3 * 16 };
+    size_t at = (ctx->spanUsed + 15) & ~(size_t)15;
+    c.layerX = 0;
+    if (at > 0 && at + bytes <= SPAN_BYTES) {
+        ctx->spanUsed = at + bytes;
+        c.layerX = (int32_t)(at / 16);
+        c.pass = LIGHT_FOG_PARTIAL;
+        lightPipeline(cmd, c.pass, bound);
+        vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+        vkCmdDispatch(cmd, groups, groups, 1);
+        lightingPassBarrier(cmd);
+    }
+    c.pass = LIGHT_FOG;
+    lightPipeline(cmd, c.pass, bound);
+    vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
+    vkCmdDispatch(cmd, 1, 1, 1);
+}
+
 /* light.comp's passes for a frame, as sceneBlurRecord's: the layers are made
  * from `primary` on the PS1's pixel grid and laid over it and over `second`.
  * (centerX, centerY): the projection centre in the primary's frame. */
@@ -6589,6 +6659,11 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
             gtStop(cmd, q);
             q = gtStart(cmd, GT_LP0 + pass);
         }
+        if (pass == LIGHT_FOG) {
+            recordFog(cmd, ctx, c, &bound);
+            lightingPassBarrier(cmd);
+            continue;
+        }
         lightPipeline(cmd, c.pass, &bound);
         vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
         /* The PS1's grid, a quarter of it (the surroundings' brightness and
@@ -6596,9 +6671,8 @@ static int32_t sceneLightRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary,
          * copy's own for the composite. */
         int quarter = (pass >= 1 && pass <= 3) || pass == 10 || pass == 11;
         /* (the shadows' passes, 14-17, run on the PS1's grid) */
-        /* (the fog's colour: one group, summing the whole grid) */
-        int gw = pass == LIGHT_COMPOSITE ? w * n : pass == LIGHT_FOG ? 1 : quarter ? (w + 3) / 4 : w;
-        int gh = pass == LIGHT_COMPOSITE ? h * n : pass == LIGHT_FOG ? 1 : quarter ? (h + 3) / 4 : h;
+        int gw = pass == LIGHT_COMPOSITE ? w * n : quarter ? (w + 3) / 4 : w;
+        int gh = pass == LIGHT_COMPOSITE ? h * n : quarter ? (h + 3) / 4 : h;
         vkCmdDispatch(cmd, (uint32_t)(gw + 7) / 8, (uint32_t)(gh + 7) / 8, 1);
         lightingPassBarrier(cmd);
     }
@@ -6639,11 +6713,8 @@ static void sceneParticlesRecord(VkCommandBuffer cmd, FrameCtx* ctx, int primary
     if (brightness) {
         /* A block of this frame's own (sceneParticlesDraw): the room's
          * brightness again (the fog's pass), from the lighting's layers. */
-        c.pass = LIGHT_FOG;
-        vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
-        vkCmdDispatch(cmd, 1, 1, 1);
+        recordFog(cmd, ctx, c, &bound);
         rasterBarrier(cmd);
-        c.pass = 20;
     }
     lightPipeline(cmd, 20, &bound);
     vkCmdPushConstants(cmd, vk.scene.lightLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(c), &c);
@@ -6925,9 +6996,9 @@ static int hiConfigure(int n, int color) {
 static void hiReserve(int n, int wide) {
     uint32_t count = wide ? vk.hiWideCount : vk.hiCount;
     size_t bytes = (size_t)n * sizeof(HiVertex) + pendingBytes();
-    if (count + (uint32_t)n > HI_MAX || frame()->vertexUsed + bytes > VERTEX_BYTES) {
+    if (count + (uint32_t)n > HI_MAX || frame()->vertexUsed + bytes > frameVertexBytes) {
         endBatch();
-        if (frame()->vertexUsed + (size_t)n * sizeof(HiVertex) + pendingBytes() > VERTEX_BYTES) {
+        if (frame()->vertexUsed + (size_t)n * sizeof(HiVertex) + pendingBytes() > frameVertexBytes) {
             submitFrame(NULL, NULL);
         }
     }
@@ -6964,11 +7035,54 @@ static int hiNeedsNative(const HiVertex* v,int count,int wide) {
     return 0;
 }
 
+/* Bounds for batches made entirely of live faces. All vertices in a face
+ * have the same scissor. A seam extends by at most one tangent and one
+ * normal unit from a corner (gp0.c hiSeal). Keep the unrounded bounds until
+ * submission, and use the general vertex walk for any other kind of batch. */
+static struct FaceBounds {
+    int usable;
+    float x0, y0, x1, y1;
+    int left, top, right, bottom;
+} faceBounds[2];
+
+static void noteFaceBounds(int wide, uint32_t pending, const HiVertex* v, int n, int face) {
+    struct FaceBounds* b = &faceBounds[wide];
+    if (!pending) {
+        *b = (struct FaceBounds){1, INFINITY, INFINITY, -INFINITY, -INFINITY,
+                                 INT_MAX, INT_MAX, -1, -1};
+    }
+    if (!b->usable) return;
+    if (!face || (v->mode & (DRAW_FILL | DRAW_RESOLVED))) { b->usable = 0; return; }
+    for (int i = 0; i < n; i++) {
+        if (!(v[i].w > 0) || !isfinite(v[i].w)) { b->usable = 0; return; }
+    }
+    float pad = n > 3 ? 2.0f : 0.0f;
+    for (int i = 0; i < 3; i++) {
+        float x = v[i].x, y = v[i].y;
+        if (!isfinite(x) || !isfinite(y)) { b->usable = 0; return; }
+        if (x - pad < b->x0) b->x0 = x - pad;
+        if (y - pad < b->y0) b->y0 = y - pad;
+        if (x + pad > b->x1) b->x1 = x + pad;
+        if (y + pad > b->y1) b->y1 = y + pad;
+    }
+    int left = v->clipMin & 65535, top = v->clipMin >> 16;
+    int right = v->clipMax & 65535, bottom = v->clipMax >> 16;
+    if (left > right || top > bottom) return;
+    if (left < b->left) b->left = left;
+    if (top < b->top) b->top = top;
+    if (right > b->right) b->right = right;
+    if (bottom > b->bottom) b->bottom = bottom;
+}
+
 /* Reserve first: vertex pressure or snapshot pressure can roll over to a
  * different context. Bind offsets only after both reservations succeed. */
-static void hiDrawTexture(const HiVertex* v, int n, int wide, const TextureSample* sample, int filter,int captured) {
+static void hiDrawTexture(const HiVertex* v, int n, int wide, const TextureSample* sample, int filter,int captured,int face) {
     if (vk.hiN == 0 || n <= 0 || (wide && vk.hiWide == VK_NULL_HANDLE)) return;
-    if (wide) {
+    /* A live face stays within its scissor and ordinary indexed textures
+     * read native VRAM. Once those rows exist the copy cannot grow. */
+    int rowsFit = face && !(v->mode & DRAW_FILL) && (int)(v->clipMax >> 16) < vk.hiWideH &&
+                  (!(v->mode & DRAW_TEXTURED) || ((v->tex >> 7) & 3) < 2 || !v->wideTex || sample);
+    if (wide && !rowsFit) {
         int rows = 0;
         for (int i=0;i<n;i++) {
             const HiVertex* a=&v[i];
@@ -6989,7 +7103,7 @@ static void hiDrawTexture(const HiVertex* v, int n, int wide, const TextureSampl
         hiWideRows(rows);
         if (vk.hiN == 0) return; /* growth under memory pressure turned upscaling off */
     }
-    if(hiNeedsNative(v,n,wide))cpuResolveFlush();
+    if (cpuResolve && cpuResolve->pending && hiNeedsNative(v,n,wide)) cpuResolveFlush();
     hiReserve(n, wide);
     uint32_t info[4] = {0};
     int64_t kept = -1;
@@ -7044,13 +7158,30 @@ static void hiDrawTexture(const HiVertex* v, int n, int wide, const TextureSampl
         info[2] = (uint32_t)sample->w | (uint32_t)sample->h<<16;
         info[3] = (uint32_t)(filter + 1) | (uint32_t)sample->scale << 8 | (sample->indices != NULL ? 1u << 17 : 0u);
     }
+    if (vk.orderedEnabled)
+        noteFaceBounds(wide, wide ? vk.hiWideCount : vk.hiCount, v, n, face);
     HiVertex* dst = wide ? &hiWideBuf[vk.hiWideCount] : &hiBuf[vk.hiCount];
     memcpy(dst,v,(size_t)n*sizeof(*v));
-    if(!captured)for (int k = 0; k < n; ++k) memcpy(dst[k].sample,info,sizeof(info));
+    if(!captured && (!face || sample))for (int k = 0; k < n; ++k) memcpy(dst[k].sample,info,sizeof(info));
     if (wide) vk.hiWideCount += (uint32_t)n; else vk.hiCount += (uint32_t)n;
 }
-void gvkHiDrawTexture(const HiVertex* v,int n,int wide,const TextureSample* sample,int filter) {hiDrawTexture(v,n,wide,sample,filter,0);}
-void gvkHiDrawCaptured(const HiVertex* v,int n,int wide) {hiDrawTexture(v,n,wide,NULL,0,1);}
+void gvkHiDrawTexture(const HiVertex* v,int n,int wide,const TextureSample* sample,int filter) {hiDrawTexture(v,n,wide,sample,filter,0,0);}
+int gvkHiSealFace(const HiVertex src[3], unsigned perimeter, int depth, int wide) {
+    if (!vk.hiN || (wide && (!vk.hiWide || (src->mode & DRAW_FILL) ||
+        (int)(src->clipMax >> 16) >= vk.hiWideH ||
+        ((src->mode & DRAW_TEXTURED) && ((src->tex >> 7) & 3) >= 2 && src->wideTex)))) return 0;
+    if (cpuResolve && cpuResolve->pending && hiNeedsNative(src, 3, wide)) cpuResolveFlush();
+    int maximum = 3 + 6 * ((perimeter & 1) + ((perimeter >> 1) & 1) + ((perimeter >> 2) & 1));
+    hiReserve(maximum, wide);
+    uint32_t* count = wide ? &vk.hiWideCount : &vk.hiCount;
+    HiVertex* dst = (wide ? hiWideBuf : hiBuf) + *count;
+    int n = gp0SealTriangle(src, dst, perimeter, depth);
+    if (vk.orderedEnabled) noteFaceBounds(wide, *count, dst, n, 1);
+    *count += n;
+    return 1;
+}
+void gvkHiDrawFace(const HiVertex* v,int n,int wide,const TextureSample* sample,int filter) {hiDrawTexture(v,n,wide,sample,filter,0,1);}
+void gvkHiDrawCaptured(const HiVertex* v,int n,int wide) {hiDrawTexture(v,n,wide,NULL,0,1,0);}
 void gvkHiDraw(const HiVertex* v, int n) { gvkHiDrawTexture(v,n,0,NULL,0); }
 void gvkHiDrawWide(const HiVertex* v, int n) { gvkHiDrawTexture(v,n,1,NULL,0); }
 
@@ -7061,7 +7192,8 @@ static int rasterShiftY(const HiVertex* v) { return (int16_t)(v->rasterShift >> 
 /* hires.frag accepts pixels only inside each primitive's native clip
  * rectangle. Scissor their union before rasterization: at large scales a
  * projected floor/effect can otherwise shade far outside the display area.
- * Fills ignore that shader clip, so retain the full target for those batches.
+ * Fills and resolved pixel uploads ignore that shader clip, so retain the
+ * full target for those batches.
  * Inspect every vertex to stay conservative even with mixed flat metadata.
  * tw, th: the render area (the target, or where the VRAM copy's shifted
  * triangles rasterise, HiVertex.rasterShift). */
@@ -7070,7 +7202,7 @@ static VkRect2D hiBatchScissor(const HiVertex* vertices, uint32_t count, int n, 
     uint32_t previousMin = UINT32_MAX, previousMax = UINT32_MAX, previousShift = UINT32_MAX;
     for (uint32_t i = 0; i < count; i++) {
         const HiVertex* v = &vertices[i];
-        if (v->mode & 0x100u) return (VkRect2D){{0, 0}, {(uint32_t)tw, (uint32_t)th}};
+        if (v->mode & (DRAW_FILL | DRAW_RESOLVED)) return (VkRect2D){{0, 0}, {(uint32_t)tw, (uint32_t)th}};
         if (v->clipMin == previousMin && v->clipMax == previousMax && v->rasterShift == previousShift) continue;
         previousMin = v->clipMin; previousMax = v->clipMax; previousShift = v->rasterShift;
         int sx = rasterShiftX(v), sy = rasterShiftY(v);
@@ -7194,12 +7326,35 @@ static int hiViewportSize(int extent) {
  * the vertices (at offset, rasterising where they are: rasterShift 0) within
  * the copy's image, the viewport tw x th and constants c the ordered lists
  * use. */
+static OrderedBox tileHiBounds(int wide, const HiVertex* v, uint32_t count, int n, int w, int h) {
+    const struct FaceBounds* f = &faceBounds[wide];
+    if (f->usable) {
+        if (f->right < f->left || f->bottom < f->top) return (OrderedBox){0};
+        int x0 = f->left * n, y0 = f->top * n;
+        int x1 = (f->right + 1) * n, y1 = (f->bottom + 1) * n;
+        return (OrderedBox){
+            (int)fmax(x0, fmin(w, floor((double)f->x0*n)-1)),
+            (int)fmax(y0, fmin(h, floor((double)f->y0*n)-1)),
+            (int)fmin(x1, fmax(0, fmin(w, ceil((double)f->x1*n)+2))),
+            (int)fmin(y1, fmax(0, fmin(h, ceil((double)f->y1*n)+2)))};
+    }
+    OrderedBox box = orderedBatchBounds(v, sizeof(*v), count, n, w, h, offsetof(HiVertex, w));
+    VkRect2D clip = hiBatchScissor(v, count, n, w, h);
+    int right = clip.offset.x + (int)clip.extent.width, bottom = clip.offset.y + (int)clip.extent.height;
+    if (box.x0 < clip.offset.x) box.x0 = clip.offset.x;
+    if (box.y0 < clip.offset.y) box.y0 = clip.offset.y;
+    if (box.x1 > right) box.x1 = right;
+    if (box.y1 > bottom) box.y1 = bottom;
+    return box;
+}
+
 static void tileHiPass(FrameCtx* f, int wide, const HiVertex* v, VkDeviceSize offset, uint32_t count, int tw, int th,
                        const HiDrawConstants* c) {
     int n = vk.hiN;
     int iw = wide ? vk.hiWideW * n : VRAM_W * n, ih = wide ? vk.hiWideH * n : VRAM_H * n;
-    OrderedBox box = tileBounds(v, sizeof(HiVertex), count, n, iw < tw ? iw : tw, ih < th ? ih : th,
-                                offsetof(HiVertex, w));
+    OrderedBox box = tileHiBounds(wide, v, count, n, iw < tw ? iw : tw, ih < th ? ih : th);
+    VkPipeline pipeline = wide ? vk.tileHiWideDraw : vk.tileHiDraw;
+    if (n == 1 && vk.tileUnit[0][wide]) pipeline = vk.tileUnit[0][wide];
     tilePass(f, wide ? vk.hiWideView : vk.hiVramView, VK_NULL_HANDLE, wide ? vk.tileHiWideDraw : vk.tileHiDraw,
              vk.hiLayout, offset, 0, count, box, tw, th, c, sizeof(*c));
 }
@@ -7212,10 +7367,11 @@ static void tileHiDepthPass(FrameCtx* f, int wide, const HiVertex* v, VkDeviceSi
     int iw = wide ? vk.hiWideW * n : VRAM_W * n, ih = wide ? vk.hiWideH * n : VRAM_H * n;
     if (iw > vk.scene.planeW[t]) iw = vk.scene.planeW[t];
     if (ih > vk.scene.planeH[t]) ih = vk.scene.planeH[t];
-    OrderedBox box = tileBounds(v, sizeof(HiVertex), count, n, iw < tw ? iw : tw, ih < th ? ih : th,
-                                offsetof(HiVertex, w));
+    OrderedBox box = tileHiBounds(wide, v, count, n, iw < tw ? iw : tw, ih < th ? ih : th);
+    VkPipeline pipeline = wide ? vk.tileHiWideDepthDraw : vk.tileHiDepthDraw;
+    if (n == 1 && vk.tileUnit[1][wide]) pipeline = vk.tileUnit[1][wide];
     tilePass(f, wide ? vk.hiWideView : vk.hiVramView, vk.scene.planeView[t],
-             wide ? vk.tileHiWideDepthDraw : vk.tileHiDepthDraw, vk.hiLayout, offset, 0, count, box, tw, th, c,
+             pipeline, vk.hiLayout, offset, 0, count, box, tw, th, c,
              sizeof(*c));
 }
 
@@ -7399,7 +7555,7 @@ static void hiResolveCpuNow(VRect r,const uint16_t* data,int pitch) {
         v[k].clipMax=(uint32_t)r.x1|(uint32_t)r.y1<<16;
         v[k].sample[0]=offset;v[k].sample[1]=(uint32_t)r.x0|(uint32_t)r.y0<<16;v[k].sample[2]=(uint32_t)w;
     }
-    hiDrawTexture(v,6,0,NULL,0,1);
+    hiDrawTexture(v,6,0,NULL,0,1,0);
 }
 
 static void cpuResolveFlush(void) {
@@ -7447,6 +7603,11 @@ void gvkHiLoad(VRect r, const uint16_t* data, int pitch, int how, int slot, cons
     vramFlushCpuWrites(r);
     int n = vk.hiN;
     if (n == 0) {
+        return;
+    }
+    if (n == 1 && how == HI_LOAD_REPLICATE && vk.tileImage) {
+        cpuResolveFlush();
+        uploadImage(vk.hiVram, r, data, pitch);
         return;
     }
     int w = r.x1 - r.x0 + 1, h = r.y1 - r.y0 + 1;
@@ -9072,6 +9233,20 @@ void presentationRateDescribe(char* out, size_t size) {
 /* ---- setup -------------------------------------------------------------------------- */
 
 static void createFrames(void) {
+    /* Four Gears can exhaust an 8 MiB vertex buffer before one picture is
+     * complete. Keep their tile passes together when the heap has room. All
+     * contexts have the same limit, including after a mid-frame handoff. */
+    frameVertexBytes = VERTEX_BYTES;
+    if (vk.tileImage) {
+        const size_t large = 3 * VERTEX_BYTES;
+        int i = 0;
+        for (; i < FRAMES; ++i) {
+            if (!tryHostBufferMemory(&vk.frames[i].vertices, large,
+                                     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0, 0)) break;
+        }
+        if (i == FRAMES) frameVertexBytes = large;
+        else while (i > 0) destroyHostBuffer(&vk.frames[--i].vertices);
+    }
     VkCommandPoolCreateInfo pi = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pi.queueFamilyIndex = vk.queueFamily;
@@ -9087,7 +9262,8 @@ static void createFrames(void) {
         VK_CHECK(vkCreateFence(vk.device, &fi, NULL, &f->fence));
         VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VK_CHECK(vkCreateSemaphore(vk.device, &si, NULL, &f->acquired));
-        createHostBuffer(&f->vertices, VERTEX_BYTES, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0);
+        if (!f->vertices.buffer)
+            createHostBuffer(&f->vertices, frameVertexBytes, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 0);
         createHostBuffer(&f->staging, STAGING_BYTES, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0);
         createHostBuffer(&f->spans, SPAN_BYTES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0);
         createSet(f);

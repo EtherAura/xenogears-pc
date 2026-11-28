@@ -42,8 +42,10 @@ States hold game memory read from the disc: a corpus never leaves this host (wor
 
 A canonical release: one whose corpus manifest says "canonical": true. `release` writes that, and only
 for a release whose executables write portable slots and, with --gate, pass state_compat.py both ways
-against every earlier canonical release; releases before (no portable slots) never get a corpus, so they are
-never in the set. `release TAG` takes the release's Linux tarball (--tarball, as the release run made it,
+against every earlier canonical release. The release gate requires every case for both engines and
+regions. It checks the public release history and the retained corpora for a real cut.
+Gated corpora keep the exact US and JP tarballs so later checks can run even if an asset is removed.
+`release TAG` takes the release's Linux tarball (--tarball, as the release run made it,
 before the upload; else downloaded from GitHub into the cache, checksum-verified), unpacks it in the cache
 and makes the corpus of both its engines (US: the tarball is US only), into work/state-corpus/TAG.
 
@@ -78,6 +80,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -86,14 +89,16 @@ import statecheck as sc  # noqa: E402 (the state format, the scenes, the discs)
 
 FORMAT = 1
 RUN = 600  # vblanks a loaded case runs (docs/CANONICAL_STATES.md 9: invariants hold for 600 vblanks)
-WAIT = 120  # a slot save waits this long for a safe point (port/src/system/savestate.c), then saves as it is
+WAIT = 120  # vblanks before the game reports a slot is still waiting for a safe point
 CORPORA = ROOT / "work" / "state-corpus"
 KEPT = "executables"  # a corpus' folder of the release's executables that are no asset (release --build)
 CACHE = Path(os.environ.get("XG_RELEASE_CACHE", "/mnt/Games/scratch/xg-release-cache"))
 REPO = "EtherAura/xenogears-pc"
 PACKAGE = "xenogears-pc"
 TAG = re.compile(r"v(\d{4})\.(0[1-9]|1[0-2])\.(0|[1-9]\d*)")  # linux_release.py's: vYYYY.MM.N
+FIRST_CANONICAL_RELEASE = "v2026.11.29"
 ENGINES = {"original": "xenogears", "enhanced": "xenogears-enhanced"}
+RELEASE_CONFIGS = {f"{region}-{engine}" for region in ("us", "jp") for engine in ENGINES}
 # Start options (port/src/system/options.c): a reader boots the plain way and loads the slot at its first
 # park, so only the load can give it the writer's moment; everything else (Speedup, battle speed) is a
 # setting a player keeps, and the reader runs with it too.
@@ -131,6 +136,7 @@ class Case:
     pad: tuple  # ("scene", name) | ("field", id) | ("battle", file, scene, gear, mash_from)
     why: str
     region: str = ""  # "": both; "us" or "jp": that region's variant of the case
+    save_window: int = 2 * WAIT  # how long the harness runs before the continuation
 
     def boot_env(self) -> dict:
         return dict(self.env)
@@ -161,7 +167,7 @@ def battle_case(cid: str, file: int, scene: int, gear: int, asked: int, why: str
 
 
 # The statecheck scenes (tools/statecheck.py SCENES) whose moment a player can save portably. Left out: movie
-# (no safe point during a movie: its slot is this version's only, by design, and every other build refuses it)
+# (no safe point during playback; a pending slot saves after it)
 # and disc2swap (disc2's state; its swap is a load path of one build, statecheck run's).
 SCENE_CASES = [
     scene_case("field", 700, 1, "field 8, walking (statecheck's field)"),
@@ -169,6 +175,8 @@ SCENE_CASES = [
     scene_case("battle", 1600, 2, "a selector battle in progress (statecheck's battle; a Gear of 51998 HP)"),
     scene_case("worldmap", 700, 3, "the world map on foot (statecheck's worldmap; from about 900 it enters a field)"),
     scene_case("opening", 1550, 1, "the title screen's field 490 after the opening movie (statecheck's opening)"),
+    Case("opening-wait", "scene", "1", (), 700, 1, ("scene", "opening"),
+         "a slot requested during the opening movie and saved at the first field safe point", save_window=1200),
     scene_case("battling", 1300, 4, "the Battling arena (statecheck's battling)"),
     scene_case("disc2", 700, 1, "disc 2's field 616 (statecheck's disc2)"),
     scene_case("speedup", 1100, 2, "a battle with Speedup on (statecheck's speedup; its data load runs to about 1000)"),
@@ -281,6 +289,7 @@ class Build:
     exe: Path
     schema: Path | None
     source: dict = field(default_factory=dict)
+    runner: Callable[[Path, Path, int, dict], int] | None = None
 
     @property
     def config(self) -> str:
@@ -288,6 +297,11 @@ class Build:
 
     def image_id(self) -> str:
         return image_id(self.exe)
+
+    def play(self, out: Path, image: Path, quit_at: int, env: dict) -> int:
+        if self.runner is not None:
+            return self.runner(out, image, quit_at, env)
+        return run_game(self.exe, out, image, quit_at, env)
 
 
 _ids: dict = {}
@@ -380,7 +394,8 @@ def disc_path(region: str, disc: str, discs: Path | None = None) -> Path:
     return (discs / rel.relative_to("bin")) if discs else ROOT / rel
 
 
-def run_game(exe: Path, out: Path, image: Path, quit_at: int, env: dict, timeout: int = 300) -> int:
+def run_game(exe: Path, out: Path, image: Path, quit_at: int, env: dict, timeout: int = 300,
+             launcher: tuple[str, ...] = (), host_env: dict | None = None) -> int:
     """statecheck.run_port's run, for one executable named outright (a release's bin/ holds both engines):
     headless, the stepped clock, no settings, cards of its own, no frame or sound dumps unless env asks."""
     out.mkdir(parents=True, exist_ok=True)
@@ -392,10 +407,11 @@ def run_game(exe: Path, out: Path, image: Path, quit_at: int, env: dict, timeout
         "XG_VK_DEVICE": e.get("XG_VK_DEVICE", "1"), "TMPDIR": str(out),
     })
     e.update(env)
+    e.update(host_env or {})
     with open(out / "port.log", "w") as log:
         try:
             p = subprocess.run(["nice", "-n", "19", "ionice", "-c3", "timeout", "-s", "INT", "-k", "30", str(timeout),
-                                str(exe), str(image)], env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out,
+                                *launcher, str(exe), str(image)], env=e, stdout=log, stderr=subprocess.STDOUT, cwd=out,
                                stdin=subprocess.DEVNULL)
         except OSError as error:
             log.write(f"state_corpus: cannot run {exe}: {error}\n")
@@ -484,7 +500,7 @@ def check_load(reader: Build, corpus: Path, rec: dict, work: Path, discs: Path |
     t0 = time.monotonic()
     # Quit one vblank later: XG_QUIT_AT ends the run right after that vblank's handlers, before its park
     # writes the vblank's log lines.
-    code = run_game(reader.exe, work, disc_path(region, disc, discs), end + 1, env)
+    code = reader.play(work, disc_path(region, disc, discs), end + 1, env)
     seconds = time.monotonic() - t0
     log = (work / "port.log").read_text(errors="replace") if (work / "port.log").exists() else ""
     problems, notes = [], []
@@ -497,8 +513,8 @@ def check_load(reader: Build, corpus: Path, rec: dict, work: Path, discs: Path |
         problems.append("no load (" + ("; ".join(state_lines(log)[-3:]) or "the log says nothing of slot 1") + ")")
     else:
         how = "converted" if ", converted from " in loaded.group(0) else "raw"
-        same = reader.image_id() == rec["build"]
-        if same and how != "raw":
+        same = reader.image_id() == rec.get("image_id", rec["build"])
+        if same and how != "raw" and "image_id" not in rec:
             problems.append("the writer's own build converted its slot instead of loading it raw")
         elif not same and how != "converted":
             problems.append("another build loaded the slot without converting it")
@@ -545,8 +561,8 @@ def make_case(build: Build, case: Case, work: Path, discs: Path | None, verify: 
            "XG_SWEEP_LOG": "sweep.log", "XG_STATE_DIR": str(states), "XG_STATE_SLOT_SAVE": f"{case.asked}:1",
            "XG_DISC2": str(disc_path(build.region, other, discs))}
     t0 = time.monotonic()
-    quit_at = case.asked + 2 * WAIT + RUN + 2  # (a safe point can come a little after the wait's deadline)
-    code = run_game(build.exe, work / "w", disc_path(build.region, case.disc, discs), quit_at, env)
+    quit_at = case.asked + case.save_window + RUN + 2
+    code = build.play(work / "w", disc_path(build.region, case.disc, discs), quit_at, env)
     seconds = time.monotonic() - t0
     log = (work / "w" / "port.log").read_text(errors="replace")
     where = f"{build.config}/{case.id}"
@@ -555,7 +571,9 @@ def make_case(build: Build, case: Case, work: Path, discs: Path | None, verify: 
     saved = re.search(r"state: saving \S*slot1\.xgs at vblank (\d+)", log)
     slot = states / "slot1.xgs"
     if not saved or not slot.is_file() or "State saved (slot 1)" not in log:
-        raise CorpusError(f"{where}: no slot saved (asked at {case.asked})")
+        reason = next((line.removeprefix("state: ") for line in reversed(state_lines(log))
+                       if "State not saved" in line or "waiting for a safe point" in line), "")
+        raise CorpusError(f"{where}: no slot saved (asked at {case.asked})" + (f": {reason}" if reason else ""))
     v = int(saved.group(1))
     if v + RUN >= quit_at:
         raise CorpusError(f"{where}: saved at {v}, too late for {RUN} vblanks of continuation (asked at {case.asked})")
@@ -601,6 +619,14 @@ def make_case(build: Build, case: Case, work: Path, discs: Path | None, verify: 
         "sweep": {"lines": len((out / "sweep.log").read_text().splitlines()), "sha256": sha256(out / "sweep.log")},
         "seconds": round(seconds, 1),
     }
+    if build.runner is not None:
+        # The raw state ID includes the load address (and on Windows a
+        # different set of PE fields). Use the runtime's schema image ID for
+        # artifact identity and allow a relocated image to convert its slot.
+        match = re.search(r"(?m)^state: schema .*\bimage ([0-9a-f]{32}), load bias ", log)
+        if match is None or match[1] != build.image_id():
+            raise CorpusError(f"{where}: the runtime did not use the expected packaged image")
+        rec["image_id"] = match[1]
     (work / "schema").mkdir()
     shutil.copyfile(schema, work / "schema" / schema.name)
     if verify:
@@ -630,7 +656,8 @@ def release_order(name: str, created: str = "") -> list:
 
 def make_corpus(builds: list[Build], out: Path, release: str, case_ids: list[str] | None = None, jobs: int = 4,
                 discs: Path | None = None, verify: bool = True, canonical: bool = False, source: dict | None = None,
-                keep_going: bool = False, replace: bool = False, quiet: bool = False) -> dict:
+                keep_going: bool = False, replace: bool = False, quiet: bool = False,
+                failed_dir: Path | None = None) -> dict:
     """Every case (of case_ids; all when empty) of every build, each build's region's variant, into a new
     corpus folder out (made beside it, then moved in place)."""
     out = out.absolute()
@@ -673,6 +700,9 @@ def make_corpus(builds: list[Build], out: Path, release: str, case_ids: list[str
                     rec = f.result()
                 except CorpusError as error:
                     failed.append({"id": f"{b.config}/{c.id}", "why": str(error)})
+                    case_work = work / b.config / c.id
+                    if failed_dir is not None and case_work.is_dir():
+                        shutil.copytree(case_work, failed_dir / b.config / c.id, dirs_exist_ok=True)
                     if not quiet:
                         print(f"FAIL {error}", flush=True)
                     continue
@@ -707,6 +737,8 @@ def make_corpus(builds: list[Build], out: Path, release: str, case_ids: list[str
                 "schemas": sorted({r["schema"] for r in recs}), "executable": b.source.get("executable")
                 or {"kind": "local", "path": str(b.exe)}, "cases": len(recs),
             }
+            if recs and "image_id" in recs[0]:
+                manifest["configs"][b.config]["image_id"] = recs[0]["image_id"]
         manifest["bytes"] = sum(p.stat().st_size for p in stage.rglob("*") if p.is_file())
         manifest["seconds"] = round(time.monotonic() - t0, 1)
         write_json(stage / "manifest.json", manifest)
@@ -765,7 +797,7 @@ def kept_files(executable: dict | None) -> list[tuple[str, str | None]]:
     SHA-256): a kind "tarball" record with "kept" (the tarball), a kind "kept" one (the executable and its schema)."""
     if not isinstance(executable, dict):
         return []
-    if executable.get("kind") == "tarball" and "kept" in executable:
+    if executable.get("kind") in ("tarball", "runtime") and "kept" in executable:
         return [(str(executable["kept"]), executable.get("sha256"))]
     if executable.get("kind") == "kept":
         schema = executable.get("schema") if isinstance(executable.get("schema"), dict) else None
@@ -820,6 +852,34 @@ def corpora(root: Path) -> list[tuple[Path, dict]]:
     return found
 
 
+def require_release_history(root: Path, before: str | None = None, published: set[str] | None = None) -> None:
+    """Require the baseline, all known published releases, and any older releases named by their gates."""
+    first = release_order(FIRST_CANONICAL_RELEASE)
+    cutoff = release_order(before) if before else None
+
+    def in_range(tag: str) -> bool:
+        order = release_order(tag)
+        return TAG.fullmatch(tag) is not None and order >= first and (cutoff is None or order < cutoff)
+
+    history = {m["release"]: (d, m) for d, m in corpora(root) if in_range(m["release"])}
+    required = {FIRST_CANONICAL_RELEASE, *(published or ())}
+    for _, m in history.values():
+        required.update(m.get("gate", {}).get("earlier", []))
+    missing = sorted({tag for tag in required if in_range(tag)} - history.keys(), key=release_order)
+    if missing:
+        raise CorpusError(f"missing canonical release corpora in {root}: {', '.join(missing)}")
+    for tag, (d, m) in history.items():
+        counts = {c: sum(r["config"] == c for r in m["cases"]) for c in m["configs"]}
+        if (d.name != tag or counts.keys() != RELEASE_CONFIGS or not all(counts.values()) or m.get("failed")
+                or m.get("tool", {}).get("cases")
+                or any(counts[c] != m["configs"][c].get("cases") for c in counts)
+                or len({r["id"] for r in m["cases"]}) != len(m["cases"])):
+            raise CorpusError(f"{d}: incomplete canonical release corpus")
+        problems = check_corpus(d)
+        if problems:
+            raise CorpusError(f"{d}: {problems[0]}")
+
+
 # ---- release tarballs: the cache -------------------------------------------------------------------------
 
 
@@ -839,6 +899,26 @@ class ReleaseCache:
         self.root, self.repo, self.assets_from, self.offline = root, repo, assets_from, offline
         self.notes: list[str] = []
         self.lock = threading.Lock()
+
+    def published_tags(self) -> set[str]:
+        """The public release list, independently of the local corpus."""
+        tags = set()
+        page = 1
+        while True:
+            url = f"https://api.github.com/repos/{self.repo}/releases?per_page=100&page={page}"
+            req = urllib.request.Request(url, headers={"User-Agent": "xenogears-state-compat",
+                                                       "Accept": "application/vnd.github+json"})
+            try:
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    rows = json.load(response)
+                if not isinstance(rows, list):
+                    raise ValueError("expected a list of releases")
+                tags.update(row["tag_name"] for row in rows if not row["draft"])
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                raise CorpusError(f"cannot verify published save-state history: {error}") from error
+            if len(rows) < 100:
+                return tags
+            page += 1
 
     def _fetch(self, tag: str, name: str, dest: Path) -> bool:
         """One asset into dest; False when the release has no such asset."""
@@ -892,7 +972,7 @@ class ReleaseCache:
         path = folder / name
         with self.lock:
             record = folder / "verified.json"
-            if path.is_file() and record.is_file():
+            if local is None and path.is_file() and record.is_file():
                 done = json.loads(record.read_text())
                 if done.get("sha256") == sha256(path) and (expect is None or done["sha256"] == expect):
                     return path
@@ -1125,7 +1205,7 @@ def other_build(tag: str, spec: str, cache: ReleaseCache) -> tuple[list[Build], 
 
 
 def keep_in_corpus(corpus: Path, keep: list[tuple[str, Path | bytes]], manifest: dict) -> None:
-    """The --build files into the corpus, checked against the manifest's records once there."""
+    """Keep the release binaries with the corpus and verify them against the manifest."""
     for rel, source in keep:
         dest = corpus / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1153,7 +1233,7 @@ def cmd_release(argv: list[str]) -> int:
                          "folder (CONFIG=DIR: one configuration of it)")
     ap.add_argument("--corpora", type=Path, default=CORPORA)
     ap.add_argument("--cache", type=Path, default=CACHE)
-    ap.add_argument("--assets-from", type=Path, help="a local stand-in of the GitHub release assets: DIR/<tag>/<asset>")
+    ap.add_argument("--assets-from", type=Path, help="rehearse with local release assets in DIR/<tag>/<asset>")
     ap.add_argument("--gate", action="store_true", help="file it only if state_compat.py passes both ways against "
                     "every earlier canonical release (exit 1 otherwise; the corpus goes to CORPORA/.rejected)")
     ap.add_argument("--case", action="append", default=[])
@@ -1164,20 +1244,34 @@ def cmd_release(argv: list[str]) -> int:
                     "(default: left out of the corpus and listed in its manifest's failed)")
     args = ap.parse_args(argv)
     try:
+        if args.gate and args.case:
+            raise CorpusError("the release gate requires every corpus case")
+        if args.gate and args.tarball and not args.tarball.with_name(args.tarball.name + ".sha256").is_file():
+            raise CorpusError(f"the release gate requires {args.tarball.name}.sha256 beside the tarball")
         cache = ReleaseCache(args.cache, assets_from=args.assets_from)
         folder = cache.unpacked(args.tag, local=args.tarball)
         digest = json.loads((args.cache / args.tag / "verified.json").read_text())["sha256"]
         builds = resolve_builds(folder, region_default="us")  # (a release's Linux tarball is US only)
+        if any(b.region != "us" for b in builds):
+            raise CorpusError(f"{args.tag}: the primary release tarball must contain US builds")
+        name = tarball_name(args.tag)
+        kept_us = f"{KEPT}/us/{name}"
+        keep: list[tuple[str, Path | bytes]] = []
+        if args.gate:
+            keep.append((kept_us, args.cache / args.tag / name))
         for b in builds:
             b.source = {"executable": {"kind": "tarball", "tag": args.tag, "sha256": digest,
                                        "path": str(b.exe.relative_to(folder))}}
+            if args.gate:
+                b.source["executable"]["kept"] = kept_us
         off = [b for b in builds if portable_off(b.exe) or b.schema is None]
         if off:
-            print(f"state_corpus: {args.tag} is not a canonical release: {', '.join(b.exe.name for b in off)} "
-                  f"write{'s' if len(off) == 1 else ''} no portable slots (XG_PORTABLE_SLOTS off, or no state schema): "
-                  "no corpus written")
+            why = (f"{args.tag}: {', '.join(b.exe.name for b in off)} "
+                   f"write{'s' if len(off) == 1 else ''} no portable slots (XG_PORTABLE_SLOTS off, or no state schema)")
+            if release_order(args.tag) >= release_order(FIRST_CANONICAL_RELEASE):
+                raise CorpusError(why)
+            print(f"state_corpus: {why}: no corpus written")
             return 0
-        keep: list[tuple[str, Path | bytes]] = []  # what the corpus keeps of --build: (path in it, file or bytes)
         for spec in args.build:
             more, files = other_build(args.tag, spec, cache)
             twice = sorted({b.config for b in more} & {b.config for b in builds})
@@ -1185,6 +1279,12 @@ def cmd_release(argv: list[str]) -> int:
                 raise CorpusError(f"--build {spec}: two builds of one configuration: {', '.join(twice)}")
             builds += more
             keep += files
+        if args.gate:
+            missing = RELEASE_CONFIGS - {b.config for b in builds}
+            if missing:
+                raise CorpusError(f"{args.tag}: the release gate needs builds for {', '.join(sorted(missing))}")
+            if args.assets_from is None:
+                require_release_history(args.corpora, before=args.tag, published=cache.published_tags())
         dest = args.corpora / args.tag
         if dest.exists() and not args.replace:
             raise CorpusError(f"{dest} exists (--replace makes it again)")
@@ -1193,7 +1293,7 @@ def cmd_release(argv: list[str]) -> int:
         find_cases(args.case)
         m = make_corpus(builds, staged, args.tag, args.case, args.jobs, args.discs, True, False,
                         {"kind": "release", "tag": args.tag, "tarball": tarball_name(args.tag), "sha256": digest},
-                        keep_going=not args.strict)
+                        keep_going=not (args.gate or args.strict))
         keep_in_corpus(staged, keep, m)
         gate = None
         if args.gate:
@@ -1201,6 +1301,7 @@ def cmd_release(argv: list[str]) -> int:
             gate = state_compat.run(args.corpora, new_corpus=staged, new_builds={b.config: b for b in builds},
                                     new_release=args.tag, cache=cache, jobs=args.jobs, discs=args.discs,
                                     work=args.cache / args.tag / "gate")
+            gate.errors.extend(gate.uncovered + gate.left_out)
             m["gate"] = gate.summary()
             print(gate.line())
             if not gate.passed:

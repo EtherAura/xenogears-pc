@@ -376,11 +376,17 @@ void execMonsterScriptEndOfPlayerTurn(void) {
 void processBattleAnimation_subType_minus6(u8 entity) {
     battleVar1->mB0_isDialogWindowInitialized[4] = 1;
     previousEntityTurn.m8_nameLabels[entity].m5D_monsterNameIsDisplayed = 1;
+#ifdef PLATFORM_PC
+    pcVersusFitAttackNames();
+#endif
 }
 
 void hideMonsterAttackName(u8 entity) {
     battleVar1->mB0_isDialogWindowInitialized[4] = 0;
     previousEntityTurn.m8_nameLabels[entity].m5D_monsterNameIsDisplayed = 0;
+#ifdef PLATFORM_PC
+    pcVersusFitAttackNames();
+#endif
 }
 
 u8 monsterBattleOpcode_countEnemiesSameRow_findFirstInBitmask(u16 bitmask) {

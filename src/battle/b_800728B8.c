@@ -17,6 +17,7 @@
  * player 2's bar, its members in slots 3-5: HUD_SLOT gives theirs then.
  * The PS1 reads the slot. */
 #ifdef PLATFORM_PC
+void pcBattleArrangeAttackPrompts(void);
 int pcBattleHudSlot(int slot);
 #define HUD_SLOT(i) pcBattleHudSlot(i)
 int pcVersusViewBar(void);      /* drawBattleMode1: player 2's bar drawn instead of the party's */
@@ -536,6 +537,9 @@ void battleRenderCommandRing(void) {
     s32 i;
 
     if (battleVar1->mCB_drawCommandRing) {
+#ifdef PLATFORM_PC
+        pcBattleArrangeAttackPrompts();
+#endif
         for (i = 0; i < 2; i++) {
 #ifdef PLATFORM_PC
             /* This shared font contains both command lettering and wheel
@@ -839,7 +843,12 @@ void drawMonsterNames(void) {
                               previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth);
             } else {
                 repositionTextRenderingPlanePrim(&previousEntityTurn.m8_nameLabels[i].m0_polys[D_800CCB04.m30_battleOddOrEven],
-                              0x9A - (previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth >> 1), 0xCA, 0,
+                              0x9A - (previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth >> 1),
+#ifdef PLATFORM_PC
+                              0xCA - 13 * pcVersusAttackNameRowsAfter(i), 0,
+#else
+                              0xCA, 0,
+#endif
                               (i / 2) * 0xD, previousEntityTurn.m8_nameLabels[i].m5E_currentMonsterNameStringWidth);
             }
 #ifdef PLATFORM_PC

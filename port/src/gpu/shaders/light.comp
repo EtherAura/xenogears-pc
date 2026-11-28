@@ -5,7 +5,7 @@
 // vk.c sceneLightRecord; docs/PORT_HD2D.md sections 14, 15). It runs where
 // the depth of field does, before it: after the scene's last packet, before
 // the first packet of the UI. Written from the textbook pieces named below
-// and our own prototype (work/hd2d/light); no other project's code.
+// and our own prototype; no other project's code.
 //
 // Inputs: the copy's frame (8:8:8 colour in bits 0-23; the mask and coverage
 // bits above pass through) and the scene's depth image (hires.frag DEPTH:
@@ -900,7 +900,7 @@ vec2 glarePoint(int b);
 
 shared vec4 fogFar[64], fogAll[64];
 shared vec2 glareSum[64];
-void fogColour() {
+void fogColour(bool partial) {
     uint i = gl_LocalInvocationIndex;
     vec4 far = vec4(0.0), every = vec4(0.0);
     vec2 open = vec2(0.0);
@@ -911,8 +911,15 @@ void fogColour() {
     // once, then summed in the order they lie (one group alone does the whole
     // grid: reading one pixel at a time, it waited on each).
     const int FOG_RUN = 8;
-    for (int y = int(gl_LocalInvocationID.y); y < pc.work.y; y += 8)
-        for (int x0 = int(gl_LocalInvocationID.x); x0 < pc.work.x; x0 += 8 * FOG_RUN) {
+    ivec2 group = ivec2(gl_WorkGroupID.xy);
+    int stride = partial ? 64 : 8;
+    if (!partial && pc.layer.x != 0) {
+        int at = pc.layer.x + 3 * int(i);
+        far = block[at];
+        every = block[at + 1];
+        open = block[at + 2].xy;
+    } else for (int y = group.y * 8 + int(gl_LocalInvocationID.y); y < pc.work.y; y += stride)
+        for (int x0 = group.x * (8 * FOG_RUN) + int(gl_LocalInvocationID.x); x0 < pc.work.x; x0 += stride * FOG_RUN) {
             vec4 geoRun[FOG_RUN], baseRun[FOG_RUN];
             uint depthRun[FOG_RUN];
             for (int k = 0; k < FOG_RUN; k++) {
@@ -944,6 +951,15 @@ void fogColour() {
     for (uint s = 32u; s > 0u; s >>= 1) {
         if (i < s) { fogFar[i] += fogFar[i + s]; fogAll[i] += fogAll[i + s]; glareSum[i] += glareSum[i + s]; }
         barrier();
+    }
+    if (partial) {
+        if (i == 0u) {
+            int at = pc.layer.x + 3 * (group.y * 8 + group.x);
+            block[at] = fogFar[0];
+            block[at + 1] = fogAll[0];
+            block[at + 2] = vec4(glareSum[0], 0.0, 0.0);
+        }
+        return;
     }
     if (i == 0u && glare)
         block[b + SHAFT_SLOT].w = glareSum[0].y > 0.0 ? clamp(glareSum[0].x / glareSum[0].y / GLARE_OPEN, 0.0, 1.0) : 0.0;
@@ -1715,8 +1731,8 @@ void main() {
         if (t.x < pc.size.x && t.y < pc.size.y) composite(t);
         return;
     }
-    if (pass == 18) {
-        fogColour();
+    if (pass == 18 || pass == 25) {
+        fogColour(pass == 25);
         return;
     }
     if ((pass >= 1 && pass <= 3) || pass == 10 || pass == 11 || pass == 22 || pass == 23) {

@@ -4,10 +4,9 @@ releases. For the new build (a development build, or a release about to be publi
 canonical release E:
 
   forward   each state of E's corpus loads in the new build;
-  backward  each state of the new build's corpus loads in E's executable (E's published Linux tarball,
-            downloaded once into the cache and checked against its published SHA-256; executables that are
-            no asset, JP's, E's corpus keeps: state_corpus.py release --build, checked against the SHA-256
-            its manifest records, a tarball unpacked into the cache);
+  backward  each state of the new build's corpus loads in E's executable, taken from the tarballs retained
+            by E's corpus or the older published US tarball. The tarballs are checked against the corpus
+            manifest's SHA-256 and unpacked into the cache.
 
 and in both, a load is held to tools/state_corpus.py check_load: no refusal, no crash, and the invariant and
 sweep logs of the 600 vblanks after the load equal the writer's own continuation, line for line.
@@ -39,6 +38,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
@@ -100,7 +100,8 @@ def run(corpora_root: Path, new_corpus: Path | None = None, new_builds: dict | N
         new_release: str | None = None, cache: cs.ReleaseCache | None = None, jobs: int = 4,
         discs: Path | None = None, work: Path | None = None, sample: int = 0, only: list[str] | None = None,
         directions: tuple = ("forward", "backward"), tolerate: int = 0, logs: tuple = ("invariants", "sweep"),
-        keep: bool = False, quiet: bool = False, out=sys.stdout, full: int = -1) -> Result:
+        keep: bool = False, quiet: bool = False, out=sys.stdout, full: int = -1,
+        reader_for: Callable[[str, dict, Path], cs.Build] | None = None) -> Result:
     """The gate. new_builds: configuration -> state_corpus.Build of the new side; new_corpus: its corpus (made
     in work when None and the backward direction is asked). sample: cases per release, configuration and
     direction (0: all); with full >= 0 only the releases between the first canonical one and the full most
@@ -181,14 +182,18 @@ def run(corpora_root: Path, new_corpus: Path | None = None, new_builds: dict | N
                 if config not in new_m["configs"]:
                     continue
                 try:
-                    exe = cache.executable(rel, info["executable"], d)
+                    if reader_for is None:
+                        exe = cache.executable(rel, info["executable"], d)
+                        reader = cs.Build(info["region"], info["engine"], exe, None)
+                    else:
+                        reader = reader_for(rel, info, d)
                 except (cs.CorpusError, KeyError) as error:
                     result.errors.append(f"{rel} {config}: its executable: {error}")
                     continue
-                reader = cs.Build(info["region"], info["engine"], exe, None)
-                if cs.image_id(exe) != info["build"]:
-                    result.errors.append(f"{rel} {config}: {exe} is not the build that wrote its corpus "
-                                         f"({cs.image_id(exe)}, the corpus says {info['build']})")
+                expected_image = info.get("image_id", info["build"])
+                if reader.image_id() != expected_image:
+                    result.errors.append(f"{rel} {config}: {reader.exe} is not the build that wrote its corpus "
+                                         f"({reader.image_id()}, the corpus says {expected_image})")
                     continue
                 recs = [r for r in new_m["cases"] if r["config"] == config and matches(r, only)]
                 for r in spread(recs, n):
@@ -229,6 +234,8 @@ def run(corpora_root: Path, new_corpus: Path | None = None, new_builds: dict | N
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--corpora", type=Path, default=cs.CORPORA, help="the canonical releases' corpora")
+    ap.add_argument("--require-history", action="store_true",
+                    help="fail if the canonical baseline or any recorded release corpus is missing or incomplete")
     ap.add_argument("--new", action="append", default=[], type=Path, metavar="BUILD", help="the new build (one or more)")
     ap.add_argument("--new-corpus", type=Path, help="the new build's corpus, already made")
     ap.add_argument("--release", help="the new side is this release: its corpus is CORPORA/TAG, its executables "
@@ -257,6 +264,8 @@ def main() -> int:
     directions = ("forward",) if args.forward_only else ("backward",) if args.backward_only else ("forward", "backward")
     cache = cs.ReleaseCache(args.cache, assets_from=args.assets_from, offline=args.offline)
     try:
+        if args.require_history:
+            cs.require_release_history(args.corpora, before=args.release)
         new_builds, new_corpus = {}, args.new_corpus
         if args.release:
             d = args.corpora / args.release
@@ -278,6 +287,8 @@ def main() -> int:
     result = run(args.corpora, new_corpus, new_builds, args.release, cache, args.jobs, args.discs, args.work,
                  args.sample, args.case, directions, args.tolerate, tuple(x for x in args.logs.split(",") if x),
                  args.keep, full=args.full)
+    if args.require_history:
+        result.errors.extend(result.left_out)
     if args.report:
         args.report.write_text(json.dumps({**result.summary(), "results": result.loads}, indent=1) + "\n")
     print(result.line())

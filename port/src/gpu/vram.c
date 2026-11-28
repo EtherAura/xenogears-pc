@@ -621,6 +621,15 @@ void vramFlushCpuWrites(VRect r) {
     }
 }
 
+/* Native colour produced by both LIBGPU clear forms: the GP0 fill and
+ * its untextured, opaque, undithered rectangle. The caller has clipped
+ * or split the rectangle to VRAM and preserved any active frame keep. */
+void vramFillShadow(VRect r, uint32_t rgb) {
+    uint16_t word = (uint16_t)(((rgb >> 3) & 31) | (((rgb >> 11) & 31) << 5) | (((rgb >> 19) & 31) << 10));
+    for (int y = r.y0; y <= r.y1; y++)
+        for (int x = r.x0; x <= r.x1; x++) vramShadow[y][x] = word;
+}
+
 /* A CPU overwrite knows all pixels of complete tiles, without downloading
  * the device result it replaced. Edge tiles retain their unread neighbours. */
 void vramResolveCpuWrite(VRect r) {

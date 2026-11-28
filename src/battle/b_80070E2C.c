@@ -440,9 +440,6 @@ void battleMain(void) {
         currentBattleMode = 1;
     }
     battleStartPartyFixups();
-#ifdef PLATFORM_PC
-    pcVersusRosterDeployGears();
-#endif
     for (i = 0; i < 3; i++) {
         if (battleCharacters[i] != 0x7F) {
             battleStartUnlockedAbilities[i][0] = gameState.m16C0_abilities[battleCharacters[i]].m0_unlockedAbilitiesBitField[0];
@@ -643,6 +640,9 @@ void removeCurrentMonsterNameString(void) {
     for (i = 0; i < 8; i++) {
         previousEntityTurn.m8_nameLabels[i].m5D_monsterNameIsDisplayed = 0;
     }
+#ifdef PLATFORM_PC
+    pcVersusFitAttackNames();
+#endif
     battleVar1->mB0_isDialogWindowInitialized[5] = 0;
     battleVar1->mB0_isDialogWindowInitialized[4] = 0;
     battleRenderDebugAndMain();

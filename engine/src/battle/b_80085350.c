@@ -400,6 +400,9 @@ void applyPassiveModifiersAtEndOfTurn(s32 arg0) {
 
 /* starts a battle dialog (applyBattleItemToTargets) */
 void performItemOnTargets(s32 arg0, s16 arg1, u16 arg2) {
+#ifdef PLATFORM_PC
+    battleEntities.m5FC1_performAttackSub3_attacker = arg0;
+#endif
     performAttackSub3_var0.m0_performAttackSub3_var0 = 0;
     entitiesHitInCurrentAttackBF[0] = arg1;
     battleEntities.m5FAE_targetableMask = allPlayerCharacterBitmask;

@@ -8,6 +8,7 @@
 #include "../system/savestate.h"
 /* system/backlog.c (weak: programs that link this file without it). */
 extern void backlogCaption(const char* utf8) __attribute__((weak));
+extern int netplayActive(void) __attribute__((weak));
 #include "common.h"
 #include "main/filesystem.h"
 #include <SDL3/SDL.h>
@@ -183,7 +184,12 @@ int pcRegionalFile(int index, const unsigned char* table, const unsigned short* 
 #if VERSION_JP
     return 0; /* already using native Japanese assets */
 #endif
-    if (cdDiscIsJapanese() || !regionalBattleEnabled() || !table || !dirs || index<0 || index>=32768/7) return 0;
+    /* Battle banks must follow the same synchronous read path on both peers,
+     * even when only one has an Undub source. Otherwise the loading tasks can
+     * become ready on different simulation frames. */
+    int synchronous = netplayActive && netplayActive();
+    int undub = regionalBattleEnabled();
+    if (cdDiscIsJapanese() || (!undub && !synchronous) || !table || !dirs || index<0 || index>=32768/7) return 0;
     int disc=dirs[60], dir=0, file=0;
     if (disc<1 || disc>2) return 0;
     if (dirs[0x2d]!=0xffff && index>=(int)dirs[0x2d]-1 && index<(int)dirs[0x2d]+0x5c-1) {
@@ -195,11 +201,11 @@ int pcRegionalFile(int index, const unsigned char* table, const unsigned short* 
         if (copy) memcpy(copy,cache[i].bytes,(size_t)cache[i].size);
         return cache[i].size;
     }
-    Source* s=source(disc);
-    if (!s || cacheCount==CACHE_FILES) return 0;
-    int ownSize=0, jpSize=0, jpIndex=(int)s->dirs[dir]-1+file-1;
+    Source* s=undub ? source(disc) : NULL;
+    if ((!s && !synchronous) || cacheCount==CACHE_FILES) return 0;
+    int ownSize=0, jpSize=0;
     uint8_t* own=fileBytes(NULL,table,index,&ownSize);
-    uint8_t* jp=fileBytes(s->image,s->table,jpIndex,&jpSize);
+    uint8_t* jp=s ? fileBytes(s->image,s->table,(int)s->dirs[dir]-1+file-1,&jpSize) : NULL;
     uint8_t* merged=NULL; int length=0;
     if (!own || !jp) goto done;
     if (file<0x1f && dir==0x2d) {
@@ -217,12 +223,21 @@ int pcRegionalFile(int index, const unsigned char* table, const unsigned short* 
         if (!merged) goto done;
         memcpy(merged,jp,(size_t)length);
     }
-    length=((length>ownSize?length:ownSize)+3)&~3;
-    cache[cacheCount].index=index; cache[cacheCount].disc=disc;
-    cache[cacheCount].bytes=merged; cache[cacheCount++].size=length;
-    if (copy) memcpy(copy,merged,(size_t)length);
-    fprintf(stderr,"regional: Japanese battle audio %02X/%02X, disc %d (%d bytes)\n",dir,file,disc,length);
  done:
+    if (merged) {
+        fprintf(stderr,"regional: Japanese battle audio %02X/%02X, disc %d (%d bytes)\n",dir,file,disc,
+                ((length>ownSize?length:ownSize)+3)&~3);
+    } else if (synchronous && own) {
+        merged=own;
+        own=NULL;
+        length=ownSize;
+    }
+    if (merged) {
+        length=((length>ownSize?length:ownSize)+3)&~3;
+        cache[cacheCount].index=index; cache[cacheCount].disc=disc;
+        cache[cacheCount].bytes=merged; cache[cacheCount++].size=length;
+        if (copy) memcpy(copy,merged,(size_t)length);
+    }
     free(own); free(jp); return merged ? length : 0;
 }
 int pcRegionalBatch(void* commands, int first, const unsigned char* table, const unsigned short* dirs) {

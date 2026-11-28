@@ -134,7 +134,7 @@ int pcArenaPackSave(const char* spec, const unsigned char* codes, XgPartyRecord*
  * (the host's) and player 2's, checked; each of the session's boots starts
  * the match with them (system/arena.c's header). NULL, NULL: none. */
 void pcArenaSessionParties(const XgPartyRecord* player1, const XgPartyRecord* player2);
-void pcArenaSessionVersus(int kind, int table, int config, const XgPartyRecord* party);
+void pcArenaSessionVersus(int kind, int table, int config, const int members[3], const XgPartyRecord* party);
 int pcArenaMatchPhase(int* kind);
 int pcArenaMatchKind(void); /* the match's kind while one is asked or runs, else 0 */
 void pcArenaMatchQuit(void); /* the menu's Leave the match: the kept game back */

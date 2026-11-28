@@ -311,6 +311,24 @@ void updatePlayerWithStatusC000And2(void) {
     }
 }
 
+#ifdef PLATFORM_PC
+int pcVersusMirrorSlot(int entity);
+
+/* A player Gear's armor is tuned against story enemies. In party Versus,
+ * subtracting its full armor term can cancel another player's entire hit.
+ * Use the same attack and armor terms as a ratio for opposing saved Gears. */
+static s32 versusGearPhysicalDamage(s32 original, s32 attack, s32 armor) {
+    u8 a = startBattleAttackAnimationVar2;
+    u8 t = startBattleAttackAnimationVar4;
+    if (!attack || !armor || (currentEntityBattleStats->mA_attackFlags & 0x100) ||
+        !(pBattleEntities->m0_entities[t].m15A_flags & 0x80) ||
+        !((a < 3 && pcVersusMirrorSlot(t)) || (t < 3 && pcVersusMirrorSlot(a)))) {
+        return original;
+    }
+    return (s32)((unsigned long long)attack * attack / (attack + armor));
+}
+#endif
+
 /* Noah: startBattleAttackAnimationVar8_0 (physical / ether damage computation) */
 void startBattleAttackAnimationVar8_0(void) {
     u16 attack;
@@ -399,6 +417,9 @@ void startBattleAttackAnimationVar8_0(void) {
     } else {
         damage = atkMul * attack;
     }
+#ifdef PLATFORM_PC
+    damage = versusGearPhysicalDamage(damage, atkMul * attack, defMul * defence);
+#endif
     switch (currentEntityBattleStats->m1A_attackFormula) {
     case 0:
     case 1:
@@ -1519,10 +1540,18 @@ void applyBattleItemToTargets(u8 arg0) {
     s32 mask;
     u8 i;
 
+#ifdef PLATFORM_PC
+    /* An item can be the first action. Status durations use the acting
+     * character and the individual recipient just as a spell does. */
+    startBattleAttackAnimationVar2 = pBattleEntities->m5FC1_performAttackSub3_attacker;
+#endif
     initBattleAttackStatus();
     mask = 1;
     for (i = 0; i < 11; i++) {
         if (mask & pBattleEntities->m5FAC_entitiesHitInCurrentAttackBF) {
+#ifdef PLATFORM_PC
+            startBattleAttackAnimationVar5 = &pBattleEntities->m0_entities[i];
+#endif
             applyBattleItemToEntity(i, arg0);
         }
         mask <<= 1;
@@ -3210,6 +3239,9 @@ void startGearAttackAnimationVar8_0(void) {
     } else {
         damage = atkMul * atk;
     }
+#ifdef PLATFORM_PC
+    damage = versusGearPhysicalDamage(damage, atkMul * atk, defMul * def);
+#endif
     switch (currentEntityBattleStats->m1A_attackFormula) {
     case 0:
     case 1:

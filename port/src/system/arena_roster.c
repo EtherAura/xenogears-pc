@@ -193,6 +193,13 @@ static int packVisuals(RosterAssets* a, const char** why) {
     return 1;
 }
 
+static int validStats(const unsigned short stats[ARENA_ROSTER_STATS]) {
+    for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
+        if (stats[i] < 25 || stats[i] > 400) return 0;
+    }
+    return 1;
+}
+
 static int prepare(RosterAssets* a, const ArenaLoadout* loadout, const char* path, const char** why) {
     int total = loadout->side[0].count + loadout->side[1].count;
     if (loadout->side[0].count > 3 || loadout->side[1].count == 0 || total > ARENA_ROSTER_SLOTS ||
@@ -203,9 +210,9 @@ static int prepare(RosterAssets* a, const ArenaLoadout* loadout, const char* pat
     }
     if (!validStage) return refused(why, "Choose an arena.");
     for (int side = 0; side < 2; side++) {
-        for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
-            int value = loadout->side[side].multiplier[i];
-            if (value < 25 || value > 400) return refused(why, "Enemy stat multipliers must be between 25 and 400 percent.");
+        for (int i = 0; i < loadout->side[side].count; i++) {
+            if (!validStats(loadout->side[side].multiplier[i]))
+                return refused(why, "Enemy stat multipliers must be between 25 and 400 percent.");
         }
     }
     if (xgDiscOpen == NULL || xgEnemySpriteGet == NULL) return refused(why, "The roster uses the Extras disc reader.");
@@ -274,10 +281,8 @@ static int validLoadout(const ArenaLoadout* loadout, const int party[3]) {
         for (int i = 0; i < ARENA_ROSTER_ITEMS; i++) {
             if (team->items[i] > 99 || (team->count == 0 && team->items[i] != 0)) return 0;
         }
-        for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
-            if (team->multiplier[i] < 25 || team->multiplier[i] > 400) return 0;
-        }
         for (int i = 0; i < team->count; i++) {
+            if (!validStats(team->multiplier[i])) return 0;
             if (team->enemy[i].type >= 8 || ((team->gearSlots & (1 << i)) && team->gear[i].type >= 8)) return 0;
         }
     }
@@ -296,7 +301,7 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
         }
     }
     int usesAssignedGears = loadout->callGear || loadout->startInGear;
-    bytes[n++] = flags ? 2 : 1;
+    bytes[n++] = 3;
     bytes[n++] = loadout->stage;
     bytes[n++] = loadout->callGear;
     for (int i = 0; i < 3; i++) bytes[n++] = party[i];
@@ -304,26 +309,24 @@ int pcArenaLoadoutEncode(const ArenaLoadout* loadout, const int party[3], char c
         const ArenaEnemyTeam* team = &loadout->side[side];
         bytes[n++] = team->count;
         bytes[n++] = usesAssignedGears ? team->gearSlots : 0;
-        for (int i = 0; i < ARENA_ROSTER_STATS; i++) {
-            bytes[n++] = team->multiplier[i] & 0xff;
-            bytes[n++] = team->multiplier[i] >> 8;
-        }
         for (int i = 0; i < team->count; i++) {
             bytes[n++] = team->enemy[i].bank;
             bytes[n++] = team->enemy[i].type;
+            for (int stat = 0; stat < ARENA_ROSTER_STATS; stat++) {
+                bytes[n++] = team->multiplier[i][stat] & 0xff;
+                bytes[n++] = team->multiplier[i][stat] >> 8;
+            }
             if (usesAssignedGears && (team->gearSlots & (1 << i))) {
                 bytes[n++] = team->gear[i].bank;
                 bytes[n++] = team->gear[i].type;
             }
         }
     }
-    if (flags) {
-        bytes[n++] = flags;
-        for (int side = 0; side < 2; side++) {
-            if (!(flags & (4u << side))) continue;
-            memcpy(bytes + n, loadout->side[side].items, ARENA_ROSTER_ITEMS);
-            n += ARENA_ROSTER_ITEMS;
-        }
+    bytes[n++] = flags;
+    for (int side = 0; side < 2; side++) {
+        if (!(flags & (4u << side))) continue;
+        memcpy(bytes + n, loadout->side[side].items, ARENA_ROSTER_ITEMS);
+        n += ARENA_ROSTER_ITEMS;
     }
     for (int i = 0; i < n; i++) {
         code[2 * i] = hex[bytes[i] >> 4];
@@ -353,21 +356,33 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
         bytes[i] = high * 16 + low;
     }
     unsigned version = bytes[at++];
-    if (version != 1 && version != 2) return 0;
+    if (version < 1 || version > 3) return 0;
     decoded.stage = bytes[at++];
     decoded.callGear = bytes[at++];
     for (int i = 0; i < 3; i++) party[i] = bytes[at++];
     for (int side = 0; side < 2; side++) {
         ArenaEnemyTeam* team = &decoded.side[side];
-        if (at + 2 + 2 * ARENA_ROSTER_STATS > length) return 0;
+        unsigned short shared[ARENA_ROSTER_STATS];
+        if (at + 2 > length) return 0;
         team->count = bytes[at++];
         team->gearSlots = bytes[at++];
         if (team->count > ARENA_ROSTER_SLOTS) return 0;
-        for (int i = 0; i < ARENA_ROSTER_STATS; i++, at += 2) team->multiplier[i] = u16le(bytes + at);
+        if (version < 3) {
+            if (at + 2 * ARENA_ROSTER_STATS > length) return 0;
+            for (int stat = 0; stat < ARENA_ROSTER_STATS; stat++, at += 2) shared[stat] = u16le(bytes + at);
+            if (!validStats(shared)) return 0;
+        }
         for (int i = 0; i < team->count; i++) {
             if (at + 2 > length) return 0;
             team->enemy[i] = (ArenaEnemy){bytes[at], bytes[at + 1]};
             at += 2;
+            if (version < 3) {
+                memcpy(team->multiplier[i], shared, sizeof shared);
+            } else {
+                if (at + 2 * ARENA_ROSTER_STATS > length) return 0;
+                for (int stat = 0; stat < ARENA_ROSTER_STATS; stat++, at += 2)
+                    team->multiplier[i][stat] = u16le(bytes + at);
+            }
             if (team->gearSlots & (1 << i)) {
                 if (at + 2 > length) return 0;
                 team->gear[i] = (ArenaEnemy){bytes[at], bytes[at + 1]};
@@ -375,7 +390,7 @@ int pcArenaLoadoutDecode(const char* code, ArenaLoadout* loadout, int party[3]) 
             }
         }
     }
-    if (version == 2) {
+    if (version >= 2) {
         if (at == length) return 0;
         unsigned flags = bytes[at++];
         if (flags & ~15u) return 0;
@@ -512,7 +527,9 @@ const unsigned char* pcArenaRosterVisuals(int* bytes) {
 
 int pcArenaRosterMultiplier(int slot, int stat) {
     if (!pcArenaRosterActive() || slot < 3 || slot >= roster.count + 3 || stat < 0 || stat >= ARENA_ROSTER_STATS) return 0;
-    return roster.loadout.side[pcArenaRosterSide(slot)].multiplier[stat];
+    int index = slot - 3;
+    int side = index >= roster.split;
+    return roster.loadout.side[side].multiplier[index - (side ? roster.split : 0)][stat];
 }
 
 int pcArenaRosterGear(int slot, const unsigned char** controls, const unsigned char** model, int* x, int* position) {

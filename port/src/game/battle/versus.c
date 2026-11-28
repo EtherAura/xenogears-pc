@@ -78,6 +78,8 @@
 #include "versus.h"
 
 s32 battleRenderDebugAndMain(void);
+void battleSoundEffect(u8 id);
+extern u8 startCharacterJumpToEnemyVar0; /* native battle input sound switch */
 u8 executeMonsterScriptLower(sBattleScriptExecutionContext* ctx, u8 entity, u8 index);
 u8 executeMonsterScriptUpper(sBattleScriptExecutionContext* ctx, u8 entity);
 void skipScriptIfFalse(sBattleScriptExecutionContext* ctx);
@@ -98,12 +100,15 @@ u32 hwVSyncCount(void);               /* port/src/system: the log's vblank */
 void srand(u32 seed);
 extern u8* currentBattleSpecificStrings;
 extern u8* battleConfigFile2;
+extern u8 currentBattleConfig[0x20];
 extern u8 battleMonsterMapping[11];
 extern u8 isEntityReadyForBattle[11];
 extern u8 battleConfigs[0x220];
 extern u8 requestedBattleConfig;
 extern u8 targetsPerPriority[12];
 extern sBattle800D2204 D_800D2204[];
+extern u8 isTargetValid(u8 actor, u8 target);
+extern u8 numValidTarget;
 extern u8 selectedItemRow, selectedItemColumn, abilitySelectedTarget;
 extern u16 abilityTargetBitmask;
 void executeItem(u8 entity);
@@ -116,11 +121,13 @@ extern u8 battleInputButton;
 #define MAX_RUNS 6000    /* probe runs a turn */
 #define MAX_OUTCOMES 192 /* distinct action lists and legal target sets */
 #define MAX_CHOICES 128
-#define LABEL 24         /* game-text bytes of a label */
+#define LABEL 48         /* game-text bytes of a label */
 #if VERSION_JP
 #define PAGE 2           /* choices shown at once: the JP window shows no fourth line (measured) */
+#define GLYPH_LEAD 0xF8
 #else
 #define PAGE 6           /* choices shown at once */
+#define GLYPH_LEAD 0xFE
 #endif
 
 #define BUTTON_RIGHT 0x2000
@@ -212,38 +219,63 @@ static int writesElsewhere(u8 op) {
     return 0;
 }
 
-/* Story formations can address fixed slots, which a custom roster may omit.
- * Keep any surviving targets and substitute a live opponent for a strike
- * whose original slots are all missing. Otherwise the native jump queue can
- * wait for an animation callback from an actor that does not exist. */
+/* Story scripts can name a fixed slot that is absent in a custom team.
+ * Keep authored targets that exist. For a missing target, the approach and
+ * the strike need the same replacement, on the side called for by the move. */
+enum RosterTargetPool { OPPONENT, LIVING_ALLY, FALLEN_ALLY, TARGET_POOLS };
+
+static int rosterTargetPool(const sBattleScriptContext* strike) {
+    if (strike->m0_attackType == 1 && strike->m1_operand < 200) {
+        const sBattle800CDD40Sub* row = &battleEntities.m35D8_enemiesBattleStats[strike->m1_operand];
+        switch (row->m16_effectType) {
+        case 1: case 5: case 7: return LIVING_ALLY; /* heal, cure, repair */
+        case 6: return FALLEN_ALLY; /* revive */
+        }
+    }
+    return OPPONENT;
+}
+
 static void resolveRosterTargets(u8 entity) {
     u16 present = 0;
-    u16 opponents[11];
-    s32 count = 0;
-    s32 i;
+    u16 candidates[TARGET_POOLS][11];
+    int counts[TARGET_POOLS] = {0};
+    int i;
 
     if (!pcArenaRosterActive()) return;
     for (i = 0; i < 11; i++) {
+        int pool, ko;
         u16 bit;
+        const sBattleEntity* target = &battleEntities.m0_entities[i];
         if (!isBattleSlotFilled.m0_isBattleSlotFilled[i] || battleVisualEntities[i].m3_hidden) continue;
         bit = characterIdToTargetBitmask(i);
         present |= bit;
-        if (pcArenaRosterSide(i) != pcArenaRosterSide(entity) && isEntityReadyForBattle[i] != 0xFF) {
-            opponents[count++] = bit;
-        }
+        ko = (apConfigArray[i].m1_gearState ? target->mA4_gear.m7C_statusFlags : target->m0_base.m7C_statusFlags[0]) & 0x8000;
+        pool = pcArenaRosterSide(i) == pcArenaRosterSide(entity) ? (ko ? FALLEN_ALLY : LIVING_ALLY) : OPPONENT;
+        if (pool != FALLEN_ALLY && (ko || isEntityReadyForBattle[i] == 0xFF)) continue;
+        candidates[pool][counts[pool]++] = bit;
     }
     for (i = 0; i < 32; i++) {
         sBattleScriptContext* c = &battleScriptContext[i];
+        const sBattleScriptContext* strike = c;
+        int pool;
         if (c->m0_attackType != 1 && c->m0_attackType != 2) continue;
         c->m6_mask &= present;
-        if (c->m6_mask == 0 && count != 0) {
-            /* The approach and damage often shared the same original mask. */
-            if (c->m0_attackType == 1 && i > 0 && battleScriptContext[i - 1].m0_attackType == 2) {
-                c->m6_mask = battleScriptContext[i - 1].m6_mask;
-            } else {
-                opDraws = 0;
-                c->m6_mask = opponents[randomInRange(0, count - 1)];
+        if (c->m6_mask) continue;
+        if (c->m0_attackType == 2 && i + 1 < 32 && c[1].m0_attackType == 1) {
+            strike = &c[1];
+            if (strike->m6_mask & present) {
+                c->m6_mask = strike->m6_mask & present;
+                continue;
             }
+        }
+        pool = rosterTargetPool(strike);
+        if (c->m0_attackType == 1 && i > 0 && c[-1].m0_attackType == 2) {
+            int j;
+            for (j = 0; j < counts[pool]; j++) c->m6_mask |= c[-1].m6_mask & candidates[pool][j];
+        }
+        if (!c->m6_mask && counts[pool]) {
+            opDraws = 0;
+            c->m6_mask = candidates[pool][randomInRange(0, counts[pool] - 1)];
         }
     }
 }
@@ -532,8 +564,14 @@ static void gameText(u8* out, const u8* s, s32 max) {
         max = LABEL - 1;
     }
     while (s != NULL && *s != 0 && n < max) {
-        out[n++] = *s == 1 ? 0x10 : *s;
-        s++;
+        u8 ch = *s++;
+        if (ch >= GLYPH_LEAD) {
+            if (n + 2 > max) break;
+            out[n++] = ch;
+            out[n++] = *s++;
+        } else {
+            out[n++] = ch == 1 ? 0x10 : ch;
+        }
     }
     out[n] = 0;
 }
@@ -547,12 +585,12 @@ unsigned char* pcVersusEnemyText(int entity, int name) {
     if (data != NULL) {
         strings = (u8*)data + ((const u16*)data)[24];
         if (name < 0) name = type + 1;
-        if ((u32)name >= *(const u32*)strings) return (u8*)empty;
     } else {
         strings = currentBattleSpecificStrings;
         if (name < 0) name = battleMonsterMapping[entity];
     }
-    return strings == NULL ? (u8*)empty : getDialogParamPointer(strings, name);
+    if (strings == NULL || (u32)name >= *(const u32*)strings) return (u8*)empty;
+    return getDialogParamPointer(strings, name);
 }
 
 static void entityName(u8* out, s32 entity) {
@@ -565,103 +603,298 @@ static void entityName(u8* out, s32 entity) {
     }
 }
 
+enum {
+    MOVE_STRIKE, MOVE_COMBO, MOVE_CHAIN, MOVE_ETHER, MOVE_DARK,
+    MOVE_HEAL, MOVE_STATUS, MOVE_DRAIN, MOVE_FIXED, MOVE_CURE,
+    MOVE_REVIVE, MOVE_REPAIR, MOVE_HALVE, MOVE_REVENGE, MOVE_MOVE,
+    MOVE_STANCE, MOVE_WAIT, MOVE_SUMMON, MOVE_ALL, MOVE_LIGHT,
+    MOVE_HEAVY, MOVE_NEUTRAL,
+};
+
+/* Fixed descriptions only for moves without a name in the acting enemy's
+ * script. The second spelling uses the Japanese retail font. */
+static void moveWord(u8* out, s32 id) {
+#if VERSION_JP
+#define MOVE_TEXT(us, jp) jp
+#else
+#define MOVE_TEXT(us, jp) us
+#endif
+    static const char* const names[] = {
+        MOVE_TEXT("Physical strike", "\xFD\x1B\xFD\xC1\xFA\x2E\xDB"), /* 物理攻撃 */
+        MOVE_TEXT("Martial combo", "\xFD\xF2\xFB\xD0\xFA\x2E\xDB"), /* 連続攻撃 */
+        MOVE_TEXT("Mixed combo", "\xFD\xF2\xFB\xD0\xF9\x77"), /* 連続技 */
+        MOVE_TEXT("Ether attack", "\xAA\x55\xBA\xD1\xFA\x2E\xDB"), /* エーテル攻撃 */
+        MOVE_TEXT("Dark Matter", "\xF8\xA1\xFA\x48\xFC\xA8"), /* 暗黒波 */
+        MOVE_TEXT("Restore HP", "\x66\x69\xD9\xFD\x14"), /* ＨＰ回復 */
+        MOVE_TEXT("Status change", "\xFB\x37\xFB\xE4\xF4\xF8\xF4"), /* 状態変化 */
+        MOVE_TEXT("Drain", "\xF9\x86\xFA\xE1"), /* 吸収 */
+        MOVE_TEXT("Special damage", "\xFC\x88\xFA\xD7\xFA\x2E\xDB"), /* 特殊攻撃 */
+        MOVE_TEXT("Clear status", "\xFB\x37\xFB\xE4\xD9\xFD\x14"), /* 状態回復 */
+        MOVE_TEXT("Revive", "\xFD\x14\xF9\x36"), /* 復活 */
+        MOVE_TEXT("Repair Gear", "\xF9\x6A\xFB\xE0\xD9\xFD\x14"), /* 機体回復 */
+        MOVE_TEXT("Fractional HP attack", "\xF9\x35\xFA\x42\xFA\x2E\xDB"), /* 割合攻撃 */
+        MOVE_TEXT("Missing HP attack", "\xFC\xCB\xDB"), /* 反撃 */
+        MOVE_TEXT("Change position", "\xF8\xB0\xFC\x80"), /* 移動 */
+        MOVE_TEXT("Change stance", "\xFA\x31\x6F"), /* 構え */
+        MOVE_TEXT("Wait", "\xFB\xE3\xF9\x6A"), /* 待機 */
+        MOVE_TEXT("Reinforcements", "\xFB\xC2\xF8\xDC"), /* 増援 */
+        MOVE_TEXT(" (all)", "\x10\xFB\xA1\xFB\xE0"), /*  全体 */
+        MOVE_TEXT("Light strike", "\xFA\xD2\xFA\x2E\xDB"), /* 弱攻撃 */
+        MOVE_TEXT("Heavy strike", "\xF9\xA1\xFA\x2E\xDB"), /* 強攻撃 */
+        MOVE_TEXT("Strike", "\xFB\xDD\xDB"), /* 打撃 */
+    };
+#undef MOVE_TEXT
+#if VERSION_JP
+    gameText(out, (const u8*)names[id], LABEL - 1);
+#else
+    word(out, names[id]);
+#endif
+}
+
+static int labelBytes(const u8* text) {
+    int len = 0;
+    while (text[len]) len += text[len] >= GLYPH_LEAD ? 2 : 1;
+    return len;
+}
+
+/* Only these commands actually display a name. Bytes in the same position
+ * of a move, camera or wait command have unrelated meanings. */
+static int isMoveName(int entity, int index) {
+    const u8* s;
+    if (index <= 0) return 0;
+    s = pcVersusEnemyText(entity, index);
+    /* Empty placeholders, countdown digits and quoted dialogue are also
+     * stored in the enemy string bank. They are not technique names. */
+    int hasText = 0;
+    if (s[0] < 0x10 || (s[0] == 0xFF && s[1] == 0xFF)) return 0;
+    while (*s) {
+        unsigned glyph = *s++;
+        if (glyph >= GLYPH_LEAD) glyph = (glyph << 8) | *s++;
+#if VERSION_JP
+        if (glyph == 0x59 || glyph == 0x5C || glyph == 0xF801 ||
+            (glyph >= 0xF81B && glyph <= 0xF81E)) return 0;
+        if ((glyph >= 0x18 && glyph <= 0x21) || glyph == 0x4F) continue;
+#else
+        if (glyph == 0x58 || glyph == 0x7B || glyph == 0x7C || glyph == 0x84 ||
+            glyph == 0x85 || glyph == 0x8F || glyph == 0x92) return 0;
+        if ((glyph >= 0x16 && glyph <= 0x1F) || (glyph >= 0x61 && glyph <= 0x6A)) continue;
+#endif
+        if (glyph > 0x10) hasText = 1;
+    }
+    return hasText;
+}
+
+/* Retail enemy banners often append a slash and an explanation of the
+ * mechanics. Display the technique itself in the player's selector. */
+static void copyMoveName(u8* out, const u8* source) {
+    int bytes = 0, end = 0;
+#if VERSION_JP
+    const int slash = 0x17, wideSlash = 0x56, wideSpace = 0x4F;
+#else
+    const int slash = 0x15, wideSlash = 0x79, wideSpace = 0x10;
+#endif
+    while (*source == 0x10 || *source == wideSpace) source++;
+    while (source[bytes] && source[bytes] != slash && source[bytes] != wideSlash) {
+        int glyph = source[bytes];
+        bytes += glyph >= GLYPH_LEAD ? 2 : 1;
+        if (glyph > 0x10 && glyph != wideSpace) end = bytes;
+    }
+    gameText(out, source, end);
+}
+
+static int moveNameIndex(int entity, const sBattleScriptContext* c) {
+    int name = 0, k;
+    for (k = 0; k < 32 && c[k].m0_attackType; k++) {
+        switch (c[k].m0_attackType) {
+        case 12: case 13:
+            if (isMoveName(entity, c[k].m3_nameIndex)) name = c[k].m3_nameIndex;
+            break;
+        case 16: name = 0; break;
+        case 1: return isMoveName(entity, c[k].m3_nameIndex) ? c[k].m3_nameIndex : name;
+        }
+    }
+    return name;
+}
+
+/* Match a technique across AI branches using its whole sequence of effects
+ * and strikes. Different actors can use the same local animation numbers. */
+static int sameTechnique(const sBattleScriptContext* a, const sBattleScriptContext* b) {
+    int i = 0, j = 0, matched = 0;
+    for (;;) {
+        while (i < 32 && a[i].m0_attackType && a[i].m0_attackType != 1 && a[i].m0_attackType != 13) i++;
+        while (j < 32 && b[j].m0_attackType && b[j].m0_attackType != 1 && b[j].m0_attackType != 13) j++;
+        if (i == 32 || !a[i].m0_attackType) return matched && (j == 32 || !b[j].m0_attackType);
+        if (j == 32 || a[i].m0_attackType != b[j].m0_attackType) return 0;
+        if (a[i].m0_attackType == 1) {
+            if (a[i].m1_operand != b[j].m1_operand || a[i].m2_animationId != b[j].m2_animationId) return 0;
+        } else if (a[i].m4_valueLow != b[j].m4_valueLow || a[i].m5_valueHigh != b[j].m5_valueHigh) return 0;
+        i++; j++; matched = 1;
+    }
+}
+
+/* A type-13 command plays an ability from 0E/022 + twice its effect ID.
+ * These contiguous ranges map a named party ability to its native text bank
+ * and entry. Derived from the learnable commands in 12/02, the animation
+ * flags in 0C/03 and the battle overlay's per-character animation bases.
+ * US and JP share the indices. Read the spelling from the active game. */
+static const u8* abilityMoveName(int effect) {
+    static const struct { u8 first, last, bank, entry; } ranges[] = {
+        {0, 5, 0, 7},
+        {7, 13, 20, 1},
+        {14, 14, 20, 0},
+        {22, 25, 1, 7},
+        {26, 37, 20, 16},
+        {47, 50, 2, 7},
+        {51, 54, 9, 7},
+        {55, 65, 20, 32},
+        {74, 77, 3, 7},
+        {78, 87, 20, 48},
+        {94, 94, 4, 7},
+        {95, 95, 4, 9},
+        {96, 96, 4, 8},
+        {97, 106, 20, 64},
+        {113, 115, 5, 7},
+        {116, 119, 20, 80},
+        {124, 126, 6, 7},
+        {127, 129, 10, 7},
+        {131, 138, 20, 96},
+        {143, 150, 20, 112},
+        {151, 155, 20, 128},
+    };
+    unsigned int i;
+    for (i = 0; i < sizeof ranges / sizeof ranges[0]; i++) {
+        if (effect >= ranges[i].first && effect <= ranges[i].last)
+            return getDeathblowName(ranges[i].bank, ranges[i].entry + effect - ranges[i].first);
+    }
+    return NULL;
+}
+
 static void actionLabel(u8* out, s32 entity, const sBattleScriptContext* c) {
-    s32 k;
+    int name = moveNameIndex(entity, c), first = -1, strikes = 0, repeat = 1, effect = -1;
+    int descriptor = MOVE_WAIT, k, len, last = -1;
+    int bank = currentBattleConfig[0], type = battleMonsterMapping[entity] - 1;
+    unsigned int targets = 0;
+    out[0] = 0;
+    if (!name) {
+        for (k = 0; k < outcomeCount; k++) {
+            int sibling;
+            if (!sameTechnique(c, outcomes[k].ctx)) continue;
+            sibling = moveNameIndex(entity, outcomes[k].ctx);
+            if (!sibling) continue;
+            if (name && name != sibling) { name = 0; break; }
+            name = sibling;
+        }
+    }
+    for (k = 0; k < 32 && c[k].m0_attackType; k++) {
+        if (c[k].m0_attackType == 13 && effect < 0)
+            effect = c[k].m4_valueLow | ((c[k].m5_valueHigh & 1) << 8);
+        if (c[k].m0_attackType == 2) descriptor = MOVE_MOVE;
+        if (c[k].m0_attackType == 3 || c[k].m0_attackType == 4) descriptor = MOVE_STANCE;
+        if (c[k].m0_attackType == 7) descriptor = MOVE_SUMMON;
+        if (c[k].m0_attackType != 1 || c[k].m1_operand >= 200) continue;
+        if (first < 0) first = k;
+        last = k;
+        if (c[k].m1_operand != c[first].m1_operand || c[k].m2_animationId != c[first].m2_animationId) repeat = 0;
+        if (c[k].m6_mask & (c[k].m6_mask - 1)) targets = 1;
+        strikes++;
+    }
+    if (name) copyMoveName(out, pcVersusEnemyText(entity, name));
+    if (!out[0] && effect >= 0) gameText(out, abilityMoveName(effect), LABEL - 1);
+    pcArenaRosterBank(entity, &bank, &type);
+    /* On-foot Id chains the same deathblows as Fei. His own script doesn't
+     * announce them. Use Fei's localized names and the order of both hits. */
+    if (!out[0] && bank == 51 && type == 0 && strikes == 2 &&
+        c[first].m1_operand == 8 && c[last].m1_operand == 8 && c[last].m2_animationId == 29) {
+        if (c[first].m2_animationId == 29) gameText(out, getDeathblowName(0, 0), LABEL - 1);
+        if (c[first].m2_animationId == 30) {
+            gameText(out, getDeathblowName(0, 1), LABEL / 2);
+            len = labelBytes(out);
+            word(out + len, " + ");
+            len = labelBytes(out);
+            gameText(out + len, getDeathblowName(0, 0), LABEL - len - 1);
+        }
+    }
+    if (!out[0]) {
+        if (first >= 0) {
+            const sBattle800CDD40Sub* row = &battleEntities.m35D8_enemiesBattleStats[c[first].m1_operand];
+            switch (row->m16_effectType) {
+            case 1: descriptor = MOVE_HEAL; break;
+            case 2: descriptor = MOVE_STATUS; break;
+            case 3: descriptor = MOVE_DRAIN; break;
+            case 4: descriptor = row->m1A_attackFormula == 0 ? MOVE_HALVE :
+                                 row->m1A_attackFormula == 2 ? MOVE_REVENGE : MOVE_FIXED; break;
+            case 5: descriptor = MOVE_CURE; break;
+            case 6: descriptor = MOVE_REVIVE; break;
+            case 7: descriptor = MOVE_REPAIR; break;
+            default:
+                /* An Ether damage formula alone does not identify a spell:
+                 * melee animations can use it, including Grahf's strikes. */
+                if (effect >= 0) descriptor = MOVE_ETHER;
+                else if (strikes > 1) descriptor = repeat ? MOVE_COMBO : MOVE_CHAIN;
+                else if (row->m11_power < 20) descriptor = MOVE_LIGHT;
+                else if (row->m11_power > 20) descriptor = MOVE_HEAVY;
+                else descriptor = row->mA_attackFlags & 0x100 ? MOVE_NEUTRAL : MOVE_STRIKE;
+            }
+        } else if (effect >= 0) descriptor = MOVE_ETHER;
+        if (effect == 210) descriptor = MOVE_DARK; /* Id's party-wide vortex */
+        if (bank == 56 && (type == 0 || type == 1) && effect < 0 && first >= 0 &&
+            c[first].m2_animationId == 29) descriptor = MOVE_COMBO;
+        moveWord(out, descriptor);
+        if (targets) {
+            u8 all[16];
+            moveWord(all, MOVE_ALL);
+            len = labelBytes(out);
+            if (len + labelBytes(all) < LABEL) __builtin_memcpy(out + len, all, labelBytes(all) + 1);
+        }
+    }
+    len = labelBytes(out);
+    if (repeat && strikes > 1 && strikes < 10 && len + 3 < LABEL) {
+        char suffix[] = " x2";
+        suffix[2] = '0' + strikes;
+        word(out + len, suffix);
+    }
+}
 
-    for (k = 0; k < 32; k++) {
-        if (c[k].m0_attackType != 0 && c[k].m3_nameIndex != 0 && currentBattleSpecificStrings != NULL) {
-            gameText(out, pcVersusEnemyText(entity, c[k].m3_nameIndex), LABEL - 1);
-            if (out[0] != 0) {
-                return;
-            }
-        }
-    }
-    /* No name in the battle's strings: what the attack is, from the entry the
-     * damage uses (battleEntities.m35D8_enemiesBattleStats[operand]: the
-     * attack's index + 0xFF, performAttackSub3): Ether for attack formula 1
-     * or attack flag 0x100 (b_800941A4.c: the ether stat, ether defence and
-     * immunity), else Physical; the damage's multiplier, power / 20 ("x1.5");
-     * "all" for a mask of more than one target. */
-    for (k = 0; k < 32; k++) {
-        if (c[k].m0_attackType == 1 && c[k].m1_operand < 200) {
-            const sBattle800CDD40Sub* a = &battleEntities.m35D8_enemiesBattleStats[c[k].m1_operand];
-            s32 ether = a->m1A_attackFormula == 1 || (a->mA_attackFlags & 0x100);
-            /* power / 20 scales the damage: formulas 0 and 1 at the end
-             * (startBattleAttackAnimationVar8_0 and the Gears' _var8_0:
-             * attack flag 0x400 makes it 20), formula 2 in the attack */
-            s32 power = a->m1A_attackFormula != 2 && (a->mA_attackFlags & 0x400) ? 20 : a->m11_power;
-            s32 targets = 0;
-            s32 i;
-            char s[LABEL];
-            s32 n = 0;
-            s32 prefix = 0;
+/* A legacy script can enqueue two different banners back to back for one
+ * strike. The last one introduces the action. Remove superseded consecutive
+ * announcements only in a manually selected turn, leaving later hits, speech,
+ * target masks, damage commands and the ordinary AI's script alone. */
+static u8 chosenMoveText[LABEL];
 
-#if VERSION_JP
-            /* エーテル, 物理 and 全体 in the retail battle font. */
-            static const u8 etherName[] = {0xAA, 0x55, 0xBA, 0xD1};
-            static const u8 physicalName[] = {0xFD, 0x1B, 0xFD, 0xC1};
-            static const u8 allName[] = {0x10, 0xFB, 0xA1, 0xFB, 0xE0, 0};
-            prefix = sizeof(etherName);
-            __builtin_memcpy(out, ether ? etherName : physicalName, prefix);
-#else
-            const char* name = ether ? "Ether" : "Physical";
-            while (*name != 0) s[n++] = *name++;
-#endif
-            for (i = 0; i < 11; i++) {
-                targets += bitmaskCharacterCheck(c[k].m6_mask, i) != 0;
-            }
-            /* By hand: a libc call here would get a pc_link stub (game C). */
-            if (power != 20) {
-                s32 h = power * 5; /* power / 20 in hundredths: at most 1275 */
-                s[n++] = ' ';
-                s[n++] = 'x';
-                if (h >= 1000) s[n++] = (char)('0' + h / 1000);
-                s[n++] = (char)('0' + h / 100 % 10);
-                if (h % 100 != 0) {
-                    s[n++] = '.';
-                    s[n++] = (char)('0' + h / 10 % 10);
-                    if (h % 10 != 0) s[n++] = (char)('0' + h % 10);
-                }
-            }
-#if !VERSION_JP
-            if (targets > 1) {
-                const char* all = " all";
-                while (*all != 0) s[n++] = *all++;
-            }
-#endif
-            s[n] = 0; /* at most "Physical x12.7 all": 18 of LABEL */
-            word(out + prefix, s);
-#if VERSION_JP
-            if (targets > 1) __builtin_memcpy(out + prefix + n, allName, sizeof(allName));
-#endif
-            return;
+u8* pcVersusMoveText(int entity, int idx) {
+    const sBattleScriptContext* c = &battleScriptContext[idx];
+    if (pcVersusSession() == PC_VERSUS_IN &&
+        ((c->m0_attackType == 12 && c->m1_operand == 0xFF && !c->m3_nameIndex) ||
+         ((c->m0_attackType == 1 || c->m0_attackType == 13) && c->m3_nameIndex == 0xFF)))
+        return chosenMoveText;
+    return pcVersusEnemyText(entity, c->m3_nameIndex);
+}
+
+static void resolveMoveCaptions(sBattleScriptContext* c, int entity, const u8* label) {
+    int i, kept = 0, hasAction = 0;
+    int name = moveNameIndex(entity, c);
+    __builtin_memcpy(chosenMoveText, label, LABEL);
+    for (i = 0; i < 32 && c[i].m0_attackType; i++) {
+        if (c[i].m0_attackType == 1 || c[i].m0_attackType == 13) {
+            hasAction = 1;
+            if (name && c[i].m3_nameIndex == name) c[i].m3_nameIndex = 0xFF;
         }
-    }
-    for (k = 0; k < 32; k++) {
-        if (c[k].m0_attackType == 1 || c[k].m0_attackType == 2) {
-#if VERSION_JP
-            word(out, "ACTION");
-#else
-            word(out, "Attack");
-#endif
-            return;
+        if (c[i].m0_attackType == 12 && isMoveName(entity, c[i].m3_nameIndex)) {
+            if (i + 1 < 32 && c[i + 1].m0_attackType == 12 && isMoveName(entity, c[i+1].m3_nameIndex)) continue;
+            if (c[i].m3_nameIndex == name) {
+                c[i].m1_operand = 0xFF;
+                c[i].m3_nameIndex = 0;
+            }
         }
+        c[kept++] = c[i];
     }
-    for (k = 0; k < 32; k++) {
-        if (c[k].m0_attackType != 0) {
-#if VERSION_JP
-            word(out, "MOVE");
-#else
-            word(out, "Move");
-#endif
-            return;
-        }
+    if (kept != i) __builtin_memset(c + kept, 0, (32 - kept) * sizeof(*c));
+    if (!name && hasAction && kept < 31) {
+        __builtin_memmove(c + 1, c, kept * sizeof(*c));
+        __builtin_memset(c, 0, sizeof(*c));
+        c[0].m0_attackType = 12;
+        c[0].m1_operand = 0xFF;
     }
-#if VERSION_JP
-    word(out, "NONE");
-#else
-    word(out, "Nothing");
-#endif
 }
 
 /* An action list's targets: an attack's or an ability's (types 1, 2, 13),
@@ -739,12 +972,12 @@ static void numberSame(u8 (*l)[LABEL], s32 count) {
         total = 0;
         n = 0;
         for (j = 0; j < count; j++) {
-            if (__builtin_strcmp((const char*)orig[i], (const char*)orig[j]) == 0) {
+            if (labelBytes(orig[i]) == labelBytes(orig[j]) && !__builtin_memcmp(orig[i], orig[j], labelBytes(orig[i]))) {
                 total++;
                 n += j <= i;
             }
         }
-        len = (s32)__builtin_strlen((const char*)l[i]);
+        len = labelBytes(l[i]);
         if (total > 1 && n < 10 && len + 3 < LABEL) {
             char number[3] = {' ', (char)('0' + n), 0};
             word(l[i] + len, number); /* the font's codes differ: JP digits are 0x18-0x21 */
@@ -760,9 +993,6 @@ static void numberSame(u8 (*l)[LABEL], s32 count) {
 #define WINDOW_Y 0x34
 
 static DialogWindow18 window;
-static DialogWindow18 ringCaption;
-static int ringCaptionShown;
-static int partyGearCaptionShown;
 static int enemyRingShown;
 static int enemyItemMenu;
 static s32 shown;
@@ -773,32 +1003,6 @@ static u8 text[(PAGE + 2) * (LABEL + 1) + 2];
 
 void pcVersusPartySelection(int player) {
     partySelection = player;
-    if (player == 0) pcVersusExitGearCaption(0, 0);
-}
-
-void pcVersusExitGearCaption(int show, int selected) {
-    u8 caption[LABEL];
-
-    if (!show) {
-        if (partyGearCaptionShown) {
-            ringCaptionShown = 0;
-            partyGearCaptionShown = 0;
-        }
-        return;
-    }
-    if (!partyGearCaptionShown) {
-        word(caption, "Exit Gear");
-        setupWindowSize2(&ringCaption, 0x380, 0x100, 0x60, 0x30, 22, 1);
-        ringCaption.m10_flags |= 2;
-        ringCaption.m68_charsPerStep = 0x20;
-        resetDialogWindow18(&ringCaption);
-        if (pcBacklogIgnore) pcBacklogIgnore(&ringCaption);
-        addDialogWindowsToOTSub2(&ringCaption, caption);
-        setupMultiChoiceColor(&ringCaption, 0xEF, 0x1E, 0xF0);
-        ringCaptionShown = 1;
-        partyGearCaptionShown = 1;
-    }
-    setSelectedLineForMultiChoice(&ringCaption, selected ? 0 : 0xFF);
 }
 
 int pcVersusEnemyRing(void) {
@@ -822,11 +1026,6 @@ int pcVersusPrivateSelection(void) {
 /* drawBattleMode1/2 (src/battle/b_800728B8.c), after the dialogue windows. */
 void pcVersusDraw(void) {
     pcVersusMirrorLabel(); /* a mirror match: player 2's name label (mirror.c) */
-    if (ringCaptionShown) {
-        OTag hidden = 0;
-        updateAndRenderTextForDialogWindow(&ringCaption, pcVersusPrivateSelection() ? &hidden : D_800CCB04.m0_pCurrentBattleOT + 1,
-                                           D_800CCB04.m30_battleOddOrEven);
-    }
     if (shown) {
         /* The text has to finish printing on both peers before input goes
          * through. Keep its update and discard only the opponent's draw. */
@@ -878,8 +1077,10 @@ static void closeWindow(void) {
 }
 
 static s32 append(s32 at, const u8* s) {
-    while (*s != 0 && at < (s32)sizeof(text) - 2) {
-        text[at++] = *s++;
+    s32 n = labelBytes(s);
+    if (at + n < (s32)sizeof(text) - 1) {
+        __builtin_memcpy(text + at, s, n);
+        at += n;
     }
     return at;
 }
@@ -950,12 +1151,12 @@ static s32 choose(const u8* title, u8 (*labels)[LABEL], s32 count, s32 canCancel
             if (choice >= first && choice < first + PAGE) {
                 setSelectedLineForMultiChoice(&window, choice - first + firstChoiceLine);
             }
-            battleSoundEffect2(0x4C);
+            battleSoundEffect(0x4C);
         } else if (pressed & BUTTON_EXECUTE) {
-            battleSoundEffect2(0x4D);
+            battleSoundEffect(0x4D);
             break;
         } else if ((pressed & BUTTON_CANCEL) && canCancel) {
-            battleSoundEffect2(0x4C);
+            battleSoundEffect(0x4E);
             choice = -1;
             break;
         }
@@ -1033,7 +1234,10 @@ void pcVersusPartyGearMenu(int slot) {
     if (!partyGearSlot(slot) || !partyGearRulesActive()) return;
     sBattleVar2Sub* menu = &battleVar2->m0_entityMenus[slot];
     menu->m1C_isCommandEnabled[7] = partyCanCallGear(slot) ? 0 : party1C_InitialValues[7];
-    if (pcVersusPartyCanExitGear(slot)) menu->m1C_isCommandEnabled[8] = 0;
+    if (pcVersusPartyCanExitGear(slot)) {
+        menu->mC_extraCommandsMapping2[2] = battleCommandsSetups[0][7];
+        menu->m1C_isCommandEnabled[8] = 0;
+    }
 }
 
 static void setPartyGearForm(int slot, int inGear) {
@@ -1075,16 +1279,11 @@ static void boardPartyGear(int slot) {
         initMechaForBattle(slot);
     }
     setPartyGearForm(slot, 1);
+    setCameraVisibleEntities(-1);
     pcArenaLog("  player %d called Gear for slot %d", slot < 3 ? 1 : 2, slot);
 }
 
-int pcVersusCallPartyGear(int slot) {
-    if (!partyGearSlot(slot) || !partyGearRulesActive()) return 0;
-    if (partyCanCallGear(slot) && !battleVisualEntities[slot].m4_isGear) boardPartyGear(slot);
-    return 1;
-}
-
-int pcVersusExitPartyGear(int slot) {
+static void dismountPartyGear(int slot) {
     s32 dir, sub, file, index;
     void* sprite;
     sBattleVisualEntity* visual;
@@ -1092,7 +1291,6 @@ int pcVersusExitPartyGear(int slot) {
     Vec2s16* position;
     SpriteActorCore* core;
 
-    if (!pcVersusPartyCanExitGear(slot)) return 0;
     visual = &battleVisualEntities[slot];
     s32 character = visual->m2_characterId;
     u8* config = battleConfigs + requestedBattleConfig * 0x20;
@@ -1101,14 +1299,13 @@ int pcVersusExitPartyGear(int slot) {
     layout = &battleSlotLayout[footSlot + 8 * secondSide];
     for (index = 0; layout->m1_mask & (1 << index); index++) {}
 
-    pcVersusExitGearCaption(0, 0);
     updateCharacterBlinkingTask(0);
     markEnemyDead(slot); /* Release the Gear's position. */
     clearBattleAnimationData();
     freeMecha_battle(slot);
     if (secondSide) {
-        freeMecha_battle(slot * 2 + 13);
-        freeMecha_battle(slot * 2 + 14);
+        freeMecha_battle(pcVersusGearPartSlot(slot, 0));
+        freeMecha_battle(pcVersusGearPartSlot(slot, 1));
     } else {
         battleMechaTextureSlotsUsed &= ~(1u << slot);
     }
@@ -1141,13 +1338,24 @@ int pcVersusExitPartyGear(int slot) {
     freeHeap(core->m20_object->m2C_subSpriteBuffer);
     core->m20_object->m30_subSprites = core->m20_object->m2C_subSpriteBuffer = allocateHeap(0x300, 0);
     sampleBattleTerrainHeight(core);
+    setCameraVisibleEntities(-1);
     pcArenaLog("  player %d exited Gear at slot %d", secondSide + 1, slot);
+}
+
+int pcVersusCallPartyGear(int slot) {
+    if (!partyGearSlot(slot) || !partyGearRulesActive()) return 0;
+    if (battleVisualEntities[slot].m4_isGear) {
+        if (!pcVersusPartyCanExitGear(slot)) return 0;
+        dismountPartyGear(slot);
+    } else if (partyCanCallGear(slot)) {
+        boardPartyGear(slot);
+    }
     return 1;
 }
 
 int pcVersusEnemyTurnResolved(void) { return enemyTurnResolved; }
 
-static void callEnemyGear(u8 slot) {
+static int mountEnemyGear(u8 slot) {
     const u8* controls;
     const u8* model;
     const u8* data;
@@ -1159,7 +1367,7 @@ static void callEnemyGear(u8 slot) {
     u8 m = slot - 3;
     EnemyGearState* saved = &enemyGear[m];
 
-    if (!pcArenaRosterGear(slot, &controls, &model, &x, &position)) return;
+    if (!pcArenaRosterGear(slot, &controls, &model, &x, &position)) return 0;
     side = pcArenaRosterSide(slot);
     pcArenaRosterGearActivated(slot);
     data = pcArenaRosterBank(slot, &bank, &type);
@@ -1196,8 +1404,8 @@ static void callEnemyGear(u8 slot) {
     }
     mechaInitEnvironmentMechaMesh(slot, 0x80, (void*)controls, (void*)model, x, 0x100, 0, slot + 0x1C0, NULL);
     initMechaForBattle(slot);
-    enemyTurnResolved = 1;
-    pcArenaLog("  player %d called Gear %d.%d for slot %d", side + 1, bank, type, slot);
+    pcArenaLog("  player %d mounted Gear %d.%d for slot %d", side + 1, bank, type, slot);
+    return 1;
 }
 
 static void exitEnemyGear(u8 slot) {
@@ -1222,7 +1430,6 @@ static void exitEnemyGear(u8 slot) {
         DrawSync(0);
     }
     createBattleSpriteActor(slot, index, 1);
-    enemyTurnResolved = 1;
     pcArenaLog("  player %d exited Gear at slot %d", pcArenaRosterSide(slot) + 1, slot);
 }
 
@@ -1235,12 +1442,8 @@ void pcVersusDeployMirrorGears(void) {
     }
 }
 
-void pcVersusRosterDeployGears(void) {
-    int slot;
-    if (!pcArenaRosterStartInGear()) return;
-    for (slot = 3; slot < 11; slot++) {
-        if (pcArenaRosterGear(slot, NULL, NULL, NULL, NULL)) callEnemyGear(slot);
-    }
+int pcVersusDeployEnemyGear(int slot) {
+    return pcArenaRosterStartInGear() && mountEnemyGear(slot);
 }
 
 static u8 labels[MAX_CHOICES][LABEL];
@@ -1294,6 +1497,28 @@ static void showLabel(const u8* s) {
     }
     battleVar1->mB0_isDialogWindowInitialized[5] = 1;
     l->m5D_monsterNameIsDisplayed = 1;
+}
+
+/* A monster script can show multiple names before hiding any of them.
+ * Slot zero is the actor above the arena. The other labels share window 4. */
+int pcVersusAttackNameRowsAfter(int label) {
+    int rows = 0;
+    int i;
+    if (pcVersusSession() == PC_VERSUS_IN) {
+        for (i = label + 1; i < 8; i++) {
+            if (previousEntityTurn.m8_nameLabels[i].m5D_monsterNameIsDisplayed) rows++;
+        }
+    }
+    return rows;
+}
+
+void pcVersusFitAttackNames(void) {
+    int rows, extra;
+    if (pcVersusSession() != PC_VERSUS_IN) return;
+    rows = pcVersusAttackNameRowsAfter(0);
+    extra = rows > 1 ? (rows - 1) * 13 : 0;
+    drawBattleDialogWindow(4, 0x20, 0xC8 - extra, 0xF4, 0x12 + extra);
+    battleVar1->mB0_isDialogWindowInitialized[4] = rows != 0;
 }
 
 static void hideLabel(void) {
@@ -1353,7 +1578,7 @@ static s32 stepTarget(s32 cur, s32 d, const u8* focus, s32 count, s32 spatial) {
 
 /* Player 2 picks one of `count` outcomes (targetOf, their targets maskOf):
  * the outcome, or -1 for cancel. */
-static s32 pickTarget(u8 entity, const s32* targetOf, const u16* maskOf, s32 count) {
+static s32 pickTarget(u8 entity, const s32* targetOf, const u16* maskOf, s32 count, s32 preferred) {
     u8 focus[MAX_CHOICES];
     u8 reached[MAX_CHOICES];
     s32 queue[MAX_CHOICES];
@@ -1386,7 +1611,7 @@ static s32 pickTarget(u8 entity, const s32* targetOf, const u16* maskOf, s32 cou
             spatial &= focus[j] != focus[i];
         }
         spatial &= focus[i] != 0xFF;
-        if (cur < 0 && focus[i] == battleVar2->m0_entityMenus[entity].m3C_currentTarget) {
+        if (cur < 0 && preferred >= 0 && preferred < 11 && bitmaskCharacterCheck(maskOf[i], preferred)) {
             cur = i; /* the one the enemy faces first (the party's selectDefaultTarget) */
         }
     }
@@ -1427,14 +1652,14 @@ static s32 pickTarget(u8 entity, const s32* targetOf, const u16* maskOf, s32 cou
         pressed = padPressed(&previous);
         d = pressedDirection(pressed);
         if (d < 4) {
-            battleSoundEffect2(0x4C);
+            battleSoundEffect(0x4C);
             cur = stepTarget(cur, d, focus, count, spatial);
         } else if (pressed & BUTTON_EXECUTE) {
-            battleSoundEffect2(0x4D);
+            battleSoundEffect(0x4D);
             removeTargetSelectionCursors();
             return targetOf[cur];
         } else if (pressed & BUTTON_CANCEL) {
-            battleSoundEffect2(0x4E);
+            battleSoundEffect(0x4E);
             removeTargetSelectionCursors();
             return -1;
         }
@@ -1449,7 +1674,6 @@ static s32 chooseCommand(u8 entity, int canAttack, int hasItems, int canCallGear
     sBattleVar2Sub* menu = &battleVar2->m0_entityMenus[entity];
     sBattleVar2Sub savedMenu = *menu;
     u8 savedNames[4];
-    u8 caption[LABEL];
     s32 choice = canAttack ? RING_ATTACK : RING_DEFEND;
     s32 shownChoice = -1;
     s32 previous = pcPadHeldRemappedPort(choosingPort);
@@ -1458,21 +1682,10 @@ static s32 chooseCommand(u8 entity, int canAttack, int hasItems, int canCallGear
     /* Use the usual Attack, Item and Defend glyphs. The top slot is the PvP command. */
     u8* const names = onGear ? menu->m8_extraCommandsMapping : menu->m0_circleMenuBattleCommandsMapping;
     __builtin_memcpy(names, battleCommandsSetups[0], 3);
-    names[RING_UTILITY] = 0xFF;
+    names[RING_UTILITY] = gear ? battleCommandsSetups[0][7] : 0xFF;
     menu->m1C_isCommandEnabled[9] = !canAttack;
     menu->m1C_isCommandEnabled[11] = !hasItems;
 
-    if (gear) {
-        word(caption, canCallGear ? "Call Gear" : "Exit Gear");
-        setupWindowSize2(&ringCaption, 0x380, 0x100, 0x60, 0x30, 22, 1);
-        ringCaption.m10_flags |= 2;
-        ringCaption.m68_charsPerStep = 0x20;
-        resetDialogWindow18(&ringCaption);
-        if (pcBacklogIgnore) pcBacklogIgnore(&ringCaption);
-        addDialogWindowsToOTSub2(&ringCaption, caption);
-        setupMultiChoiceColor(&ringCaption, 0xEF, 0x1E, 0xF0);
-        ringCaptionShown = 1;
-    }
     enemyRingShown = 1;
 
     pcArenaLog("  command ring for player %d (vblank %u)", choosingPort + 1, hwVSyncCount());
@@ -1480,7 +1693,6 @@ static s32 chooseCommand(u8 entity, int canAttack, int hasItems, int canCallGear
         if (choice != shownChoice) {
             battleVar1->mA3_641COddOrEven = updateBattleMenuSpriteForMenu(entity, (onGear ? 16 : 1) + choice, 0);
             battleVar1->mCB_drawCommandRing = 1;
-            if (gear) setSelectedLineForMultiChoice(&ringCaption, choice == RING_UTILITY ? 0 : 0xFF);
             shownChoice = choice;
         }
         battleRenderDebugAndMain();
@@ -1490,53 +1702,91 @@ static s32 chooseCommand(u8 entity, int canAttack, int hasItems, int canCallGear
             else if (pressed & BUTTON_DOWN) choice = RING_ITEM;
             else if (pressed & BUTTON_LEFT) choice = RING_DEFEND;
             else if (gear) choice = RING_UTILITY;
-            battleSoundEffect2(0x4C);
+            battleSoundEffect(0x4C);
         } else if (battleInputButton == 0xFF || !isControllerConnected(choosingPort)) {
             choice = RING_ABORT;
             break;
         } else if (pressed & BUTTON_EXECUTE) {
             if ((choice == RING_ATTACK && !canAttack) || (choice == RING_ITEM && !hasItems)) {
-                battleSoundEffect2(0x4F);
+                battleSoundEffect(0x4F);
                 continue;
             }
-            battleSoundEffect2(0x4D);
+            battleSoundEffect(0x4D);
             break;
         }
     }
     battleVar1->mCB_drawCommandRing = 0;
     enemyRingShown = 0;
-    if (gear) {
-        ringCaptionShown = 0;
-        dealocateDialogWindow18Memory(&ringCaption);
-    }
     *menu = savedMenu;
     __builtin_memcpy(battleVar2->m2C0_circleMenuCommandsNames, savedNames, sizeof savedNames);
     return choice;
 }
 
-static u16 itemTargets(u8 entity, u16 flags) {
-    int target;
-    if (flags & 0x4000) return characterIdToTargetBitmask(entity);
-    u16 result = 0;
+/* Team membership, including two teams of monsters on the same physical
+ * side of the retail slot array. 0x2000 permits manual retargeting to either
+ * team; 0x1000 still tells us which team the command should open on. */
+static u16 commandTargets(u8 entity, u16 flags, int attackRange, u8* preferred) {
+    int preferredSide = pcArenaRosterSide(entity) ^ ((flags & 0x1000) != 0);
+    int first = -1, best = -1, target;
+    int current = battleVar2->m0_entityMenus[entity].m3C_currentTarget;
+    u16 mask = 0;
     for (target = 0; target < 11; target++) {
-        if (!isBattleSlotFilled.m0_isBattleSlotFilled[target] || !battleBssBlock.m8C8C_spriteActorCores[target] ||
-            (battleVisualEntities[target].m3_hidden & 0x80)) continue;
-        int opponent = pcArenaRosterSide(target) != choosingPort;
-        if (!(flags & 0x2000) && opponent != ((flags & 0x1000) != 0)) continue;
         const sBattleEntity* e = &battleEntities.m0_entities[target];
+        int side = pcArenaRosterSide(target);
         u16 status = apConfigArray[target].m1_gearState ? e->mA4_gear.m7C_statusFlags : e->m0_base.m7C_statusFlags[0];
-        if (((status ^ flags) & 0x8000) == 0) result |= characterIdToTargetBitmask(target);
+        if (!isBattleSlotFilled.m0_isBattleSlotFilled[target] || battleVisualEntities[target].m3_hidden) continue;
+        if ((flags & 0x4000) ? target != entity : (!(flags & 0x2000) && side != preferredSide)) continue;
+        if ((flags & 0x8000) ? !(status & 0x8000) : (status & 0xC001)) continue;
+        if (attackRange && !isTargetValid(entity, target)) continue;
+        mask |= characterIdToTargetBitmask(target);
+        if (first < 0) first = target;
+        if (side == preferredSide && (best < 0 || target == ((flags & 0x1000) ? current : entity))) best = target;
     }
-    return result;
+    *preferred = best >= 0 ? best : first >= 0 ? first : 0xFF;
+    return mask;
+}
+
+int pcVersusInitCommandTargets(u8 entity, u16 flags, int attackRange) {
+    int n = 0, target;
+    if (pcVersusSession() != PC_VERSUS_IN) return 0;
+    abilityTargetBitmask = commandTargets(entity, flags, attackRange, &abilitySelectedTarget);
+    __builtin_memset(targetsPerPriority, 0xFF, sizeof targetsPerPriority);
+    for (target = 0; target < 11; target++) {
+        if (bitmaskCharacterCheck(abilityTargetBitmask, target)) targetsPerPriority[n++] = target;
+    }
+    numValidTarget = n;
+    return 1;
+}
+
+/* The retail row numbers repeat across teams for custom formations. */
+u16 pcVersusGroupTargets(u8 selected, u16 eligible, int rowOnly) {
+    u16 group = 0;
+    int i;
+    for (i = 0; i < 11; i++) {
+        if (pcArenaRosterSide(i) != pcArenaRosterSide(selected)) continue;
+        if (rowOnly && battleVisualEntities[i].m0_positionSlot != battleVisualEntities[selected].m0_positionSlot) continue;
+        group |= characterIdToTargetBitmask(i);
+    }
+    return eligible & group;
+}
+
+/* The custom picker polls held buttons. Let the regular battle input reader
+ * consume that same press before handing it the inventory again. */
+static void finishEnemyMenuPress(void) {
+    while (pcPadHeldRemappedPort(choosingPort) & (BUTTON_EXECUTE | BUTTON_CANCEL)) {
+        battleRenderDebugAndMain();
+        if (battleInputButton == 0xFF || !isControllerConnected(choosingPort)) break;
+    }
 }
 
 /* useItemInSlot supplies the regular menu and asks which PvP targets are legal. */
 int pcVersusEnemyItemTarget(u8 entity, u16 flags) {
     if (!enemyItemMenu) return -1;
 
-    u16 mask = itemTargets(entity, flags);
+    u8 preferred;
+    u16 mask = commandTargets(entity, flags, 0, &preferred);
     if (!mask) {
-        battleSoundEffect2(0x4F);
+        battleSoundEffect(0x4F);
         return 0;
     }
     s32 targets[11];
@@ -1547,14 +1797,11 @@ int pcVersusEnemyItemTarget(u8 entity, u16 flags) {
         if (!bitmaskCharacterCheck(mask, candidate)) continue;
         u16 choice = characterIdToTargetBitmask(candidate);
         if (flags & 7) {
-            choice = mask;
-            if ((flags & 7) == 2) {
-                for (i = 0; i < 11; i++) {
-                    if (pcArenaRosterSide(i) != pcArenaRosterSide(candidate) ||
-                        battleVisualEntities[i].m0_positionSlot != battleVisualEntities[candidate].m0_positionSlot) {
-                        choice &= ~characterIdToTargetBitmask(i);
-                    }
-                }
+            choice = pcVersusGroupTargets(candidate, mask, (flags & 7) == 2);
+            for (i = 0; i < count && masks[i] != choice; i++) {}
+            if (i < count) {
+                if (candidate == preferred) targets[i] = preferred;
+                continue;
             }
         }
         targets[count] = candidate;
@@ -1564,7 +1811,12 @@ int pcVersusEnemyItemTarget(u8 entity, u16 flags) {
     sBattle800c3e24 savedCursor = *battleG3;
     u8 savedConfirmed = battleVar2->m2E9_targetConfirmed;
     __builtin_memcpy(savedTargets, targetsPerPriority, sizeof savedTargets);
-    int target = pickTarget(entity, targets, masks, count);
+    /* The target picker sounds its own input. Silence the native pad reader underneath it. */
+    u8 inputSounds = startCharacterJumpToEnemyVar0;
+    startCharacterJumpToEnemyVar0 = 0;
+    int target = pickTarget(entity, targets, masks, count, preferred);
+    finishEnemyMenuPress();
+    startCharacterJumpToEnemyVar0 = inputSounds;
     __builtin_memcpy(targetsPerPriority, savedTargets, sizeof savedTargets);
     *battleG3 = savedCursor;
     battleVar2->m2E9_targetConfirmed = savedConfirmed;
@@ -1593,8 +1845,14 @@ static s32 chooseEnemyItem(u8 entity, const u8* inventory) {
         }
     }
     pcArenaLog("  native item screen for player %d (vblank %u)", choosingPort + 1, hwVSyncCount());
+    /* Only the native inventory reads and sounds pad presses during this part of an enemy turn. */
+    u8 inputSounds = startCharacterJumpToEnemyVar0;
     enemyItemMenu = 1;
+    startCharacterJumpToEnemyVar0 = 0;
+    finishEnemyMenuPress();
+    startCharacterJumpToEnemyVar0 = 1;
     int selected = drawCircleMenuItem_update(entity) == 1;
+    startCharacterJumpToEnemyVar0 = inputSounds;
     enemyItemMenu = 0;
     battleVar1->mCB_drawCommandRing = 0;
     if (selected) {
@@ -1695,8 +1953,10 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
         if (command == RING_UTILITY && (canCallGear || canExitGear)) {
             updateCharacterBlinkingTask(0);
             choosing = 0;
-            if (canCallGear) callEnemyGear(entity);
+            if (canCallGear) mountEnemyGear(entity);
             else exitEnemyGear(entity);
+            setCameraVisibleEntities(-1);
+            enemyTurnResolved = 1;
             return;
         }
         if (command != RING_ATTACK) break;
@@ -1725,7 +1985,7 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
             u8 savedArrows = battleVar1->mC6_isTargetSelectionCursorVisible;
             u8 savedConfirmed = battleVar2->m2E9_targetConfirmed;
             __builtin_memcpy(savedTargets, targetsPerPriority, sizeof(savedTargets));
-            chosen = pickTarget(entity, targetOf, masks, targets);
+            chosen = pickTarget(entity, targetOf, masks, targets, battleVar2->m0_entityMenus[entity].m3C_currentTarget);
             __builtin_memcpy(targetsPerPriority, savedTargets, sizeof(savedTargets));
             *battleG3 = savedCursor;
             battleVar1->mC6_isTargetSelectionCursorVisible = savedArrows;
@@ -1756,6 +2016,7 @@ void pcVersusMonsterTurn(u8 entity, s32 status) {
     if (__builtin_memcmp(battleScriptContext, outcomes[chosen].ctx, sizeof(battleScriptContext)) != 0) {
         pcArenaLog("  the turn's actions differ from the chosen outcome (an op the probe passes over)");
     }
+    resolveMoveCaptions(battleScriptContext, entity, title);
 }
 
 /* ---- battleMain: the formation, the end ---- */
@@ -1840,6 +2101,48 @@ void pcVersusRosterHideParty(void) {
     }
 }
 
+static s16 gearPositionInBounds(s32 value, s16 min, s16 max) {
+    if (min < max) {
+        if (value < min) return min;
+        if (value > max) return max;
+    }
+    return (s16)value;
+}
+
+/* Foot-only stages can have empty Gear slots. Place those behind their own
+ * side's foot formation, in staggered rows along the stage's line of battle. */
+static void placeMissingGearPositions(Vec2s16 party, Vec2s16 enemies) {
+    static const s32 lanes[] = {0, -1, 1};
+    sBattleMechaInitData* stage = battleMechaInitData;
+    s32 dx = party.vx - enemies.vx;
+    s32 dz = party.vy - enemies.vy;
+    s32 absX = dx < 0 ? -dx : dx;
+    s32 absZ = dz < 0 ? -dz : dz;
+    s32 span = absX > absZ ? absX : absZ;
+    s32 row, side;
+
+    if (span == 0) {
+        dx = 1;
+        span = 1;
+    }
+    dx = dx * 256 / span;
+    dz = dz * 256 / span;
+    for (row = 0; row < 8; row++) {
+        s32 lane = lanes[row % 3];
+        s32 depth = 1 + row / 3;
+        for (side = 0; side < 2; side++) {
+            Vec2s16* gear = &stage->m100_gearPositions[row][side];
+            if (gear->vx != 0 || gear->vy != 0) continue;
+            Vec2s16 anchor = side == 0 ? party : enemies;
+            s32 sign = side == 0 ? 1 : -1;
+            s32 x = anchor.vx + sign * dx * depth - dz * lane;
+            s32 z = anchor.vy + sign * dz * depth + dx * lane;
+            gear->vx = gearPositionInBounds(x, stage->m34E_minX, stage->m34C_maxX);
+            gear->vy = gearPositionInBounds(z, stage->m350_minZ, stage->m352_maxZ);
+        }
+    }
+}
+
 /* Move the native deployment rows away from each other on the stage's
  * existing line of battle. The Gear rows use the same offset so Call Gear
  * and the return from an attack still use the wider formation. */
@@ -1851,11 +2154,38 @@ void pcVersusRosterSpaceTeams(void) {
     s32 dx, dz, row, i;
     unsigned rows = 0;
 
-    if (!pcArenaRosterActive() || pcVersusStage(party, enemies) < 0) return;
+    if (pcVersusSession() != PC_VERSUS_IN) return;
     slots = battleMechaInitData->m4_slotPositions;
+    if (!pcArenaRosterActive()) {
+        if (!pcVersusGears() && !pcVersusCallGearSetting()) return;
+        const u8* config = battleConfigs + requestedBattleConfig * 0x20;
+        if (pcVersusMirror() && config[2] == 71) {
+            /* The Ethos transport has no native Gear positions. Keep the
+             * party Gears on the broad, rear half of the deck, clear of the
+             * front edge where the generic staggered rows put their feet. */
+            static const Vec2s16 deck[3][2] = {
+                {{780, 128}, {150, 128}},
+                {{842, 76}, {250, 128}},
+                {{715, 54}, {332, 51}},
+            };
+            __builtin_memcpy(battleMechaInitData->m100_gearPositions, deck, sizeof deck);
+            return;
+        }
+        s32 partyRow = config[4] & 0x7F;
+        if (partyRow >= 7) return;
+        for (i = 0; i < 8; i++) {
+            s32 opponentRow = config[0x18 + i] & 0x7F;
+            if ((config[8 + i] & 0x7F) == 0x7F || opponentRow >= 7) continue;
+            placeMissingGearPositions(slots[partyRow].m0_party[0], slots[opponentRow].mC_monsters[0]);
+            break;
+        }
+        return;
+    }
+    if (pcVersusStage(party, enemies) < 0) return;
     enemyRow = &slots[enemies[0] & 0x7F];
     a = slots[party[0] & 0x7F].m0_party[0];
     b = enemyRow->mC_monsters[0];
+    if (pcArenaRosterCallGear() || pcArenaRosterStartInGear()) placeMissingGearPositions(a, b);
     dx = (a.vx - b.vx) / 10;
     dz = (a.vy - b.vy) / 10;
     for (i = 0; i < 3; i++) rows |= 1u << (party[i] & 0x7F);

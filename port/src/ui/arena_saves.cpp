@@ -101,6 +101,7 @@ void pickSaveParty(const CardGameSave& s) {
 }
 
 void readCards(bool partyRecord = true) {
+    cardImagesInit();
     int card = -1, block = -1;
     std::vector<uint8_t> was;
     if (B->selected >= 0 && B->selected < (int)B->saves.size()) {

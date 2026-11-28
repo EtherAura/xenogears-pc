@@ -52,6 +52,7 @@ void vramDeferCpuDraw(VRect r);
 void vramFlushCpuWrites(VRect r);
 /* Discard superseded device pixels only in completely overwritten tiles. */
 void vramResolveCpuWrite(VRect r);
+void vramFillShadow(VRect r, uint32_t rgb);
 /* Bring the CPU copy up to date where the GPU has drawn inside r. */
 void vramSyncRect(VRect r);
 /* Decoded texture dependencies. Generations change on writes, never on
@@ -349,6 +350,10 @@ void gvkHiDraw(const HiVertex* v, int n);
 void gvkHiDrawWide(const HiVertex* v, int n);
 struct TextureSample;
 int gvkHiFeedbackSource(VRect source);
+/* One live projected triangle, optionally followed by its seam-edge strips.
+ * All vertices share clip, texture and sampling state. */
+int gvkHiSealFace(const HiVertex src[3], unsigned perimeter, int depth, int wide);
+void gvkHiDrawFace(const HiVertex* v, int n, int wide, const struct TextureSample* sample, int filter);
 void gvkHiDrawCaptured(const HiVertex* v,int n,int wide);
 void gvkHiDrawTexture(const HiVertex* v, int n, int wide, const struct TextureSample* sample, int filter);
 /* An upload's side in the copy, recorded before its 1x upload: `data` (rows

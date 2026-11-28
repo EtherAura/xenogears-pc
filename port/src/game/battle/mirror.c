@@ -311,6 +311,11 @@ int pcVersusMirrorSlot(s32 entity) {
     return mirrorOn && entity >= 3 && entity < 6 && mirrorChar[entity - 3] != 0x7F;
 }
 
+int pcVersusGearPartSlot(int owner, int part) {
+    if (pcVersusMirrorSlot(owner)) return 32 + (owner - 3) * 2 + part;
+    return 13 + owner * 2 + part;
+}
+
 sBattle800CDD40Sub* pcVersusMirrorRows(int entity, int gear) {
     return gear ? p2GearRows[entity - 3] : p2Rows[entity - 3];
 }
@@ -800,9 +805,6 @@ void pcVersusBattleLoaded(void) {
             /* the member's ring (batteLoaderPhase2_2 sets up the party's; party vs party: partyBuild) */
             battleVar2->m0_entityMenus[e] = battleVar2->m0_entityMenus[k];
         }
-        battleVar2->m0_entityMenus[e].m3C_currentTarget = getEntityToFace(e);
-        battleBssBlock.m4_visualEntities[e].m6_direction =
-            getDirectionBetween2BattleEntities(e, battleVar2->m0_entityMenus[e].m3C_currentTarget);
         pcArenaLog("mirror match: entity %d is character %d (HP %d/%d, EP %d, AP %d)", e, mirrorChar[k],
                    battleEntities.m0_entities[e].m0_base.m4C_HP, battleEntities.m0_entities[e].m0_base.m4E_MaxHP,
                    battleEntities.m0_entities[e].m0_base.m50_MP, apConfigArray[e].m4_currentAP);
@@ -887,6 +889,10 @@ void pcVersusMirrorSprites(void) {
         if (c == 0x7F) {
             continue;
         }
+        /* The stage's jump paths are ready by the time the sprites load. */
+        u8 target = getEntityToFace(e);
+        battleVar2->m0_entityMenus[e].m3C_currentTarget = target;
+        battleBssBlock.m4_visualEntities[e].m6_direction = getDirectionBetween2BattleEntities(e, target);
         setCurrentDirectory(0x2C, 1);
         file = battlePartyFileMapping[c][0];
         mirrorSprite[k] = allocateHeap(getFileSizeAligned(file), 0);
@@ -1251,7 +1257,7 @@ static void drawRing(u8 entity, u8 menu) {
     battleVar1->mCB_drawCommandRing = 1;
 }
 
-/* Escape gives the match to Player 1. Exit Gear uses the same ring slot. */
+/* Escape gives the match to Player 1. Call Gear uses this slot when dismounting is allowed. */
 static int confirmForfeit(void) {
     if (battleInputButton != 4 && battleInputButton != 6 && battleInputButton != 7) return 0;
     pcArenaLog("mirror match: player 2 gave up (vblank %u)", hwVSyncCount());

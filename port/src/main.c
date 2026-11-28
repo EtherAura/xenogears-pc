@@ -26,6 +26,7 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "system/stateimage.h"
 #include "cd/setup.h"
 #include "cd/cd.h"
 #include "cd/regional.h"
@@ -374,6 +375,7 @@ int main(int argc, char** argv) {
     if (extrasInit != NULL) {
         extrasInit(); /* the modules' data as loaded, for the extras' sandbox */
     }
+    if (!netplay) stateRememberBoot();
     if (extras) {
         int game = 0;
         if (extrasMain == NULL) {

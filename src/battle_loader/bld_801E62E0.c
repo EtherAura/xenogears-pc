@@ -222,6 +222,7 @@ void createEnemiesBattleSprites(void* config) {
         if (pcVersusMirrorSlot(i)) {
             continue; /* a mirror match: a party member's sprite (pcVersusMirrorSprites) */
         }
+        if (pcVersusDeployEnemyGear(i)) continue; /* the assigned Gear is the slot's first actor */
 #endif
         if (index < 8) {
             index += 3;

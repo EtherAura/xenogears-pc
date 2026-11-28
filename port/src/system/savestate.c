@@ -474,7 +474,7 @@ static void memoryRegions(XgState* s) {
     unsigned char* base = gameStackBase();
     unsigned char* top = base + gameStackSize();
     unsigned char* at = (unsigned char*)(uintptr_t)xgStateLen(s, "stack.sp", (size_t)(uintptr_t)gameStackParkedSp());
-    if (!xgStateSaving(s) && at == NULL) {
+    if (at == NULL) {
         /* A state without the game's frames (a canonical state decoded for this build, which
          * cannot carry them): the game starts again from the safe point it was saved at
          * (serveLoad: gameStackRestart, kernel.c pcResumeGame). */
@@ -665,8 +665,7 @@ typedef struct {
     StateHeader header;
     uint8_t* thumb;
     uint8_t* body;
-    int portable; /* taken at a safe point for a slot: with a trailer (stateportable.h), if it can be made */
-    int missed;   /* a slot's, taken when no safe point came in time: for this build only */
+    int portable; /* require a portable trailer (stateportable.h) */
 } Job;
 
 static SDL_AtomicInt serial; /* stateSerial */
@@ -677,21 +676,12 @@ static char jobNote[400];
 
 static int workerMain(void* arg) {
     Job* j = arg;
-    char why[300], local[300] = "";
+    char why[300];
     StatePortable portable;
-    int carried = j->portable && statePortableMake(j->body, (size_t)j->header.bodySize, &portable, local, sizeof local);
-    if (j->portable && !carried) {
-        fprintf(stderr, "state: %s for this version only: %s\n", j->what, local);
-    }
-    if (stateFileWritePortable(j->path, &j->header, j->thumb, j->body, carried ? &portable : NULL, why, sizeof why)) {
-        if (j->missed) {
-            snprintf(jobNote, sizeof jobNote, "State saved (%s), for this version only: it was taken during a movie, "
-                     "a prompt or a card access", j->what);
-        } else if (j->portable && !carried) {
-            snprintf(jobNote, sizeof jobNote, "State saved (%s), for this version only: %s", j->what, local);
-        } else {
-            snprintf(jobNote, sizeof jobNote, "State saved (%s)", j->what);
-        }
+    int carried = j->portable && statePortableMake(j->body, (size_t)j->header.bodySize, &portable, why, sizeof why);
+    if ((!j->portable || carried) &&
+        stateFileWritePortable(j->path, &j->header, j->thumb, j->body, carried ? &portable : NULL, why, sizeof why)) {
+        snprintf(jobNote, sizeof jobNote, "State saved (%s)", j->what);
     } else {
         snprintf(jobNote, sizeof jobNote, "State not saved (%s): %s", j->what, why);
     }
@@ -730,10 +720,8 @@ static void finishAtExit(void) {
     finishJob(1);
 }
 
-/* Writes in the background (sync: here, before going on). Takes the body. portable: a slot's at a
- * safe point (a trailer, made on the worker); missed: a slot's that waited for one in vain. */
-static void writeState(const char* path, const char* what, uint8_t* body, size_t size, int sync, int portable,
-                       int missed) {
+/* Writes in the background (sync: here, before going on). Takes the body. */
+static void writeState(const char* path, const char* what, uint8_t* body, size_t size, int sync, int portable) {
     static int registered;
     finishJob(1);
     if (!registered) {
@@ -751,7 +739,6 @@ static void writeState(const char* path, const char* what, uint8_t* body, size_t
     j->thumb = thumbnail();
     j->body = body;
     j->portable = portable;
-    j->missed = missed;
     fprintf(stderr, "state: saving %s at vblank %u (audio dump frame %llu)\n", path, j->header.vblank,
             (unsigned long long)j->header.dumpFrames);
     job = j;
@@ -959,6 +946,40 @@ static void restore(const StateHeader* h, const uint8_t* body) {
     loadedHooks(h->dumpFrames);
 }
 
+/* A stackless power-on image for online play. The local timelines can be
+ * different when their menus open. Start both from the untouched machine
+ * and keep the caller's parked stack separately for the return trip. */
+static uint8_t* bootPacked;
+static size_t bootPackedSize, bootRawSize;
+static StateHeader bootHeader;
+
+void stateRememberBoot(void) {
+    size_t size;
+    uint8_t* raw = capture(&size);
+    bootPacked = malloc(statePackBound(size));
+    if (bootPacked != NULL) {
+        bootPackedSize = statePack(raw, size, bootPacked);
+        uint8_t* packed = realloc(bootPacked, bootPackedSize);
+        if (packed) bootPacked = packed;
+        bootRawSize = size;
+        bootHeader.disc = cdBootDiscNumber();
+        bootHeader.bodySize = size;
+    }
+    free(raw);
+}
+
+int stateBootAvailable(void) {
+    return bootPacked != NULL && bootPackedSize != 0;
+}
+
+void stateRestoreBoot(void) {
+    uint8_t* raw = malloc(bootRawSize);
+    if (!raw || !stateUnpack(bootPacked, bootPackedSize, raw, bootRawSize)) abort();
+    restore(&bootHeader, raw);
+    free(raw);
+    stackless = 0; /* the caller starts kernelMain on its fresh stack */
+}
+
 /* ---- requests ----------------------------------------------------------------------------- */
 
 enum { REQ_NONE, REQ_SAVE, REQ_LOAD, REQ_REWIND, REQ_RESTART, REQ_RETURN };
@@ -970,8 +991,7 @@ static struct {
     int sync;            /* write before going on (the harness) */
     int rewind;          /* REQ_REWIND: REWIND_CAPTURE or REWIND_BACK */
     int safe;            /* REQ_SAVE: only at a safe point (stateSafePark: a canonical state's) */
-    uint32_t until;      /* safe: from this vblank an ordinary save instead (a slot's; 0: wait as long as it takes) */
-    int missed;          /* that came first: the save loads in this build only */
+    uint32_t notifyAt;   /* tell the player if a slot is still waiting at this vblank; 0: no note */
     int keep;            /* REQ_RESTART: the game kept in memory first (stateimage.h) */
     void (*entry)(void); /* REQ_RESTART: where the game starts again */
 } req;
@@ -983,7 +1003,7 @@ static struct {
     StateHeader header;
 } kept;
 
-/* How long a slot save waits for a safe point: 2 seconds. */
+/* Show a note after two seconds of waiting for a safe point. */
 #define SAFE_WAIT 120
 
 static int selected = 1;
@@ -1105,8 +1125,7 @@ static void request(int kind, int slot, const char* path) {
     req.slot = slot;
     req.sync = 0;
     req.safe = 0;
-    req.until = 0;
-    req.missed = 0;
+    req.notifyAt = 0;
     if (path != NULL) {
         snprintf(req.path, sizeof req.path, "%s", path);
     } else if (!stateSlotPath(slot, req.path, sizeof req.path)) {
@@ -1120,20 +1139,26 @@ void stateRequestSave(int slot) {
         return;
     }
     request(REQ_SAVE, slot, NULL);
-    if (req.kind == REQ_SAVE && statePortableOn()) {
-        /* At the next safe point, which normally comes at once, so that other builds load the slot too
-         * (stateportable.h); if none comes in time (a movie, a prompt, the card's directory scan), as
-         * before, for this build only (stateVBlankPoint). */
-        req.safe = 1;
-        req.until = hwVSyncCount() + SAFE_WAIT;
-        if (req.until == 0) {
-            req.until = 1;
+#ifndef XG_PORTABLE_SLOTS_OFF
+    if (req.kind == REQ_SAVE) {
+        if (!statePortableOn()) {
+            req.kind = REQ_NONE;
+            note("State not saved (slot %d): this build has no state schema", slot);
+            return;
         }
+        req.safe = 1;
+        req.notifyAt = hwVSyncCount() + SAFE_WAIT;
+        if (req.notifyAt == 0) req.notifyAt = 1;
     }
+#endif
 }
 
 int stateSlotsPortable(void) {
-    return statePortableOn();
+#ifdef XG_PORTABLE_SLOTS_OFF
+    return 0;
+#else
+    return 1;
+#endif
 }
 
 void stateRequestLoad(int slot) {
@@ -1223,7 +1248,16 @@ void stateInfoFree(XgStateInfo* info) {
 
 int stateDeleteSlot(int slot) {
     char path[1100];
-    int ok = stateSlotPath(slot, path, sizeof path) && SDL_RemovePath(path);
+    if (!stateSlotPath(slot, path, sizeof path)) {
+        return 0;
+    }
+    if (req.kind == REQ_SAVE && req.slot == slot) {
+        req.kind = REQ_NONE;
+    }
+    if (job != NULL && strcmp(job->path, path) == 0) {
+        finishJob(1);
+    }
+    int ok = SDL_RemovePath(path);
     SDL_AddAtomicInt(&serial, 1);
     return ok;
 }
@@ -1369,13 +1403,11 @@ void stateVBlankPoint(void) {
     finishJob(0);
     harnessCheck(hwVSyncCount());
     if (req.kind == REQ_SAVE && req.safe) {
-        if (req.until == 0 || (int32_t)(hwVSyncCount() - req.until) < 0) {
-            return; /* a canonical state's: at the next safe point (stateSafePark), not inside a frame */
+        if (req.notifyAt != 0 && (int32_t)(hwVSyncCount() - req.notifyAt) >= 0) {
+            note("Slot %d is waiting for a safe point to save", req.slot);
+            req.notifyAt = 0;
         }
-        /* None came in time (a slot's): an ordinary save, which only this build loads. */
-        fprintf(stderr, "state: no safe point in %d vblanks: slot %d saved as it is\n", SAFE_WAIT, req.slot);
-        req.safe = 0;
-        req.missed = 1;
+        return;
     }
     if (req.kind == REQ_NONE) {
         /* Rewind (rewind.c): a capture due, or the rewind input held. */
@@ -1438,7 +1470,7 @@ static void serveSave(void) {
     if (logOn()) {
         fprintf(stderr, "state: captured %zu bytes in %.2f ms\n", size, (double)(SDL_GetTicksNS() - t0) * 1e-6);
     }
-    writeState(req.path, what, body, size, req.sync, req.safe && req.slot > 0, req.missed);
+    writeState(req.path, what, body, size, req.sync, req.safe && req.slot > 0);
 }
 
 static void serveLoad(void) {
@@ -1504,7 +1536,7 @@ static void serveLoad(void) {
         now = capture(&nowSize);
     }
     if (keepUndo && now != NULL) {
-        writeState(undo, "undo", now, nowSize, req.sync, 0, 0);
+        writeState(undo, "undo", now, nowSize, req.sync, 0);
     } else {
         free(now);
     }

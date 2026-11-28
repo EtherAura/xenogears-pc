@@ -57,6 +57,9 @@ int stateRestoreChunks(const StateChunkRef* chunks, int count, int disc, uint64_
 int stateRestartAvailable(const char** why);
 void stateRequestRestart(int keep, void (*entry)(void));
 void stateRequestReturn(void);
+void stateRememberBoot(void);
+int stateBootAvailable(void);
+void stateRestoreBoot(void);
 int stateKept(void);
 void stateKeptDrop(void);
 

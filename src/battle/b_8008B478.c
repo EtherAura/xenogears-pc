@@ -926,10 +926,6 @@ s32 updateBattleMenuSpriteForMenu(u8 entity, u8 set, u8 dimOnly) {
     s32 id;
     u8 color;
 
-#ifdef PLATFORM_PC
-    int exitGear = set >= 16 && set <= 24 && pcVersusPartyCanExitGear(entity);
-    pcVersusExitGearCaption(exitGear && !dimOnly, set == 23);
-#endif
     if (dimOnly != 0) {
         makeAllBattleCommandsDisabled();
         return battleVar1->mA3_641COddOrEven;
@@ -953,13 +949,6 @@ s32 updateBattleMenuSpriteForMenu(u8 entity, u8 set, u8 dimOnly) {
                     continue;
                 }
             }
-#ifdef PLATFORM_PC
-            /* The Gear ring's Escape slot is Exit Gear when enabled. */
-            if (exitGear && (battleMenuGraphicConfigs2[layout[i]][j + 3] & 0x200F) == 0x2008) {
-                j += 4;
-                continue;
-            }
-#endif
             start = battleVar1->mD0_battleCommandLength[page[i]] * 2;
             battleVar1->mD0_battleCommandLength[page[i]] += battleSetupStringInPolyFT4Large(id,
                 (POLY_FT4 (*)[2])&battleVar0->m641C_commandGlyphs[page[i]][battleVar1->mD0_battleCommandLength[page[i]] * 2],

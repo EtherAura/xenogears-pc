@@ -2202,6 +2202,19 @@ void startJumpAnimationSub0(s32 arg0) {
 /* Noah setCameraVisibleEntities */
 void setCameraVisibleEntities(s32 arg0) {
     if (battleCameraVar0 == 0) {
+#ifdef PLATFORM_PC
+        /* The command camera must still fit the Gear models on a foot fighter's turn. */
+        if (arg0 != 0 && pcVersusSession() == PC_VERSUS_IN) {
+            s32 slot;
+            for (slot = 0; slot < 11; slot++) {
+                sBattleVisualEntity* visual = &battleBssBlock.m4_visualEntities[slot];
+                if (visual->m4_isGear && !visual->m3_hidden && battleBssBlock.m8C8C_spriteActorCores[slot] != NULL) {
+                    arg0 = -1;
+                    break;
+                }
+            }
+        }
+#endif
         setBattleCameraMode(1);
         computeBattleCameraParams(arg0);
     }

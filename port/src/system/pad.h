@@ -60,7 +60,10 @@ const char* padProfileName(int port);
 int padGamepadHeld(SDL_JoystickID device, int button);
 const char* padInputLabel(int input);      /* selected controller's physical label */
 const char* padActionLabel(const char* button); /* last deliberately used pad's mapped label, NULL without one */
-void padDeviceEvent(const SDL_Event* event); /* all events, including while the extras own the loop */
+/* A launched netplay window owns the pad until the user focuses the lobby again. */
+void padSessionWindow(int open);
+SDL_JoystickID* padMenuGamepads(int* count);
+int padDeviceEvent(const SDL_Event* event); /* nonzero: this input belongs to the session window */
 const char* padInputName(int input);       /* SDL's name ("a", "leftshoulder", "lefttrigger") or "none" */
 int padInputFromName(const char* name);
 

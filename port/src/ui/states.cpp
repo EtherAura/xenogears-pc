@@ -140,10 +140,7 @@ bool slotRow(int i, bool selected) {
     ImGui::Text(tr("Disc %d  %s"), s.info.disc, s.info.label);
     if (s.info.usable) {
         ImGui::Text(tr("Play time %u:%02u:%02u"), t / 3600, t / 60 % 60, t % 60);
-        // Saved without what another build needs to convert it (during a movie or a prompt, or by a build
-        // without a state schema: system/stateportable.h): no other build loads it. Another build's that
-        // loads here (it converts) says whose. A build without portable slots marks none: every slot is
-        // this version's only there, and the section's hint says so.
+        // Label older build-only saves and identify the version that wrote a convertible save.
         if (!s.info.otherBuild && !s.info.portable && stateSlotsPortable()) {
             ImGui::SameLine();
             ImGui::TextDisabled("%s", tr("This version only"));
@@ -382,9 +379,8 @@ void statesSection() {
         hint(stateSlotsPortable()
                  ? "A save state is the whole game at a moment: loading it goes back there exactly. Loading never "
                    "changes the memory cards: saves made since stay on them, and the game reads the cards again. "
-                   "Other builds of the port that can convert states load these too, except those marked \"This "
-                   "version only\": saved during a movie, a prompt or a memory card access. Keep long-term progress "
-                   "on memory cards."
+                   "Slot saves wait for a point that other compatible versions can resume. Older saves marked "
+                   "\"This version only\" load in the build that saved them. Keep long-term progress on memory cards."
                  : "A save state is the whole game at a moment: loading it goes back there exactly. Loading never "
                    "changes the memory cards: saves made since stay on them, and the game reads the cards again. "
                    "States load only in the build of the port that saved them: after the port is updated or "

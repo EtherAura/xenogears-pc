@@ -1433,7 +1433,15 @@ extern BattleBss_800D2DCC isBattleSlotFilled;        /* Noah: isBattleSlotFilled
 extern BattleSlotTicks battleSlotStatusVar0;
 extern sBattleScriptContext battleScriptContext[32];
 extern sBattleResultChar* battleResultCharWindows[3];
-extern sLoadedMechas* battleMechas[32] PORT_ALIAS;
+/* Slots 19–30 belong to transient animation parts and 31 to the environment.
+ * Party Versus needs two more attached models for each of the three guests. */
+#ifdef PLATFORM_PC
+#define BATTLE_MECHA_COUNT 38
+int pcVersusGearPartSlot(int owner, int part);
+#else
+#define BATTLE_MECHA_COUNT 32
+#endif
+extern sLoadedMechas* battleMechas[BATTLE_MECHA_COUNT] PORT_ALIAS;
 extern u16 currentJumpAnimationBitMask;
 
 /* ---- functions called across battle files (the definitions' prototypes) ---- */

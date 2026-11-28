@@ -122,8 +122,7 @@ if(XG_STATE_SCHEMA)
     if(NOT XG_DWARFDUMP)
         if(XG_DIST)
             message(FATAL_ERROR "XG_STATE_SCHEMA: no llvm-dwarfdump. A build to hand out ships its state schema: "
-                "install LLVM (llvm-dwarfdump), or configure with -DXG_STATE_SCHEMA=OFF for one whose slots load "
-                "in it alone.")
+                "install LLVM (llvm-dwarfdump).")
         endif()
         message(WARNING "XG_STATE_SCHEMA: no llvm-dwarfdump (LLVM): this build writes no state schema, so the "
             "slots it saves load in it alone. Install LLVM, or -DXG_STATE_SCHEMA=OFF to silence this.")
@@ -144,11 +143,10 @@ if(XG_STATE_SCHEMA)
             if(NOT XG_SCHEMA_GCC)
                 if(XG_DIST)
                     message(FATAL_ERROR "XG_STATE_SCHEMA: no gcc. A clang build to hand out reads its game C's "
-                        "declarations with the host's GCC for its state schema: install GCC, or configure with "
-                        "-DXG_STATE_SCHEMA=OFF for one whose slots load in it alone.")
+                        "declarations with the host's GCC for its state schema: install GCC.")
                 endif()
                 message(WARNING "XG_STATE_SCHEMA: no gcc: this clang build's state schema cannot read the game "
-                    "C's declarations, so the slots it saves load in it alone. Install GCC.")
+                    "C's declarations. Install GCC for portable save slots.")
             endif()
         endif()
     endif()
@@ -589,7 +587,10 @@ target_compile_definitions(platform PRIVATE PLATFORM_PC VERSION_${XG_VERSION} ${
 # first canonical one, and from then on each release's slots load in every earlier canonical release
 # and theirs in it (the state-compat gate at each release cut). OFF writes and converts none: every
 # slot is "This version only", as in the releases before.
-option(XG_PORTABLE_SLOTS "save state slots that other builds load" ON)
+option(XG_PORTABLE_SLOTS "save state slots that other builds load" ${XG_STATE_SCHEMA})
+if(XG_DIST AND (NOT XG_PORTABLE_SLOTS OR NOT XG_STATE_SCHEMA))
+    message(FATAL_ERROR "Release builds require XG_PORTABLE_SLOTS and XG_STATE_SCHEMA")
+endif()
 if(NOT XG_PORTABLE_SLOTS)
     target_compile_definitions(platform PRIVATE XG_PORTABLE_SLOTS_OFF=1)
 endif()

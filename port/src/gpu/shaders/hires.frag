@@ -111,6 +111,14 @@ layout(push_constant) uniform Hi {
     ivec2 depthSize;   // its size
 #endif
 } pc;
+#ifdef TILE_IMAGE
+// At Auto's 1x level, texel and output grids coincide. Specializing this
+// uniform eliminates integer divisions for both axes of every sample.
+layout(constant_id = 0) const bool unitScale = false;
+#define HI_SCALE (unitScale ? 1 : pc.n)
+#else
+#define HI_SCALE pc.n
+#endif
 
 #ifdef DEPTH
 // The scene's depth image (scene.c, vk.c gvkSceneBegin): for each pixel of
@@ -277,7 +285,7 @@ float boundaryNudge(int scale) { return scale > 1 ? 1.0/256.0 : 0.0; }
 
 uint filteredPixel(vec2 at, ivec2 lo, ivec2 hi, out bool clear) {
     int scale = int((vSample.w >> 8) & 255u);
-    if ((vSample.w & 255u) == 3u && scale == 1 && pc.n <= 2) {
+    if ((vSample.w & 255u) == 3u && scale == 1 && HI_SCALE <= 2) {
         // Exact textureSampleGet Scale2x rule, clamped to this face's patch.
         // RGB follows the selected corner; STP follows the nearest centre.
         ivec2 e=ivec2(floor(at)),sub=ivec2(floor(fract(at)*2.0));
@@ -291,7 +299,7 @@ uint filteredPixel(vec2 at, ivec2 lo, ivec2 hi, out bool clear) {
         clear=(chosen>>24)==0u;
         return (chosen&0xffffffu)|((c>>24)==128u?MASK:0u);
     }
-    if ((vSample.w & 255u) == 3u && scale == 1 && pc.n > 2) {
+    if ((vSample.w & 255u) == 3u && scale == 1 && HI_SCALE > 2) {
         edgeLo = lo; edgeHi = hi;
         ivec2 size = hi - lo + 1;
         vec2 pos = clamp(at - vec2(lo), vec2(0.0), vec2(size) - 0.00001);
@@ -302,7 +310,7 @@ uint filteredPixel(vec2 at, ivec2 lo, ivec2 hi, out bool clear) {
             clear = (nearest >> 24) == 0u;
             return (nearest & 0xffffffu) | ((nearest >> 24) == 128u ? MASK : 0u);
         }
-        vec4 c = xbrBlend(e, size, code, fract(pos), vec2(pc.n));
+        vec4 c = xbrBlend(e, size, code, fract(pos), vec2(HI_SCALE));
         clear = c.a < 127.5;
         ivec3 rgb = c.a > 0.0 ? ivec3(floor(c.rgb * (255.0 / c.a) + 0.5)) : ivec3(0);
         return pack8(clamp(rgb, ivec3(0), ivec3(255))) | ((nearest >> 24) == 128u ? MASK : 0u);
@@ -317,12 +325,12 @@ uint filteredPixel(vec2 at, ivec2 lo, ivec2 hi, out bool clear) {
         // outline mix where they meet; the outer edge fades into the picture.
         // STP follows the nearest pixel.
         uint nearest = samplePixel(ivec2(floor(at*float(scale) + boundaryNudge(scale))),lo,hi,scale);
-        float box = max(1.5 * float(scale) / float(pc.n), 1.0);
+        float box = max(1.5 * float(scale) / float(HI_SCALE), 1.0);
         vec2 origin = at*float(scale) - 0.5*box;
         // The tap count comes from the push constants (always 4) so the loop
         // stays a loop: unrolled, its 16 samplePixel copies in every variant
         // made Mesa's pipeline compile take minutes.
-        int taps = 4 + min(pc.n, 0);
+        int taps = 4 + min(HI_SCALE, 0);
         vec3 rgb = vec3(0); float cover = 0.0, total = float(taps * taps);
         for (int y = 0; y < taps; ++y) for (int x = 0; x < taps; ++x) {
             uint tap = samplePixel(ivec2(floor(origin + (vec2(x, y) + 0.5) * (box / float(taps)))),lo,hi,scale);
@@ -390,7 +398,7 @@ uint hiPixel(uint dst, ivec2 pp, ivec2 q, uint mode, bool resolved, uint fill, b
         ivec3 v = !semi ? f : semiMode == 3u ? b + expand5(front5 >> 2) : blend8(semiMode, b, f);
         color = pack8(clamp(v, ivec3(0), ivec3(255)));
     } else if (dithered) {
-        ivec2 dp = pc.color == 1 ? q + pc.ditherOrigin : pp + pc.ditherOrigin * pc.n;
+        ivec2 dp = pc.color == 1 ? q + pc.ditherOrigin : pp + pc.ditherOrigin * HI_SCALE;
         int d = dither[(dp.y & 3) * 4 + (dp.x & 3)];
         ivec3 f = clamp((front8 + d) >> 3, 0, 31);
         color = pack8(expand5(semi ? ivec3(blend5(semiMode, rgb8(dst) >> 3, f)) : f));
@@ -423,7 +431,7 @@ void main() {
     const int cs = 1;
 #endif
     ivec2 p = ivec2(gl_FragCoord.xy) * cs - vRasterShift; // the VRAM copy's pixel (hires.vert)
-    int n = pc.n;
+    int n = HI_SCALE;
     ivec2 q = p / n; // the 1x pixel
     // Texture coordinates and colour as the PS1 samples them, centred on
     // each 1x pixel's block: the PS1 takes them at its sample point (the
@@ -452,6 +460,16 @@ void main() {
         }
     }
     uint mode = vMode;
+#ifdef TILE_IMAGE
+    // Derivatives have already run. Covered seam fragments can leave both
+    // color and depth untouched before the texture and palette lookups.
+    bool checkDestination = (mode & (DRAW_FRINGE | DRAW_CHECK_MASK)) != 0u;
+    uint checkedPixel = 0u;
+    if (checkDestination) {
+        checkedPixel = colorAttachmentReadEXT(tilePixel).r;
+        if (!hiKeeps(checkedPixel, mode)) discard;
+    }
+#endif
     bool resolved=(mode&DRAW_RESOLVED)!=0u;
     uint resolvedWord=0u;
     if(resolved) {
@@ -480,7 +498,11 @@ void main() {
         ivec2 cmin = ivec2(vClipMin & 0xFFFFu, vClipMin >> 16);
         ivec2 cmax = ivec2(vClipMax & 0xFFFFu, vClipMax >> 16);
         if (any(lessThan(q, cmin)) || any(greaterThan(q, cmax))) {
+#ifdef TILE_IMAGE
+            discard;
+#else
             write = false;
+#endif
         }
         if ((mode & DRAW_TEXTURED) != 0u) {
             // The texel in hi-res texel units (texel * N + sub-texel).
@@ -603,18 +625,12 @@ void main() {
     // As draw.frag's: a fragment that writes nothing leaves the attachment
     // alone, and tile memory is read only by the fragments that are kept.
     if (write) {
-        uint dst = colorAttachmentReadEXT(tilePixel).r;
-        if (hiKeeps(dst, mode)) {
-            outPixel = hiPixel(dst, p, q, mode, resolved, fill, raw, semi, semiMode, dithered, front8, front5, maskOut);
+        uint dst = checkDestination ? checkedPixel :
+                   (semi || textCover < 1.0 ? colorAttachmentReadEXT(tilePixel).r : 0u);
+        outPixel = hiPixel(dst, p, q, mode, resolved, fill, raw, semi, semiMode, dithered, front8, front5, maskOut);
 #ifdef DEPTH
-            // The interlocked pass's rule: a fragment that replaces the pixel
-            // owns its depth; one that blends or only smooths a text edge
-            // keeps what is there.
-            outDepth = vInvZ != 0.0 && !semi && textCover >= 1.0 ? depthWord() : colorAttachmentReadEXT(tileDepth).r;
+        outDepth = vInvZ != 0.0 && !semi && textCover >= 1.0 ? depthWord() : colorAttachmentReadEXT(tileDepth).r;
 #endif
-        } else {
-            discard;
-        }
     } else {
         discard;
     }

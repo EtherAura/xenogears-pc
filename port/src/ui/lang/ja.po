@@ -3697,6 +3697,10 @@ msgstr "プレイヤー 2 はキーボード"
 msgid "Battle arena"
 msgstr "バトル闘技場"
 
+#: port/src/extras/modes.cpp
+msgid "Local Battling, versus battles and online matches."
+msgstr "バトリング、対戦バトル、オンライン対戦。"
+
 #: port/src/ui/arena.cpp
 msgid "Go to the arena"
 msgstr "闘技場へ行く"
@@ -4929,6 +4933,10 @@ msgstr "このディスクの敵は %zu 体。出会ったのは %d 体、倒し
 msgid "Show"
 msgstr "表示"
 
+#: port/src/ui/skin.cpp
+msgid "Hide"
+msgstr "隠す"
+
 #: port/src/extras/bestiary.cpp
 msgid "Everything"
 msgstr "すべて"
@@ -4969,10 +4977,6 @@ msgstr "ID より前にセーブしたゲーム(共通の記録)"
 #, c-format
 msgid "Slot %d: %s (%s, story %d) - shared record"
 msgstr "スロット %d: %s(%s、ストーリー %d)- 共通の記録"
-
-#: port/src/ui/skin.cpp
-msgid "Hide"
-msgstr "隠す"
 
 #: port/src/extras/bestiary.cpp
 msgid "Catch up"
@@ -9913,15 +9917,15 @@ msgid "Start on foot"
 msgstr "徒歩で開始"
 
 #: port/src/ui/arena.cpp
-msgid "Allow Exit Gear"
+msgid "Allow dismounting"
 msgstr "ギアから降りられる"
 
 #: port/src/ui/arena.cpp
-msgid "Allow switching back to fighting on foot after entering a Gear."
-msgstr "ギアに搭乗した後、降りて生身で戦えるようにします。"
+msgid "Use Call Gear again to return to fighting on foot."
+msgstr "「ギアを呼ぶ」をもう一度選ぶと、ギアから降りて生身で戦えます。"
 
 #: port/src/ui/arena.cpp
-msgid "Exit Gear allowed"
+msgid "Dismounting allowed"
 msgstr "ギアから降りられる"
 
 #: port/src/ui/arena.cpp
@@ -10011,6 +10015,11 @@ msgstr "数"
 #: port/src/ui/arena.cpp
 msgid "Enemy stats"
 msgstr "敵の能力値"
+
+#: port/src/ui/arena.cpp
+#, c-format
+msgid "Scale this stat for %s."
+msgstr "%s のこの能力値の倍率を変更します。"
 
 #: port/src/ui/arena.cpp
 msgid "No Gear assigned"
@@ -10145,8 +10154,8 @@ msgid "End the match for both players and return to the paused game."
 msgstr "二人の対戦を終了し、一時停止中のゲームに戻ります。"
 
 #: port/src/ui/arena.cpp
-msgid "Use the same game version, disc and session code. A session opens in its own window."
-msgstr "同じバージョン、ディスク、セッションコードを使います。対戦は別のウィンドウで開きます。"
+msgid "Use the same game version, disc and session code."
+msgstr "同じバージョン、ディスク、セッションコードを使います。"
 
 #: port/src/ui/arena.cpp
 msgid "Use a reachable UDP port. Play on the same network, over a VPN, or forward the port on the host's router."

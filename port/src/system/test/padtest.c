@@ -231,6 +231,9 @@ int main(int argc, char** argv) {
     CHECK(pcPadRegionalButtons(0xffff) == 0xffff);
     CHECK(pcPadPromptSlot(0) == 1 && pcPadPromptSlot(2) == 3 && pcPadPromptSlot(4) == 4);
     if (!strcmp(argv[2],"write")) {
+        int positions[4];
+        pcPadAttackPositions(positions);
+        CHECK(positions[0] == 1 && positions[1] == 0 && positions[2] == 3 && positions[3] == 2);
         CHECK(pcPadPromptGlyph(0)==PAD_GLYPH_CROSS && pcPadPromptGlyph(1)==PAD_GLYPH_CIRCLE);
         CHECK(pcPadPromptGlyph(2)==PAD_GLYPH_SQUARE && pcPadPromptGlyph(3)==PAD_GLYPH_TRIANGLE);
         CHECK(pcPadDialogSlot(0)==1 && pcPadDialogSlot(4)==4);
@@ -269,6 +272,25 @@ int main(int argc, char** argv) {
         SDL_Quit(); return 0;
     }
     if (strcmp(argv[2], "write") == 0) {
+        /* The match and its launcher can both see this physical confirm. */
+        int menuPads = 0;
+        padSessionWindow(1);
+        SDL_free(padMenuGamepads(&menuPads));
+        CHECK(menuPads == 0);
+        CHECK(SDL_SetJoystickVirtualButton(pj, SDL_GAMEPAD_BUTTON_EAST, true));
+        SDL_UpdateJoysticks();
+        notify(SDL_EVENT_WINDOW_FOCUS_GAINED, 0);
+        SDL_free(padMenuGamepads(&menuPads));
+        CHECK(menuPads == 0); /* switching back with confirm held */
+        neutral(pj);
+        SDL_free(padMenuGamepads(&menuPads));
+        CHECK(menuPads == 2);
+        notify(SDL_EVENT_WINDOW_FOCUS_LOST, 0);
+        SDL_free(padMenuGamepads(&menuPads));
+        CHECK(menuPads == 0);
+        padSessionWindow(0);
+        SDL_free(padMenuGamepads(&menuPads));
+        CHECK(menuPads == 2);
         /* Both live gamepads reach their own ports during a local match. */
         uint8_t first[8] = {0}, second[8] = {0};
         CHECK(SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1"));
@@ -334,6 +356,10 @@ int main(int argc, char** argv) {
     CHECK(strcmp(padInputLabel(padGamepadInput(4)), "Circle") == 0);
     CHECK(strcmp(padActionLabel("cross"), "Circle") == 0);
     CHECK(padActionGlyph("cross")==PAD_GLYPH_CIRCLE);
+    int positions[4];
+    pcPadAttackPositions(positions);
+    CHECK(positions[1] == 0 && positions[2] == 3); /* Cross on east, Square on north */
+    CHECK(positions[0] != positions[3]); /* two distinct slots for the displaced hints */
     CHECK(pcPadDialogSlot(1)==0); /* custom physical binding */
     CHECK(pcPadDialogSlot(0)<0); /* unbound: never display an actionable Circle */
     CHECK(padKey(4, 0) == SDL_SCANCODE_X); /* device profiles don't alter the keyboard */
@@ -430,6 +456,10 @@ int main(int argc, char** argv) {
     /* Nintendo's A/B and X/Y labels follow its physical button positions. */
     SDL_JoystickID nintendo=device("Polish Nintendo",0xc0de,0x0001,"switchpro");
     CHECK(nintendo!=0); notify(SDL_EVENT_GAMEPAD_ADDED,nintendo); padSelectProfile(0);
+    pcPadAttackPositions(positions);
+    CHECK(positions[0] == 0 && positions[1] == 1);
+    CHECK(positions[2] == (padGamepadInput(6) == SDL_GAMEPAD_BUTTON_NORTH ? 3 : 2));
+    CHECK(positions[2] + positions[3] == 5);
     CHECK(padInputGlyph(SDL_GAMEPAD_BUTTON_SOUTH)==PAD_GLYPH_B);
     CHECK(padInputGlyph(SDL_GAMEPAD_BUTTON_EAST)==PAD_GLYPH_A);
     CHECK(padInputGlyph(SDL_GAMEPAD_BUTTON_WEST)==PAD_GLYPH_Y);

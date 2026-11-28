@@ -45,9 +45,8 @@
  * port/src/game/main/arena.c), EXIT in Battling's menu, a versus battle
  * that ends without the prompt, or Leave the match in the menu: the kept
  * game is put back at the next vblank, exactly as it was. Save states (and
- * rewind) are off meanwhile (savestate.c stateAvailable). Online the
- * session is a process of its own and its own start (netplay.c): nothing
- * is kept here.
+ * rewind) are off meanwhile (savestate.c stateAvailable). For online matches
+ * netplay.c owns the kept game and the negotiated start.
  * XG_ARENA_MATCH=<vblank>:battling | <vblank>:versus,<table>,<config>[,current|new|a.b.c]
  * | <vblank>:mirror[,current|new|a.b.c] | <vblank>:party,<save>,<save> asks for
  * a match as the menu does, at that vblank (headless runs). A party vs party
@@ -547,6 +546,7 @@ void softReboot(void);           /* src/main/kernel.c: the game's soft reset */
 int pcWideGetMode(void);         /* include/pc_wide.h */
 int portGameMode(void);          /* memory.c: the mode bootGame started last (kernel.c's numbers) */
 int netplayActive(void) __attribute__((weak));
+int netplayMenuStartingBattle(void) __attribute__((weak));
 void netplayLeave(void) __attribute__((weak));
 void netplaySoftReset(void) __attribute__((weak));
 void pcVersusApplySavedGears(const XgPartyRecord* party);
@@ -652,6 +652,7 @@ int pcArenaHoldBattleIntro(void) {
 }
 
 int pcArenaBattleIntroHidden(void) {
+    if (netplayMenuStartingBattle && netplayMenuStartingBattle()) return 1;
     return holdMenuIntro && (M.armed || matchOnline() || pcGauntletMenuIntroActive());
 }
 
@@ -836,12 +837,17 @@ void pcArenaSessionParties(const XgPartyRecord* player1, const XgPartyRecord* pl
                (unsigned)recordHash(player2));
 }
 
-void pcArenaSessionVersus(int kind, int table, int config, const XgPartyRecord* party) {
+void pcArenaSessionVersus(int kind, int table, int config, const int members[3], const XgPartyRecord* party) {
     S.kind = kind;
     S.table = table;
     S.config = config;
-    S.records[0] = *party;
-    recordMembers(party, S.party);
+    if (party) {
+        S.records[0] = *party;
+        recordMembers(party, S.party);
+    } else {
+        memset(&S.records[0], 0, sizeof S.records[0]);
+        memcpy(S.party, members, sizeof S.party);
+    }
 }
 
 /* Back to the kept game (at the next vblank). */
@@ -968,6 +974,7 @@ int pcArenaApplyMatchParty(void) {
     const XgPartyRecord* record;
     int kind;
     if (S.kind && matchOnline()) {
+        if (!S.records[0].m3_count) return 0;
         record = &S.records[0];
         kind = S.kind;
     } else if (M.phase == MATCH_ON && (M.hasRecord || M.kind == ARENA_MATCH_PARTY)) {
@@ -1007,7 +1014,7 @@ static void versusStart(int kind, const int party[3], int table, int config, int
 /* options.c portStartState: the match's start, applied to the fresh game. */
 int pcArenaStartState(void) {
     if (S.kind && matchOnline()) {
-        versusStart(S.kind, S.party, S.table, S.config, 1, 0);
+        versusStart(S.kind, S.party, S.table, S.config, S.records[0].m3_count != 0, 0);
         return 1;
     }
     if (!M.armed) return 0;
@@ -1091,7 +1098,6 @@ static int envRoster(const char* text, int stage) {
     review.current.loadout.stage = stage;
     for (int side = 0; side < 2; side++) {
         ArenaEnemyTeam* team = &review.current.loadout.side[side];
-        for (int i = 0; i < ARENA_ROSTER_STATS; i++) team->multiplier[i] = 100;
         if (side == 0 && strncmp(text, "party", 5) == 0) {
             text += 5;
             if (*text == '=') {
@@ -1107,6 +1113,7 @@ static int envRoster(const char* text, int stage) {
             if (sscanf(text, "%d.%d%n", &bank, &type, &end) != 2 || bank < 0 || bank > 255 ||
                 type < 0 || type >= 8 || team->count == ARENA_ROSTER_SLOTS) goto refused;
             int slot = team->count++;
+            for (int i = 0; i < ARENA_ROSTER_STATS; i++) team->multiplier[slot][i] = 100;
             team->enemy[slot] = (ArenaEnemy){bank, type};
             text += end;
             if (*text == '@') {

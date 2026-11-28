@@ -996,17 +996,12 @@ static int moveCopy(int sx, int sy, int dx, int dy, int w, int h) {
 void gpuFill(int x, int y, int w, int h, uint32_t rgb) {
     VPiece pieces[4];
     int n = vramWrap(x, y, w, h, pieces);
-    uint16_t c = (uint16_t)(((rgb >> 3) & 0x1F) | ((rgb >> 11) & 0x1F) << 5 | ((rgb >> 19) & 0x1F) << 10);
     beetleTrackFill(x, y, w, h); /* a fill lets go of the upload names (texture_beetle.c) */
     for (int i = 0; i < n; i++) {
         VRect r = pieces[i].r;
         vramKeepWrite(r); /* a picture between's keep (vram.c) */
         gp0VramChanging(r);
-        for (int row = r.y0; row <= r.y1; row++) {
-            for (int col = r.x0; col <= r.x1; col++) {
-                vramShadow[row][col] = c;
-            }
-        }
+        vramFillShadow(r, rgb);
         gp0Fill(r, rgb);
         vramMarkCopied(r, 1);
         vramResolveCpuWrite(r);

@@ -500,7 +500,7 @@ void runScript(bool onVBlank, unsigned long now, bool all = false) {
 // Any gamepad button held, or a trigger pulled, on any gamepad.
 bool gamepadHeld() {
     int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_JoystickID* ids = padMenuGamepads(&count);
     bool held = false;
     for (int i = 0; i < count && !held; i++) {
         SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
@@ -591,7 +591,7 @@ bool buttonHeld(int b, bool typing) {
         }
     }
     int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_JoystickID* ids = padMenuGamepads(&count);
     bool held = false;
     for (int i = 0; i < count && !held; i++) {
         held = padGamepadHeld(ids[i], b);
@@ -622,7 +622,7 @@ void feedButtons(bool quiet) {
     squareDown = square;
     float stick = 0.0f;
     int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_JoystickID* ids = padMenuGamepads(&count);
     for (int i = 0; i < count; i++) {
         SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
         float v = pad != NULL ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f : 0.0f;
@@ -2189,6 +2189,7 @@ void run() {
     if (!st.backlog) sectionsOpened();
     uint64_t next = SDL_GetTicksNS();
     while (true) {
+        if (netplayMenuPoll()) break;
         padPumpEvents(); // the window's events: ImGui's through uiEvent, the hotkeys, quitting
         runScript(false, st.frames);
         if (st.closing && !st.leaving) {

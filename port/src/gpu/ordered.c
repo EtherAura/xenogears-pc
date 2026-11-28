@@ -3,10 +3,18 @@
 #include <string.h>
 static int minInt(int a,int b){return a<b?a:b;}
 static int maxInt(int a,int b){return a>b?a:b;}
-OrderedBox orderedBounds(const void* vertices,size_t stride,int scale,int w,int h) {
+OrderedBox orderedBatchBounds(const void* vertices, size_t stride, uint32_t count, int scale, int w, int h, size_t wOffset) {
+    count -= count % 3;
+    if (!count) return (OrderedBox){w,h,0,0};
     float lo[2]={INFINITY,INFINITY},hi[2]={-INFINITY,-INFINITY};
-    for(int k=0;k<3;k++) {
-        float p[2];memcpy(p,(const char*)vertices+k*stride,sizeof(p));
+    for(uint32_t k=0;k<count;k++) {
+        const char* vertex=(const char*)vertices+k*stride;
+        float p[2];memcpy(p,vertex,sizeof(p));
+        if (wOffset) {
+            float depth;
+            memcpy(&depth,vertex+wOffset,sizeof depth);
+            if (!isfinite(depth) || depth<=0) return (OrderedBox){0,0,w,h};
+        }
         for(int d=0;d<2;d++) {
             if(!isfinite(p[d]))return (OrderedBox){0,0,w,h};
             lo[d]=fminf(lo[d],p[d]);hi[d]=fmaxf(hi[d],p[d]);
@@ -20,6 +28,9 @@ OrderedBox orderedBounds(const void* vertices,size_t stride,int scale,int w,int 
     b.x1=(int)fmax(0,fmin(w,ceil((double)hi[0]*scale)+2));
     b.y1=(int)fmax(0,fmin(h,ceil((double)hi[1]*scale)+2));
     return b;
+}
+OrderedBox orderedBounds(const void* vertices,size_t stride,int scale,int w,int h) {
+    return orderedBatchBounds(vertices,stride,3,scale,w,h,0);
 }
 uint64_t orderedEstimate(const OrderedBox* boxes,int count,OrderedBox band) {
     uint64_t sum=0;

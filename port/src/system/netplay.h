@@ -67,7 +67,7 @@ int netplayRosterLobbyState(NetplayStart* start, char* proposal, char* detail, s
 void netplayRosterLobbyConfirm(const char* proposal, const XgPartyRecord* party);
 void netplayRosterLobbyStop(void);
 
-/* The session's process started: 1. */
+/* Returns 1 when the connection worker starts. */
 int netplayLaunch(const NetplayStart* start);
 /* Its state now (NETPLAY_*), and what goes with it: the port (hosting), the
  * host's address (joining), the other player's address (connected; and its
@@ -86,8 +86,12 @@ void netplaySessionStop(void);
 /* The running game's story progress (field variable 0), for the host's Gears;
  * its party (a versus battle's: Fei and Citan when none). */
 int netplaySessionStory(void);
-/* netplayPace without a session of its own: the game waits while one runs. */
-void netplayLaunchWait(void);
+/* Menu lifecycle. Poll on the game thread while the menu is open or at vblank. */
+int netplayMenuConnect(const NetplayStart* start);
+int netplayMenuPoll(void);
+int netplayMenuStartingBattle(void);
+void netplayMenuCancel(void);
+void netplayMenuStatus(const char* line);
 
 #ifdef __cplusplus
 }

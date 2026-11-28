@@ -42,6 +42,7 @@ typedef void (*HwEvent)(void* arg);
 
 /* Seconds since startup (the virtual clock follows real time). */
 double hwNow(void);
+int hwSetSteppedClock(int on, double now);
 
 /* Real time only: the virtual clock runs `rate` seconds per real second from
  * now on (1 by default; displaylock.c's lock of the vblank to the display

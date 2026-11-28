@@ -7,6 +7,10 @@
 #include "main/dialog.h"
 #include "main/debug_font.h"
 #include "battle/battle.h"
+#ifdef PLATFORM_PC
+#include "pc_arena.h"
+#include "main/sound.h"
+#endif
 
 extern sBattle800cdd40 partyBattleStats[3];
 extern sBattle800CEF10 mechaBattleStats[3];
@@ -426,6 +430,14 @@ void battleUpdateInputs(s32 arg0) {
 }
 
 void battleSoundEffect(u8 id) {
+#ifdef PLATFORM_PC
+    /* Both peers schedule the same cue. Only the player choosing hears the
+     * menu clicks (4C-4F) and the start-of-turn chime (5A). */
+    if (((id >= 0x4C && id <= 0x4F) || id == 0x5A) && pcVersusPrivateSelection()) {
+        pcPlaySoundEffectAtVolume((gBattleCurrentSoundEffectSeq->u14.m14_id << 16) | id, 0);
+        return;
+    }
+#endif
     playSoundEffect((gBattleCurrentSoundEffectSeq->u14.m14_id << 16) | id);
 }
 

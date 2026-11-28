@@ -10,7 +10,7 @@ extern "C" {
 #define ARENA_ROSTER_SLOTS 8
 #define ARENA_ROSTER_STATS 6
 #define ARENA_ROSTER_ITEMS 0x30 /* battle item IDs 1–0x30, indexed by ID minus one */
-#define ARENA_LOADOUT_CODE 328 /* versioned hexadecimal data including both sides */
+#define ARENA_LOADOUT_CODE 472 /* eight individually scaled enemies, assigned Gears and both inventories */
 #define ARENA_ROSTER_PACKET (ARENA_LOADOUT_CODE + XG_PARTY_BYTES)
 
 typedef struct {
@@ -20,7 +20,7 @@ typedef struct {
 typedef struct {
     ArenaEnemy enemy[ARENA_ROSTER_SLOTS];
     ArenaEnemy gear[ARENA_ROSTER_SLOTS];
-    unsigned short multiplier[ARENA_ROSTER_STATS];
+    unsigned short multiplier[ARENA_ROSTER_SLOTS][ARENA_ROSTER_STATS];
     unsigned char count, gearSlots;
     unsigned char items[ARENA_ROSTER_ITEMS];
 } ArenaEnemyTeam;

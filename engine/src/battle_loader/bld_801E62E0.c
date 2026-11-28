@@ -213,6 +213,7 @@ void createEnemiesBattleSprites(void* config) {
         if (pcVersusMirrorSlot(i)) {
             continue; /* a mirror match: a party member's sprite (pcVersusMirrorSprites) */
         }
+        if (pcVersusDeployEnemyGear(i)) continue; /* the assigned Gear is the slot's first actor */
         if (index < 8) {
             index += 3;
             if (battleBssBlock.m8D24_visualBuffers[index].m0_spriteData != NULL) {

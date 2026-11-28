@@ -81,8 +81,8 @@
  *
  * Env: XG_DOF_DEBUG=1: the blur amounts as colours instead of the blur (red
  * behind the focus, blue in front, the picture's own brightness in focus);
- * 2: the same inverted, on white (work/hd2d/verify.py tells the UI's opaque
- * pixels from the scene's by what is equal over both);
+ * 2: the same inverted, on white (the UI's opaque pixels are told from the
+ * scene's by what is equal over both);
  * XG_DOF_BAND=<u>: the focus range as a number (1e9: nothing blurs, the
  * whole path still runs: the picture must equal the one with the option
  * off); XG_DOF_RADIUS=<r>, XG_DOF_GAIN=<g>, XG_TILT_RADIUS=<r>: the
@@ -121,8 +121,8 @@
 static const char* const levelNames[] = {"off", "subtle", "medium", "strong"};
 /* The largest radius by level and the focus range by setting. Testing
  * at 9x: "a bit too strong still" (a step softer), then "still too blurry and
- * tall, looks like smeared vaseline": half the screen was half blurred. He
- * chose, from captures of Strong + Wide, the radius at 2/3 and the range
+ * tall, looks like smeared vaseline": half the screen was half blurred.
+ * Chosen, from captures of Strong + Wide: the radius at 2/3 and the range
  * 0.18 -> 0.65 (only the far backdrop and what is right before the camera
  * soften), every level and range scaled the same way. */
 static const float levelRadius[] = {0, 0.65f, 1.25f, 2.0f};

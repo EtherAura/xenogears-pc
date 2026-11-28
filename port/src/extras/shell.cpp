@@ -33,6 +33,7 @@
 //   leave                leave the extras
 // XG_EXTRAS_OPEN=<id>: open that viewer when the extras first open.
 
+#include "system/netplay.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdarg.h>
@@ -743,7 +744,7 @@ bool buttonHeld(int b, bool typing) {
         }
     }
     int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_JoystickID* ids = padMenuGamepads(&count);
     bool held = false;
     for (int i = 0; i < count && !held; i++) {
         held = padGamepadHeld(ids[i], b);
@@ -767,7 +768,7 @@ void feedButtons(bool quiet) {
     }
     float sx = 0, sy = 0;
     int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_JoystickID* ids = padMenuGamepads(&count);
     for (int i = 0; i < count; i++) {
         SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
         float x = pad != nullptr ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHTX) / 32767.0f : 0.0f;
@@ -798,7 +799,7 @@ void releaseButtons() {
 
 bool gamepadHeld() {
     int count = 0;
-    SDL_JoystickID* ids = SDL_GetGamepads(&count);
+    SDL_JoystickID* ids = padMenuGamepads(&count);
     bool held = false;
     for (int i = 0; i < count && !held; i++) {
         SDL_Gamepad* pad = SDL_GetGamepadFromID(ids[i]);
@@ -820,7 +821,7 @@ namespace {
 void pump() {
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
-        padDeviceEvent(&e);
+        if (padDeviceEvent(&e)) continue;
         switch (e.type) {
         case SDL_EVENT_QUIT:
             st.leaving = true;
@@ -1491,6 +1492,7 @@ bool run(bool fromMenu) {
     bool viaPad = false;
     while (!st.leaving || (viaPad = gamepadHeld())) {
         pump();
+        if (netplayMenuPoll()) leaveIntoGame();
         if (!st.leaving) {
             st.navigation.dispatch(navigationHost);
             dispatchBookmark();
